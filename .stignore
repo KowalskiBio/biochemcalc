@@ -1,0 +1,13 @@
+// Syncthing ignore patterns
+// Do not sync machine-specific build artifacts and dependency folders
+// between macOS and Linux.
+
+/node_modules
+/src-tauri/target
+/dist
+/.omo
+/test-results
+/qa-screenshots
+
+// Editor/OS metadata
+.DS_Store

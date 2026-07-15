@@ -1,0 +1,797 @@
+import { motion } from "framer-motion"
+import { ArrowLeft, Download, FileText, Loader2, RefreshCw, Save, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link, useParams, useSearchParams } from "react-router-dom"
+import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
+import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialog"
+
+import { useToast } from "@/hooks/use-toast"
+import { cs } from "@/i18n/cs"
+import {
+  ApiError,
+  categoriesApi,
+  generationApi,
+  projektyApi,
+  setsApi,
+  templatesApi,
+} from "@/lib/api"
+import { formatNumberMaxDecimals } from "@/lib/math-utils"
+import { QuestionTextRenderer } from "@/lib/render-question-text"
+import { useGenerationActions, useGenerationBySetId } from "@/stores/generation-store"
+import type {
+  ExportQuestion,
+  ProjektQuestion,
+  QuestionDifficulty,
+  SaveProjektInput,
+  Set as SetModel,
+  Template,
+  TemplateMode,
+  TemplateWithDetails,
+} from "@/lib/types"
+
+export function SetDetailPage() {
+  const { setId } = useParams<{ setId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { toast } = useToast()
+  const [set, setSet] = useState<SetModel | null>(null)
+  const [templateDetails, setTemplateDetails] = useState<TemplateWithDetails[]>([])
+  const [parentTopicId, setParentTopicId] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [templateToDelete, setTemplateToDelete] = useState<Template | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [regeneratingMap, setRegeneratingMap] = useState<Record<string, boolean>>({})
+  const [savingToProjekt, setSavingToProjekt] = useState<string | null | "saving">(null)
+  const [projektName, setProjektName] = useState("")
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [showClosedConfigDialog, setShowClosedConfigDialog] = useState(false)
+  const generatedRef = useRef<HTMLDivElement>(null)
+
+  const generation = useGenerationBySetId(setId)
+  const { setGeneration, updateGeneration } = useGenerationActions()
+  const {
+    results: generated,
+    mode: generatedMode,
+    closedDifficulty,
+    closedOptionCount,
+    lastClosedDifficulty,
+    lastClosedOptionCount,
+    generationError,
+  } = generation
+
+  const templateDetailsById = useMemo(
+    () => new Map(templateDetails.map((td) => [td.template.id, td])),
+    [templateDetails],
+  )
+
+  const loadData = useCallback(async () => {
+    if (!setId) return
+    try {
+      setIsLoading(true)
+      const data = await setsApi.getWithTemplates(setId)
+      setSet(data.set)
+      setTemplateDetails(data.templates)
+      const category = await categoriesApi.get(data.set.categoryId)
+      setParentTopicId(category.topicId)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({
+        title: "Chyba",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [setId, toast])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    const templateId = searchParams.get("templateId")
+    if (!templateId || templateDetails.length === 0) return
+    if (templateDetails.some((t) => t.template.id === templateId)) {
+      setSelectedTemplateId(templateId)
+      setDialogOpen(true)
+      setSearchParams({}, { replace: true })
+      window.setTimeout(() => {
+        document.getElementById(`template-row-${templateId}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        })
+      }, 100)
+    }
+  }, [searchParams, setSearchParams, templateDetails])
+
+  const handleDeleteTemplate = useCallback(
+    async (template: Template) => {
+      try {
+        setIsDeleting(true)
+        await templatesApi.delete(template.id)
+        setTemplateDetails((prev) => prev.filter((t) => t.template.id !== template.id))
+        toast({
+          title: cs.sets.deleteSuccess,
+          description: cs.sets.deleteSuccessDescription.replace(
+            "{name}",
+            template.questionText.slice(0, 50),
+          ),
+        })
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err)
+        toast({
+          title: cs.sets.deleteError,
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setIsDeleting(false)
+        setIsDeleteDialogOpen(false)
+        setTemplateToDelete(null)
+      }
+    },
+    [toast],
+  )
+
+  const openDeleteDialog = useCallback((template: Template, event: React.MouseEvent) => {
+    event.stopPropagation()
+    setTemplateToDelete(template)
+    setIsDeleteDialogOpen(true)
+  }, [])
+
+  const handleGenerate = useCallback(
+    async (mode: TemplateMode, difficulty: QuestionDifficulty, optionCount: number) => {
+      if (!setId || templateDetails.length === 0) return
+      try {
+        setIsGenerating(true)
+        setGeneration(setId, {
+          results: null,
+          generationError: null,
+        })
+        const results = await generationApi.generateForTemplates({
+          templateIds: templateDetails.map((t) => t.template.id),
+          count: 1,
+          baseSeed: Date.now(),
+          mode,
+          difficulty,
+          optionCount,
+        })
+        setGeneration(setId, {
+          results,
+          mode,
+          lastClosedDifficulty: difficulty,
+          lastClosedOptionCount: optionCount,
+        })
+        toast({
+          title: "Generování dokončeno",
+          description: `Vygenerováno ${results.length} variant.`,
+        })
+        window.setTimeout(() => {
+          generatedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+        }, 100)
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err)
+        setGeneration(setId, { generationError: message })
+        toast({
+          title: "Chyba generování",
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setIsGenerating(false)
+      }
+    },
+    [setId, templateDetails, setGeneration, toast],
+  )
+
+  const handleExport = useCallback(async () => {
+    if (!generated || !generatedMode) return
+    const questions: ExportQuestion[] = generated.map((g) => ({
+      template: g.template,
+      variant: g.variants[0],
+      variablePrecisions: {},
+      resultPrecision: 2,
+      mode: generatedMode,
+    }))
+
+    try {
+      const result = await generationApi.exportToTxt({
+        filename: `export-${Date.now()}`,
+        questions,
+      })
+      toast({
+        title: "Otázky exportovány",
+        description: `Test byl uložen do Testy (${result.filePath}).`,
+      })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({
+        title: "Chyba exportu",
+        description: message,
+        variant: "destructive",
+      })
+    }
+  }, [generated, generatedMode, toast])
+
+  const handleRegenerateVariant = useCallback(
+    async (templateId: string, manualAnswer?: number) => {
+      if (!setId || !generatedMode) return
+
+      try {
+        setRegeneratingMap((prev) => ({ ...prev, [templateId]: true }))
+        const newVariant = await generationApi.regenerateVariant({
+          templateId,
+          mode: generatedMode,
+          seed: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
+          manualAnswer,
+          difficulty: generatedMode === "closed" ? lastClosedDifficulty : "medium",
+          optionCount: generatedMode === "closed" ? lastClosedOptionCount : 5,
+        })
+
+        updateGeneration(setId, (prev) => {
+          if (!prev.results) return prev
+          return {
+            ...prev,
+            results: prev.results.map((g) =>
+              g.template.id === templateId ? { ...g, variants: [newVariant] } : g,
+            ),
+          }
+        })
+
+        toast({
+          title: "Varianta regenerována",
+          description: `Nová správná odpověď: ${formatNumberMaxDecimals(newVariant.correctAnswer)}`,
+        })
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err)
+        toast({
+          title: "Chyba regenerace",
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setRegeneratingMap((prev) => ({ ...prev, [templateId]: false }))
+      }
+    },
+    [setId, generatedMode, lastClosedDifficulty, lastClosedOptionCount, updateGeneration, toast],
+  )
+
+  const handleSaveToProjekt = useCallback(async () => {
+    if (!generated || !generatedMode || !set) return
+
+    if (!projektName.trim()) {
+      toast({
+        title: "Chyba",
+        description: "Zadejte název projektu",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setSavingToProjekt("saving")
+
+      const questions: ProjektQuestion[] = generated.map((g) => {
+        const variant = g.variants[0]
+        return {
+          templateId: g.template.id,
+          questionText: g.template.questionText,
+          resultUnit: g.template.resultUnit,
+          pointValue: g.template.pointValue,
+          correctAnswer: variant?.correctAnswer,
+          assignedValues: variant?.assignedValues || {},
+          assignedStrings: variant?.assignedStrings || {},
+          variablePrecisions: {},
+          resultPrecision: 2,
+          numericOptions: variant?.numericOptions,
+          correctOption: variant?.correctOption,
+          intervalLo: variant?.intervalLo,
+          intervalHi: variant?.intervalHi,
+          mode: generatedMode,
+          seed: variant?.seed || Date.now(),
+        }
+      })
+
+      const input: SaveProjektInput = {
+        name: projektName,
+        topicName: set?.categoryId ? "Téma" : undefined,
+        mode: generatedMode,
+        questions,
+      }
+
+      const projekt = await projektyApi.save(input)
+
+      toast({
+        title: "Projekt uložen",
+        description: `Projekt "${projekt.name}" byl úspěšně uložen (${projekt.questionCount} otázek).`,
+      })
+
+      setProjektName("")
+      setShowSaveDialog(false)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({
+        title: "Chyba uložení",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setSavingToProjekt(null)
+    }
+  }, [generated, generatedMode, set, projektName, toast])
+
+  if (isLoading) {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <Card>
+          <CardContent className="py-8 text-center">
+            <p className="text-foreground-muted">Načítám sadu...</p>
+          </CardContent>
+        </Card>
+      </motion.div>
+    )
+  }
+
+  if (!set) {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <Card>
+          <CardContent className="py-8 text-center">
+            <p className="text-foreground-muted">Sada nenalezena.</p>
+            <Button asChild variant="outline" className="mt-4">
+              <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>
+                Zpět na témata
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </motion.div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-6"
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.1 }}
+        className="flex items-center gap-4"
+      >
+        <Button variant="ghost" size="icon" asChild>
+          <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>
+            <ArrowLeft className="size-5" />
+          </Link>
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">
+            {cs.topics.setIndex.replace("{index}", String(set.setIndex))}
+          </h1>
+          <p className="text-foreground-secondary text-sm">
+            {templateDetails.length} {cs.sets.questions.toLowerCase()}
+          </p>
+        </div>
+      </motion.div>
+
+      {/* Mode and actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+      >
+        <Card>
+          <CardContent className="flex flex-wrap gap-2 pt-6">
+            <Button
+              onClick={() => setShowClosedConfigDialog(true)}
+              disabled={isGenerating || templateDetails.length === 0}
+              variant="secondary"
+            >
+              {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+              {cs.sets.closedQuestions}
+            </Button>
+            <Button
+              onClick={() => handleGenerate("open", "medium", 5)}
+              disabled={isGenerating || templateDetails.length === 0}
+            >
+              {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+              {cs.sets.openQuestions}
+            </Button>
+            <Button onClick={handleExport} variant="outline" disabled={!generated || isGenerating}>
+              <Download className="size-4 mr-2" />
+              {cs.sets.export}
+            </Button>
+            <Button
+              onClick={() => setShowSaveDialog(true)}
+              variant="secondary"
+              disabled={!generated || isGenerating || savingToProjekt === "saving"}
+            >
+              <Save className="size-4 mr-2" />
+              {cs.sets.saveToProjekt}
+            </Button>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Templates table */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.3 }}
+      >
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">
+              <FileText className="size-5 inline mr-2" />
+              {cs.sets.questions}
+            </CardTitle>
+            <CardDescription>
+              {templateDetails.length}{" "}
+              {templateDetails.length === 1
+                ? "otázka"
+                : templateDetails.length >= 2 && templateDetails.length <= 4
+                  ? "otázky"
+                  : "otázek"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {templateDetails.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-foreground-muted">{cs.sets.noQuestions}</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[50px]">#</TableHead>
+                    <TableHead>Text otázky</TableHead>
+                    <TableHead className="w-[100px]">Body</TableHead>
+                    <TableHead className="w-[80px] text-right">Akce</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {templateDetails.map((t, idx) => (
+                    <TableRow
+                      key={t.template.id}
+                      id={`template-row-${t.template.id}`}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => {
+                        setSelectedTemplateId(t.template.id)
+                        setDialogOpen(true)
+                      }}
+                    >
+                      <TableCell className="font-medium">{idx + 1}</TableCell>
+                      <TableCell className="min-w-[400px] max-w-2xl">
+                        <QuestionTextRenderer
+                          text={t.template.questionText}
+                          variables={t.variables}
+                          constants={Object.fromEntries(
+                            t.constants.map((c) => [c.symbol, c.value]),
+                          )}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{t.template.pointValue}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(event) => openDeleteDialog(t.template, event)}
+                          disabled={isDeleting}
+                          aria-label={cs.common.delete}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Generation error */}
+      {generationError && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <Card className="border-destructive">
+            <CardContent className="pt-6">
+              <p className="text-destructive font-medium">Generování selhalo</p>
+              <p className="text-sm text-destructive/80 mt-1">{generationError}</p>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Generated results */}
+      {generated && (
+        <motion.div
+          ref={generatedRef}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="space-y-4"
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">{cs.sets.generated}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {generated.map((g, idx) => {
+                const variant = g.variants[0]
+                const details = templateDetailsById.get(g.template.id)
+                const constants = Object.fromEntries(
+                  (details?.constants ?? []).map((c) => [c.symbol, c.value]),
+                )
+                const optionLabels = ["a", "b", "c", "d", "e"]
+                const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
+                const correctOption = variant?.correctOption
+
+                return (
+                  <div key={g.template.id} className="rounded-lg border p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-foreground-secondary">{idx + 1}.</p>
+                        <QuestionTextRenderer
+                          text={g.template.questionText}
+                          variables={details?.variables ?? []}
+                          variant={variant}
+                          constants={constants}
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRegenerateVariant(g.template.id)}
+                        disabled={regeneratingMap[g.template.id]}
+                      >
+                        {regeneratingMap[g.template.id] ? (
+                          <Loader2 className="size-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-4 mr-2" />
+                        )}
+                        Rekalkulovat
+                      </Button>
+                    </div>
+
+                    {generatedMode === "closed" &&
+                      (options.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                          {options.map((value, optionIdx) => {
+                            const label = optionLabels[optionIdx]
+                            const isCorrect = optionIdx + 1 === correctOption
+                            return (
+                              <div
+                                key={label}
+                                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                                  isCorrect
+                                    ? "border-green-500 bg-green-50 dark:bg-green-950/30"
+                                    : "bg-muted/30"
+                                }`}
+                              >
+                                <span
+                                  className={`font-semibold ${
+                                    isCorrect ? "text-green-700 dark:text-green-300" : ""
+                                  }`}
+                                >
+                                  {label})
+                                </span>
+                                <span>
+                                  {value}
+                                  {g.template.resultUnit ? " " : ""}
+                                  <UnitRenderer unit={g.template.resultUnit} />
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-amber-600">
+                          Pro tuto otázku nebyly vygenerovány žádné možnosti.
+                        </div>
+                      ))}
+
+                    {generatedMode === "open" && (
+                      <div className="text-sm text-foreground-secondary">
+                        Správná odpověď: {formatNumberMaxDecimals(variant?.correctAnswer)}
+                        {g.template.resultUnit ? " " : ""}
+                        <UnitRenderer unit={g.template.resultUnit} />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Save to Projekt Dialog */}
+      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{cs.sets.saveToProjekt}</DialogTitle>
+            <DialogDescription>{cs.sets.saveToProjektDescription}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="projekt-name" className="text-right">
+                Název
+              </Label>
+              <Input
+                id="projekt-name"
+                value={projektName}
+                onChange={(e) => setProjektName(e.target.value)}
+                className="col-span-3"
+                placeholder="Název projektu..."
+                disabled={savingToProjekt === "saving"}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveDialog(false)}
+              disabled={savingToProjekt === "saving"}
+            >
+              Zrušit
+            </Button>
+            <Button
+              onClick={handleSaveToProjekt}
+              disabled={savingToProjekt === "saving" || !projektName.trim()}
+            >
+              {savingToProjekt === "saving" ? (
+                <>
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                  Ukládám...
+                </>
+              ) : (
+                <>
+                  <Save className="size-4 mr-2" />
+                  Uložit
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Closed Question Config Dialog */}
+      <Dialog open={showClosedConfigDialog} onOpenChange={setShowClosedConfigDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{cs.sets.configureClosed}</DialogTitle>
+            <DialogDescription>{cs.sets.configureClosedDescription}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-6 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="difficulty">{cs.sets.difficultyLabel}</Label>
+              <Select
+                value={closedDifficulty}
+                onValueChange={(value) =>
+                  setId && setGeneration(setId, { closedDifficulty: value as QuestionDifficulty })
+                }
+              >
+                <SelectTrigger id="difficulty">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="easy">{cs.difficulty.easy}</SelectItem>
+                  <SelectItem value="medium">{cs.difficulty.medium}</SelectItem>
+                  <SelectItem value="hard">{cs.difficulty.hard}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="option-count">{cs.sets.optionCountLabel}</Label>
+              <Select
+                value={String(closedOptionCount)}
+                onValueChange={(value) =>
+                  setId && setGeneration(setId, { closedOptionCount: Number(value) })
+                }
+              >
+                <SelectTrigger id="option-count">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="2">2 (a, b)</SelectItem>
+                  <SelectItem value="3">3 (a, b, c)</SelectItem>
+                  <SelectItem value="4">4 (a, b, c, d)</SelectItem>
+                  <SelectItem value="5">5 (a, b, c, d, e)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowClosedConfigDialog(false)}
+            >
+              Zrušit
+            </Button>
+            <Button
+              type="button"
+              disabled={isGenerating}
+              onClick={() => {
+                setShowClosedConfigDialog(false)
+                void handleGenerate("closed", closedDifficulty, closedOptionCount)
+              }}
+            >
+              {isGenerating ? "Generuji…" : cs.common.generate}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Question Detail Dialog */}
+      {selectedTemplateId && (
+        <QuestionDetailDialog
+          templateId={selectedTemplateId}
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          onDelete={() => {
+            setDialogOpen(false)
+            void loadData()
+          }}
+        />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {templateToDelete && (
+        <DeleteConfirmDialog
+          open={isDeleteDialogOpen}
+          onOpenChange={setIsDeleteDialogOpen}
+          onConfirm={() => handleDeleteTemplate(templateToDelete)}
+          title={cs.sets.deleteQuestion}
+          description={cs.sets.deleteQuestionConfirm.replace(
+            "{name}",
+            templateToDelete.questionText.slice(0, 50),
+          )}
+        />
+      )}
+    </motion.div>
+  )
+}

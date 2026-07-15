@@ -1,0 +1,657 @@
+{
+  "topics": [
+    {
+      "name": "Hmotnostní a objemové procento, ředění",
+      "point_values": [
+        {
+          "point_value": 2,
+          "sets": [
+            {
+              "questions": [
+                {
+                  "answer_text": "0.638",
+                  "numeric_answer": 0.638,
+                  "text": "Jaký je hmotnostní zlomek KOH (pozor zde variuje i aniont a čísla) v roztoku, který vznikl rozpuštěním 499.7 g této látky ve 284 g vody?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 499.7
+                    },
+                    {
+                      "unit": "g",
+                      "value": 284.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "0.5965",
+                  "numeric_answer": 0.5965,
+                  "text": "Jaký je hmotnostní zlomek H2SO4 v roztoku, jehož 976.1 g obsahuje 582.2 g H2SO4?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 976.1
+                    },
+                    {
+                      "unit": "g",
+                      "value": 582.2
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "2.86x100 g",
+                  "numeric_answer": 2.86,
+                  "text": "Kolik gramů KCl bude izolováno z 22.2 g roztoku o hmotnostním zlomku KCl 0.129, bude-li z něj odpařena veškerá voda?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 22.2
+                    },
+                    {
+                      "unit": "",
+                      "value": 0.129
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "47.6 %",
+                  "numeric_answer": 47.6,
+                  "text": "Jaké je hmotnostní procento AgNO3 (pozor zde se variuje i kationt a čísla) v roztoku, který vznikl rozpuštěním 697 g AgNO3 ve 768 g vody?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 697.0
+                    },
+                    {
+                      "unit": "g",
+                      "value": 768.0
+                    }
+                  ]
+                }
+              ],
+              "set": 1
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "392 g roztoku KI (pozor zde se variuje i aniont a čísla) je rozpuštěno 104 g této látky. Vypočítejte, jaké je hmotnostní procento KI v roztoku. 26.5 %",
+                  "numeric_answer": 392.0,
+                  "text": "Ve",
+                  "variables": []
+                },
+                {
+                  "answer_text": "89.4 g NaCl (pozor zde se variuje i kationt i aniont a čísla) bylo rozpuštěno ve 991 g vody. Vypočtěte, jaké je hmotnostní procento NaCl v roztoku. 8.3 %",
+                  "numeric_answer": 89.4,
+                  "text": "",
+                  "variables": []
+                },
+                {
+                  "answer_text": "1.25x103 g",
+                  "numeric_answer": 1250.0,
+                  "text": "Kolik gramů glukosy je nutno rozpustit ve 2.68 litrech vody, abychom získali 31.8 % roztok?",
+                  "variables": [
+                    {
+                      "unit": "litrech",
+                      "value": 2.68
+                    },
+                    {
+                      "unit": "%",
+                      "value": 31.8
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "353.13 g",
+                  "numeric_answer": 353.13,
+                  "text": "Kolik gramů H2SO4 obsahuje 613.6 cm3 43 % roztoku kyseliny sírové o hustotě 1.3384 g.cm-3 ?",
+                  "variables": [
+                    {
+                      "unit": "cm3 43",
+                      "value": 613.6
+                    },
+                    {
+                      "unit": "g",
+                      "value": 1.3384
+                    },
+                    {
+                      "unit": " ",
+                      "value": 3.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "714.9 g",
+                  "numeric_answer": 714.9,
+                  "text": "Kolik gramů vody bude třeba, aby z 774.5 g manganistanu draselného byl připraven 52 % roztok této soli?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 774.5
+                    },
+                    {
+                      "unit": "%",
+                      "value": 52.0
+                    }
+                  ]
+                }
+              ],
+              "set": 2
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "3 absolutního ethanolu je třeba na přípravu 1429 cm3 roztoku, který obsahuje 26.70 objemových % ethanolu. 381.5 cm3",
+                  "numeric_answer": 3.0,
+                  "text": "Vypočítejte, kolik cm",
+                  "variables": []
+                },
+                {
+                  "answer_text": "2.5 % obj.",
+                  "numeric_answer": 2.5,
+                  "text": "39.5 cm3 methanolu bylo doplněno vodou na celkový objem 1582 cm3. Jaké je objemové procento methanolu v roztoku?",
+                  "variables": [
+                    {
+                      "unit": "cm3 methanolu",
+                      "value": 39.5
+                    },
+                    {
+                      "unit": "cm3",
+                      "value": 1582.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "593 cm3 byl připraven zředěním 336 cm3 absolutního ethanolu vodou. Vypočítejte objemové procento ethanolu v roztoku. 56.7 % obj.",
+                  "numeric_answer": 593.0,
+                  "text": "Roztok ethanolu o objemu",
+                  "variables": []
+                }
+              ],
+              "set": 3
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "31.0 %",
+                  "numeric_answer": 31.0,
+                  "text": "Máme 73.1 g 76.7 % roztoku, který zředíme 108 g rozpouštědla. Jaká je nyní koncentrace roztoku?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 73.1
+                    },
+                    {
+                      "unit": "%",
+                      "value": 76.7
+                    },
+                    {
+                      "unit": "g",
+                      "value": 108.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "27.6 g",
+                  "numeric_answer": 27.6,
+                  "text": "Kolik gramů vody je nutno přidat ke 26.9 g 49.4 % roztoku KI, aby vznikl 24.4 % roztok?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 26.9
+                    },
+                    {
+                      "unit": "%",
+                      "value": 49.4
+                    },
+                    {
+                      "unit": "%",
+                      "value": 24.4
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "31.9 g",
+                  "numeric_answer": 31.9,
+                  "text": "V kolika gramech 71.2 % roztoku je obsaženo 22.7 g NaCl?",
+                  "variables": [
+                    {
+                      "unit": "%",
+                      "value": 71.2
+                    },
+                    {
+                      "unit": "g",
+                      "value": 22.7
+                    }
+                  ]
+                }
+              ],
+              "set": 4
+            }
+          ]
+        },
+        {
+          "point_value": 3,
+          "sets": [
+            {
+              "questions": [
+                {
+                  "answer_text": "5.5 g",
+                  "numeric_answer": 5.5,
+                  "text": "Kolik gramů KCl (pozor zde se variuje i sůl i čísla) je rozpuštěno v roztoku, ve kterém je w(KCl) = 0.174, bylo-li pro jeho přípravu použito 25.9 g vody?",
+                  "variables": [
+                    {
+                      "unit": "",
+                      "value": 0.174
+                    },
+                    {
+                      "unit": "g",
+                      "value": 25.9
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "6.7 g",
+                  "numeric_answer": 6.7,
+                  "text": "Kolik gramů vody bude třeba, aby z 25.7 g KBr byl připraven roztok, ve kterém je hmotnostní zlomek této soli 0.792?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 25.7
+                    },
+                    {
+                      "unit": "",
+                      "value": 0.792
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "2.04x101 g",
+                  "numeric_answer": 20.4,
+                  "text": "Kolik gramů uhličitanu draselného se vyloučí odpařením veškeré vody z 73.1 ml 23.4 % (w/w) roztoku K2CO3, jehož hustota je 1.1898 g.cm-3?",
+                  "variables": [
+                    {
+                      "unit": "ml",
+                      "value": 73.1
+                    },
+                    {
+                      "unit": "%",
+                      "value": 23.4
+                    },
+                    {
+                      "unit": "g",
+                      "value": 1.1898
+                    },
+                    {
+                      "unit": "",
+                      "value": 3.0
+                    }
+                  ]
+                }
+              ],
+              "set": 1
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "0.365",
+                  "numeric_answer": 0.365,
+                  "text": "Jaký je hmotnostní zlomek H2SO4 v roztoku, který vznikl z 967 g vodného roztoku H2SO4, ve kterém byl w(H2SO4) = 0.459, bylo-li do soustavy přidáno 250 g vody?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 967.0
+                    },
+                    {
+                      "unit": "",
+                      "value": 0.459
+                    },
+                    {
+                      "unit": "g",
+                      "value": 250.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "0.2867",
+                  "numeric_answer": 0.2867,
+                  "text": "Jaký bude hmotnostní zlomek síranu měďnatého v roztoku, který vznikl rozpuštěním 173.4 g CuSO4.5H2O ve 213.2 g vody?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 173.4
+                    },
+                    {
+                      "unit": "g",
+                      "value": 213.2
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "28.10 %",
+                  "numeric_answer": 28.1,
+                  "text": "Jaké je hmotnostní procento (w/w) H2SO4 v roztoku, který vznikl ze 621.3 g 31.42 % (w/w) roztoku H2SO4, k němuž bylo přidáno 73.46 g vody?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 621.3
+                    },
+                    {
+                      "unit": "%",
+                      "value": 31.42
+                    },
+                    {
+                      "unit": "g",
+                      "value": 73.46
+                    }
+                  ]
+                }
+              ],
+              "set": 2
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "1 dm3 roztoku je obsaženo 10.23 molů ethanolu. Hustota absolutního ethanolu je 0.7893 g.cm-3. 59.71 %",
+                  "numeric_answer": 1.0,
+                  "text": "Vypočítejte, jaká je objemové procento ethanolu v jeho vodném roztoku, víte-li, že v",
+                  "variables": []
+                },
+                {
+                  "answer_text": "0.9636 g.cm-3 je 45.77 %. Přepočítejte objemové procento na hmotnostní procento. Hustota čístého methanolu je 0.7917 g.cm-3 .  37.60 %",
+                  "numeric_answer": 0.9636,
+                  "text": "Objemové procento methanolu v jeho vodném roztoku o hustotě",
+                  "variables": []
+                },
+                {
+                  "answer_text": "Hustota čistého ethanolu je 0.7907 g.cm-3. 22.3 % obj.",
+                  "numeric_answer": 0.7907,
+                  "text": "Roztok byl připraven zředěním 334 g absolutního ethanolu vodou na celkový objem 1893 cm3. Jaké je objemové procento ethanolu v roztoku?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 334.0
+                    },
+                    {
+                      "unit": "cm3",
+                      "value": 1893.0
+                    }
+                  ]
+                }
+              ],
+              "set": 3
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "98.6 g",
+                  "numeric_answer": 98.6,
+                  "text": "Kolik g čisté látky musíme přidat do 43.7 g 24.8 % roztoku, aby byl roztok 76.9 %?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 43.7
+                    },
+                    {
+                      "unit": "%",
+                      "value": 24.8
+                    },
+                    {
+                      "unit": "%",
+                      "value": 76.9
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "59.9 g",
+                  "numeric_answer": 59.9,
+                  "text": "Kolik gramů 10.4 % roztoku musíme přidat ke 47.6 gramům 65.3 % roztoku, aby vznikl roztok 34.7 %?",
+                  "variables": [
+                    {
+                      "unit": "%",
+                      "value": 10.4
+                    },
+                    {
+                      "unit": "gramům",
+                      "value": 47.6
+                    },
+                    {
+                      "unit": "%",
+                      "value": 65.3
+                    },
+                    {
+                      "unit": "%",
+                      "value": 34.7
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "79.6 %",
+                  "numeric_answer": 79.6,
+                  "text": "Jaká je výsledná koncentrace roztoku, který vznikl z 491 g 57.0 % roztoku kyseliny chlorovodíkové, do něhož bylo zavedeno 337 dm3 (přepočteno na normální podmínky) plynného chlorovodíku?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 491.0
+                    },
+                    {
+                      "unit": "%",
+                      "value": 57.0
+                    },
+                    {
+                      "unit": "dm3 (přepočteno",
+                      "value": 337.0
+                    }
+                  ]
+                }
+              ],
+              "set": 4
+            }
+          ]
+        },
+        {
+          "point_value": 4,
+          "sets": [
+            {
+              "questions": [
+                {
+                  "answer_text": "129.4 g",
+                  "numeric_answer": 129.4,
+                  "text": "Jaká byla navážka Na2SO3.7H2O na přípravu 437 g roztoku siřičitanu sodného, ve kterém je hmotnostní zlomek vody 0.852?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 437.0
+                    },
+                    {
+                      "unit": "",
+                      "value": 0.852
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "5.3x102 g",
+                  "numeric_answer": 530.0,
+                  "text": "Kolik gramů vody bude nutno použít pro přípravu chloridu nikelnatého ze 42 g NiCl2.6H2O, má-li být hmotnostní zlomek chloridu nikelnatého v připraveném roztoku 0.04?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 42.0
+                    },
+                    {
+                      "unit": "",
+                      "value": 0.04
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "111.9 g",
+                  "numeric_answer": 111.9,
+                  "text": "Kolik gramů FeSO4.7H2O vznikne, dojde-li k odpaření vody z 305.6 g 20 % roztoku síranu železnatého?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 305.6
+                    },
+                    {
+                      "unit": "%",
+                      "value": 20.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "66.48 g",
+                  "numeric_answer": 66.48,
+                  "text": "Na přípravu vývojky je třeba 33.23 g Na2SO3, k dispozici je však pouze Na2SO3.7H2O. Kolik gramů hydrátu je nutné použít na přípravu vývojky?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 33.23
+                    }
+                  ]
+                }
+              ],
+              "set": 1
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "15.21 %",
+                  "numeric_answer": 15.21,
+                  "text": "Jaká je hmotnostní procento (w/w) chloridu železitého v roztoku, který vznikl rozpuštěním 286.0 g FeCl3.6H2O ve 842.6 g vody?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 286.0
+                    },
+                    {
+                      "unit": "g",
+                      "value": 842.6
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "15.70 %",
+                  "numeric_answer": 15.7,
+                  "text": "Jaké je hmotnostní procento (w/w) FeCl3 v roztoku, který vznikl z 695.9 g 10.15 % (w/w) roztoku FeCl3, bylo-li k němu přidáno 87.2 g FeCl3.6H2O?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 695.9
+                    },
+                    {
+                      "unit": "%",
+                      "value": 10.15
+                    },
+                    {
+                      "unit": "g",
+                      "value": 87.2
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "0.5521",
+                  "numeric_answer": 0.5521,
+                  "text": "Jaký bude hmotnostní zlomek síranu měďnatého v roztoku, který byl připraven ze 737.6 g roztoku síranu měďnatého, ve kterém byl hmotnostní zlomek CuSO4 roven 0.5100, bylo-li k němu přidáno 356.9 g CuSO4.5H2O?",
+                  "variables": [
+                    {
+                      "unit": "g",
+                      "value": 737.6
+                    },
+                    {
+                      "unit": "",
+                      "value": 0.51
+                    },
+                    {
+                      "unit": "g",
+                      "value": 356.9
+                    }
+                  ]
+                }
+              ],
+              "set": 2
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "595.5 cm3 roztoku methanolu o objemovém procentu 56.00 % (ρ = 0.9607 g.cm-3) bylo přidáno 564.9 g vody. Vypočítejte hmotnostní procento methanolu ve výsledném roztoku, víte-li, že hustota čistého methanolu je 0.7917 g.cm-3. 23.22 % hmotnostní",
+                  "numeric_answer": 595.5,
+                  "text": "K",
+                  "variables": []
+                },
+                {
+                  "answer_text": "Hustota čistého methanolu je 0.7917 g.cm-3. 34.89 % hmotnostních",
+                  "numeric_answer": 0.7917,
+                  "text": "Bylo smícháno 50.50 cm3 roztoku methanolu o objemovém zlomku 20.00 % (ρ = 0.9483 g.cm-3) a 79.16 cm3 roztoku methanolu o objemovém zlomku 54.25 % (ρ = 0.9156 g.cm-3). Jaké je hmotnostní procento methanolu ve výsledném roztoku?",
+                  "variables": [
+                    {
+                      "unit": "cm3 roztoku",
+                      "value": 50.5
+                    },
+                    {
+                      "unit": "%",
+                      "value": 20.0
+                    },
+                    {
+                      "unit": "g",
+                      "value": 0.9483
+                    },
+                    {
+                      "unit": ")",
+                      "value": 3.0
+                    },
+                    {
+                      "unit": "cm3 roztoku",
+                      "value": 79.16
+                    },
+                    {
+                      "unit": "%",
+                      "value": 54.25
+                    },
+                    {
+                      "unit": "g",
+                      "value": 0.9156
+                    },
+                    {
+                      "unit": ")",
+                      "value": 3.0
+                    }
+                  ]
+                },
+                {
+                  "answer_text": "300 cm3 roztoku metanolu obsahujícího 26.7 % objemových této látky (ρ = 0.9636 g.cm-3) s 500 cm3 roztoku metanolu, který obsahuje 41.7 % objemových této látky (ρ = 0.9433 g.cm-3). 30.03 %",
+                  "numeric_answer": 300.0,
+                  "text": "Jaká bude koncentrace roztoku methanolu vyjádřená ve hmotnostních procentech, pokud roztok vznikl smísením",
+                  "variables": []
+                }
+              ],
+              "set": 3
+            },
+            {
+              "questions": [
+                {
+                  "answer_text": "60% kyseliny dusičné (ρ = 1,3667 g.cm-3) a kolik ml jejího 10% roztoku (ρ = 1,0543 g.cm-3) je potřeba na přípravu 3663 ml jejího 30% roztoku (ρ = 1,1800 g.cm-3). 1265 ml 60% HNO3 + 2460 ml 10% HNO3",
+                  "numeric_answer": 60.0,
+                  "text": "Vypočítejte kolik ml",
+                  "variables": []
+                },
+                {
+                  "answer_text": "50% HNO3 (ρ = 1.3100 g.cm-3) a kolik ml vody je potřeba na přípravu 685 ml jejího 20% roztoku (ρ = 1.1150 g.cm-3). 233 ml 50% HNO3 + 458 ml vody",
+                  "numeric_answer": 50.0,
+                  "text": "Vypočítejte kolik ml",
+                  "variables": []
+                },
+                {
+                  "answer_text": "4.5H2O a množství vody potřebné k přípravě 1235 g 30 % roztoku síranu měďnatého. 579.6 g CuSO4.5H2O a 655.4 g vody",
+                  "numeric_answer": 1235.0,
+                  "text": "Vypočítejte množství CuSO",
+                  "variables": []
+                }
+              ],
+              "set": 4
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
