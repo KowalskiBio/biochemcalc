@@ -15,6 +15,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 
 import { cs } from "@/i18n/cs"
+import { FIRST_THREE_ROWS_ELEMENTS, KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import type { LocalVariableEdit, VariableType } from "@/lib/types"
 
 // X/Y/Z placeholder colors
@@ -222,7 +223,29 @@ export function VariableEditorRow({
 
         {isStringType ? (
           <div className="space-y-1">
-            <Label className="text-xs">{cs.questions.stringValuesInput}</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">{cs.questions.stringValuesInput}</Label>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => handleStringValuesChange(FIRST_THREE_ROWS_ELEMENTS.join(", "))}
+                >
+                  {cs.questions.fillFirstThreeRows}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => handleStringValuesChange(KNOWN_ELEMENTS.join(", "))}
+                >
+                  {cs.questions.fillAllElements}
+                </Button>
+              </div>
+            </div>
             <Textarea
               value={stringValuesInput}
               onChange={(e) => handleStringValuesChange(e.target.value)}

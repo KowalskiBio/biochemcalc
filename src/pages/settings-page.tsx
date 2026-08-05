@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Settings } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -70,45 +69,30 @@ export function SettingsPage() {
 
   if (isLoading) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         className="space-y-6"
       >
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
+        <div
         >
-          <h1 className="text-2xl font-bold text-foreground">{cs.settings.title}</h1>
-          <p className="text-foreground-secondary mt-1">{cs.settings.description}</p>
-        </motion.div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.settings.title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{cs.settings.description}</p>
+        </div>
         <p className="text-foreground-muted">{cs.common.loading}...</p>
-      </motion.div>
+      </div>
     )
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className="space-y-6"
     >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
       >
-        <h1 className="text-2xl font-bold text-foreground">{cs.settings.title}</h1>
-        <p className="text-foreground-secondary mt-1">{cs.settings.description}</p>
-      </motion.div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.settings.title}</h1>
+        <p className="text-sm text-muted-foreground mt-1">{cs.settings.description}</p>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
       >
         <Card>
           <CardHeader>
@@ -149,7 +133,7 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }

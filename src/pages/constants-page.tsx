@@ -1,5 +1,4 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
 import { Search, ShieldCheck } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 // Sub-components
@@ -161,31 +160,22 @@ export function ConstantsPage() {
   }, [fetchConstants])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className={cn(pageContainerVariants())}
     >
       {/* Page header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{cs.constants.title}</h1>
-            <p className="text-foreground-secondary mt-1">{cs.constants.pageDescription}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.constants.title}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{cs.constants.pageDescription}</p>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Actions bar */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
         className="flex flex-col sm:flex-row gap-4"
       >
         <div className="relative flex-1">
@@ -202,13 +192,10 @@ export function ConstantsPage() {
         <Button className={cn(actionButtonVariants())} onClick={() => setIsCreateDialogOpen(true)}>
           {cs.constants.createConstant}
         </Button>
-      </motion.div>
+      </div>
 
       {/* Constants table */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
+      <div
       >
         <Card>
           <CardHeader>
@@ -224,7 +211,7 @@ export function ConstantsPage() {
               <div className="text-foreground-muted">{cs.toasts.info.loading}</div>
             ) : filteredConstants.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
-                <p className="text-foreground-secondary mb-4">{cs.constants.emptyState.title}</p>
+                <p className="text-muted-foreground mb-4">{cs.constants.emptyState.title}</p>
                 <p className="text-foreground-muted text-sm mb-4">
                   {cs.constants.emptyState.description}
                 </p>
@@ -286,7 +273,7 @@ export function ConstantsPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Create Constant Dialog */}
       <ConstantDialog
@@ -319,6 +306,6 @@ export function ConstantsPage() {
           description={cs.constants.deleteConfirm.replace("{name}", selectedConstant.name)}
         />
       )}
-    </motion.div>
+    </div>
   )
 }

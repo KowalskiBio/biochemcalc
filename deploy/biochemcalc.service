@@ -1,0 +1,35 @@
+# biochemcalc — 24/7 unattended operation on a headless VM.
+#
+# Install as a per-user service (no root needed):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/biochemcalc.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now biochemcalc
+#   loginctl enable-linger "$USER"   # keep it running after logout
+#
+# Prerequisites on the VM: WebKitGTK (Tauri runtime dependency) and xvfb.
+# The app is a GUI process; xvfb supplies the virtual display it requires.
+#
+# Logs:
+#   journalctl --user -u biochemcalc -f   # stdout/stderr incl. panics
+#   ~/.local/share/com.kowalski.biochemcalc/logs/biochemcalc.log  # app log
+# Data:
+#   ~/.local/share/com.kowalski.biochemcalc/biochemcalc.sqlite
+#   ~/.local/share/com.kowalski.biochemcalc/projekty/*.json
+# Do NOT live-sync the app-data directory (Syncthing/Dropbox) while the app
+# runs — syncing an open SQLite file is a corruption vector.
+[Unit]
+Description=biochemcalc (Tauri GUI, headless via Xvfb)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/xvfb-run --auto-servernum /opt/biochemcalc/biochemcalc
+Restart=always
+RestartSec=5
+# Panics and hook-level diagnostics reach the journal via stderr.
+Environment=RUST_BACKTRACE=1
+
+[Install]
+WantedBy=default.target

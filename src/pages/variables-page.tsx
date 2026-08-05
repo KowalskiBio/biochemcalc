@@ -1,5 +1,4 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
 import { Search } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -159,72 +158,54 @@ export function VariablesPage() {
     fetchVariables()
   }, [fetchVariables])
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className={cn(pageContainerVariants())}
-    >
+   return (
+    <div className={cn(pageContainerVariants())}>
       {/* Page header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
-      >
+      <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{cs.variables.title}</h1>
-            <p className="text-foreground-secondary mt-1">{cs.variables.pageDescription}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.variables.title}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{cs.variables.pageDescription}</p>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Actions bar */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="flex flex-col sm:flex-row gap-4"
-      >
+      <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-foreground-muted" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
             type="text"
             placeholder={`${cs.common.search}...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
 
         <Button className={cn(actionButtonVariants())} onClick={() => setIsCreateDialogOpen(true)}>
           {cs.variables.createVariable}
         </Button>
-      </motion.div>
+      </div>
 
-      {/* Variables table */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
-      >
+       {/* Variables table */}
+      <div>
         <Card>
           <CardHeader>
             <CardTitle>{cs.variables.columns.name}</CardTitle>
-            <CardDescription>
-              {filteredVariables.length} {cs.variables.title.toLowerCase()}
-            </CardDescription>
+             <CardDescription>
+               <span className="font-mono tabular">{filteredVariables.length}</span> {cs.variables.title.toLowerCase()}
+             </CardDescription>
           </CardHeader>
           <CardContent>
             {error ? (
               <div className="text-destructive">{error}</div>
-            ) : isLoading ? (
-              <div className="text-foreground-muted">{cs.toasts.info.loading}</div>
-            ) : filteredVariables.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <p className="text-foreground-secondary mb-4">{cs.variables.emptyState.title}</p>
-                <p className="text-foreground-muted text-sm mb-4">
+             ) : isLoading ? (
+               <div className="text-muted-foreground">{cs.toasts.info.loading}</div>
+             ) : filteredVariables.length === 0 ? (
+               <div className="flex flex-col items-center justify-center py-8 text-center">
+                 <p className="text-muted-foreground mb-4">{cs.variables.emptyState.title}</p>
+                 <p className="text-muted-foreground text-sm mb-4">
                   {cs.variables.emptyState.description}
                 </p>
                 <Button onClick={() => setIsCreateDialogOpen(true)}>
@@ -249,10 +230,10 @@ export function VariablesPage() {
                       <TableCell>
                         <Badge variant="secondary">{variable.symbol}</Badge>
                       </TableCell>
-                      <TableCell>
-                        {variable.minValue} - {variable.maxValue}
-                        {variable.step && ` (${variable.step})`}
-                      </TableCell>
+                       <TableCell className="font-mono tabular">
+                         {variable.minValue} - {variable.maxValue}
+                         {variable.step && ` (${variable.step})`}
+                       </TableCell>
                       <TableCell>{variable.unit}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
@@ -278,8 +259,8 @@ export function VariablesPage() {
               </Table>
             )}
           </CardContent>
-        </Card>
-      </motion.div>
+         </Card>
+       </div>
 
       {/* Create Variable Dialog */}
       <VariableDialog
@@ -312,6 +293,6 @@ export function VariablesPage() {
           description={cs.variables.deleteConfirm.replace("{name}", selectedVariable.name)}
         />
       )}
-    </motion.div>
+    </div>
   )
 }

@@ -8,6 +8,7 @@ use uuid::Uuid;
 /// A saved, fully generated category ready to be merged into an output file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct CategoryPackage {
     pub id: Uuid,
     pub point_value: u8,
@@ -18,6 +19,7 @@ pub struct CategoryPackage {
 /// A saved set inside a category package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct SetPackage {
     pub id: Uuid,
     pub category_package_id: Uuid,
@@ -28,6 +30,7 @@ pub struct SetPackage {
 /// A saved variant inside a set package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct VariantPackage {
     pub id: Uuid,
     pub set_package_id: Uuid,
@@ -40,6 +43,7 @@ pub struct VariantPackage {
 /// A lightweight in-progress wizard session, persisted for crash recovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct WizardSession {
     pub id: Uuid,
     pub point_value: Option<u8>,
@@ -52,6 +56,7 @@ pub struct WizardSession {
 /// One set inside the current wizard session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct WizardSessionSet {
     pub set_index: u8,
     pub mode: TemplateMode,
@@ -87,6 +92,7 @@ pub struct OutputFile {
 /// Generic key-value store for app settings and preferences.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct AppSetting {
     pub key: String,
     pub value: serde_json::Value,

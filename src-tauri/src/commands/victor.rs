@@ -168,7 +168,7 @@ fn parse_victor_response(raw_content: &str) -> Result<VictorResponse, DbError> {
 
 #[tauri::command]
 pub fn get_victor_settings(state: State<'_, AppState>) -> Result<VictorSettings, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let api_base_url =
         AppSettingsRepo::get_or_default(&conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
     let api_key = AppSettingsRepo::get_or_default(&conn, KEY_API_KEY, DEFAULT_API_KEY)?;
@@ -183,7 +183,7 @@ pub fn set_victor_settings(
     state: State<'_, AppState>,
     payload: VictorSettingsPayload,
 ) -> Result<VictorSettings, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     AppSettingsRepo::set(&conn, KEY_API_BASE_URL, &payload.api_base_url)?;
     AppSettingsRepo::set(&conn, KEY_API_KEY, &payload.api_key)?;
     Ok(VictorSettings {
@@ -198,7 +198,7 @@ pub async fn chat_with_victor(
     payload: VictorChatPayload,
 ) -> Result<VictorResponse, DbError> {
     let (api_base_url, api_key) = {
-        let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+        let conn = crate::util::lock_db(&state.db);
         let url = AppSettingsRepo::get_or_default(&conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
         let key = AppSettingsRepo::get_or_default(&conn, KEY_API_KEY, DEFAULT_API_KEY)?;
         (url, key)

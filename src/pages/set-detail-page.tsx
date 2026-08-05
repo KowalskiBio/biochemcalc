@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { ArrowLeft, Download, FileText, Loader2, RefreshCw, Save, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
@@ -14,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -31,8 +31,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialog"
+import { ExportVariantsDialog } from "@/components/wizard/export-variants-dialog"
 
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
@@ -44,11 +44,9 @@ import {
   setsApi,
   templatesApi,
 } from "@/lib/api"
-import { formatNumberMaxDecimals } from "@/lib/math-utils"
+import { evaluateVariantAnswer, formatNumberMaxDecimals } from "@/lib/math-utils"
 import { QuestionTextRenderer } from "@/lib/render-question-text"
-import { useGenerationActions, useGenerationBySetId } from "@/stores/generation-store"
 import type {
-  ExportQuestion,
   ProjektQuestion,
   QuestionDifficulty,
   SaveProjektInput,
@@ -57,6 +55,7 @@ import type {
   TemplateMode,
   TemplateWithDetails,
 } from "@/lib/types"
+import { useGenerationActions, useGenerationBySetId } from "@/stores/generation-store"
 
 export function SetDetailPage() {
   const { setId } = useParams<{ setId: string }>()
@@ -77,6 +76,7 @@ export function SetDetailPage() {
   const [projektName, setProjektName] = useState("")
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [showClosedConfigDialog, setShowClosedConfigDialog] = useState(false)
+  const [showExportDialog, setShowExportDialog] = useState(false)
   const generatedRef = useRef<HTMLDivElement>(null)
 
   const generation = useGenerationBySetId(setId)
@@ -217,35 +217,6 @@ export function SetDetailPage() {
     [setId, templateDetails, setGeneration, toast],
   )
 
-  const handleExport = useCallback(async () => {
-    if (!generated || !generatedMode) return
-    const questions: ExportQuestion[] = generated.map((g) => ({
-      template: g.template,
-      variant: g.variants[0],
-      variablePrecisions: {},
-      resultPrecision: 2,
-      mode: generatedMode,
-    }))
-
-    try {
-      const result = await generationApi.exportToTxt({
-        filename: `export-${Date.now()}`,
-        questions,
-      })
-      toast({
-        title: "Otázky exportovány",
-        description: `Test byl uložen do Testy (${result.filePath}).`,
-      })
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : String(err)
-      toast({
-        title: "Chyba exportu",
-        description: message,
-        variant: "destructive",
-      })
-    }
-  }, [generated, generatedMode, toast])
-
   const handleRegenerateVariant = useCallback(
     async (templateId: string, manualAnswer?: number) => {
       if (!setId || !generatedMode) return
@@ -322,6 +293,7 @@ export function SetDetailPage() {
           intervalHi: variant?.intervalHi,
           mode: generatedMode,
           seed: variant?.seed || Date.now(),
+          answersData: variant?.answersData,
         }
       })
 
@@ -355,44 +327,34 @@ export function SetDetailPage() {
 
   if (isLoading) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-foreground-muted">Načítám sadu...</p>
-          </CardContent>
-        </Card>
-      </motion.div>
+      <Card>
+        <CardContent className="py-8 text-center">
+          <p className="text-muted-foreground">Načítám sadu...</p>
+        </CardContent>
+      </Card>
     )
   }
 
   if (!set) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-foreground-muted">Sada nenalezena.</p>
-            <Button asChild variant="outline" className="mt-4">
-              <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>
-                Zpět na témata
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </motion.div>
+      <Card>
+        <CardContent className="py-8 text-center">
+          <p className="text-muted-foreground">Sada nenalezena.</p>
+          <Button asChild variant="outline" className="mt-4">
+            <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>
+              Zpět na témata
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className="space-y-6"
     >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
         className="flex items-center gap-4"
       >
         <Button variant="ghost" size="icon" asChild>
@@ -401,20 +363,17 @@ export function SetDetailPage() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {cs.topics.setIndex.replace("{index}", String(set.setIndex))}
           </h1>
-          <p className="text-foreground-secondary text-sm">
+          <p className="text-muted-foreground text-sm">
             {templateDetails.length} {cs.sets.questions.toLowerCase()}
           </p>
         </div>
-      </motion.div>
+      </div>
 
       {/* Mode and actions */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
       >
         <Card>
           <CardContent className="flex flex-wrap gap-2 pt-6">
@@ -433,7 +392,11 @@ export function SetDetailPage() {
               {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
               {cs.sets.openQuestions}
             </Button>
-            <Button onClick={handleExport} variant="outline" disabled={!generated || isGenerating}>
+            <Button
+              onClick={() => setShowExportDialog(true)}
+              variant="outline"
+              disabled={templateDetails.length === 0 || isGenerating}
+            >
               <Download className="size-4 mr-2" />
               {cs.sets.export}
             </Button>
@@ -447,13 +410,10 @@ export function SetDetailPage() {
             </Button>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Templates table */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
+      <div
       >
         <Card>
           <CardHeader>
@@ -527,14 +487,11 @@ export function SetDetailPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       {/* Generation error */}
       {generationError && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+        <div
         >
           <Card className="border-destructive">
             <CardContent className="pt-6">
@@ -542,16 +499,13 @@ export function SetDetailPage() {
               <p className="text-sm text-destructive/80 mt-1">{generationError}</p>
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       )}
 
       {/* Generated results */}
       {generated && (
-        <motion.div
+        <div
           ref={generatedRef}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
           className="space-y-4"
         >
           <Card>
@@ -566,14 +520,30 @@ export function SetDetailPage() {
                   (details?.constants ?? []).map((c) => [c.symbol, c.value]),
                 )
                 const optionLabels = ["a", "b", "c", "d", "e"]
+                const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
                 const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
                 const correctOption = variant?.correctOption
+                const equationText = g.template.equationText?.trim() || g.template.formula
+                const recomputed =
+                  equationText && variant
+                    ? evaluateVariantAnswer(
+                        equationText,
+                        details?.variables ?? [],
+                        variant,
+                        constants,
+                        g.template.questionText,
+                      )
+                    : null
+                const hasMismatch =
+                  recomputed?.ok &&
+                  variant?.correctAnswer != null &&
+                  Math.abs(recomputed.value - variant.correctAnswer) > 1e-9
 
                 return (
                   <div key={g.template.id} className="rounded-lg border p-4 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="space-y-1">
-                        <p className="text-sm font-medium text-foreground-secondary">{idx + 1}.</p>
+                        <p className="text-sm font-medium text-muted-foreground">{idx + 1}.</p>
                         <QuestionTextRenderer
                           text={g.template.questionText}
                           variables={details?.variables ?? []}
@@ -597,7 +567,46 @@ export function SetDetailPage() {
                     </div>
 
                     {generatedMode === "closed" &&
-                      (options.length > 0 ? (
+                      (hasMultiAnswers && variant?.answersData ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {variant.answersData[0].numericOptions?.map((_, optionIdx) => {
+                            const label = optionLabels[optionIdx]
+                            const isCorrect =
+                              optionIdx + 1 ===
+                              (variant.answersData?.[0]?.correctOption ?? correctOption)
+                            return (
+                              <div
+                                key={label}
+                                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                                  isCorrect
+                                    ? "border-green-500 bg-green-50 dark:bg-green-950/30"
+                                    : "bg-muted/30"
+                                }`}
+                              >
+                                <span
+                                  className={`font-semibold ${
+                                    isCorrect ? "text-green-700 dark:text-green-300" : ""
+                                  }`}
+                                >
+                                  {label})
+                                </span>
+                                <span>
+                                  {variant.answersData?.map((a, idx) => {
+                                    const value = a.numericOptions?.[optionIdx]
+                                    if (value == null) return null
+                                    return (
+                                      <span key={a.symbol}>
+                                        {idx > 0 && ", "}
+                                        <FormattedResult value={value} unit={a.unit} />
+                                      </span>
+                                    )
+                                  })}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : options.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                           {options.map((value, optionIdx) => {
                             const label = optionLabels[optionIdx]
@@ -619,9 +628,7 @@ export function SetDetailPage() {
                                   {label})
                                 </span>
                                 <span>
-                                  {value}
-                                  {g.template.resultUnit ? " " : ""}
-                                  <UnitRenderer unit={g.template.resultUnit} />
+                                  <FormattedResult value={value} unit={g.template.resultUnit} />
                                 </span>
                               </div>
                             )
@@ -634,10 +641,42 @@ export function SetDetailPage() {
                       ))}
 
                     {generatedMode === "open" && (
-                      <div className="text-sm text-foreground-secondary">
-                        Správná odpověď: {formatNumberMaxDecimals(variant?.correctAnswer)}
-                        {g.template.resultUnit ? " " : ""}
-                        <UnitRenderer unit={g.template.resultUnit} />
+                      <div className="text-sm text-muted-foreground">
+                        {hasMultiAnswers && variant?.answersData ? (
+                          <>
+                            Správné odpovědi:{" "}
+                            {variant.answersData.map((a, idx) => (
+                              <span key={a.symbol} className="ml-1">
+                                {idx > 0 && "; "}
+                                {a.symbol} = <FormattedResult value={a.value} unit={a.unit} />
+                                {a.intervalLo != null && a.intervalHi != null && (
+                                  <span className="ml-1 text-xs text-muted-foreground">
+                                    (± okolí <FormattedResult value={a.intervalLo} />–
+                                    <FormattedResult value={a.intervalHi} />)
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                          </>
+                        ) : (
+                          <>
+                            Správná odpověď:{" "}
+                            <FormattedResult
+                              value={recomputed?.ok ? recomputed.value : variant?.correctAnswer}
+                              unit={g.template.resultUnit}
+                            />
+                            {recomputed?.ok && hasMismatch && (
+                              <span className="ml-2 text-xs text-amber-600">
+                                (backend: {formatNumberMaxDecimals(variant?.correctAnswer)})
+                              </span>
+                            )}
+                            {!recomputed?.ok && recomputed?.error && (
+                              <span className="ml-2 text-xs text-red-600">
+                                ({recomputed.error})
+                              </span>
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -645,7 +684,7 @@ export function SetDetailPage() {
               })}
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       )}
 
       {/* Save to Projekt Dialog */}
@@ -792,6 +831,18 @@ export function SetDetailPage() {
           )}
         />
       )}
-    </motion.div>
+
+      {/* Export Variants Dialog */}
+      {set && (
+        <ExportVariantsDialog
+          open={showExportDialog}
+          onOpenChange={setShowExportDialog}
+          templates={templateDetails}
+          mode={set.mode}
+          closedDifficulty={closedDifficulty}
+          closedOptionCount={closedOptionCount}
+        />
+      )}
+    </div>
   )
 }

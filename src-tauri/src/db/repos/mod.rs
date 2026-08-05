@@ -9,7 +9,6 @@ pub mod template_repo;
 pub mod topic_repo;
 pub mod variable_history_repo;
 pub mod variable_repo;
-pub mod variant_repo;
 
 pub use category_repo::CategoryRepo;
 pub use constant_repo::ConstantRepo;
@@ -22,4 +21,3 @@ pub use template_repo::TemplateRepo;
 pub use topic_repo::TopicRepo;
 pub use variable_history_repo::VariableHistoryRepo;
 pub use variable_repo::VariableRepo;
-pub use variant_repo::VariantRepo;

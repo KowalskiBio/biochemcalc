@@ -14,6 +14,7 @@ pub struct AppState {
 impl AppState {
     /// Create a new state with a default in-memory connection.
     /// The real connection is set up in `initialize_db` during `.setup()`.
+    #[cfg(test)]
     pub fn new_in_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
         schema::run_migrations(&conn)?;
@@ -64,6 +65,9 @@ pub enum DbError {
 
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 impl serde::Serialize for DbError {
@@ -88,6 +92,7 @@ impl DbError {
             DbError::NotFound(_) => "not_found",
             DbError::Validation(_) => "validation",
             DbError::Conflict(_) => "conflict",
+            DbError::Internal(_) => "internal",
         }
     }
 }

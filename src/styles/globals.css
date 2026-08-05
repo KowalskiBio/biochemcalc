@@ -1,146 +1,140 @@
 @import "./tokens.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource/inter";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* BiochemCalc design tokens from design-system/MASTER.md */
-    --color-primary: #1e40af;
-    --color-primary-light: #3b82f6;
-    --color-on-primary: #ffffff;
-    --color-secondary: #059669;
-    --color-secondary-light: #10b981;
-    --color-on-secondary: #ffffff;
-    --color-accent: #0891b2;
-    --color-accent-light: #0ea5e9;
-    --color-on-accent: #ffffff;
-    --color-background: #f8fafc;
-    --color-foreground: #0f172a;
-    --color-foreground-secondary: #4b5563;
-    --color-foreground-muted: #9ca3af;
-    --color-muted: #f1f5f9;
-    --color-muted-dark: #e5e7eb;
-    --color-border: #e5e7eb;
-    --color-border-strong: #d1d5db;
-    --color-success: #059669;
-    --color-success-light: #d1fae5;
-    --color-warning: #d97706;
-    --color-warning-light: #fef3c7;
-    --color-destructive: #dc2626;
-    --color-destructive-light: #fee2e2;
-    --color-info: #0284c7;
-    --color-info-light: #dbeafe;
+    /* Lab instrument design tokens - BiochemCalc */
+    --color-primary: #155E46;
+    --color-primary-light: #2E8565;
+    --color-on-primary: #FBFBF7;
+    --color-secondary: #3E6453;
+    --color-secondary-light: #5F6B64;
+    --color-on-secondary: #FBFBF7;
+    --color-accent: #9A5B17;
+    --color-accent-light: #D08C1F;
+    --color-on-accent: #FBFBF7;
+    --color-background: #F2F3EC;
+    --color-foreground: #202622;
+    --color-foreground-secondary: #4A524C;
+    --color-foreground-muted: #8A9288;
+    --color-muted: #E7EAE0;
+    --color-muted-dark: #D8DCCE;
+    --color-border: #D8DCCE;
+    --color-border-strong: #C4C8BE;
+    --color-success: #155E46;
+    --color-success-light: #D1FAE5;
+    --color-warning: #A16207;
+    --color-warning-light: #FEF3C7;
+    --color-destructive: #B42318;
+    --color-destructive-light: #FEE2E2;
+    --color-info: #155E75;
+    --color-info-light: #DBEAFE;
 
-    --gradient-primary: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-    --gradient-biochem: linear-gradient(135deg, #059669 0%, #0891b2 100%);
-
-    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
     --font-heading: var(--font-sans);
-    --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 
-    /* shadcn/ui HSL variables derived from the design tokens */
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 223 73% 38%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 160 84% 37%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 210 20% 95%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 195 84% 45%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 214 20% 91%;
-    --input: 214 20% 91%;
-    --ring: 223 73% 38%;
-    --radius: 0.5rem;
-    --chart-1: 223 73% 38%;
-    --chart-2: 160 84% 37%;
-    --chart-3: 222 47% 11%;
-    --chart-4: 210 40% 98%;
-    --chart-5: 0 84% 60%;
-    --sidebar: 0 0% 100%;
-    --sidebar-foreground: 222 47% 11%;
-    --sidebar-primary: 223 73% 38%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 195 84% 45%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 214 20% 91%;
-    --sidebar-ring: 223 73% 38%;
+    /* shadcn/ui HSL variables - Lab instrument theme */
+    --background: 69 23% 94%;
+    --foreground: 140 9% 14%;
+    --card: 60 33% 98%;
+    --card-foreground: 140 9% 14%;
+    --popover: 60 33% 98%;
+    --popover-foreground: 140 9% 14%;
+    --primary: 160 63% 23%;
+    --primary-foreground: 69 23% 94%;
+    --secondary: 78 19% 90%;
+    --secondary-foreground: 150 16% 20%;
+    --muted: 78 19% 90%;
+    --muted-foreground: 145 6% 40%;
+    --accent: 31 74% 35%;
+    --accent-foreground: 60 33% 98%;
+    --destructive: 4 76% 40%;
+    --destructive-foreground: 69 23% 94%;
+    --border: 77 17% 84%;
+    --input: 77 17% 84%;
+    --ring: 160 63% 23%;
+    --radius: 0.25rem;
+    --chart-1: 160 63% 23%;
+    --chart-2: 31 74% 35%;
+    --chart-3: 140 9% 14%;
+    --chart-4: 60 33% 98%;
+    --chart-5: 4 76% 40%;
+    --sidebar: 150 29% 12%;
+    --sidebar-foreground: 127 13% 87%;
+    --sidebar-primary: 31 74% 35%;
+    --sidebar-primary-foreground: 60 33% 98%;
+    --sidebar-accent: 150 29% 12%;
+    --sidebar-accent-foreground: 127 13% 87%;
+    --sidebar-border: 77 17% 84%;
+    --sidebar-ring: 160 63% 23%;
   }
 
   .dark {
-    --color-primary: #3b82f6;
-    --color-primary-light: #60a5fa;
-    --color-on-primary: #ffffff;
-    --color-secondary: #10b981;
-    --color-secondary-light: #34d399;
-    --color-on-secondary: #0f172a;
-    --color-accent: #0ea5e9;
-    --color-accent-light: #38bdf8;
-    --color-on-accent: #0f172a;
-    --color-background: #0f172a;
-    --color-foreground: #f8fafc;
-    --color-foreground-secondary: #cbd5e1;
-    --color-foreground-muted: #94a3b8;
-    --color-muted: #1e293b;
-    --color-muted-dark: #334155;
-    --color-border: #334155;
-    --color-border-strong: #475569;
-    --color-success: #10b981;
-    --color-success-light: #064e3b;
-    --color-warning: #f59e0b;
-    --color-warning-light: #78350f;
-    --color-destructive: #ef4444;
-    --color-destructive-light: #7f1d1d;
-    --color-info: #38bdf8;
-    --color-info-light: #0c4a6e;
+    --color-primary: #3FA37E;
+    --color-primary-light: #5FAB89;
+    --color-on-primary: #101613;
+    --color-secondary: #2E6A59;
+    --color-secondary-light: #4A7A6B;
+    --color-on-secondary: #101613;
+    --color-accent: #D08C1F;
+    --color-accent-light: #E6A843;
+    --color-on-accent: #101613;
+    --color-background: #101613;
+    --color-foreground: #E4E8DE;
+    --color-foreground-secondary: #B8C2B8;
+    --color-foreground-muted: #8A9288;
+    --color-muted: #1B2420;
+    --color-muted-dark: #243029;
+    --color-border: #243029;
+    --color-border-strong: #344039;
+    --color-success: #3FA37E;
+    --color-success-light: #064E3B;
+    --color-warning: #D08C1F;
+    --color-warning-light: #78350F;
+    --color-destructive: #B42318;
+    --color-destructive-light: #7F1D1D;
+    --color-info: #38BDF8;
+    --color-info-light: #0C4A6E;
 
-    --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
-    --gradient-biochem: linear-gradient(135deg, #10b981 0%, #0ea5e9 100%);
-
-    /* Dark mode HSL variables */
-    --background: 222 47% 11%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 11%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 223 73% 38%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 167 72% 25%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 195 84% 45%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
-    --ring: 213 52% 24%;
-    --sidebar: 222 47% 11%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 213 52% 24%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 195 84% 45%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 217 33% 17%;
-    --sidebar-ring: 213 52% 24%;
-  }
-
-  .theme {
-    --font-heading: var(--font-sans);
-    --font-sans: "Inter", sans-serif;
+    /* Dark mode HSL variables - Lab instrument theme */
+    --background: 150 16% 7%;
+    --foreground: 84 18% 89%;
+    --card: 143 15% 10%;
+    --card-foreground: 84 18% 89%;
+    --popover: 143 15% 10%;
+    --popover-foreground: 84 18% 89%;
+    --primary: 158 44% 44%;
+    --primary-foreground: 152 48% 5%;
+    --secondary: 150 16% 15%;
+    --secondary-foreground: 138 14% 81%;
+    --muted: 153 14% 12%;
+    --muted-foreground: 148 8% 59%;
+    --accent: 37 74% 47%;
+    --accent-foreground: 150 16% 7%;
+    --destructive: 358 75% 59%;
+    --destructive-foreground: 84 18% 89%;
+    --border: 145 14% 16%;
+    --input: 145 14% 16%;
+    --ring: 37 74% 47%;
+    --sidebar: 144 19% 5%;
+    --sidebar-foreground: 127 13% 87%;
+    --sidebar-primary: 37 74% 47%;
+    --sidebar-primary-foreground: 150 16% 7%;
+    --sidebar-accent: 144 19% 5%;
+    --sidebar-accent-foreground: 127 13% 87%;
+    --sidebar-border: 145 14% 16%;
+    --sidebar-ring: 37 74% 47%;
   }
 
   * {
@@ -155,6 +149,12 @@
     @apply font-sans;
   }
 
+  /* Selection styling */
+  ::selection {
+    background: #9A5B17;
+    color: #FBFBF7;
+  }
+
   /* Respect reduced motion */
   @media (prefers-reduced-motion: reduce) {
     *,
@@ -164,6 +164,12 @@
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
+    }
+  }
+
+  @layer utilities {
+    .tabular {
+      font-variant-numeric: tabular-nums;
     }
   }
 }

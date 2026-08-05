@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { BookOpen, Plus } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
@@ -38,21 +37,15 @@ export function TopicsPage() {
   }, [fetchTopics])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className="space-y-6"
     >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{cs.topics.pageTitle}</h1>
-            <p className="text-foreground-secondary mt-1">{cs.topics.pageDescription}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.topics.pageTitle}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{cs.topics.pageDescription}</p>
           </div>
           <Button asChild variant="outline">
             <Link to="/bulk-import">
@@ -61,12 +54,9 @@ export function TopicsPage() {
             </Link>
           </Button>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
       >
         {isLoading ? (
           <Card>
@@ -78,13 +68,13 @@ export function TopicsPage() {
           <Card>
             <CardContent className="py-12 text-center">
               <BookOpen className="size-12 text-foreground-muted mx-auto mb-4" />
-              <p className="text-foreground-secondary">{cs.topics.noTopics}</p>
+              <p className="text-muted-foreground">{cs.topics.noTopics}</p>
             </CardContent>
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {topics.map((topic) => (
-              <motion.div key={topic.id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+              <div key={topic.id}>
                 <Link to={`/topics/${topic.id}`}>
                   <Card className="h-full cursor-pointer hover:border-primary transition-colors">
                     <CardHeader>
@@ -98,11 +88,11 @@ export function TopicsPage() {
                     </CardHeader>
                   </Card>
                 </Link>
-              </motion.div>
+              </div>
             ))}
           </div>
         )}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }

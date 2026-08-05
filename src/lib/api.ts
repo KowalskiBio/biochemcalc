@@ -63,7 +63,7 @@ export class ApiError extends Error {
  * Extract a human-readable message from an unknown error value.
  * Tauri invoke errors may be plain objects, strings, or Error instances.
  */
-function extractErrorMessage(error: unknown, fallback: string): string {
+export function extractErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) {
     return error.message || fallback
   }

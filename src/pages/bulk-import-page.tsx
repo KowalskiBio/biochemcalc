@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Download, Loader2, Upload } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -15,7 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { ApiError, constantsApi, topicsApi } from "@/lib/api"
+import { ApiError, constantsApi, extractErrorMessage, topicsApi } from "@/lib/api"
 import {
   pairFormulasWithQuestions,
   parseBulkImportText,
@@ -57,6 +56,7 @@ export function BulkImportPage() {
   const [inputText, setInputText] = useState("")
   const [formulaText, setFormulaText] = useState("")
   const [mode, setMode] = useState<ImportMode>("questions")
+  const [parseError, setParseError] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
 
   const [molarMassText, setMolarMassText] = useState("")
@@ -94,17 +94,24 @@ export function BulkImportPage() {
   )
 
   const parsedData = useMemo(() => {
-    if (!inputText.trim()) return null
+    if (!inputText.trim()) {
+      setParseError(null)
+      return null
+    }
     try {
       if (mode === "questions") {
-        return parseBulkImportText(inputText, databazeEntries)
+        const result = parseBulkImportText(inputText, databazeEntries)
+        setParseError(null)
+        return result
       } else {
         const parsedQuestions = parseBulkImportText(inputText, databazeEntries)
         const parsedFormulas = parseFormulaText(formulaText)
         const pairingResult = pairFormulasWithQuestions(parsedQuestions, parsedFormulas)
+        setParseError(null)
         return pairingResult.data
       }
-    } catch {
+    } catch (err) {
+      setParseError(extractErrorMessage(err, "Failed to parse import text"))
       return null
     }
   }, [inputText, formulaText, mode, databazeEntries])
@@ -150,7 +157,7 @@ export function BulkImportPage() {
       })
       navigate(`/topics/${topic.id}`)
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : String(err)
+      const message = extractErrorMessage(err, cs.bulkImport.error)
       toast({
         title: cs.bulkImport.error,
         description: message,
@@ -240,35 +247,21 @@ export function BulkImportPage() {
   }, [handleImportMolarMasses, parsedMolarMasses])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-6"
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
-      >
+    <div className="space-y-6">
+      <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{cs.bulkImport.title}</h1>
-            <p className="text-foreground-secondary mt-1">{cs.bulkImport.description}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.bulkImport.title}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{cs.bulkImport.description}</p>
           </div>
           <Button variant="outline" onClick={loadSample}>
             <Download className="size-4 mr-2" />
             {cs.bulkImport.loadSample}
           </Button>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-      >
+       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>{cs.bulkImport.inputTitle}</CardTitle>
@@ -314,6 +307,13 @@ export function BulkImportPage() {
                   placeholder={cs.bulkImport.formulasPlaceholder}
                   className="min-h-[200px] font-mono text-sm"
                 />
+              </div>
+            )}
+
+            {parseError && (
+              <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-md text-sm text-red-800 dark:text-red-200">
+                <p className="font-medium">{cs.bulkImport.parseErrorTitle}</p>
+                <p className="text-red-700 dark:text-red-300">{parseError}</p>
               </div>
             )}
 
@@ -375,47 +375,47 @@ export function BulkImportPage() {
                           key={`${category.pointValue}-${set.setIndex}`}
                           className="pl-4 border-l-2 border-muted"
                         >
-                          <div className="flex items-center gap-2 mb-1">
-                            <p className="text-sm text-foreground-secondary">
-                              {cs.topics.setIndex.replace("{index}", String(set.setIndex))} ·{" "}
-                              {set.questions.length}{" "}
-                              {set.questions.length === 1
-                                ? "otázka"
-                                : set.questions.length >= 2 && set.questions.length <= 4
-                                  ? "otázky"
-                                  : "otázek"}
-                            </p>
-                            {mode === "questions-and-formulas" && (
-                              <span
-                                className={`text-xs px-2 py-0.5 rounded-full ${
-                                  pairingStatus.paired === pairingStatus.total
-                                    ? "bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200"
-                                    : "bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200"
-                                }`}
-                              >
-                                {cs.bulkImport.pairingStatus
-                                  .replace("{paired}", String(pairingStatus.paired))
-                                  .replace("{total}", String(pairingStatus.total))}
-                              </span>
-                            )}
+                           <div className="flex items-center gap-2 mb-1">
+                             <p className="text-sm text-muted-foreground">
+                               {cs.topics.setIndex.replace("{index}", String(set.setIndex))} ·{" "}
+                               <span className="font-mono tabular">{set.questions.length}</span>{" "}
+                               {set.questions.length === 1
+                                 ? "otázka"
+                                 : set.questions.length >= 2 && set.questions.length <= 4
+                                   ? "otázky"
+                                   : "otázek"}
+                             </p>
+                             {mode === "questions-and-formulas" && (
+                               <span
+                                 className={`text-xs px-2 py-0.5 rounded-full ${
+                                   pairingStatus.paired === pairingStatus.total
+                                     ? "bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200"
+                                     : "bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200"
+                                 }`}
+                               >
+                                 {cs.bulkImport.pairingStatus
+                                   .replace("{paired}", String(pairingStatus.paired))
+                                   .replace("{total}", String(pairingStatus.total))}
+                               </span>
+                             )}
                           </div>
-                          <ul className="space-y-1">
-                            {set.questions.map((question, idx) => (
-                              <li
-                                key={`${category.pointValue}-${set.setIndex}-${question.questionText}`}
-                                className="text-sm text-foreground-secondary truncate"
-                                title={question.questionText}
-                              >
-                                {idx + 1}. {question.questionText.slice(0, 80)}
-                                {question.questionText.length > 80 ? "…" : ""}
-                                {question.formula && mode === "questions-and-formulas" && (
-                                  <span className="ml-2 text-xs text-muted-foreground">
-                                    ({question.equationText})
-                                  </span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
+                           <ul className="space-y-1">
+                             {set.questions.map((question, idx) => (
+                               <li
+                                 key={`${category.pointValue}-${set.setIndex}-${question.questionText}`}
+                                 className="text-sm text-muted-foreground truncate"
+                                 title={question.questionText}
+                               >
+                                 <span className="font-mono tabular">{idx + 1}</span>. {question.questionText.slice(0, 80)}
+                                 {question.questionText.length > 80 ? "…" : ""}
+                                 {question.formula && mode === "questions-and-formulas" && (
+                                   <span className="ml-2 text-xs text-muted-foreground">
+                                     ({question.equationText})
+                                   </span>
+                                 )}
+                               </li>
+                             ))}
+                           </ul>
                         </div>
                       )
                     })}
@@ -425,16 +425,12 @@ export function BulkImportPage() {
             )}
           </CardContent>
         </Card>
-      </motion.div>
+       </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
-      >
+       <div>
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">{cs.databaze.atomicWeights.bulkImportTitle}</CardTitle>
+            <CardTitle>{cs.databaze.atomicWeights.bulkImportTitle}</CardTitle>
             <CardDescription>{cs.databaze.atomicWeights.bulkImportDescription}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -483,8 +479,8 @@ export function BulkImportPage() {
                 : cs.databaze.atomicWeights.bulkImport}
             </Button>
           </CardContent>
-        </Card>
-      </motion.div>
-    </motion.div>
+         </Card>
+       </div>
+     </div>
   )
 }

@@ -401,6 +401,23 @@ export const cs = {
     deleteSuccess: "Otázka smazána",
     deleteSuccessDescription: 'Otázka "{name}" byla úspěšně smazána.',
     deleteError: "Nepodařilo se smazat otázku",
+    exportDialog: {
+      title: "Exportovat varianty",
+      description: "Vyberte otázky a počet variant pro export. Celkem {count} otázek.",
+      questionText: "Text otázky",
+      variantCount: "Počet variant",
+      totalVariants: "Celkem variant",
+      includeQuestion: "Zahrnout otázku",
+      excludeQuestion: "Vyloučit otázku",
+      exportButton: "Exportovat",
+      exporting: "Exportuji...",
+      loadingSamples: "Načítám náhledy otázek...",
+      successTitle: "Export dokončen",
+      successDescription: "Otázky byly uloženy do Testy ({filePath}).",
+      errorTitle: "Chyba exportu",
+      noQuestions: "Nevybrali jste žádné otázky k exportu.",
+      noVariants: "Nebyly vygenerovány žádné varianty.",
+    },
   },
 
   // Testy page
@@ -445,6 +462,7 @@ export const cs = {
     success: "Import dokončen",
     successDescription: 'Téma "{topic}" bylo vytvořeno s {count} otázkami.',
     error: "Import se nezdařil",
+    parseErrorTitle: "Chyba při zpracování textu",
     pairingStatus: "{paired}/{total} spárováno",
     pairingNotPaired: "nespárováno",
     warningsHeader: "Upozornění",
@@ -565,6 +583,8 @@ export const cs = {
     variableTypeString: "Řetězec",
     stringValuesInput: "Hodnoty (oddělené čárkou)",
     stringValuesLabel: "Hodnoty",
+    fillFirstThreeRows: "Vyplnit prvky 1.–3. periody",
+    fillAllElements: "Vyplnit všechny prvky",
     greaterThan: "Větší než",
     lessThan: "Menší než",
     noComparison: "Žádné",
@@ -708,12 +728,6 @@ export const cs = {
     dark: "Tmavý režim",
     system: "Systémový režim",
     toggle: "Přepnout téma",
-  },
-
-  // Sidebar
-  sidebar: {
-    collapse: "Skrýt postranní panel",
-    expand: "Zobrazit postranní panel",
   },
 
   // Settings page

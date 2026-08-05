@@ -248,6 +248,7 @@ impl TemplateRepo {
         }
     }
 
+    #[cfg(test)]
     pub fn update(conn: &Connection, template: &Template) -> Result<(), DbError> {
         let affected = conn.execute(
             "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, \

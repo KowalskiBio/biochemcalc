@@ -62,3 +62,11 @@ export function extractPlaceholderValues(text: string): PlaceholderMatch[] {
   }
   return result
 }
+
+const ATOM_PLACEHOLDER_REGEX = /^atom\d*$/i
+const ELEMENT_SYNONYMS = new Set(["atom", "element", "prvek"])
+
+export function isAtomPlaceholder(placeholder: string): boolean {
+  const lower = placeholder.toLowerCase()
+  return ELEMENT_SYNONYMS.has(lower) || ATOM_PLACEHOLDER_REGEX.test(lower)
+}

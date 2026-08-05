@@ -1,29 +1,19 @@
-import { motion } from "framer-motion"
 import { HelpCircle } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export function HelpPage() {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className="space-y-6"
     >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
       >
-        <h1 className="text-2xl font-bold text-foreground">Nápověda</h1>
-        <p className="text-foreground-secondary mt-1">Informace o aplikaci a návody k použití.</p>
-      </motion.div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Nápověda</h1>
+        <p className="text-sm text-muted-foreground mt-1">Informace o aplikaci a návody k použití.</p>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
       >
         <Card>
           <CardHeader>
@@ -42,7 +32,7 @@ export function HelpPage() {
             </p>
           </CardContent>
         </Card>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }

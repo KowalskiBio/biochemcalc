@@ -2,6 +2,7 @@ mod commands;
 mod db;
 pub mod engine;
 mod models;
+mod util;
 
 use commands::importer::{do_import_bulk_templates, BulkImportTemplatesPayload};
 use db::schema::run_migrations;
@@ -24,13 +25,65 @@ pub fn import_bulk_templates_from_json(
 use db::{initialize_db, AppState};
 use tauri::Manager;
 
+/// Initialize an append-only file logger in the app's log directory so that
+/// warnings/errors (including panics) survive restarts on an unattended VM.
+fn init_file_logger(app: &tauri::App) {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        eprintln!("Failed to create log dir {}: {e}", log_dir.display());
+        return;
+    }
+
+    let log_path = log_dir.join("biochemcalc.log");
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to open log file {}: {e}", log_path.display());
+            return;
+        }
+    };
+
+    if simplelog::WriteLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default(), file)
+        .is_ok()
+    {
+        log::info!("biochemcalc starting (log file: {})", log_path.display());
+    }
+}
+
+/// Route every panic to both stderr (captured by systemd/journald on the VM)
+/// and the persistent log file, then flush so nothing is lost on the way down.
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown".to_string());
+        eprintln!("PANIC at {location}: {info}");
+        log::error!("PANIC at {location}: {info}");
+        log::logger().flush();
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let conn = initialize_db(app)
-                .expect("Failed to initialize the database. The application cannot start.");
+            init_file_logger(app);
+            install_panic_hook();
+
+            let conn = initialize_db(app).unwrap_or_else(|e| {
+                log::error!("database initialization failed: {e}");
+                panic!("Failed to initialize the database. The application cannot start: {e}");
+            });
             app.manage(AppState {
                 db: std::sync::Mutex::new(conn),
             });
@@ -38,7 +91,7 @@ pub fn run() {
             // Seed built-in constants and editable atomic weights on first launch.
             {
                 let state = app.state::<AppState>();
-                let db = state.db.lock().expect("db lock");
+                let db = util::lock_db(&state.db);
                 db::repos::ConstantRepo::seed_builtins_if_empty(&db)
                     .expect("Failed to seed built-in constants");
                 db::repos::ConstantRepo::seed_atomic_weights_if_missing(&db)

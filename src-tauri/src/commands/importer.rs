@@ -72,7 +72,7 @@ pub fn import_bulk_templates(
     state: State<'_, AppState>,
     payload: BulkImportTemplatesPayload,
 ) -> Result<Topic, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     do_import_bulk_templates(&conn, payload)
 }
 
@@ -179,7 +179,7 @@ fn import_bulk_question(
 
 #[tauri::command]
 pub fn import_test1(state: State<'_, AppState>) -> Result<Topic, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     do_import_test1(&conn)
 }
 
@@ -194,7 +194,7 @@ fn do_import_test1(conn: &rusqlite::Connection) -> Result<Topic, DbError> {
 
 #[tauri::command]
 pub fn import_reparse_test1(state: State<'_, AppState>) -> Result<Topic, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     do_import_reparse_test1(&conn)
 }
 

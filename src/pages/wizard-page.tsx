@@ -1,5 +1,4 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
 // Icons from lucide-react
 import { Check, Clock, Eye, FileText, FlaskConical, RefreshCw } from "lucide-react"
 import { useCallback, useState } from "react"
@@ -211,32 +210,18 @@ export function WizardPage() {
     handleComplete,
   ])
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className={cn(pageContainerVariants())}
-    >
+   return (
+    <div className={cn(pageContainerVariants())}>
       {/* Page header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
-      >
+      <div>
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-foreground">{cs.wizard.title}</h1>
-          <p className="text-foreground-secondary max-w-2xl">{cs.wizard.description}</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.wizard.title}</h1>
+          <p className="text-sm text-muted-foreground max-w-2xl">{cs.wizard.description}</p>
         </div>
-      </motion.div>
+      </div>
 
-      {/* Stepper */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className={cn(contentSectionVariants())}
-      >
+       {/* Stepper */}
+       <div className={cn(contentSectionVariants())}>
         <Card>
           <CardHeader>
             <CardTitle>Průvodce generováním</CardTitle>
@@ -253,18 +238,15 @@ export function WizardPage() {
               </p>
             </div>
 
-            {/* Stepper */}
+             {/* Stepper */}
             <div className={cn(stepperContainerVariants())}>
               {steps.map((step, index) => {
                 const isActive = step.id === currentStep
                 const isCompleted = step.id < currentStep
 
                 return (
-                  <motion.div
+                  <div
                     key={step.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: 0.3 + index * 0.1 }}
                     className={cn(stepContainerVariants())}
                   >
                     {/* Step circle */}
@@ -292,27 +274,22 @@ export function WizardPage() {
                       <span className="text-xs text-foreground-muted hidden sm:block">
                         {step.description}
                       </span>
-                    </div>
+                     </div>
 
-                    {/* Step line (not for last step) */}
+                     {/* Step line (not for last step) */}
                     {index < steps.length - 1 && (
                       <div className={cn(stepLineVariants({ completed: isCompleted }))} />
                     )}
-                  </motion.div>
+                  </div>
                 )
               })}
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
-      {/* Step content */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.8 }}
-        className={cn(contentSectionVariants())}
-      >
+       {/* Step content */}
+       <div className={cn(contentSectionVariants())}>
         <Card>
           <CardHeader>
             <CardTitle>{steps[currentStep - 1].label}</CardTitle>
@@ -320,21 +297,16 @@ export function WizardPage() {
           </CardHeader>
           <CardContent>{renderStepContent()}</CardContent>
         </Card>
-      </motion.div>
+      </div>
 
-      {/* Action buttons - shown only in some steps */}
-      {currentStep === 1 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 1.2 }}
-          className="flex justify-between gap-4"
-        >
+       {/* Action buttons - shown only in some steps */}
+       {currentStep === 1 && (
+        <div className="flex justify-between gap-4">
           <Button variant="outline" onClick={() => /* Cancel */ {}}>
             {cs.common.cancel}
           </Button>
-        </motion.div>
-      )}
-    </motion.div>
+        </div>
+       )}
+     </div>
   )
 }

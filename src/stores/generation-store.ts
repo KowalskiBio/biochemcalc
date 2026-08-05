@@ -67,7 +67,7 @@ export const useGenerationStore = create<GenerationStoreState>()((set) => ({
 
 export const useGenerationBySetId = (setId: string | undefined) =>
   useGenerationStore((state) =>
-    setId ? state.generations[setId] ?? defaultGeneratedState : defaultGeneratedState,
+    setId ? (state.generations[setId] ?? defaultGeneratedState) : defaultGeneratedState,
   )
 
 export const useGenerationActions = () =>

@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Download, FolderOpen, Loader2, MoreVertical, Pencil, Save, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
@@ -236,31 +235,22 @@ export function ProjektyPage() {
 
   return (
     <>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         className="space-y-6"
       >
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
+        <div
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Projekty</h1>
-              <p className="text-foreground-secondary mt-1">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Projekty</h1>
+              <p className="text-sm text-muted-foreground mt-1">
                 Správa uložených projektů s generovanými úkoly
               </p>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
+        <div
         >
           {isLoading ? (
             <Card>
@@ -273,10 +263,10 @@ export function ProjektyPage() {
             <Card>
               <CardContent className="py-12 text-center">
                 <FolderOpen className="size-12 text-foreground-muted mx-auto mb-4" />
-                <p className="text-foreground-secondary mb-2">
+                <p className="text-muted-foreground mb-2">
                   Zatím jste nevytvořili žádné projekty.
                 </p>
-                <p className="text-foreground-secondary text-sm mb-4">
+                <p className="text-muted-foreground text-sm mb-4">
                   Uložte generované úkoly z detailu sady pomocí "Uložit do Projektu"
                 </p>
                 <Button asChild variant="outline">
@@ -365,8 +355,8 @@ export function ProjektyPage() {
               </CardContent>
             </Card>
           )}
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
       <Dialog open={!!editingProjekt} onOpenChange={(open) => !open && handleCancelEdit()}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -380,7 +370,7 @@ export function ProjektyPage() {
             </div>
           ) : projektContent ? (
             <div className="space-y-4">
-              <p className="text-sm text-foreground-secondary">
+              <p className="text-sm text-muted-foreground">
                 Upravte otázky v tomto projektu. Změny budou uloženy při kliknutí na "Uložit".
               </p>
 
@@ -408,18 +398,39 @@ export function ProjektyPage() {
 
                       <div className="space-y-2">
                         <Label>Správná odpověď</Label>
-                        <Input
-                          type="number"
-                          value={question.correctAnswer ?? ""}
-                          onChange={(e) =>
-                            handleQuestionChange(
-                              index,
-                              "correctAnswer",
-                              e.target.value ? Number(e.target.value) : 0,
-                            )
-                          }
-                          className="w-full"
-                        />
+                        {question.answersData && question.answersData.length > 0 ? (
+                          <div className="space-y-2">
+                            {question.answersData.map((a) => (
+                              <div key={a.symbol} className="flex items-center gap-2">
+                                <span className="text-sm font-medium min-w-[2rem]">
+                                  {a.symbol} =
+                                </span>
+                                <Input
+                                  type="number"
+                                  value={a.value}
+                                  readOnly
+                                  className="w-full bg-muted/50"
+                                />
+                                {a.unit && (
+                                  <span className="text-sm text-muted-foreground">{a.unit}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <Input
+                            type="number"
+                            value={question.correctAnswer ?? ""}
+                            onChange={(e) =>
+                              handleQuestionChange(
+                                index,
+                                "correctAnswer",
+                                e.target.value ? Number(e.target.value) : 0,
+                              )
+                            }
+                            className="w-full"
+                          />
+                        )}
                       </div>
 
                       <div className="space-y-2">
@@ -442,7 +453,7 @@ export function ProjektyPage() {
                             ))}
                           </div>
                         ) : (
-                          <p className="text-sm text-foreground-secondary">
+                          <p className="text-sm text-muted-foreground">
                             Žádné číselné proměnné
                           </p>
                         )}

@@ -175,7 +175,7 @@ export function TemplateAssignment({ category, onNext, onBack }: TemplateAssignm
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold">Assign Templates to Sets</h3>
-        <p className="text-foreground-secondary text-sm">
+        <p className="text-muted-foreground text-sm">
           {category.pointValue}-point category: 3 closed sets + 1 open set
         </p>
       </div>

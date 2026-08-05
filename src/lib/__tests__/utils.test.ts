@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { extractPlaceholders, extractPlaceholderValues, replacePlaceholder } from "@/lib/utils"
+import {
+  extractPlaceholders,
+  extractPlaceholderValues,
+  isAtomPlaceholder,
+  replacePlaceholder,
+} from "@/lib/utils"
 
 describe("extractPlaceholders", () => {
   it("extracts simple placeholders", () => {
@@ -48,5 +53,25 @@ describe("replacePlaceholder", () => {
 
   it("renames a fixed-value placeholder keeping the value", () => {
     expect(replacePlaceholder("[[v%=56 %]]", "v%", "x")).toBe("[[x=56 %]]")
+  })
+})
+
+describe("isAtomPlaceholder", () => {
+  it("matches indexed atom placeholders", () => {
+    expect(isAtomPlaceholder("atom1")).toBe(true)
+    expect(isAtomPlaceholder("atom2")).toBe(true)
+    expect(isAtomPlaceholder("ATOM10")).toBe(true)
+  })
+
+  it("matches bare element synonyms", () => {
+    expect(isAtomPlaceholder("atom")).toBe(true)
+    expect(isAtomPlaceholder("element")).toBe(true)
+    expect(isAtomPlaceholder("prvek")).toBe(true)
+  })
+
+  it("does not match ordinary numeric placeholders", () => {
+    expect(isAtomPlaceholder("ms")).toBe(false)
+    expect(isAtomPlaceholder("rho_r")).toBe(false)
+    expect(isAtomPlaceholder("atomX")).toBe(false)
   })
 })

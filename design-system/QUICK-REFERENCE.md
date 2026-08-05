@@ -1,53 +1,50 @@
 # BiochemCalc Design System - Quick Reference
 
-> **One-page cheat sheet for developers and designers**
+> **One-page cheat sheet for developers and designers**  
 > Full documentation: [`design-system/MASTER.md`](./MASTER.md)
 
 ---
 
 ## 🎨 Color Palette
 
-### Primary Colors (Trust & Professionalism)
+### Light Mode - Porcelain Benchtop Lab
 
 | Token | Hex | Usage |
 |-------|-----|-------|
-| `--color-primary` | `#1E40AF` | Primary buttons, headings, key UI |
-| `--color-primary-light` | `#3B82F6` | Hover states |
-| `--color-on-primary` | `#FFFFFF` | Text on primary backgrounds |
+| `--background` | `#F2F3EC` | Page background |
+| `--card` | `#FBFBF7` | Card backgrounds |
+| `--foreground` | `#202622` | Primary text |
+| `--primary` | `#155E46` | Primary actions, active states |
+| `--accent` | `#9A5B17` | CTAs, indicators, active navigation |
+| `--destructive` | `#B42318` | Errors, delete actions |
+| `--warning` | `#A16207` | Warnings, alerts |
+| `--info` | `#155E75` | Information messages |
+| `--muted` | `#E7EAE0` | Subtle backgrounds |
+| `--muted-foreground` | `#5F6B64` | **Secondary text** |
+| `--border` | `#D8DCCE` | Borders, dividers |
 
-### Secondary Colors (Success & Growth)
-
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--color-secondary` | `#059669` | Success messages, confirmations |
-| `--color-secondary-light` | `#10B981` | Success hover |
-
-### Accent Colors (Clarity & Biochemistry)
-
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--color-accent` | `#0891B2` | Links, interactive elements, CTAs |
-| `--color-accent-light` | `#0EA5E9` | Link hover |
-
-### Neutral Colors
+### Dark Mode - Forest Laboratory
 
 | Token | Hex | Usage |
 |-------|-----|-------|
-| `--color-background` | `#F8FAFC` | Page background |
-| `--color-foreground` | `#0F172A` | Primary text |
-| `--color-foreground-secondary` | `#4B5563` | Secondary text |
-| `--color-foreground-muted` | `#9CA3AF` | Placeholders, hints |
-| `--color-muted` | `#F1F5F9` | Card backgrounds |
-| `--color-border` | `#E5E7EB` | Borders, dividers |
+| `--background` | `#101613` | Page background |
+| `--card` | `#161E19` | Card backgrounds |
+| `--foreground` | `#E4E8DE` | Primary text |
+| `--primary` | `#3FA37E` | Primary actions |
+| `--accent` | `#D08C1F` | CTAs, indicators |
+| `--destructive` | `#FCA598` | Errors |
+| `--warning` | `#D4A017` | Warnings |
+| `--info` | `#3FA3B8` | Information |
+| `--muted` | `#1B2420` | Subtle backgrounds |
+| `--muted-foreground` | `#8A9489` | **Secondary text** |
+| `--border` | `#243029` | Borders, dividers |
 
-### Semantic Colors
+### Sidebar Panel
 
 | Token | Hex | Usage |
 |-------|-----|-------|
-| `--color-success` | `#059669` | Success states |
-| `--color-warning` | `#D97706` | Warnings |
-| `--color-destructive` | `#DC2626` | Errors, delete actions |
-| `--color-info` | `#0284C7` | Information messages |
+| `--sidebar-background` | `#16281F` | Sidebar panel |
+| `--sidebar-foreground` | `#D9E2DA` | Sidebar text |
 
 ---
 
@@ -56,38 +53,47 @@
 ### Font Family
 
 ```css
-font-family: var(--font-sans);
-/* Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, ... */
+/* Primary UI text and headings */
+font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+
+/* Numbers, code, micro-labels */
+font-family: 'IBM Plex Mono', monospace;
 ```
 
-**Google Fonts Import:**
-```html
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-```
+**Font Formats:** Use Google Fonts or local files for IBM Plex Sans and IBM Plex Mono
 
 ### Type Scale
 
-| Size | Token | px | rem | Usage |
-|------|-------|----|-----|-------|
-| XS | `--text-xs` | 12px | 0.75rem | Captions, labels |
-| SM | `--text-sm` | 14px | 0.875rem | Secondary text, form labels |
-| **Base** | `--text-base` | **16px** | **1rem** | **Body text** |
-| LG | `--text-lg` | 18px | 1.125rem | Emphasized text |
-| XL | `--text-xl` | 20px | 1.25rem | Subheadings |
-| 2XL | `--text-2xl` | 24px | 1.5rem | Section headings |
-| 3XL | `--text-3xl` | 30px | 1.875rem | Hero subheadings |
-| 4XL | `--text-4xl` | 36px | 2.25rem | Main headings |
-| 5XL | `--text-5xl` | 48px | 3rem | Hero titles |
+| Size | Token | Usage |
+|------|-------|-------|
+| **2XL** | `text-2xl` | **Page headings** - font-semibold tracking-tight |
+| Base | `text-base` | Body text |
+| SM | `text-sm` | **Descriptions, secondary text** |
+| Mono | `font-mono tabular` | **Statistics, numbers, readouts** |
 
 ### Font Weights
 
-| Weight | Token | Usage |
-|--------|-------|-------|
-| Light | `--font-light` (300) | Display text |
-| Normal | `--font-normal` (400) | Body text |
-| Medium | `--font-medium` (500) | Buttons, labels |
-| **Semibold** | `--font-semibold` (600) | **Headings** |
-| Bold | `--font-bold` (700) | Strong emphasis |
+| Weight | Usage |
+|--------|-------|
+| **400** | Body text |
+| **500** | Buttons, labels |
+| **600** | **Headings (font-semibold)** |
+| 700 | Rare, avoid for page headers |
+
+### Special: Tabular Numbers
+
+**Apply `font-mono tabular` to all statistic-like numbers:**
+
+```tsx
+// Counts in headers
+<span className="font-mono tabular">{filteredItems.length}</span>
+
+// Badges with numbers  
+<Badge className="font-mono tabular">{value} pt</Badge>
+
+// Readouts
+<div className="font-mono text-3xl tabular">{statistic}</div>
+```
 
 ---
 
@@ -95,17 +101,13 @@ font-family: var(--font-sans);
 
 **Base Unit:** 4px (0.25rem)
 
-| Points | Token | px | rem | Usage |
-|--------|-------|----|-----|-------|
-| 1 | `--space-1` | 4px | 0.25rem | Micro gaps |
-| 2 | `--space-2` | 8px | 0.5rem | Small gaps, icon spacing |
-| 3 | `--space-3` | 12px | 0.75rem | Compact padding |
-| **4** | `--space-4` | **16px** | **1rem** | **Standard padding** |
-| 5 | `--space-5` | 20px | 1.25rem | Medium gaps |
-| 6 | `--space-6` | 24px | 1.5rem | Card padding |
-| 8 | `--space-8` | 32px | 2rem | Section gaps |
-| 10 | `--space-10` | 40px | 2.5rem | Large gaps |
-| 12 | `--space-12` | 48px | 3rem | Hero padding |
+| Token | px | rem | Usage |
+|-------|----|-----|-------|
+| `--radius` | 4px | 0.25rem | **Universal radius** (cards, inputs, buttons) |
+| `--space-4` | 16px | 1rem | **Standard padding** |
+| `--space-6` | 24px | 1.5rem | Card padding, section gaps |
+
+**Rule:** Apply 4px radius to EVERYTHING except sharp corners (tables, code blocks)
 
 ---
 
@@ -113,112 +115,95 @@ font-family: var(--font-sans);
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--radius-none` | 0px | Sharp corners |
-| `--radius-sm` | 4px | Inputs, small buttons |
-| **`--radius-md`** | **8px** | **Default (cards, buttons)** |
-| `--radius-lg` | 12px | Large cards |
-| `--radius-xl` | 16px | Modals, hero |
-| `--radius-full` | 9999px | Circular |
+| Default | 4px | **Everything** - cards, buttons, inputs, badges |
+| None | 0px | Tables, code blocks, sharp containers |
 
 ---
 
 ## 🌈 Shadows
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--shadow-none` | `none` | Flat |
-| `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.05)` | Subtle lift |
-| **`--shadow-md`** | `0 4px 6px -1px rgba(0,0,0,0.1)` | **Cards, buttons** |
-| `--shadow-lg` | `0 10px 15px -3px rgba(0,0,0,0.1)` | Modals |
-| `--shadow-xl` | `0 20px 25px -5px rgba(0,0,0,0.1)` | Hero |
+**KEY RULE: NO SHADOWS on cards/panels**
+
+| Token | Usage |
+|-------|-------|
+| `shadow-none` | **All cards, panels, containers** |
+| Subtle tokens | Dialog, DropdownMenu, Select, Tooltip only |
+
+**Forbidden:** `shadow-sm`, `shadow-md`, `shadow-lg` on regular UI elements
+**Allowed:** Only on floating/overlay elements (Dialog, dropdowns, popovers)
 
 ---
 
-## ⏱️ Transitions
+## ⏱️ Transitions & Animation
 
-### Timing Functions
+### What's REMOVED ❌
+- All framer-motion usage
+- Staggered fade-in animations
+- Hover scale effects
+- Layout-shifting transforms
+- Entrance animations
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | **Default** |
-| `--ease-out` | `cubic-bezier(0, 0, 0.2, 1)` | Exit animations |
-| `--ease-in` | `cubic-bezier(0.4, 0, 1, 1)` | Entrance animations |
+### What's ALLOWED ✅
+- Color transitions: ≤150ms
+- Focus state changes: ≤150ms
+- Hover color shifts: ≤150ms
 
-### Durations
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--duration-fast` | 100ms | Micro-interactions |
-| **`--duration-normal`** | **200ms** | **Default (hover, focus)** |
-| `--duration-slow` | 300ms | Modals, complex |
-| `--duration-slower` | 400ms | Page transitions |
-
-### Common Transitions
+### Transitions
 
 ```css
-transition: var(--transition-all);           /* All properties, 200ms */
-transition: var(--transition-colors);       /* Colors only, 200ms */
-transition: var(--transition-opacity);      /* Opacity only, 200ms */
-transition: var(--transition-transform);    /* Transform only, 200ms */
+/* Default for interactive elements */
+transition: color 150ms ease-in-out, background-color 150ms ease-in-out;
+
+/* Maximum allowed duration */
+--duration-normal: 150ms;
 ```
 
 ---
 
-## 📱 Breakpoints
+## 🏗️ Component Patterns
 
-| Token | Width | Device |
-|-------|-------|--------|
-| `--breakpoint-xs` | 0px | Mobile (portrait) |
-| `--breakpoint-sm` | 640px | Mobile (landscape) |
-| `--breakpoint-md` | 768px | Tablet (portrait) |
-| `--breakpoint-lg` | 1024px | Tablet (landscape) |
-| `--breakpoint-xl` | 1280px | Desktop |
-| `--breakpoint-2xl` | 1536px | Large desktop |
+### Page Headers (ALL pages)
 
----
+```tsx
+// STANDARD pattern
+<div>
+  <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+    {cs.page.title}
+  </h1>
+  <p className="text-sm text-muted-foreground mt-1">
+    {cs.page.description}
+  </p>
+</div>
 
-## 🏗️ Component Tokens
-
-### Buttons
-
-```css
-/* Sizes */
---btn-padding-sm: 8px 16px;    /* Small */
---btn-padding-md: 12px 24px;   /* Medium (default) */
---btn-padding-lg: 16px 32px;   /* Large */
-
-/* Style */
---btn-radius: 8px;
---btn-font-weight: 500;
+// EXCEPTION: Home page keeps signature eyebrow
+<div>
+  <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-accent mb-2">
+    PŘEHLED
+  </div>
+  <h1 className="text-2xl font-semibold tracking-tight">...</h1>
+  <p className="text-muted-foreground max-w-2xl mt-1">...</p>
+</div>
 ```
 
 ### Cards
 
-```css
---card-radius: 12px;
---card-padding: 24px;
---card-shadow: var(--shadow-sm);
---card-shadow-hover: var(--shadow-md);
+```tsx
+<Card className="border border-border rounded-[4px]">
+  <CardHeader>
+    <CardTitle className="text-base font-semibold tracking-tight">
+      Title
+    </CardTitle>
+    <CardDescription className="text-sm text-muted-foreground">
+      Description
+    </CardDescription>
+  </CardHeader>
+  <CardContent>
+    Content
+  </CardContent>
+</Card>
 ```
 
-### Inputs
-
-```css
---input-padding: 12px 16px;
---input-radius: 8px;
---input-font-size: 16px;
---input-border: 1px solid var(--color-border);
-```
-
-### Modals
-
-```css
---modal-radius: 16px;
---modal-padding: 32px;
---modal-shadow: var(--shadow-xl);
---modal-max-width: 500px;
---modal-scrim: rgba(0, 0, 0, 0.5);
-```
+**Key:** No shadows, 4px radius, hairline border
 
 ---
 
@@ -226,96 +211,87 @@ transition: var(--transition-transform);    /* Transform only, 200ms */
 
 ### ✅ DO
 
-- Use **Inter** for all text
-- Use **CSS variables** for all colors/spacing
-- Maintain **4.5:1 contrast** minimum
-- Use **200ms transitions** for hover/focus
-- Add **`cursor: pointer`** to all clickable elements
-- Import Google Fonts with **`display=swap`**
+- Use **IBM Plex Sans** for all UI text
+- Use **IBM Plex Mono** for all numbers, code, micro-labels
+- Add **`tabular`** class to all statistic numbers
+- Use **`font-mono tabular`** for headline metrics
+- Apply **4px radius** to all elements
+- Use **`text-muted-foreground`** for secondary/descriptive text
+- Use **hairline borders** for visual separation (not shadows)
+- Respect **≤150ms transitions** for color changes
+- Use **`font-semibold tracking-tight`** for page headers
+- Keep **page headers at text-2xl** (never text-3xl or larger)
 
 ### ❌ DON'T
 
-- Use **emojis as icons** → Use Lucide (`lucide-react`)
-- Use **hardcoded colors** → Use tokens
-- Use **arbitrary spacing** → Use spacing tokens
-- Use **`!important`** → Avoid at all costs
-- Use **`margin: 13px`** → Use `--space-3` or `--space-4`
-- Forget **keyboard navigation** → Focus states required
+- Use **emojis anywhere** in UI → Use text or Lucide icons
+- Use **framer-motion** → Static design only
+- Use **shadows on cards/panels** → Borders only
+- Use **font-bold for page headers** → Use font-semibold
+- Use **text-3xl/text-4xl for pages** → Use text-2xl
+- Use **`text-foreground-secondary`** → Use `text-muted-foreground`
+- Use **hardcoded colors** → Use CSS variables
+- Use **arbitrary radius values** → Use 4px
+- Use **staggered animations** → No entrance animations
+- Use **hover scale effects** → Static design
+- Use **default shadcn styling** → Full restyle required
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Implementation Checklist
 
-### 1. Import Tokens
+### For Every New Component
 
-```css
-/* In your main CSS file */
-@import url('src/styles/tokens.css');
-```
+- [ ] Colors use CSS variables (not hex/rgb)
+- [ ] Spacing uses Tailwind tokens (not px values)
+- [ ] Radius is 4px (`rounded-[4px]`)
+- [ ] No shadows on cards/panels
+- [ ] Page header follows `text-2xl font-semibold tracking-tight` pattern
+- [ ] Statistics use `font-mono tabular`
+- [ ] Secondary text uses `text-muted-foreground`
+- [ ] No framer-motion imports or usage
+- [ ] No layout-shifting animations
+- [ ] Transitions ≤150ms if any
 
-### 2. Use Tokens in CSS
+### For Statistic Numbers
 
-```css
-.button {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  padding: var(--space-3) var(--space-6);
-  border-radius: var(--radius-md);
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: var(--font-medium);
-  transition: var(--transition-colors);
-}
-
-.button:hover {
-  background: var(--color-primary-light);
-}
-```
-
-### 3. Use Tokens in HTML
-
-```html
-<button class="btn btn-primary">
-  <svg class="icon" width="16" height="16"><use href="#icon-save"/></svg>
-  <span>Uložit</span>
-</button>
-```
+- [ ] Applied `font-mono` class
+- [ ] Applied `tabular` class  
+- [ ] Used for headline metrics only (not body text numbers)
+- [ ] Consistent with other statistics in the interface
 
 ---
 
-## ♿ Accessibility Checklist
+## ♿ Accessibility
 
-- [ ] Text contrast >= **4.5:1** (normal), >= **3:1** (large)
-- [ ] `cursor: pointer` on all clickable elements
-- [ ] `alt` text on all meaningful images
-- [ ] Labels on all form fields
-- [ ] Focus indicators visible
-- [ ] Keyboard navigation works
-- [ ] Touch targets >= **44x44px**
-- [ ] Reduced motion respected
-- [ ] Dynamic text size supported
-- [ ] Czech diacritics render correctly
+- Text contrast ≥ **4.5:1** in light and dark mode
+- `cursor: pointer` on all clickable elements
+- **44x44px** minimum touch targets
+- **Reduced motion** respected throughout
+- **Czech diacritics** render correctly in IBM Plex fonts
+- **Keyboard navigation** works throughout
+- **Focus indicators** visible and appropriate
 
 ---
 
-## 📚 Resources
+## 📚 File References
 
 - **Full Design System:** [`design-system/MASTER.md`](./MASTER.md)
-- **CSS Tokens:** [`src/styles/tokens.css`](../src/styles/tokens.css)
+- **CSS Tokens:** Defined in Tailwind config and CSS variables
 - **Icon Library:** [Lucide React](https://lucide.dev)
-- **Font Family:** [Inter on Google Fonts](https://fonts.google.com/specimen/Inter)
-- **Color Palette Tester:** [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/)
+- **IBM Plex Fonts:** [IBM Plex on Google Fonts](https://fonts.google.com/specimen/IBM+Plex+Sans)
+- **Color Contrast Tester:** [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/)
 
 ---
 
-## 🇨🇿 Czech Localization Notes
+## 🇨🇿 Czech Localization
 
 - **Diacritics:** á, č, ď, é, ě, í, ň, ó, ř, š, ť, ú, ů, ý, ž
-- **Date Format:** DD.MM.YYYY (08.07.2026)
+- **Date Format:** DD.MM.YYYY (04.08.2026)
 - **Time Format:** HH:MM:SS (15:09:38)
-- **Number Format:** 1 234,56 Kč (space thousands, comma decimal)
-- **Font:** Inter fully supports Czech characters ✓
+- **Number Format:** 1 234,56 (space thousands, comma decimal)
+- **Font:** IBM Plex Sans and Mono fully support Czech characters ✓
 
 ---
 
-*Generated: 2026-07-08 | Version: 1.0.0 | Project: BiochemCalc*
+*Generated: 2026-08-04 | Version: 2.1.0 | Project: BiochemCalc | Identity: Benchtop Lab Instrument*

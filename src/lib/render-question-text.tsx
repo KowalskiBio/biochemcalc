@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
 import { constantsApi } from "@/lib/api"
+import { formatNumberMaxDecimals } from "@/lib/math-utils"
 import { PLACEHOLDER_REGEX } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
@@ -20,14 +21,21 @@ export const VARIABLE_COLORS = [
 ] as const
 
 export function formatChemicalText(text: string): string {
-  return text
-    .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?)/g, (_, base, exponent) => {
-      return `${base}<sup>${exponent}</sup>`
-    })
-    .replace(/([A-Z][a-z]?|\))_(\d+)/g, (_, base, subscript) => {
-      return `${base}<sub>${subscript}</sub>`
-    })
-    .replace(/([A-Za-z0-9)])\*([A-Za-z0-9(])/g, "$1·$2")
+  return (
+    text
+      // Hydrate separators → × BEFORE sub/sup so H_2O is still raw text.
+      .replace(/([A-Za-z0-9)])[*·.](\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
+      .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?)/g, (_, base, exponent) => {
+        return `${base}<sup>${exponent}</sup>`
+      })
+      .replace(/([A-Z][a-z]?|\))_(\d+)/g, (_, base, subscript) => {
+        return `${base}<sub>${subscript}</sub>`
+      })
+      // Remaining . as multiplication → ×, but keep digit.digit as a decimal point.
+      .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
+      // Remaining * / · between formula characters → ×.
+      .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1×$2")
+  )
 }
 
 function getExampleStringValue(
@@ -46,13 +54,10 @@ function getExampleStringValue(
 }
 
 function formatTextSegment(text: string): string {
-  const withDots = text.replace(/([A-Za-z0-9)])\./g, (match, before, offset, string) => {
-    const nextChar = string[offset + match.length]
-    if (nextChar && /[A-Za-z0-9(]/.test(nextChar)) {
-      return `${before}·`
-    }
-    return match
-  })
+  // Hydrate dots → × first, then remaining multiplication dots → ×,
+  // while leaving digit.digit as a decimal point.
+  const withHydrateDots = text.replace(/([A-Za-z0-9)])\.(\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
+  const withDots = withHydrateDots.replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
   return formatChemicalText(withDots)
 }
 
@@ -77,8 +82,8 @@ function renderPlaceholderSpan(
     const variable = variables[idx].variable
     const displayValue =
       variable.varType === "string"
-        ? getExampleStringValue(placeholder, variable, databazeEntries)
-        : variable.minValue
+        ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
+        : formatNumberMaxDecimals(variable.minValue, variable.precision)
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
   const constantValue = constants[placeholder]
@@ -156,7 +161,7 @@ export const QuestionTextRenderer: React.FC<QuestionTextRendererProps> = ({
     ? renderQuestionTextWithVariant(text, variables, variant, databazeEntries, loadedConstants)
     : renderQuestionText(text, variables, databazeEntries, loadedConstants)
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none">
+    <div className="prose prose-sm dark:prose-invert max-w-none break-words">
       <ReactMarkdown rehypePlugins={[rehypeRaw]}>{rendered}</ReactMarkdown>
     </div>
   )
@@ -214,10 +219,11 @@ function renderPlaceholderSpanWithVariant(
         const sampledString =
           variant.assignedStrings?.[placeholder] ||
           getExampleStringValue(placeholder, variable, databazeEntries)
-        return `<span class="inline-flex items-center font-semibold ${colorClass}">${sampledString}</span>`
+        return `<span class="inline-flex items-center font-semibold ${colorClass}">${formatChemicalText(sampledString)}</span>`
       } else {
         const sampledValue = variant.assignedValues[placeholder]
-        const displayValue = sampledValue !== undefined ? sampledValue : variable.minValue
+        const rawValue = sampledValue !== undefined ? sampledValue : variable.minValue
+        const displayValue = formatNumberMaxDecimals(rawValue, variable.precision)
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
     }
@@ -225,8 +231,8 @@ function renderPlaceholderSpanWithVariant(
     // Fallback to original behavior
     const displayValue =
       variable.varType === "string"
-        ? getExampleStringValue(placeholder, variable, databazeEntries)
-        : variable.minValue
+        ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
+        : formatNumberMaxDecimals(variable.minValue, variable.precision)
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
 

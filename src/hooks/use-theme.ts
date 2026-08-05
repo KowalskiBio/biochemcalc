@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
  */
 export function useTheme() {
   const [theme, setTheme] = useState<"light" | "dark">(
-    (localStorage.getItem("theme") as "light" | "dark" | null) || "light",
+    (localStorage.getItem("theme") as "light" | "dark" | null) || "dark",
   )
 
   // Initialize theme on mount
@@ -17,9 +17,8 @@ export function useTheme() {
 
     // Check localStorage first, then system preference
     const savedTheme = localStorage.getItem("theme") as "light" | "dark" | null
-    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches
 
-    const initialTheme = savedTheme || (systemPrefersDark ? "dark" : "light")
+    const initialTheme = savedTheme || "dark"
 
     // Apply the theme class to html element
     if (initialTheme === "dark") {
@@ -81,7 +80,7 @@ export function getThemeInstance() {
     // This is a fallback for SSR/non-react contexts
     // In practice, useTheme() should be used within React components
     themeInstance = {
-      theme: (localStorage.getItem("theme") as "light" | "dark") || "light",
+      theme: (localStorage.getItem("theme") as "light" | "dark") || "dark",
       setTheme: () => {},
       toggleTheme: () => {},
       isDark: false,

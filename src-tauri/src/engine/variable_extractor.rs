@@ -11,6 +11,9 @@
 /// 4. Extracts the unit token after each number (stops at whitespace, comma,
 ///    period, `?`, or end of string).
 /// 5. Returns variables in text order with their byte position.
+use regex::Regex;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// A numeric value extracted from question text together with its unit and
 /// byte position.
@@ -117,10 +120,18 @@ fn parse_full_number(text: &str, start: usize) -> Option<(f64, usize)> {
         5
     } else if rest.starts_with("x10^") {
         4
+    } else if rest.starts_with("*10^") {
+        4
+    } else if rest.starts_with(".10^") {
+        4
     } else if rest.starts_with("\u{00d7}10") {
         // ×10    (× is 2 bytes, 10 is 2 → 4 total)
         4
     } else if rest.starts_with("x10") {
+        3
+    } else if rest.starts_with("*10") {
+        3
+    } else if rest.starts_with(".10") {
         3
     } else {
         0
@@ -240,6 +251,37 @@ pub fn extract_variables(text: &str) -> Vec<ExtractedValue> {
 }
 
 // ---------------------------------------------------------------------------
+// fixed-value placeholders
+// ---------------------------------------------------------------------------
+
+static FIXED_PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[\[([^\]=\s]+)(?:=([^\]]*))?\]\]").expect("valid fixed-placeholder regex")
+});
+
+/// Extract placeholders of the form `[[symbol=value]]` from text and return
+/// a map of symbol to numeric value.
+///
+/// Only placeholders that include an `=` and whose value parses as a number
+/// (accepting either `.` or `,` as the decimal separator) are included.
+/// If the same symbol appears multiple times, the first occurrence wins.
+pub fn extract_fixed_placeholders(text: &str) -> HashMap<String, f64> {
+    let mut result = HashMap::new();
+    for cap in FIXED_PLACEHOLDER_RE.captures_iter(text) {
+        let symbol = cap[1].trim().to_string();
+        let Some(value_match) = cap.get(2) else {
+            continue;
+        };
+        let value_str = value_match.as_str().trim().replace(',', ".");
+        if let Some((value, end)) = parse_full_number(&value_str, 0) {
+            if end == value_str.len() {
+                result.entry(symbol).or_insert(value);
+            }
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -351,5 +393,63 @@ mod tests {
         assert_eq!(vars.len(), 1);
         assert!((vars[0].value - 42.0).abs() < 1e-9);
         assert_eq!(vars[0].unit, "");
+    }
+
+    #[test]
+    fn fixed_placeholder_with_decimal_dot() {
+        let text =
+            "Molární koncentrace [[wperc=21.1]] % roztoku (hustota = [[rho_r=1.3083]] g·cm-3) je:";
+        let fixed = extract_fixed_placeholders(text);
+        assert_eq!(fixed.len(), 2);
+        assert!((fixed["wperc"] - 21.1).abs() < 1e-9);
+        assert!((fixed["rho_r"] - 1.3083).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fixed_placeholder_with_decimal_comma() {
+        let text = "Hodnota je [[x=3,14]] a [[y=2,5]]";
+        let fixed = extract_fixed_placeholders(text);
+        assert_eq!(fixed.len(), 2);
+        assert!((fixed["x"] - 3.14).abs() < 1e-9);
+        assert!((fixed["y"] - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fixed_placeholder_ignores_plain_placeholders() {
+        let text = "Roztok obsahuje [[wperc]] % látky.";
+        let fixed = extract_fixed_placeholders(text);
+        assert!(fixed.is_empty());
+    }
+
+    #[test]
+    fn fixed_placeholder_first_occurrence_wins() {
+        let text = "[[a=1]] a později [[a=2]]";
+        let fixed = extract_fixed_placeholders(text);
+        assert_eq!(fixed.len(), 1);
+        assert!((fixed["a"] - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fixed_placeholder_with_asterisk_scientific_notation() {
+        let text = "[[Kb=1.8*10^-5]]";
+        let fixed = extract_fixed_placeholders(text);
+        assert_eq!(fixed.len(), 1);
+        assert!((fixed["Kb"] - 1.8e-5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fixed_placeholder_with_dot_scientific_notation() {
+        let text = "[[Ka=3.53.10^-4]]";
+        let fixed = extract_fixed_placeholders(text);
+        assert_eq!(fixed.len(), 1);
+        assert!((fixed["Ka"] - 3.53e-4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn fixed_placeholder_with_multiplication_sign_scientific_notation() {
+        let text = "[[Ka=5.61×10^-11]]";
+        let fixed = extract_fixed_placeholders(text);
+        assert_eq!(fixed.len(), 1);
+        assert!((fixed["Ka"] - 5.61e-11).abs() < 1e-15);
     }
 }

@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
+ 
 import { ExternalLink, Eye, Loader2, Pencil, Save, Search, Wand2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -316,11 +316,8 @@ export function FormulasPage() {
   }, [groups, loadTemplates, toast])
 
   const skeletonItems = [1, 2, 3, 4, 5].map((key) => (
-    <motion.div
+    <div
       key={key}
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.4, delay: 0.3 + (key - 1) * 0.05 }}
       className={cn(formulaItemVariants())}
     >
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -330,32 +327,23 @@ export function FormulasPage() {
         </div>
         <Skeleton className="h-7 w-32" />
       </div>
-    </motion.div>
+    </div>
   ))
 
   if (isLoading) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         className={cn(pageContainerVariants())}
       >
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
+        <div
         >
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-bold text-foreground">{cs.formulas.title}</h1>
-            <p className="text-foreground-secondary">{cs.formulas.description}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.formulas.title}</h1>
+            <p className="text-muted-foreground">{cs.formulas.description}</p>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
+        <div
         >
           <Card>
             <CardHeader>
@@ -364,66 +352,48 @@ export function FormulasPage() {
             </CardHeader>
             <CardContent className={cn(formulaCardVariants())}>{skeletonItems}</CardContent>
           </Card>
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
     )
   }
 
   if (error) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         className={cn(pageContainerVariants())}
       >
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
+        <div
         >
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-bold text-foreground">{cs.formulas.title}</h1>
-            <p className="text-foreground-secondary">{cs.formulas.description}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.formulas.title}</h1>
+            <p className="text-muted-foreground">{cs.formulas.description}</p>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.15 }}
+        <div
           className="text-center py-12 text-destructive"
         >
           <p>{error}</p>
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
     )
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className={cn(pageContainerVariants())}
     >
       {/* Page header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
       >
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-foreground">{cs.formulas.title}</h1>
-          <p className="text-foreground-secondary">{cs.formulas.description}</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.formulas.title}</h1>
+          <p className="text-muted-foreground">{cs.formulas.description}</p>
         </div>
-      </motion.div>
+      </div>
 
       {/* Formulas card */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
       >
         <Card>
           <CardHeader className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
@@ -475,29 +445,23 @@ export function FormulasPage() {
           </CardHeader>
           <CardContent className={cn(formulaCardVariants())}>
             {sortedKeys.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.3, delay: 0.3 }}
+              <div
                 className="text-center py-12 text-muted-foreground"
               >
                 <p>{cs.sets.noQuestions}</p>
                 <p className="text-sm mt-2">
                   Žádné šablony s vzorci zatím neexistují. Vzorec přidejte editací otázky.
                 </p>
-              </motion.div>
+              </div>
             ) : (
-              sortedKeys.map((key, index) => {
+              sortedKeys.map((key) => {
                 const group = groups.get(key) ?? []
                 const first = group[0]
                 const rawKey = getEquationKey(first)
                 const uniqueQuestionTexts = getUniqueQuestionTexts(group)
                 return (
-                  <motion.div
+                  <div
                     key={key}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.4, delay: 0.3 + index * 0.05 }}
                     className={cn(formulaItemVariants())}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -550,7 +514,7 @@ export function FormulasPage() {
                           .entries(),
                       ).map(([text, templates]) => (
                         <div key={text} className="flex items-start gap-3 group">
-                          <div className="flex-1 min-w-0 break-words text-sm text-foreground-secondary">
+                          <div className="flex-1 min-w-0 break-words text-sm text-muted-foreground">
                             <QuestionTextRenderer
                               text={text}
                               variables={[]}
@@ -580,13 +544,13 @@ export function FormulasPage() {
                         </div>
                       ))}
                     </div>
-                  </motion.div>
+                  </div>
                 )
               })
             )}
           </CardContent>
         </Card>
-      </motion.div>
+      </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl">
@@ -719,6 +683,6 @@ export function FormulasPage() {
           onDelete={handleCloseDetail}
         />
       )}
-    </motion.div>
+    </div>
   )
 }

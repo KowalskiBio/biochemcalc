@@ -1,6 +1,27 @@
 // Periodic table atomic weights (rounded to 2 decimals) derived from Bowserinator/Periodic-Table-JSON
 // https://github.com/Bowserinator/Periodic-Table-JSON
 
+export const FIRST_THREE_ROWS_ELEMENTS = [
+  "H",
+  "He",
+  "Li",
+  "Be",
+  "B",
+  "C",
+  "N",
+  "O",
+  "F",
+  "Ne",
+  "Na",
+  "Mg",
+  "Al",
+  "Si",
+  "P",
+  "S",
+  "Cl",
+  "Ar",
+]
+
 export const ATOMIC_WEIGHTS: Record<string, number> = {
   H: 1.01,
   He: 4.0,

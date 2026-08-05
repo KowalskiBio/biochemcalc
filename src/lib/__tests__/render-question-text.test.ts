@@ -32,9 +32,26 @@ describe("formatChemicalText", () => {
     expect(formatChemicalText("SO_4^2-")).toBe("SO<sub>4</sub><sup>2-</sup>")
   })
 
-  it("converts multiplication asterisks between units to a middle dot", () => {
-    expect(formatChemicalText("g*cm^-3")).toBe("g·cm<sup>-3</sup>")
-    expect(formatChemicalText("2*3")).toBe("2·3")
+  it("converts multiplication asterisks to a multiplication sign", () => {
+    expect(formatChemicalText("g*cm^-3")).toBe("g×cm<sup>-3</sup>")
+    expect(formatChemicalText("2*3")).toBe("2×3")
+  })
+
+  it("converts multiplication middle dots to a multiplication sign", () => {
+    expect(formatChemicalText("g·cm^-3")).toBe("g×cm<sup>-3</sup>")
+  })
+
+  it("converts hydrate dots and stars to a multiplication sign", () => {
+    expect(formatChemicalText("FeSO4*7H2O")).toBe("FeSO4×7H2O")
+    expect(formatChemicalText("FeSO4.7H2O")).toBe("FeSO4×7H2O")
+    expect(formatChemicalText("FeSO4.7H_2O")).toBe("FeSO4×7H<sub>2</sub>O")
+    expect(formatChemicalText("FeSO4.H2O")).toBe("FeSO4×H2O")
+    expect(formatChemicalText("CO2.5H2O")).toBe("CO2×5H2O")
+  })
+
+  it("preserves decimal points in numbers", () => {
+    expect(formatChemicalText("58.44 g")).toBe("58.44 g")
+    expect(formatChemicalText("Hustota 1.5 g*cm^-3")).toBe("Hustota 1.5 g×cm<sup>-3</sup>")
   })
 
   it("does not convert asterisks used for markdown emphasis", () => {
@@ -139,12 +156,41 @@ describe("renderQuestionTextWithVariant", () => {
     expect(result).toContain(">NaCl<")
   })
 
+  it("applies chemical formatting to string variable values", () => {
+    const text = "Vypočítejte hustotu [[plyn]]. [rho]"
+    const result = renderQuestionTextWithVariant(
+      text,
+      [
+        {
+          placeholder: "plyn",
+          variable: {
+            id: "2",
+            name: "Plyn",
+            symbol: "plyn",
+            varType: "string",
+            minValue: 0,
+            maxValue: 0,
+            step: 1,
+            unit: "",
+            precision: 0,
+            stringValues: ["CO_2", "N_2", "O_2"],
+            createdAt: "",
+          },
+          isShared: false,
+        },
+      ],
+      { ...makeVariant({}), assignedStrings: { plyn: "N_2" } },
+    )
+    expect(result).toContain("N<sub>2</sub>")
+    expect(result).not.toContain(">N_2<")
+  })
+
   it("renders fixed-value placeholders without brackets", () => {
     const text = "Hustota roztoku je [[rho_r=1.1296]] g*cm^-3. [c]"
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}))
     expect(result).toContain(">1.1296<")
     expect(result).not.toContain("[[rho_r=1.1296]]")
-    expect(result).toContain("g·cm<sup>-3</sup>")
+    expect(result).toContain("g×cm<sup>-3</sup>")
   })
 
   it("converts dots in hydrates to multiplication dots without touching decimals in placeholders", () => {
@@ -187,7 +233,7 @@ describe("renderQuestionTextWithVariant", () => {
       ],
       makeVariant({ ns: 5, nv: 3 }),
     )
-    expect(result).toContain("FeSO4·7H2O")
+    expect(result).toContain("FeSO4×7H2O")
     expect(result).not.toContain("FeSO4.7H2O")
     expect(result).toContain(">5<")
     expect(result).toContain(">3<")
@@ -234,5 +280,56 @@ describe("renderQuestionTextWithVariant", () => {
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}), [], { M_x: 58.44 })
     expect(result).toContain(">58.44<")
     expect(result).not.toContain("[[M_x]]")
+  })
+
+  it("formats numeric placeholder values with variable precision", () => {
+    const text = "Hodnota je [[x]]."
+    const result = renderQuestionTextWithVariant(
+      text,
+      [
+        {
+          placeholder: "x",
+          variable: {
+            id: "1",
+            name: "x",
+            symbol: "x",
+            varType: "numeric",
+            minValue: 0,
+            maxValue: 100,
+            step: 1,
+            unit: "",
+            precision: 0,
+            createdAt: "",
+          },
+          isShared: false,
+        },
+      ],
+      makeVariant({ x: 16.999999999 }),
+    )
+    expect(result).toContain(">17<")
+    expect(result).not.toContain(">16.999999999<")
+  })
+
+  it("formats fallback numeric values with variable precision", () => {
+    const text = "Hodnota je [[x]]."
+    const result = renderQuestionText(text, [
+      {
+        placeholder: "x",
+        variable: {
+          id: "1",
+          name: "x",
+          symbol: "x",
+          varType: "numeric",
+          minValue: 16.1234,
+          maxValue: 100,
+          step: 1,
+          unit: "",
+          precision: 2,
+          createdAt: "",
+        },
+        isShared: false,
+      },
+    ])
+    expect(result).toContain(">16.12<")
   })
 })

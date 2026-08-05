@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Download, Eye, FileText, Loader2, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
@@ -126,15 +125,12 @@ export function TestyPage() {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className="space-y-6"
     >
       <div>
-        <h1 className="text-2xl font-bold text-foreground">{cs.testy.title}</h1>
-        <p className="text-foreground-secondary text-sm">{cs.testy.description}</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.testy.title}</h1>
+        <p className="text-muted-foreground text-sm">{cs.testy.description}</p>
       </div>
 
       <Card>
@@ -148,10 +144,10 @@ export function TestyPage() {
         <CardContent>
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="size-6 animate-spin text-foreground-secondary" />
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
             </div>
           ) : files.length === 0 ? (
-            <div className="text-center py-12 text-foreground-secondary">
+            <div className="text-center py-12 text-muted-foreground">
               <p>{cs.testy.emptyState.title}</p>
               <p className="text-sm">{cs.testy.emptyState.description}</p>
             </div>
@@ -217,6 +213,6 @@ export function TestyPage() {
           </pre>
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </div>
   )
 }

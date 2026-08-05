@@ -72,6 +72,16 @@ describe("parseChemicalFormula", () => {
     expect(calculateMolarMass("O2-")).toBeCloseTo(16.0, 1)
   })
 
+  it("calculates single-element formulas", () => {
+    expect(calculateMolarMass("S")).toBeCloseTo(32.06, 2)
+    expect(calculateMolarMass("Fe")).toBeCloseTo(55.85, 2)
+    expect(calculateMolarMass("C")).toBeCloseTo(12.01, 2)
+  })
+
+  it("falls back to periodic table when custom weights do not include element", () => {
+    expect(calculateMolarMass("S", { M_Fe: 55.85 })).toBeCloseTo(32.06, 2)
+  })
+
   it("handles organic molecules", () => {
     const glucose = parseChemicalFormula("C6H12O6")
     expect(glucose.ok).toBe(true)

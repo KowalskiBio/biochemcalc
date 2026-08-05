@@ -1,6 +1,5 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
-import { Bot, Ellipsis, Menu } from "lucide-react"
+import { Bot, Ellipsis } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import {
@@ -9,62 +8,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-// Czech translations
 import { cs } from "@/i18n/cs"
 import { categoriesApi, setsApi, topicsApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-/**
- * TopBar Component
- * Breadcrumbs and page title for BiochemCalc
- */
-
-interface TopBarProps {
-  onMenuClick?: () => void
-  isMobile: boolean
-}
-
-// Breadcrumbs configuration based on route
 interface BreadcrumbItem {
   path: string
   label: string
 }
 
 const topBarVariants = cva(
-  "sticky top-0 z-30 flex items-center justify-between h-[var(--top-bar-height)] bg-card/80 backdrop-blur-lg border-b border-border",
-  {
-    variants: {
-      isMobile: {
-        true: "px-2",
-        false: "px-4 lg:px-6",
-      },
-    },
-    defaultVariants: {
-      isMobile: false,
-    },
-  },
+  "sticky top-0 z-30 flex items-center justify-between h-[var(--top-bar-height)] bg-background border-b border-border px-4 lg:px-6",
 )
 
 const breadcrumbVariants = cva(
-  "flex items-center gap-1 text-sm text-foreground-muted hover:text-foreground hover:underline underline-offset-4 transition-colors",
+  "text-sm hover:text-foreground transition-colors cursor-pointer",
   {
     variants: {
-      isFirst: {
-        true: "text-foreground",
-        false: "",
+      variant: {
+        first: "font-medium text-foreground",
+        normal: "font-mono text-[11px] uppercase tracking-wider text-muted-foreground",
+        current: "font-medium text-foreground cursor-default",
       },
     },
   },
 )
-
-const titleVariants = cva("text-lg font-semibold text-foreground truncate", {
-  variants: {
-    isMobile: {
-      true: "text-base",
-      false: "",
-    },
-  },
-})
 
 const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
   "/": [{ path: "/", label: cs.navigation.home }],
@@ -94,23 +62,13 @@ const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
   ],
 }
 
-const staticRouteTitles: Record<string, string> = {
-  "/": cs.home.title,
-  "/topics": cs.topics.title,
-  "/constants": cs.constants.title,
-  "/history": cs.history.title,
-  "/settings": cs.navigation.settings,
-  "/help": cs.navigation.help,
-  "/victor": cs.victor.title,
-}
 
-export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
+
+export function TopBar() {
   const location = useLocation()
   const [currentTime, setCurrentTime] = useState<string>("")
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([])
-  const [title, setTitle] = useState<string>(cs.home.title)
 
-  // Get current time for display (optional)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date()
@@ -130,7 +88,6 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
 
     if (staticRouteBreadcrumbs[path]) {
       setBreadcrumbs(staticRouteBreadcrumbs[path])
-      setTitle(staticRouteTitles[path] || cs.home.title)
       return
     }
 
@@ -145,7 +102,6 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
           { path: "/", label: cs.navigation.home },
           { path: "/victor", label: cs.navigation.victor },
         ])
-        setTitle(cs.victor.title)
       } else if (topicMatch) {
         const topicId = topicMatch[1]
         const topic = await topicsApi.get(topicId)
@@ -154,7 +110,6 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
           { path: "/topics", label: cs.navigation.topics },
           { path: `/topics/${topicId}`, label: topic.name },
         ])
-        setTitle(topic.name)
       } else if (topicSetMatch) {
         const topicId = topicSetMatch[1]
         const setId = topicSetMatch[2]
@@ -179,7 +134,6 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
             label: cs.topics.setIndex.replace("{index}", String(set.set.setIndex)),
           },
         ])
-        setTitle(cs.topics.setIndex.replace("{index}", String(set.set.setIndex)))
       } else if (setMatch) {
         const setId = setMatch[1]
 
@@ -200,17 +154,14 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
             label: cs.topics.setIndex.replace("{index}", String(set.set.setIndex)),
           },
         ])
-        setTitle(cs.topics.setIndex.replace("{index}", String(set.set.setIndex)))
       } else {
         setBreadcrumbs([{ path: "/", label: cs.navigation.home }])
-        setTitle(cs.home.title)
       }
     } catch (err) {
       console.error("Failed to load breadcrumb data:", err)
       setBreadcrumbs(
         staticRouteBreadcrumbs[location.pathname] || [{ path: "/", label: cs.navigation.home }],
       )
-      setTitle(staticRouteTitles[location.pathname] || cs.home.title)
     }
   }, [location.pathname])
 
@@ -219,26 +170,8 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
   }, [loadDynamicBreadcrumbs])
 
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className={cn(topBarVariants({ isMobile }), "gap-4")}
-    >
+    <header className={cn(topBarVariants(), "gap-4")}>
       <div className="flex items-center gap-4 overflow-hidden">
-        {/* Mobile menu button */}
-        {isMobile && onMenuClick && (
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={onMenuClick}
-            className="p-2 rounded-lg hover:bg-muted flex-shrink-0"
-            aria-label={cs.sidebar.expand}
-          >
-            <Menu className="size-5" />
-          </motion.button>
-        )}
-
         {/* Breadcrumbs */}
         <div className="hidden md:flex items-center gap-2 overflow-hidden">
           {breadcrumbs.length > 4 ? (
@@ -246,23 +179,22 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
               <div key={breadcrumbs[0].path} className="flex items-center gap-2">
                 <Link
                   to={breadcrumbs[0].path}
-                  className={cn(breadcrumbVariants({ isFirst: true }), "max-w-[240px] truncate")}
+                  className={cn(breadcrumbVariants({ variant: "first" }), "max-w-[240px] truncate")}
                 >
                   {breadcrumbs[0].label}
                 </Link>
-                <span className="text-foreground-muted">/</span>
+                <span className="text-muted-foreground font-mono">/</span>
               </div>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="p-2 rounded-lg hover:bg-muted flex-shrink-0"
-                    aria-label={cs.common.showMore}
-                  >
+                   <button
+                     type="button"
+                     className="p-2 rounded-[4px] hover:bg-muted flex-shrink-0 border border-transparent"
+                     aria-label={cs.common.showMore}
+                   >
                     <Ellipsis className="size-4" />
-                  </motion.button>
+                  </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" sideOffset={4}>
                   {breadcrumbs.slice(1, breadcrumbs.length - 2).map((item) => (
@@ -275,19 +207,19 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <span className="text-foreground-muted">/</span>
+              <span className="text-muted-foreground font-mono">/</span>
 
               {breadcrumbs.slice(breadcrumbs.length - 2).map((item, index) => (
                 <div key={`${item.path}-${item.label}`} className="flex items-center gap-2">
                   <Link
                     to={item.path}
-                    className={cn(breadcrumbVariants({ isFirst: false }), "max-w-[240px] truncate")}
+                    className={cn(
+                      breadcrumbVariants({ variant: index === breadcrumbs.slice(breadcrumbs.length - 2).length - 1 ? "current" : "normal" }),
+                      "max-w-[240px] truncate"
+                    )}
                   >
                     {item.label}
                   </Link>
-                  {index < breadcrumbs.slice(breadcrumbs.length - 2).length - 1 && (
-                    <span className="text-foreground-muted">/</span>
-                  )}
                 </div>
               ))}
             </>
@@ -298,50 +230,32 @@ export function TopBar({ onMenuClick, isMobile }: TopBarProps) {
                   to={item.path}
                   className={cn(
                     breadcrumbVariants({
-                      isFirst: index === 0,
+                      variant: index === breadcrumbs.length - 1 ? "current" : index === 0 ? "first" : "normal",
                     }),
-                    "max-w-[240px] truncate",
+                    "max-w-[240px] truncate"
                   )}
                 >
                   {item.label}
                 </Link>
-                {index < breadcrumbs.length - 1 && <span className="text-foreground-muted">/</span>}
+                {index < breadcrumbs.length - 1 && <span className="text-muted-foreground font-mono">/</span>}
               </div>
             ))
           )}
         </div>
       </div>
 
-      {/* Title */}
-      <motion.div
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.3, delay: 0.1 }}
-        className="flex-1 px-4 text-center"
-      >
-        <h1 className={cn(titleVariants({ isMobile }))}>{title}</h1>
-      </motion.div>
-
-      {/* Right side - Victor button and timezone */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3, delay: 0.2 }}
-        className="hidden sm:flex items-center gap-4"
-      >
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg hover:bg-muted"
+      {/* Right side - Victor button and clock */}
+      <div className="hidden sm:flex items-center gap-4">
+        <Link
+          to="/victor"
+          className="p-2 rounded-[4px] border border-border hover:bg-muted"
           aria-label={cs.navigation.victor}
           title={cs.navigation.victor}
         >
-          <Link to="/victor">
-            <Bot className="size-5" />
-          </Link>
-        </motion.button>
-        <span className="text-sm text-foreground-muted">{currentTime}</span>
-      </motion.div>
-    </motion.header>
+          <Bot className="size-5" />
+        </Link>
+        <span className="font-mono text-[12px] tabular text-muted-foreground">{currentTime}</span>
+      </div>
+    </header>
   )
 }

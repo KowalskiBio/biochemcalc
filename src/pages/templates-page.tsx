@@ -1,5 +1,4 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
 import { Lock, Search, Unlock } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { TemplateDialog } from "@/components/templates/template-dialog"
@@ -178,22 +177,13 @@ export function TemplatesPage() {
   }, [fetchTemplates])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className={cn(pageContainerVariants())}
-    >
+    <div className={cn(pageContainerVariants())}>
       {/* Page header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
-      >
+      <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{cs.templates.title}</h1>
-            <p className="text-foreground-secondary mt-1">{cs.templates.pageDescription}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.templates.title}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{cs.templates.pageDescription}</p>
           </div>
 
           {/* Mode filter */}
@@ -212,53 +202,44 @@ export function TemplatesPage() {
             ))}
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Actions bar */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="flex flex-col sm:flex-row gap-4"
-      >
+      <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-foreground-muted" />
-          <Input
-            type="text"
-            placeholder={`${cs.common.search}...`}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+           <Input
+             type="text"
+             placeholder={`${cs.common.search}...`}
+             value={searchTerm}
+             onChange={(e) => setSearchTerm(e.target.value)}
+             className="w-full pl-10 pr-4 py-2 bg-input border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+           />
         </div>
 
         <Button className={cn(actionButtonVariants())} onClick={() => setIsCreateDialogOpen(true)}>
           {cs.templates.createTemplate}
         </Button>
-      </motion.div>
+      </div>
 
-      {/* Templates table */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
-      >
+       {/* Templates table */}
+      <div>
         <Card>
           <CardHeader>
             <CardTitle>{cs.templates.title}</CardTitle>
-            <CardDescription>
-              {filteredTemplates.length} {cs.templates.title.toLowerCase()}
-            </CardDescription>
+           <CardDescription>
+               <span className="font-mono tabular">{filteredTemplates.length}</span> {cs.templates.title.toLowerCase()}
+             </CardDescription>
           </CardHeader>
           <CardContent>
             {error ? (
               <div className="text-destructive">{error}</div>
             ) : isLoading ? (
-              <div className="text-foreground-muted">{cs.toasts.info.loading}</div>
-            ) : filteredTemplates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <p className="text-foreground-secondary mb-4">{cs.templates.emptyState.title}</p>
-                <p className="text-foreground-muted text-sm mb-4">
+               <div className="text-muted-foreground">{cs.toasts.info.loading}</div>
+             ) : filteredTemplates.length === 0 ? (
+               <div className="flex flex-col items-center justify-center py-8 text-center">
+                 <p className="text-muted-foreground mb-4">{cs.templates.emptyState.title}</p>
+                 <p className="text-muted-foreground text-sm mb-4">
                   {cs.templates.emptyState.description}
                 </p>
                 <Button onClick={() => setIsCreateDialogOpen(true)}>
@@ -286,9 +267,9 @@ export function TemplatesPage() {
                       <TableCell className="max-w-[150px] truncate font-mono text-sm">
                         {template.formula}
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{template.pointValue} pt</Badge>
-                      </TableCell>
+                       <TableCell>
+                         <Badge variant="secondary" className="font-mono tabular">{template.pointValue} pt</Badge>
+                       </TableCell>
                       <TableCell>
                         <Badge className={cn(modeBadgeVariants({ mode: template.mode }))}>
                           {template.mode === "closed" ? (
@@ -328,8 +309,8 @@ export function TemplatesPage() {
               </Table>
             )}
           </CardContent>
-        </Card>
-      </motion.div>
+         </Card>
+       </div>
 
       {/* Create Template Dialog */}
       <TemplateDialog
@@ -372,8 +353,8 @@ export function TemplatesPage() {
             "{name}",
             selectedTemplate.questionText.slice(0, 50),
           )}
-        />
-      )}
-    </motion.div>
-  )
+         />
+       )}
+     </div>
+   )
 }

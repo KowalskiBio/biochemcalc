@@ -272,6 +272,17 @@ export interface SetWithTemplates {
   templates: TemplateWithDetails[]
 }
 
+// One answer field inside a multi-answer variant
+export interface AnswerField {
+  symbol: string
+  value: number
+  unit?: string
+  numericOptions?: number[]
+  correctOption?: number
+  intervalLo?: number
+  intervalHi?: number
+}
+
 // Variant model - represents a generated variant of a template
 export interface Variant {
   id: string
@@ -285,6 +296,7 @@ export interface Variant {
   intervalHi?: number
   seed: number
   createdAt: string
+  answersData?: AnswerField[]
 }
 
 /**
@@ -530,6 +542,7 @@ export interface ProjektQuestion {
   intervalHi?: number
   mode: TemplateMode
   seed: number
+  answersData?: AnswerField[]
 }
 
 export interface ProjektContent {

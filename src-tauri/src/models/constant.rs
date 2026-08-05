@@ -17,13 +17,7 @@ pub struct Constant {
 }
 
 impl Constant {
-    pub fn new(
-        name: String,
-        symbol: String,
-        value: f64,
-        unit: String,
-        is_builtin: bool,
-    ) -> Self {
+    pub fn new(name: String, symbol: String, value: f64, unit: String, is_builtin: bool) -> Self {
         Self {
             id: Uuid::new_v4(),
             name,

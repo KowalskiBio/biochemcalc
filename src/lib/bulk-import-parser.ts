@@ -1,4 +1,6 @@
+import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import type { DatabazeEntry } from "@/lib/types"
+import { isAtomPlaceholder } from "@/lib/utils"
 
 export type BulkImportVarType = "numeric" | "string"
 
@@ -39,17 +41,25 @@ export interface BulkImportData {
 
 export type FormulaMap = Record<string, string[]>
 
-const PLACEHOLDER_REGEX = /\[\[([a-zA-Zα-ωφ][a-zA-Z0-9_%_α-ωφ]*)\]\]/g
+const PLACEHOLDER_REGEX = /\[\[([a-zA-Zα-ωφ][a-zA-Z0-9_%_α-ωφ]*)(?:=([^\]]*))?\]\]/g
 
-const TARGET_BLOCK_REGEX = /(?:\[[a-zA-Zα-ωφ][a-zA-Z0-9_%_α-ωφ]*\])+\s*$/
-
-const TARGET_SYMBOL_REGEX = /\[([a-zA-Zα-ωφ][a-zA-Z0-9_%_α-ωφ]*)\]/g
+import { extractTargets as extractAnswerTargets } from "@/lib/formula-checker"
 
 const POINT_VALUE_REGEX = /^(\d+)\s*body\s*$/i
 
 const SET_INDEX_REGEX = /^(\d+)_(\d+)\s*$/
 
 const KNOWN_STRING_SYMBOLS = new Set(["sK", "sA", "KK", "AA", "sKK", "sAA", "molekula2"])
+
+const DEFAULT_STRING_VALUES: Record<string, string[]> = {
+  sK: ["Li", "Na", "K", "Rb", "Cs"],
+  sA: ["F", "Cl", "Br", "I"],
+  KK: ["Mg", "Ca", "Sr", "Ba", "Zn", "Cu"],
+  AA: ["O", "S", "SO4", "CO3"],
+  sKK: ["Mg", "Ca", "Sr", "Ba"],
+  sAA: ["O", "S", "SO4"],
+  molekula2: [],
+}
 
 const UNIT_PATTERNS: { pattern: RegExp; unit: string }[] = [
   { pattern: /%\s*(?:obj\.|hmotnostní|hmotnostních)?/, unit: "%" },
@@ -63,37 +73,46 @@ const UNIT_PATTERNS: { pattern: RegExp; unit: string }[] = [
 ]
 
 function extractTargets(text: string): string[] {
-  const trimmed = text.trim()
-  const blockMatch = trimmed.match(TARGET_BLOCK_REGEX)
-  if (!blockMatch) {
-    return []
-  }
-
-  const targets: string[] = []
-  for (const match of blockMatch[0].trim().matchAll(TARGET_SYMBOL_REGEX)) {
-    targets.push(match[1])
-  }
-  return targets
+  return extractAnswerTargets(text).map((target) => target.symbol)
 }
 
-function extractPlaceholderSymbols(text: string): string[] {
+interface PlaceholderInfo {
+  symbol: string
+  fixedValue?: number
+}
+
+function parseScientificNotation(value: string): number | undefined {
+  const normalized = value
+    .trim()
+    .replace(/,/g, ".")
+    .replace(/\s+/g, "")
+    .replace(/×10\^?/g, "e")
+    .replace(/x10\^?/g, "e")
+    .replace(/\*10\^?/g, "e")
+    .replace(/\.10\^?/g, "e")
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function extractPlaceholders(text: string): PlaceholderInfo[] {
   const seen = new Set<string>()
-  const symbols: string[] = []
+  const placeholders: PlaceholderInfo[] = []
   for (const match of text.matchAll(PLACEHOLDER_REGEX)) {
     const symbol = match[1]
-    if (!seen.has(symbol)) {
-      seen.add(symbol)
-      symbols.push(symbol)
-    }
+    if (seen.has(symbol)) continue
+    seen.add(symbol)
+    const rawValue = match[2]
+    const fixedValue = rawValue !== undefined ? parseScientificNotation(rawValue) : undefined
+    placeholders.push({ symbol, fixedValue })
   }
-  return symbols
+  return placeholders
 }
 
-function inferUnit(symbol: string, text: string): string {
+function inferUnitFromText(symbol: string, text: string): string | undefined {
   const regex = new RegExp(`\\[\\[${symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\]`, "g")
   const match = regex.exec(text)
   if (!match) {
-    return "—"
+    return undefined
   }
 
   const after = text.slice(match.index + match[0].length, match.index + match[0].length + 40)
@@ -103,11 +122,47 @@ function inferUnit(symbol: string, text: string): string {
     }
   }
 
-  return "—"
+  return undefined
+}
+
+const SYMBOL_UNIT_PATTERNS: { pattern: RegExp; unit: string }[] = [
+  { pattern: /^pH\d*$/, unit: "" },
+  { pattern: /^pK[a-z]?$/, unit: "" },
+  { pattern: /^dpH\d*$/, unit: "" },
+  { pattern: /^K[a-z]$/, unit: "" },
+  { pattern: /^ratio\d*$/, unit: "" },
+  { pattern: /^wDsc\d*$/, unit: "%" },
+  { pattern: /^wperc\d*$/, unit: "%" },
+  { pattern: /^vperc\d*$/, unit: "%" },
+  { pattern: /^m\d*$/, unit: "g" },
+  { pattern: /^ms\d*$/, unit: "g" },
+  { pattern: /^mv\d*$/, unit: "g" },
+  { pattern: /^mr\d*$/, unit: "g" },
+  { pattern: /^V\d*$/, unit: "l" },
+  { pattern: /^Vs\d*$/, unit: "l" },
+  { pattern: /^Vr\d*$/, unit: "l" },
+  { pattern: /^rho[_a-z0-9]*$/, unit: "g.cm-3" },
+  { pattern: /^n\d*$/, unit: "mol" },
+  { pattern: /^n[a-z]+\d*$/, unit: "mol" },
+  { pattern: /^c\d*$/, unit: "mol/l" },
+  { pattern: /^c[a-z]+\d*$/, unit: "mol/l" },
+]
+
+function inferUnitFromSymbol(symbol: string): string {
+  for (const { pattern, unit } of SYMBOL_UNIT_PATTERNS) {
+    if (pattern.test(symbol)) {
+      return unit
+    }
+  }
+  return ""
+}
+
+function inferUnit(symbol: string, text: string): string {
+  return inferUnitFromText(symbol, text) ?? inferUnitFromSymbol(symbol)
 }
 
 function inferVarType(symbol: string, unit: string): BulkImportVarType {
-  if (KNOWN_STRING_SYMBOLS.has(symbol)) {
+  if (KNOWN_STRING_SYMBOLS.has(symbol) || isAtomPlaceholder(symbol)) {
     return "string"
   }
   if (unit === "—") {
@@ -120,12 +175,53 @@ function buildVariableInput(
   symbol: string,
   text: string,
   databazeEntries: DatabazeEntry[] = [],
+  fixedValue?: number,
 ): BulkImportVariableInput {
   const unit = inferUnit(symbol, text)
   const varType = inferVarType(symbol, unit)
 
+  if (fixedValue !== undefined) {
+    return {
+      symbol,
+      name: symbol,
+      varType: "numeric",
+      minValue: fixedValue,
+      maxValue: fixedValue,
+      step: 1,
+      unit,
+      precision: 0,
+    }
+  }
+
   if (varType === "string") {
+    if (isAtomPlaceholder(symbol)) {
+      return {
+        symbol,
+        name: symbol,
+        varType,
+        minValue: 0,
+        maxValue: 0,
+        step: 1,
+        unit: "",
+        precision: 0,
+        stringValues: [...KNOWN_ELEMENTS],
+      }
+    }
     const entry = databazeEntries.find((e) => e.code === symbol)
+    if (entry && entry.values.length > 0) {
+      return {
+        symbol,
+        name: symbol,
+        varType,
+        minValue: 0,
+        maxValue: 0,
+        step: 1,
+        unit: "",
+        precision: 0,
+        stringValues: entry.values,
+      }
+    }
+    const defaultValues = DEFAULT_STRING_VALUES[symbol]
     return {
       symbol,
       name: symbol,
@@ -135,7 +231,21 @@ function buildVariableInput(
       step: 1,
       unit: "",
       precision: 0,
-      stringValues: entry && entry.values.length > 0 ? entry.values : [symbol],
+      stringValues: defaultValues && defaultValues.length > 0 ? defaultValues : [symbol],
+    }
+  }
+
+  // Mass fraction symbol `w` is dimensionless and must stay in (0, 1).
+  if (symbol === "w") {
+    return {
+      symbol,
+      name: symbol,
+      varType,
+      minValue: 0.1,
+      maxValue: 0.9,
+      step: 0.1,
+      unit: "—",
+      precision: 1,
     }
   }
 
@@ -154,8 +264,10 @@ function buildVariableInput(
 function parseQuestion(line: string, databazeEntries: DatabazeEntry[] = []): BulkImportQuestion {
   const trimmed = line.trim()
   const targets = extractTargets(trimmed)
-  const symbols = extractPlaceholderSymbols(trimmed)
-  const variables = symbols.map((symbol) => buildVariableInput(symbol, trimmed, databazeEntries))
+  const placeholders = extractPlaceholders(trimmed)
+  const variables = placeholders.map(({ symbol, fixedValue }) =>
+    buildVariableInput(symbol, trimmed, databazeEntries, fixedValue),
+  )
 
   return {
     questionText: trimmed,
@@ -280,12 +392,20 @@ export function parseFormulaText(text: string): FormulaMap {
       continue
     }
 
+    if (POINT_VALUE_REGEX.test(trimmed)) {
+      continue
+    }
+
     const setMatch = trimmed.match(SET_INDEX_REGEX)
     if (setMatch) {
       flushCurrentSet()
       currentSetKey = `${setMatch[1]}_${setMatch[2]}`
     } else if (currentSetKey) {
-      currentFormulas.push(trimmed)
+      const parts = trimmed
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0)
+      currentFormulas.push(...parts)
     }
   }
 
@@ -294,12 +414,17 @@ export function parseFormulaText(text: string): FormulaMap {
 }
 
 export function normalizeFormulaForEvaluation(raw: string): string {
-  return raw
+  // Strip explanatory comments such as "— (NA = Avogadrova konstanta)"
+  // so they are not evaluated as part of the formula.
+  const withoutComment = raw.split("—")[0] ?? raw
+  return withoutComment
     .replace(/\[/g, "(")
     .replace(/\]/g, ")")
     .replace(/,/g, ".")
     .replace(/⁻/g, "-")
     .replace(/×/g, "*")
+    .replace(/−/g, "-")
+    .replace(/÷/g, "/")
     .replace(/¹/g, "1")
     .replace(/²/g, "2")
     .replace(/³/g, "3")
@@ -313,7 +438,7 @@ function extractFormulaTarget(formula: string): string | null {
 }
 
 function joinFormulas(formulas: string[]): string {
-  return formulas.join("\n")
+  return formulas.join("; ")
 }
 
 export function pairFormulasWithQuestions(
@@ -373,10 +498,11 @@ export function pairFormulasWithQuestions(
         }
       }
 
-      const unconsumedCount = formulas.length - consumed.size
-      if (unconsumedCount > 0) {
+      const unconsumed = formulas.filter((_, i) => !consumed.has(i))
+      if (unconsumed.length > 0) {
+        const list = unconsumed.map((f) => `"${f}"`).join(", ")
         warnings.push(
-          `Sada ${setKey}: ${set.questions.length} otázky, ${formulas.length} vzorce — ${unconsumedCount} vzorců nebylo spárováno.`,
+          `Sada ${setKey}: ${set.questions.length} otázky, ${formulas.length} vzorce — ${unconsumed.length} vzorců nebylo spárováno: ${list}`,
         )
       }
     }

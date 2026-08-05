@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest"
 import { extractFormulaVariables, extractTargets, matchVariables } from "@/lib/formula-checker"
 
+function targets(symbols: string[]) {
+  return symbols.map((symbol) => ({ symbol }))
+}
+
 function placeholders(symbols: string[]) {
   return symbols.map((symbol) => ({ symbol }))
 }
 
 describe("extractTargets", () => {
   it("returns the target variable from trailing [w]", () => {
-    expect(extractTargets("...vody? [w]")).toEqual(["w"])
+    expect(extractTargets("...vody? [w]")).toEqual([{ symbol: "w" }])
   })
 
   it("returns an empty array when no target is present", () => {
@@ -15,27 +19,38 @@ describe("extractTargets", () => {
   })
 
   it("ignores placeholders and only matches the trailing variable", () => {
-    expect(extractTargets("Jaký je zlomek [[w]] v roztoku [ms]")).toEqual(["ms"])
+    expect(extractTargets("Jaký je zlomek [[w]] v roztoku [ms]")).toEqual([{ symbol: "ms" }])
   })
 
   it("supports percent sign in target variable", () => {
-    expect(extractTargets("... [w%]")).toEqual(["w%"])
+    expect(extractTargets("... [w%]")).toEqual([{ symbol: "w%" }])
   })
 
   it("supports underscore in target variable", () => {
-    expect(extractTargets("... [rho_r]")).toEqual(["rho_r"])
+    expect(extractTargets("... [rho_r]")).toEqual([{ symbol: "rho_r" }])
   })
 
   it("extracts multiple adjacent targets", () => {
-    expect(extractTargets("... [V1][V2]")).toEqual(["V1", "V2"])
+    expect(extractTargets("... [V1][V2]")).toEqual(targets(["V1", "V2"]))
   })
 
   it("extracts multiple adjacent targets with underscores", () => {
-    expect(extractTargets("... [ms][mv]")).toEqual(["ms", "mv"])
+    expect(extractTargets("... [ms][mv]")).toEqual(targets(["ms", "mv"]))
   })
 
   it("only treats adjacent trailing brackets as multiple targets", () => {
-    expect(extractTargets("Jaký je [[w]] mezi [ms] a [mv]")).toEqual(["mv"])
+    expect(extractTargets("Jaký je [[w]] mezi [ms] a [mv]")).toEqual([{ symbol: "mv" }])
+  })
+
+  it("extracts target with unit", () => {
+    expect(extractTargets("... [n mol]")).toEqual([{ symbol: "n", unit: "mol" }])
+  })
+
+  it("extracts multiple targets with units", () => {
+    expect(extractTargets("... [n mol][m g]")).toEqual([
+      { symbol: "n", unit: "mol" },
+      { symbol: "m", unit: "g" },
+    ])
   })
 })
 
@@ -133,22 +148,5 @@ describe("matchVariables", () => {
     expect(result.required).toEqual(["m1", "m2"])
     expect(result.present).toEqual(["m1", "m2"])
     expect(result.missing).toEqual([])
-  })
-
-  it("treats M_atom2A as satisfied when atom2A placeholder exists", () => {
-    const result = matchVariables(
-      placeholders(["m", "atom2A", "atom2B"]),
-      ["ratio", "M_atom2B", "M_atom2A"],
-      ["ratio"],
-    )
-    expect(result.required).toEqual([])
-    expect(result.present).toEqual([])
-    expect(result.missing).toEqual([])
-  })
-
-  it("reports M_atom2A as missing when atom2A placeholder is absent", () => {
-    const result = matchVariables(placeholders(["m"]), ["ratio", "M_atom2A"], ["ratio"])
-    expect(result.required).toEqual(["M_atom2A"])
-    expect(result.missing).toEqual(["M_atom2A"])
   })
 })

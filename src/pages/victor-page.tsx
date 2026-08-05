@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Bot, Loader2, Send, User } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -88,70 +87,45 @@ export function VictorPage() {
     }
   }
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="space-y-6"
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
-      >
-        <h1 className="text-2xl font-bold text-foreground">{cs.victor.title}</h1>
-        <p className="text-foreground-secondary mt-1">{cs.victor.description}</p>
-      </motion.div>
+   return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.victor.title}</h1>
+        <p className="text-sm text-muted-foreground mt-1">{cs.victor.description}</p>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="flex-1 flex flex-col gap-4"
-      >
-        {/* Chat messages */}
-        <div className="flex-1 flex flex-col gap-4 overflow-y-auto max-h-[60vh] min-h-[40vh] border rounded-lg p-4 bg-muted/50">
-          {messages.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              className="flex-1 flex items-center justify-center text-foreground-muted text-center"
-            >
-              <Bot className="size-12 mb-4 opacity-50" />
-              <p>{cs.victor.inputPlaceholder}</p>
-            </motion.div>
-          ) : (
-            messages.map((message) => {
-              if (message.role === "user") {
-                return (
-                  <motion.div
-                    key={message.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="flex gap-3 max-w-[80%] self-end"
-                  >
-                    <div className="flex-1 bg-primary text-primary-foreground rounded-lg px-4 py-2">
-                      <p className="text-sm">{message.content}</p>
-                    </div>
-                    <User className="size-8 text-primary shrink-0 mt-auto" />
-                  </motion.div>
-                )
-              }
+      <div className="flex-1 flex flex-col gap-4">
+         {/* Chat messages */}
+         <div className="flex-1 flex flex-col gap-4 overflow-y-auto max-h-[60vh] min-h-[40vh] border rounded-lg p-4 bg-muted/50">
+           {messages.length === 0 ? (
+             <div className="flex-1 flex items-center justify-center text-muted-foreground text-center">
+               <Bot className="size-12 mb-4 opacity-50" />
+               <p>{cs.victor.inputPlaceholder}</p>
+             </div>
+           ) : (
+             messages.map((message) => {
+               if (message.role === "user") {
+                 return (
+                   <div
+                     key={message.id}
+                     className="flex gap-3 max-w-[80%] self-end"
+                   >
+                     <div className="flex-1 bg-primary text-primary-foreground rounded-lg px-4 py-2">
+                       <p className="text-sm">{message.content}</p>
+                     </div>
+                     <User className="size-8 text-primary shrink-0 mt-auto" />
+                   </div>
+                 )
+               }
 
-              // Assistant message
-              const responseData = parseAssistantMessage(message.content)
-              return (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex gap-3 max-w-[90%]"
-                >
-                  <Bot className="size-8 text-foreground-secondary shrink-0 mt-auto" />
+               // Assistant message
+               const responseData = parseAssistantMessage(message.content)
+               return (
+                 <div
+                   key={message.id}
+                   className="flex gap-3 max-w-[90%]"
+                 >
+                   <Bot className="size-8 text-muted-foreground shrink-0 mt-auto" />
                   <div className="flex-1 space-y-2">
                     {responseData ? (
                       <>
@@ -187,25 +161,25 @@ export function VictorPage() {
                                 <h3 className="font-medium text-sm mb-1">
                                   {cs.victor.explanation}:
                                 </h3>
-                                <p className="text-sm text-foreground-muted">
-                                  {responseData.explanation}
-                                </p>
+                       <p className="text-sm text-muted-foreground">
+                         {responseData.explanation}
+                       </p>
                               </div>
                             )}
 
-                            {/* Variables as badges */}
-                            {responseData.variables && responseData.variables.length > 0 && (
-                              <div>
-                                <h3 className="font-medium text-sm mb-1">{cs.victor.variables}:</h3>
-                                <div className="flex flex-wrap gap-2">
-                                  {responseData.variables.map((variable) => (
-                                    <Badge key={variable.symbol} variant="secondary">
-                                      {variable.symbol} = {variable.value} {variable.unit}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                             {/* Variables as badges */}
+                             {responseData.variables && responseData.variables.length > 0 && (
+                               <div>
+                                 <h3 className="font-medium text-sm mb-1">{cs.victor.variables}:</h3>
+                                 <div className="flex flex-wrap gap-2">
+                                   {responseData.variables.map((variable) => (
+                                     <Badge key={variable.symbol} variant="secondary" className="font-mono tabular">
+                                       {variable.symbol} = {variable.value} {variable.unit}
+                                     </Badge>
+                                   ))}
+                                 </div>
+                               </div>
+                             )}
                           </CardContent>
                         </Card>
                       </>
@@ -216,43 +190,33 @@ export function VictorPage() {
                       </div>
                     )}
                   </div>
-                </motion.div>
+                </div>
               )
             })
           )}
 
-          {/* Loading state */}
-          {isLoading && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2 }}
-              className="flex gap-3 max-w-[80%]"
-            >
-              <Bot className="size-8 text-foreground-secondary shrink-0" />
-              <div className="bg-muted p-3 rounded-lg">
-                <p className="text-sm flex items-center gap-2">
-                  <Loader2 className="size-4 animate-spin" />
-                  {cs.victor.thinking}
-                </p>
-              </div>
-            </motion.div>
-          )}
+             {/* Loading state */}
+           {isLoading && (
+             <div className="flex gap-3 max-w-[80%]">
+               <Bot className="size-8 text-muted-foreground shrink-0" />
+               <div className="bg-muted p-3 rounded-lg">
+                 <p className="text-sm flex items-center gap-2">
+                   <Loader2 className="size-4 animate-spin" />
+                   {cs.victor.thinking}
+                 </p>
+               </div>
+             </div>
+           )}
 
-          {/* Error state */}
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2 }}
-              className="flex gap-3 max-w-[80%]"
-            >
-              <Bot className="size-8 text-destructive shrink-0" />
-              <div className="bg-destructive/10 text-destructive p-3 rounded-lg">
-                <p className="text-sm">{error}</p>
-              </div>
-            </motion.div>
-          )}
+           {/* Error state */}
+           {error && (
+             <div className="flex gap-3 max-w-[80%]">
+               <Bot className="size-8 text-destructive shrink-0" />
+               <div className="bg-destructive/10 text-destructive p-3 rounded-lg">
+                 <p className="text-sm">{error}</p>
+               </div>
+             </div>
+           )}
 
           <div ref={messagesEndRef} />
         </div>
@@ -277,7 +241,7 @@ export function VictorPage() {
             {isLoading ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
           </Button>
         </div>
-      </motion.div>
-    </motion.div>
+       </div>
+     </div>
   )
 }

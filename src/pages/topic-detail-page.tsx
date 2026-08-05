@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { ArrowLeft, Layers, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
@@ -90,42 +89,32 @@ export function TopicDetailPage() {
 
   if (isLoading) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-foreground-muted">Načítám téma...</p>
-          </CardContent>
-        </Card>
-      </motion.div>
+      <Card>
+        <CardContent className="py-8 text-center">
+          <p className="text-muted-foreground">Načítám téma...</p>
+        </CardContent>
+      </Card>
     )
   }
 
   if (!topic) {
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-foreground-muted">Téma nenalezeno.</p>
-            <Button asChild variant="outline" className="mt-4">
-              <Link to="/topics">Zpět na témata</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </motion.div>
+      <Card>
+        <CardContent className="py-8 text-center">
+          <p className="text-muted-foreground">Téma nenalezeno.</p>
+          <Button asChild variant="outline" className="mt-4">
+            <Link to="/topics">Zpět na témata</Link>
+          </Button>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className="space-y-6"
     >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
         className="flex items-center gap-4"
       >
         <Button variant="ghost" size="icon" asChild>
@@ -134,8 +123,8 @@ export function TopicDetailPage() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{topic.name}</h1>
-          <p className="text-foreground-secondary text-sm">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{topic.name}</h1>
+          <p className="text-muted-foreground text-sm">
             {categories.length} {cs.topics.categories.toLowerCase()}
           </p>
         </div>
@@ -148,12 +137,9 @@ export function TopicDetailPage() {
           <Trash2 className="size-4 mr-2" />
           {cs.common.delete}
         </Button>
-      </motion.div>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
+      <div
         className="space-y-6"
       >
         {categoriesWithSets
@@ -175,13 +161,11 @@ export function TopicDetailPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {sets
                     .sort((a, b) => a.setIndex - b.setIndex)
-                    .map((set) => (
-                      <motion.div
-                        key={set.id}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <Link to={`/sets/${set.id}`}>
+                     .map((set) => (
+                       <div
+                         key={set.id}
+                       >
+                         <Link to={`/sets/${set.id}`}>
                           <Card className="cursor-pointer hover:border-primary transition-colors">
                             <CardContent className="p-4">
                               <div className="flex items-center justify-between">
@@ -193,13 +177,13 @@ export function TopicDetailPage() {
                             </CardContent>
                           </Card>
                         </Link>
-                      </motion.div>
+                      </div>
                     ))}
                 </div>
               </CardContent>
             </Card>
           ))}
-      </motion.div>
+      </div>
 
       {topic && (
         <DeleteConfirmDialog
@@ -210,6 +194,6 @@ export function TopicDetailPage() {
           description={cs.topics.deleteTopicConfirm.replace("{name}", topic.name)}
         />
       )}
-    </motion.div>
+    </div>
   )
 }

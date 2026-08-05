@@ -1,5 +1,4 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
 import { Loader2, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
@@ -73,16 +72,13 @@ export function HistoryPage() {
   }, [loadHistory])
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className={cn(pageContainerVariants())}
     >
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{cs.history.title}</h1>
-          <p className="text-foreground-secondary mt-1">{cs.history.description}</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.history.title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{cs.history.description}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -120,7 +116,7 @@ export function HistoryPage() {
         <Card>
           <CardHeader />
           <CardContent className={cn(emptyStateVariants())}>
-            <p className="text-foreground-secondary">{cs.history.emptyState.description}</p>
+            <p className="text-muted-foreground">{cs.history.emptyState.description}</p>
           </CardContent>
         </Card>
       ) : (
@@ -174,6 +170,6 @@ export function HistoryPage() {
         cancelLabel={cs.common.cancel}
         onConfirm={handleClearHistoryConfirm}
       />
-    </motion.div>
+    </div>
   )
 }

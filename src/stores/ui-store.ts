@@ -3,13 +3,10 @@ import { persist } from "zustand/middleware"
 
 /**
  * UI Store for BiochemCalc
- * Manages global UI state including sidebar collapse, theme, and current page
+ * Manages global UI state including theme and current page
  */
 
 interface UiState {
-  // Sidebar state
-  sidebarCollapsed: boolean
-
   // Theme state
   theme: "light" | "dark"
 
@@ -17,34 +14,23 @@ interface UiState {
   currentPage: string
 
   // Actions
-  setSidebarCollapsed: (collapsed: boolean) => void
-  toggleSidebar: () => void
   setTheme: (theme: "light" | "dark") => void
   toggleTheme: () => void
   setCurrentPage: (page: string) => void
 }
 
-const defaultState: Pick<UiState, "sidebarCollapsed" | "theme" | "currentPage"> = {
-  sidebarCollapsed: false,
+const defaultState: Pick<UiState, "theme" | "currentPage"> = {
   theme: "light",
   currentPage: "/",
 }
 
 /**
  * Create UI store with persistence for theme preference
- * Sidebar state is not persisted as it's per-session preference
  */
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
       ...defaultState,
-
-      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-
-      toggleSidebar: () =>
-        set((state) => ({
-          sidebarCollapsed: !state.sidebarCollapsed,
-        })),
 
       setTheme: (theme) => {
         // Also update DOM class
@@ -83,16 +69,10 @@ export const useUiStore = create<UiState>()(
 )
 
 // Selector hooks for better performance
-export const useSidebar = () => useUiStore((state) => state.sidebarCollapsed)
 export const useThemeStore = () => useUiStore((state) => state.theme)
 export const useCurrentPage = () => useUiStore((state) => state.currentPage)
 
 // Action hooks
-export const useSidebarActions = () => ({
-  setSidebarCollapsed: useUiStore((state) => state.setSidebarCollapsed),
-  toggleSidebar: useUiStore((state) => state.toggleSidebar),
-})
-
 export const useThemeActions = () => ({
   setTheme: useUiStore((state) => state.setTheme),
   toggleTheme: useUiStore((state) => state.toggleTheme),
@@ -103,6 +83,5 @@ export const usePageActions = () => ({
 })
 
 // Type-safe selectors for specific state slices
-export const selectSidebar = (state: UiState) => state.sidebarCollapsed
 export const selectTheme = (state: UiState) => state.theme
 export const selectCurrentPage = (state: UiState) => state.currentPage

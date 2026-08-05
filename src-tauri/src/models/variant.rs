@@ -3,6 +3,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// One answer field inside a multi-answer variant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnswerField {
+    pub symbol: String,
+    pub value: f64,
+    pub unit: Option<String>,
+    pub numeric_options: Option<Vec<f64>>,
+    pub correct_option: Option<u8>,
+    pub interval_lo: Option<f64>,
+    pub interval_hi: Option<f64>,
+}
+
 /// One generated student instance of a template.
 ///
 /// For closed mode the user-facing options are r1-r5 (numeric) and r6
@@ -27,6 +40,9 @@ pub struct Variant {
     /// Deterministic seed used to generate this variant.
     pub seed: u64,
     pub created_at: DateTime<Utc>,
+    /// Per-symbol answer data for templates with multiple answer fields
+    /// (e.g. `[n mol][m g]`). `None` for legacy single-answer templates.
+    pub answers_data: Option<Vec<AnswerField>>,
 }
 
 impl Variant {
@@ -54,6 +70,7 @@ impl Variant {
             interval_hi,
             seed,
             created_at: Utc::now(),
+            answers_data: None,
         }
     }
 }

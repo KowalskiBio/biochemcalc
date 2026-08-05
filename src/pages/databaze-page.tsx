@@ -1,5 +1,4 @@
 import { cva } from "class-variance-authority"
-import { motion } from "framer-motion"
 import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { DatabazeDialog } from "@/components/databaze/databaze-dialog"
@@ -283,27 +282,18 @@ export function DatabazePage() {
   )
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+    <div
       className={cn(pageContainerVariants())}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+      <div
       >
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-foreground">{cs.databaze.title}</h1>
-          <p className="text-foreground-secondary">{cs.databaze.pageDescription}</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.databaze.title}</h1>
+          <p className="text-muted-foreground">{cs.databaze.pageDescription}</p>
         </div>
-      </motion.div>
+      </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.15 }}
+      <div
         className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
       >
         <div className="flex items-center gap-2 p-1 bg-muted rounded-lg">
@@ -343,13 +333,10 @@ export function DatabazePage() {
             </Button>
           </div>
         )}
-      </motion.div>
+      </div>
 
       {activeTab === "variables" ? (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
+        <div
         >
           <Card>
             <CardHeader>
@@ -370,12 +357,9 @@ export function DatabazePage() {
                   </Button>
                 </div>
               ) : (
-                entries.map((entry, index) => (
-                  <motion.div
+                entries.map((entry) => (
+                  <div
                     key={entry.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.4, delay: 0.3 + index * 0.05 }}
                     className={cn(entryItemVariants())}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -409,17 +393,14 @@ export function DatabazePage() {
                         </Button>
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
                 ))
               )}
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       ) : (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
+        <div
         >
           <Card>
             <CardHeader>
@@ -484,12 +465,9 @@ export function DatabazePage() {
                   )}
                 </div>
               ) : (
-                filteredMolarMasses.map((entry, index) => (
-                  <motion.div
+                filteredMolarMasses.map((entry) => (
+                  <div
                     key={entry.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.4, delay: 0.3 + index * 0.05 }}
                     className={cn(entryItemVariants())}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
@@ -533,12 +511,12 @@ export function DatabazePage() {
                         </Button>
                       </div>
                     </div>
-                  </motion.div>
+                  </div>
                 ))
               )}
             </CardContent>
           </Card>
-        </motion.div>
+        </div>
       )}
 
       <DatabazeDialog
@@ -598,6 +576,6 @@ export function DatabazePage() {
         onSubmit={handleBulkImportMolarMasses}
         atomicWeights={atomicWeights}
       />
-    </motion.div>
+    </div>
   )
 }

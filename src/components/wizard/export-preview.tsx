@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Check, Copy, FileText } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -77,29 +76,24 @@ export function ExportPreview({ exportInput, onBack, onComplete }: ExportPreview
     }
   }, [exportInput, exportResult, handleExport])
 
-  if (!exportResult) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center space-y-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5 }}
-            className="inline-block p-4 bg-muted rounded-full"
-          >
-            <FileText className="size-8 text-foreground-muted" />
-          </motion.div>
-          <p className="text-foreground-secondary">Exporting your assignment...</p>
-        </div>
-      </div>
-    )
-  }
+   if (!exportResult) {
+     return (
+       <div className="flex items-center justify-center py-12">
+         <div className="text-center space-y-4">
+           <div className="inline-block p-4 bg-muted rounded-full">
+             <FileText className="size-8 text-muted-foreground" />
+           </div>
+           <p className="text-muted-foreground">Exporting your assignment...</p>
+         </div>
+       </div>
+     )
+   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Export Preview</h3>
-        <p className="text-foreground-secondary text-sm">
+        <h3 className="text-base font-semibold tracking-tight text-foreground">Export Preview</h3>
+        <p className="text-sm text-muted-foreground">
           Review your generated assignment and export the file
         </p>
       </div>
@@ -111,25 +105,25 @@ export function ExportPreview({ exportInput, onBack, onComplete }: ExportPreview
           <CardDescription>Your assignment has been generated successfully</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Filename</Label>
-              <Badge variant="default" className="mt-2 block">
-                {exportResult.filePath.split("/").pop() || exportInput.filename}
-              </Badge>
-            </div>
-            <div>
-              <Label>File Path</Label>
-              <Badge variant="secondary" className="mt-2 block truncate">
-                {exportResult.filePath}
-              </Badge>
-            </div>
-          </div>
+           <div className="grid grid-cols-2 gap-4">
+             <div>
+               <Label>Filename</Label>
+               <Badge variant="default" className="mt-2 block font-mono tabular">
+                 {exportResult.filePath.split("/").pop() || exportInput.filename}
+               </Badge>
+             </div>
+             <div>
+               <Label>File Path</Label>
+               <Badge variant="secondary" className="mt-2 block truncate font-mono">
+                 {exportResult.filePath}
+               </Badge>
+             </div>
+           </div>
 
-          <div className="space-y-2">
-            <Label>Character Count</Label>
-            <Badge variant="outline">{exportResult.content.length} characters</Badge>
-          </div>
+           <div className="space-y-2">
+             <Label>Character Count</Label>
+             <Badge variant="outline" className="font-mono tabular">{exportResult.content.length} characters</Badge>
+           </div>
         </CardContent>
       </Card>
 

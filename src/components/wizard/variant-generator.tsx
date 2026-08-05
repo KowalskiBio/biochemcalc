@@ -1,4 +1,3 @@
-import { motion } from "framer-motion"
 import { Clock, Download } from "lucide-react"
 import { useCallback, useState } from "react"
 import { Badge } from "@/components/ui/badge"
@@ -139,11 +138,11 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
     onNext(exportInput)
   }, [generatedVariants, filename, toast, onNext])
 
-  return (
+   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Generate Variants</h3>
-        <p className="text-foreground-secondary text-sm">
+        <h3 className="text-base font-semibold tracking-tight text-foreground">Generate Variants</h3>
+        <p className="text-sm text-muted-foreground">
           Configure the number of variants and seed for reproducible generation
         </p>
       </div>
@@ -167,11 +166,11 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
               min={1}
               max={100}
             />
-            <p className="text-xs text-foreground-muted">
-              Total variants:{" "}
-              {variantCount *
-                Array.from(templateAssignments.values()).reduce((sum, ids) => sum + ids.length, 0)}
-            </p>
+             <p className="text-xs text-muted-foreground">
+               Total variants:{" "}
+               <span className="font-mono tabular">{variantCount *
+                 Array.from(templateAssignments.values()).reduce((sum, ids) => sum + ids.length, 0)}</span>
+             </p>
           </div>
 
           <div className="space-y-2">
@@ -183,87 +182,97 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
               onChange={(e) => setBaseSeed(parseInt(e.target.value, 10) || 0)}
               placeholder="Enter seed for reproducible results"
             />
-            <p className="text-xs text-foreground-muted">
-              Using the same seed will generate the same variants
-            </p>
+             <p className="text-xs text-muted-foreground">
+               Using the same seed will generate the same variants
+             </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Generate button */}
-      <div className="flex justify-center">
-        <Button size="lg" onClick={handleGenerate} disabled={isGenerating}>
-          {isGenerating ? (
-            <>
-              <Clock className="size-4 mr-2 animate-spin" />
-              Generating...
-              <Progress value={generationProgress} className="ml-4 w-20" />
-            </>
-          ) : (
-            <Motion.div
-              initial={{ scale: 1 }}
-              animate={{ scale: [1, 1.1, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              {cs.common.generate} Variants
-            </Motion.div>
-          )}
-        </Button>
-      </div>
+       {/* Generate button */}
+       <div className="flex justify-center">
+         <Button size="lg" onClick={handleGenerate} disabled={isGenerating}>
+           {isGenerating ? (
+             <>
+               <Clock className="size-4 mr-2 animate-spin" />
+               Generating...
+               <Progress value={generationProgress} className="ml-4 w-20" />
+             </>
+           ) : (
+             <>
+               {cs.common.generate} Variants
+             </>
+           )}
+         </Button>
+       </div>
 
-      {/* Preview */}
-      {previewVariants.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Variant Preview</CardTitle>
-            <CardDescription>Preview of the first variant from each template</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex gap-2 mb-4">
-                {previewVariants.map((variant, index) => (
-                  <motion.div
-                    key={variant.id}
-                    animate={{ opacity: selectedPreviewIndex === index ? 1 : 0.5 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <Button
-                      size="sm"
-                      variant={selectedPreviewIndex === index ? "default" : "outline"}
-                      onClick={() => setSelectedPreviewIndex(index)}
-                    >
-                      Variant {index + 1}
-                    </Button>
-                  </motion.div>
-                ))}
-              </div>
+       {/* Preview */}
+       {previewVariants.length > 0 && (
+         <Card>
+           <CardHeader>
+             <CardTitle>Variant Preview</CardTitle>
+             <CardDescription>Preview of the first variant from each template</CardDescription>
+           </CardHeader>
+           <CardContent>
+             <div className="space-y-4">
+               <div className="flex gap-2 mb-4">
+                 {previewVariants.map((variant, index) => (
+                   <div
+                     key={variant.id}
+                     className={selectedPreviewIndex === index ? "opacity-100" : "opacity-50"}
+                   >
+                     <Button
+                       size="sm"
+                       variant={selectedPreviewIndex === index ? "default" : "outline"}
+                       onClick={() => setSelectedPreviewIndex(index)}
+                     >
+                       Variant <span className="font-mono tabular">{index + 1}</span>
+                     </Button>
+                   </div>
+                 ))}
+               </div>
 
               {selectedPreviewIndex < previewVariants.length && (
                 <div className="p-4 bg-muted rounded-lg">
                   <div className="flex items-start gap-4">
                     <div className="flex-1">
-                      <h4 className="font-semibold mb-2">Question</h4>
-                      <p className="text-foreground-secondary mb-4">
-                        {formatNumberMaxDecimals(
-                          previewVariants[selectedPreviewIndex].correctAnswer,
-                        )}
-                      </p>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <Label>Correct Answer</Label>
-                          <Badge variant="default" className="mt-2">
-                            {formatNumberMaxDecimals(
-                              previewVariants[selectedPreviewIndex].correctAnswer,
-                            )}
-                          </Badge>
-                        </div>
-                        <div>
-                          <Label>Seed</Label>
-                          <Badge variant="secondary" className="mt-2">
-                            {previewVariants[selectedPreviewIndex].seed}
-                          </Badge>
-                        </div>
-                      </div>
+                      <h4 className="font-semibold mb-2">Correct Answers</h4>
+                      {(() => {
+                        const variant = previewVariants[selectedPreviewIndex]
+                        if (variant.answersData && variant.answersData.length > 0) {
+                          return (
+                            <div className="space-y-1 mb-4">
+                              {variant.answersData.map((a) => (
+                         <p key={a.symbol} className="text-muted-foreground">
+                                   {a.symbol} = <span className="font-mono tabular">{formatNumberMaxDecimals(a.value)}</span>
+                                   {a.unit ? ` ${a.unit}` : ""}
+                                 </p>
+                              ))}
+                            </div>
+                          )
+                        }
+                         return (
+                           <p className="text-muted-foreground mb-4">
+                             <span className="font-mono tabular">{formatNumberMaxDecimals(variant.correctAnswer)}</span>
+                           </p>
+                         )
+                      })()}
+                       <div className="grid grid-cols-2 gap-4">
+                         <div>
+                           <Label>Primary Answer</Label>
+                           <Badge variant="default" className="mt-2 font-mono tabular">
+                             {formatNumberMaxDecimals(
+                               previewVariants[selectedPreviewIndex].correctAnswer,
+                             )}
+                           </Badge>
+                         </div>
+                         <div>
+                           <Label>Seed</Label>
+                           <Badge variant="secondary" className="mt-2 font-mono tabular">
+                             {previewVariants[selectedPreviewIndex].seed}
+                           </Badge>
+                         </div>
+                       </div>
                     </div>
                   </div>
                 </div>
@@ -289,7 +298,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                 onChange={(e) => setFilename(e.target.value)}
                 placeholder="e.g., biochemcalc_assignment"
               />
-              <p className="text-xs text-foreground-muted">Will be saved as .txt file</p>
+               <p className="text-xs text-muted-foreground">Will be saved as .txt file</p>
             </div>
 
             <div className="flex gap-4">
@@ -318,5 +327,4 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
   )
 }
 
-// Fix for Motion import
-const Motion = motion
+

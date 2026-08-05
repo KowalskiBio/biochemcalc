@@ -11,7 +11,9 @@
               "questionText": "Jaký je hmotnostní zlomek [[sK]][[sA]] v roztoku, který vznikl rozpuštěním [[ms]] g této látky ve [[mv]] g vody? [w]",
               "formula": "w = ms / (ms + mv)",
               "equationText": "w = ms / (ms + mv)",
-              "targets": ["w"],
+              "targets": [
+                "w"
+              ],
               "variables": [
                 {
                   "symbol": "sK",
@@ -22,7 +24,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -33,7 +41,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 },
                 {
                   "symbol": "ms",
@@ -61,7 +74,9 @@
               "questionText": "Jaký je hmotnostní zlomek [[KK]][[AA]] v roztoku, jehož [[mr]] g obsahuje [[ms]] g [[KK]][[AA]]? [w]",
               "formula": "w = ms / mr",
               "equationText": "w = ms / mr",
-              "targets": ["w"],
+              "targets": [
+                "w"
+              ],
               "variables": [
                 {
                   "symbol": "KK",
@@ -72,7 +87,14 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["KK"]
+                  "stringValues": [
+                    "Mg",
+                    "Ca",
+                    "Sr",
+                    "Ba",
+                    "Zn",
+                    "Cu"
+                  ]
                 },
                 {
                   "symbol": "AA",
@@ -83,7 +105,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["AA"]
+                  "stringValues": [
+                    "O",
+                    "S",
+                    "SO4",
+                    "CO3"
+                  ]
                 },
                 {
                   "symbol": "mr",
@@ -111,7 +138,9 @@
               "questionText": "Kolik gramů [[sK]][[sA]] bude izolováno z [[mr]] g roztoku o hmotnostním zlomku [[sK]][[sA]] [[w]], bude-li z něj odpařena veškerá voda? [ms]",
               "formula": "ms = w * mr",
               "equationText": "ms = w * mr",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "sK",
@@ -122,7 +151,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -133,7 +168,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 },
                 {
                   "symbol": "mr",
@@ -149,11 +189,11 @@
                   "symbol": "w",
                   "name": "w",
                   "varType": "numeric",
-                  "minValue": 1,
-                  "maxValue": 1000,
-                  "step": 1,
+                  "minValue": 0.1,
+                  "maxValue": 0.9,
+                  "step": 0.1,
                   "unit": "—",
-                  "precision": 0
+                  "precision": 1
                 }
               ]
             },
@@ -161,7 +201,9 @@
               "questionText": "Jaké je hmotnostní procento [[sK]][[sA]] v roztoku, který vznikl rozpuštěním [[ms]] g [[sK]][[sA]] ve [[mv]] g vody? [wperc]",
               "formula": "wperc = ms / (ms + mv) * 100",
               "equationText": "wperc = ms / (ms + mv) * 100",
-              "targets": ["wperc"],
+              "targets": [
+                "wperc"
+              ],
               "variables": [
                 {
                   "symbol": "sK",
@@ -172,7 +214,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -183,7 +231,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 },
                 {
                   "symbol": "ms",
@@ -216,7 +269,9 @@
               "questionText": "Kolik gramů [[molekula2]] je nutno rozpustit ve [[mv]] litrech vody, abychom získali [[wperc]] roztok? [ms]",
               "formula": "ms = wperc * (mv * 1000) / (100 - wperc)",
               "equationText": "ms = wperc * (mv * 1000) / (100 - wperc)",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "molekula2",
@@ -227,7 +282,9 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["molekula2"]
+                  "stringValues": [
+                    "molekula2"
+                  ]
                 },
                 {
                   "symbol": "mv",
@@ -255,7 +312,9 @@
               "questionText": "Kolik gramů [[KK]][[AA]] obsahuje [[V]] cm^3 [[wperc]] roztoku [[KK]][[AA]] o hustotě [[rho]] g*cm^-3? [ms]",
               "formula": "ms = V * rho * wperc / 100",
               "equationText": "ms = V * rho * wperc / 100",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "KK",
@@ -266,7 +325,14 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["KK"]
+                  "stringValues": [
+                    "Mg",
+                    "Ca",
+                    "Sr",
+                    "Ba",
+                    "Zn",
+                    "Cu"
+                  ]
                 },
                 {
                   "symbol": "AA",
@@ -277,7 +343,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["AA"]
+                  "stringValues": [
+                    "O",
+                    "S",
+                    "SO4",
+                    "CO3"
+                  ]
                 },
                 {
                   "symbol": "V",
@@ -315,7 +386,9 @@
               "questionText": "Kolik gramů vody bude třeba, aby z [[ms]] g manganistanu draselného byl připraven [[wperc]] roztok této soli? [mv]",
               "formula": "mv = ms * (100 - wperc) / wperc",
               "equationText": "mv = ms * (100 - wperc) / wperc",
-              "targets": ["mv"],
+              "targets": [
+                "mv"
+              ],
               "variables": [
                 {
                   "symbol": "ms",
@@ -348,7 +421,9 @@
               "questionText": "[[Vs]] cm^3 methanolu bylo doplněno vodou na celkový objem [[V]] cm^3. Jaké je objemové procento methanolu v roztoku? [vperc]",
               "formula": "vperc = Vs / V * 100",
               "equationText": "vperc = Vs / V * 100",
-              "targets": ["vperc"],
+              "targets": [
+                "vperc"
+              ],
               "variables": [
                 {
                   "symbol": "Vs",
@@ -381,7 +456,9 @@
               "questionText": "Máme [[m1]] g [[w1perc]] roztoku, který zředíme [[m2]] g rozpouštědla. Jaká je nyní koncentrace roztoku? [w2perc]",
               "formula": "w2perc = m1 * w1perc / (m1 + m2)",
               "equationText": "w2perc = m1 * w1perc / (m1 + m2)",
-              "targets": ["w2perc"],
+              "targets": [
+                "w2perc"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -419,7 +496,9 @@
               "questionText": "Kolik gramů vody je nutno přidat ke [[m1]] g [[w1perc]] roztoku [[sK]][[sA]], aby vznikl [[w2perc]] roztok? [m2]",
               "formula": "m2 = m1 * (w1perc - w2perc) / w2perc",
               "equationText": "m2 = m1 * (w1perc - w2perc) / w2perc",
-              "targets": ["m2"],
+              "targets": [
+                "m2"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -450,7 +529,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -461,7 +546,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 },
                 {
                   "symbol": "w2perc",
@@ -479,7 +569,9 @@
               "questionText": "V kolika gramech [[wperc]] roztoku je obsaženo [[ms]] g [[sK]][[sA]]? [mr]",
               "formula": "mr = ms * 100 / wperc",
               "equationText": "mr = ms * 100 / wperc",
-              "targets": ["mr"],
+              "targets": [
+                "mr"
+              ],
               "variables": [
                 {
                   "symbol": "wperc",
@@ -510,7 +602,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -521,7 +619,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 }
               ]
             }
@@ -539,7 +642,9 @@
               "questionText": "Kolik gramů [[sK]][[sA]] je rozpuštěno v roztoku, ve kterém je w([[sK]][[sA]]) = [[w]], bylo-li pro jeho přípravu použito [[mv]] g vody? [ms]",
               "formula": "ms = mv * w / (1 - w)",
               "equationText": "ms = mv * w / (1 - w)",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "sK",
@@ -550,7 +655,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -561,17 +672,22 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 },
                 {
                   "symbol": "w",
                   "name": "w",
                   "varType": "numeric",
-                  "minValue": 1,
-                  "maxValue": 1000,
-                  "step": 1,
+                  "minValue": 0.1,
+                  "maxValue": 0.9,
+                  "step": 0.1,
                   "unit": "—",
-                  "precision": 0
+                  "precision": 1
                 },
                 {
                   "symbol": "mv",
@@ -589,14 +705,16 @@
               "questionText": "Kolik gramů vody bude třeba, aby z [[ms]] g [[sK]][[sA]] byl připraven roztok, ve kterém je hmotnostní zlomek této soli [[w]]? [mv]",
               "formula": "mv = ms * (1 - w) / w",
               "equationText": "mv = ms * (1 - w) / w",
-              "targets": ["mv"],
+              "targets": [
+                "mv"
+              ],
               "variables": [
                 {
                   "symbol": "ms",
                   "name": "ms",
                   "varType": "numeric",
-                  "minValue": 1,
-                  "maxValue": 1000,
+                  "minValue": 200,
+                  "maxValue": 300,
                   "step": 1,
                   "unit": "g",
                   "precision": 0
@@ -610,7 +728,13 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sK"]
+                  "stringValues": [
+                    "Li",
+                    "Na",
+                    "K",
+                    "Rb",
+                    "Cs"
+                  ]
                 },
                 {
                   "symbol": "sA",
@@ -621,17 +745,22 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sA"]
+                  "stringValues": [
+                    "F",
+                    "Cl",
+                    "Br",
+                    "I"
+                  ]
                 },
                 {
                   "symbol": "w",
                   "name": "w",
                   "varType": "numeric",
-                  "minValue": 1,
-                  "maxValue": 1000,
-                  "step": 1,
+                  "minValue": 0.1,
+                  "maxValue": 0.7,
+                  "step": 0.1,
                   "unit": "—",
-                  "precision": 0
+                  "precision": 1
                 }
               ]
             },
@@ -639,7 +768,9 @@
               "questionText": "Kolik gramů [[sKK]][[sAA]] se vyloučí odpařením veškeré vody z [[V]] ml [[wperc]] (w/w) roztoku [[sKK]][[sAA]], jehož hustota je [[rho]] g*cm^-3? [ms]",
               "formula": "ms = V * rho * wperc / 100",
               "equationText": "ms = V * rho * wperc / 100",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "sKK",
@@ -650,7 +781,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sKK"]
+                  "stringValues": [
+                    "Mg",
+                    "Ca",
+                    "Sr",
+                    "Ba"
+                  ]
                 },
                 {
                   "symbol": "sAA",
@@ -661,7 +797,11 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["sAA"]
+                  "stringValues": [
+                    "O",
+                    "S",
+                    "SO4"
+                  ]
                 },
                 {
                   "symbol": "V",
@@ -704,7 +844,9 @@
               "questionText": "Jaký je hmotnostní zlomek [[KK]][[AA]] v roztoku, který vznikl z [[m1]] g vodného roztoku [[KK]][[AA]], ve kterém byl w([[KK]][[AA]]) = [[w1]], bylo-li do soustavy přidáno [[m2]] g vody? [w2]",
               "formula": "w2 = m1 * w1 / (m1 + m2)",
               "equationText": "w2 = m1 * w1 / (m1 + m2)",
-              "targets": ["w2"],
+              "targets": [
+                "w2"
+              ],
               "variables": [
                 {
                   "symbol": "KK",
@@ -715,7 +857,14 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["KK"]
+                  "stringValues": [
+                    "Mg",
+                    "Ca",
+                    "Sr",
+                    "Ba",
+                    "Zn",
+                    "Cu"
+                  ]
                 },
                 {
                   "symbol": "AA",
@@ -726,7 +875,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["AA"]
+                  "stringValues": [
+                    "O",
+                    "S",
+                    "SO4",
+                    "CO3"
+                  ]
                 },
                 {
                   "symbol": "m1",
@@ -764,7 +918,9 @@
               "questionText": "Jaký bude hmotnostní zlomek síranu měďnatého v roztoku, který vznikl rozpuštěním [[ms]] g CuSO4.5H2O ve [[mv]] g vody? [w]",
               "formula": "w = ms * (159.61/249.68) / (ms + mv)",
               "equationText": "w = ms * (159,61/249,68) / (ms + mv)",
-              "targets": ["w"],
+              "targets": [
+                "w"
+              ],
               "variables": [
                 {
                   "symbol": "ms",
@@ -792,7 +948,9 @@
               "questionText": "Jaké je hmotnostní procento [[KK]][[AA]] v roztoku, který vznikl z [[m1]] g [[w1perc]] (w/w) roztoku [[KK]][[AA]], k němuž bylo přidáno [[m2]] g vody? [w2perc]",
               "formula": "w2perc = m1 * w1perc / (m1 + m2)",
               "equationText": "w2perc = m1 * w1perc / (m1 + m2)",
-              "targets": ["w2perc"],
+              "targets": [
+                "w2perc"
+              ],
               "variables": [
                 {
                   "symbol": "KK",
@@ -803,7 +961,14 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["KK"]
+                  "stringValues": [
+                    "Mg",
+                    "Ca",
+                    "Sr",
+                    "Ba",
+                    "Zn",
+                    "Cu"
+                  ]
                 },
                 {
                   "symbol": "AA",
@@ -814,7 +979,12 @@
                   "step": 1,
                   "unit": "",
                   "precision": 0,
-                  "stringValues": ["AA"]
+                  "stringValues": [
+                    "O",
+                    "S",
+                    "SO4",
+                    "CO3"
+                  ]
                 },
                 {
                   "symbol": "m1",
@@ -857,7 +1027,9 @@
               "questionText": "Roztok byl připraven zředěním [[ms]] g absolutního ethanolu vodou na celkový objem [[V]] cm^3. Jaké je objemové procento ethanolu v roztoku? Hustota čistého ethanolu je [[rho]] g*cm^-3. [vperc]",
               "formula": "vperc = (ms / rho) / V * 100",
               "equationText": "vperc = (ms / rho) / V * 100",
-              "targets": ["vperc"],
+              "targets": [
+                "vperc"
+              ],
               "variables": [
                 {
                   "symbol": "ms",
@@ -900,7 +1072,9 @@
               "questionText": "Kolik g čisté látky musíme přidat do [[m1]] g [[w1perc]] roztoku, aby byl roztok [[w2perc]]? [m2]",
               "formula": "m2 = m1 * (w2perc - w1perc) / (100 - w2perc)",
               "equationText": "m2 = m1 * (w2perc - w1perc) / (100 - w2perc)",
-              "targets": ["m2"],
+              "targets": [
+                "m2"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -938,7 +1112,9 @@
               "questionText": "Kolik gramů [[w1perc]] roztoku musíme přidat ke [[m2]] gramům [[w2perc]] roztoku, aby vznikl roztok [[w3perc]]? [m1]",
               "formula": "m1 = m2 * (w3perc - w2perc) / (w1perc - w3perc)",
               "equationText": "m1 = m2 * (w3perc - w2perc) / (w1perc - w3perc)",
-              "targets": ["m1"],
+              "targets": [
+                "m1"
+              ],
               "variables": [
                 {
                   "symbol": "w1perc",
@@ -986,7 +1162,9 @@
               "questionText": "Jaká je výsledná koncentrace roztoku, který vznikl z [[m1]] g [[w1perc]] roztoku kyseliny chlorovodíkové, do něhož bylo zavedeno [[V]] dm^3 (přepočteno na normální podmínky) plynného chlorovodíku? [w2perc]",
               "formula": "w2perc = (m1*w1perc/100 + V*(36.46/22.4)) / (m1 + V*(36.46/22.4)) * 100",
               "equationText": "w2perc = [m1*w1perc/100 + V*(36,46/22,4)] / [m1 + V*(36,46/22,4)] * 100",
-              "targets": ["w2perc"],
+              "targets": [
+                "w2perc"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -1034,7 +1212,9 @@
               "questionText": "Jaká byla navážka Na_2SO_3.7H_2O na přípravu [[mr]] g roztoku siřičitanu sodného, ve kterém je hmotnostní zlomek vody [[w]]? [ms]",
               "formula": "ms = mr * (1 - w) / (1 - 126.14/252.19)",
               "equationText": "ms = mr * (1 - w) / (1 - 126,14/252,19)",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "mr",
@@ -1050,11 +1230,11 @@
                   "symbol": "w",
                   "name": "w",
                   "varType": "numeric",
-                  "minValue": 1,
-                  "maxValue": 1000,
-                  "step": 1,
+                  "minValue": 0.1,
+                  "maxValue": 0.9,
+                  "step": 0.1,
                   "unit": "—",
-                  "precision": 0
+                  "precision": 1
                 }
               ]
             },
@@ -1062,7 +1242,9 @@
               "questionText": "Kolik gramů vody bude nutno použít pro přípravu roztoku chloridu nikelnatého ze [[ms]] g NiCl_2*6H_2O, má-li být hmotnostní zlomek chloridu nikelnatého v připraveném roztoku [[w]]? [mv]",
               "formula": "mv = ms * (129.59/237.71) / w - ms",
               "equationText": "mv = ms * (129,59/237,71) / w - ms",
-              "targets": ["mv"],
+              "targets": [
+                "mv"
+              ],
               "variables": [
                 {
                   "symbol": "ms",
@@ -1078,11 +1260,11 @@
                   "symbol": "w",
                   "name": "w",
                   "varType": "numeric",
-                  "minValue": 1,
-                  "maxValue": 1000,
-                  "step": 1,
+                  "minValue": 0.1,
+                  "maxValue": 0.9,
+                  "step": 0.1,
                   "unit": "—",
-                  "precision": 0
+                  "precision": 1
                 }
               ]
             },
@@ -1090,7 +1272,9 @@
               "questionText": "Kolik gramů FeSO_4*7H_2O vznikne, dojde-li k odpaření vody z [[mr]] g [[wperc]] roztoku síranu železnatého? [ms]",
               "formula": "ms = mr * (wperc/100) * (278.06/151.92)",
               "equationText": "ms = mr * (wperc/100) * (278,06/151,92)",
-              "targets": ["ms"],
+              "targets": [
+                "ms"
+              ],
               "variables": [
                 {
                   "symbol": "mr",
@@ -1118,7 +1302,9 @@
               "questionText": "Na přípravu vývojky je třeba [[m1]] g Na2SO3, k dispozici je však pouze Na_2SO_3*7H_2O. Kolik gramů hydrátu je nutné použít na přípravu vývojky? [m2]",
               "formula": "m2 = m1 * (252.19/126.05)",
               "equationText": "m2 = m1 * (252,19/126,05)",
-              "targets": ["m2"],
+              "targets": [
+                "m2"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -1141,7 +1327,9 @@
               "questionText": "Jaké je hmotnostní procento (w/w) chloridu železitého v roztoku, který vznikl rozpuštěním [[ms]] g FeCl_3*6H_2O ve [[mv]] g vody? [wperc]",
               "formula": "wperc = ms * (162.20/270.32) / (ms + mv) * 100",
               "equationText": "wperc = ms * (162,20/270,32) / (ms + mv) * 100",
-              "targets": ["wperc"],
+              "targets": [
+                "wperc"
+              ],
               "variables": [
                 {
                   "symbol": "ms",
@@ -1169,7 +1357,9 @@
               "questionText": "Jaké je hmotnostní procento (w/w) FeCl_3 v roztoku, který vznikl z [[m1]] g [[w1perc]] (w/w) roztoku FeCl_3, bylo-li k němu přidáno [[m2]] g FeCl_3*6H_2O? [w2perc]",
               "formula": "w2perc = (m1*w1perc/100 + m2*(162.20/270.32)) / (m1 + m2) * 100",
               "equationText": "w2perc = [m1*w1perc/100 + m2*(162,20/270,32)] / (m1 + m2) * 100",
-              "targets": ["w2perc"],
+              "targets": [
+                "w2perc"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -1207,7 +1397,9 @@
               "questionText": "Jaký bude hmotnostní zlomek síranu měďnatého v roztoku, který byl připraven ze [[m1]] g roztoku síranu měďnatého, ve kterém byl hmotnostní zlomek CuSO_4 roven [[w1]], bylo-li k němu přidáno [[m2]] g CuSO_4*5H_2O? [w2]",
               "formula": "w2 = (m1*w1 + m2*(159.61/249.68)) / (m1 + m2)",
               "equationText": "w2 = [m1*w1 + m2*(159,61/249,68)] / (m1 + m2)",
-              "targets": ["w2"],
+              "targets": [
+                "w2"
+              ],
               "variables": [
                 {
                   "symbol": "m1",
@@ -1250,7 +1442,9 @@
               "questionText": "Bylo smícháno [[V1]] cm^3 roztoku methanolu o objemovém procentu [[v1perc=20]] (ρ = [[rho_r1=0.9483]] g*cm^-3) a [[V2]] cm^3 roztoku methanolu o objemovém procentu [[v2perc]] (ρ = [[rho_r2=0.9156]] g*cm^-3). Jaké je hmotnostní procento methanolu ve výsledném roztoku? Hustota čistého methanolu je [[rho_s=0.7917]] g*cm^-3. [wperc]",
               "formula": "wperc = (V1*(v1perc/100)*rho_s + V2*(v2perc/100)*rho_s) / (V1*rho_r1 + V2*rho_r2) * 100",
               "equationText": "wperc = [V1*(v1perc/100)*rho_s + V2*(v2perc/100)*rho_s] / [V1*rho_r1 + V2*rho_r2] * 100",
-              "targets": ["wperc"],
+              "targets": [
+                "wperc"
+              ],
               "variables": [
                 {
                   "symbol": "V1",

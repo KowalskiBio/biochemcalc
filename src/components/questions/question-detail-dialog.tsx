@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { MathRenderer } from "@/components/ui/math-renderer"
@@ -19,20 +20,23 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { UnitRenderer } from "@/components/ui/unit-renderer"
 
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError, constantsApi, generationApi, historyApi, templatesApi } from "@/lib/api"
 import { normalizeFormulaForEvaluation } from "@/lib/bulk-import-parser"
-import { calculateMolarMass } from "@/lib/chemical-formula-parser"
+import { extractTargets } from "@/lib/formula-checker"
 import {
   createRandom,
   evaluateExpression,
+  extractMolarMassValues,
   renderEquationAsLatex,
   resolveMolarMasses,
+  substituteRemainingMolarMasses,
+  substituteStringsInMolarMassReferences,
   validateEquationReferences,
 } from "@/lib/math-utils"
+import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   HistoryEntry,
@@ -44,7 +48,12 @@ import type {
   VariableWithPlaceholder,
   Variant,
 } from "@/lib/types"
-import { extractPlaceholders, extractPlaceholderValues, replacePlaceholder } from "@/lib/utils"
+import {
+  extractPlaceholders,
+  extractPlaceholderValues,
+  isAtomPlaceholder,
+  replacePlaceholder,
+} from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
 import { VariableEditorRow } from "./variable-editor-row"
@@ -271,6 +280,7 @@ export function QuestionDetailDialog({
   const [editEquationText, setEditEquationText] = useState("")
   const [editResultUnit, setEditResultUnit] = useState("")
   const [mockSeed, setMockSeed] = useState(0)
+  const [sampleSeed, setSampleSeed] = useState(1)
 
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
@@ -329,7 +339,7 @@ export function QuestionDetailDialog({
           const variant = await generationApi.regenerateVariant({
             templateId,
             mode: "closed",
-            seed: 1,
+            seed: sampleSeed,
             difficulty: "medium",
             optionCount: 5,
           })
@@ -368,7 +378,7 @@ export function QuestionDetailDialog({
     } finally {
       setIsLoading(false)
     }
-  }, [templateId, toast])
+  }, [templateId, toast, sampleSeed])
 
   const handleClearHistoryClick = useCallback(() => {
     if (!templateId) return
@@ -644,19 +654,20 @@ export function QuestionDetailDialog({
         if (existing && !existing.isRemoved) {
           nextVariables.push(existing)
         } else {
+          const isElement = isAtomPlaceholder(placeholder)
           nextVariables.push({
             key: `new-${placeholder}-${Date.now()}`,
             variableId: null,
             placeholder,
             name: cs.questions.variableDefaultName.replace("{placeholder}", placeholder),
             symbol: placeholder,
-            varType: "numeric",
+            varType: isElement ? "string" : "numeric",
             minValue: 0,
             maxValue: 100,
             step: 1,
             unit: "",
-            precision: 1,
-            stringValues: [],
+            precision: isElement ? 0 : 1,
+            stringValues: isElement ? [...KNOWN_ELEMENTS] : [],
             greaterThanVariableId: undefined,
             lessThanVariableId: undefined,
             isNew: true,
@@ -773,10 +784,14 @@ export function QuestionDetailDialog({
     const source = isEditingAnswer ? visibleVariables : displayTemplateVariables
     const variables = source.map((item) => {
       const variable = "variable" in item ? item.variable : item
-      return { placeholder: item.placeholder, symbol: variable.symbol }
+      return {
+        placeholder: item.placeholder,
+        symbol: variable.symbol,
+        varType: variable.varType,
+      }
     })
     for (const placeholder of fixedPlaceholderValues.keys()) {
-      variables.push({ placeholder, symbol: placeholder })
+      variables.push({ placeholder, symbol: placeholder, varType: "numeric" as const })
     }
     return variables
   }, [isEditingAnswer, visibleVariables, displayTemplateVariables, fixedPlaceholderValues])
@@ -791,39 +806,105 @@ export function QuestionDetailDialog({
     const items: { name: string; value: number; unit?: string }[] = []
     const seen = new Set<string>()
 
-    const molarMassRegex = /M_([A-Za-z0-9_().*·∙]+)/g
-    for (const match of activeEquationText.matchAll(molarMassRegex)) {
-      const name = match[0]
+    // Exclude variable symbols, placeholders, and answer targets so that
+    // placeholders like N or V are not mistaken for element constants.
+    const variableSymbols = new Set(
+      displayTemplateVariables
+        .flatMap((vwp) => [vwp.placeholder, vwp.variable.symbol])
+        .filter(Boolean),
+    )
+    const targets = templateDetails ? extractTargets(templateDetails.template.questionText) : []
+    const targetSymbols = targets.map((t) => t.symbol)
+    const excludedSymbols = new Set([...variableSymbols, ...targetSymbols])
+    const equationWithoutComment = activeEquationText.split("—")[0] ?? activeEquationText
+
+    const molarMassValues = extractMolarMassValues(equationWithoutComment, constants)
+    for (const [name, value] of Object.entries(molarMassValues)) {
       if (seen.has(name)) continue
-
-      // Prefer a custom molecular weight constant registered under M_*.
-      if (constants[name] !== undefined) {
-        seen.add(name)
-        items.push({ name, value: constants[name], unit: "g/mol" })
-        continue
-      }
-
-      const formula = match[1].replace(/_(\d+)(H_?2O)/g, ".$1$2").replace(/_/g, "")
-      const mass = calculateMolarMass(formula, constants)
-      if (mass !== null) {
-        seen.add(name)
-        items.push({ name, value: mass, unit: "g/mol" })
-      }
+      seen.add(name)
+      items.push({ name, value, unit: "g/mol" })
     }
 
     for (const [symbol, value] of Object.entries(constants)) {
-      if (seen.has(symbol)) continue
+      if (seen.has(symbol) || excludedSymbols.has(symbol)) continue
       const symbolRegex = new RegExp(
         `(?<![A-Za-z0-9_\u03B1-\u03C9])${escapeRegex(symbol)}(?![A-Za-z0-9_\u03B1-\u03C9])`,
       )
-      if (symbolRegex.test(activeEquationText)) {
+      if (symbolRegex.test(equationWithoutComment)) {
         seen.add(symbol)
         items.push({ name: symbol, value })
       }
     }
 
     return items
-  }, [activeEquationText, constants, templateDetails])
+  }, [activeEquationText, constants, templateDetails, displayTemplateVariables])
+
+  const buildSubstitutedEquation = useCallback(
+    (
+      equationText: string,
+      assignedValues: Record<string, number>,
+      assignedStrings: Record<string, string>,
+    ): string => {
+      const text = equationText.trim()
+      if (text.length === 0) return ""
+
+      const numericSources = displayTemplateVariables
+        .filter((vwp) => vwp.variable.varType === "numeric")
+        .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
+      const stringSources = displayTemplateVariables
+        .filter((vwp) => vwp.variable.varType === "string")
+        .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
+      const fixedSources = Array.from(fixedPlaceholderValues.keys()).map((placeholder) => ({
+        placeholder,
+        symbol: placeholder,
+      }))
+      const allNumericSources = [...numericSources, ...fixedSources]
+
+      let substituted = text
+      for (const v of allNumericSources) {
+        const value = assignedValues[v.placeholder]
+        if (value === undefined) continue
+        substituted = substituted.replace(
+          new RegExp(`\\[\\[${escapeRegex(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
+          String(value),
+        )
+      }
+      for (const v of stringSources) {
+        const value = assignedStrings[v.placeholder]
+        if (value === undefined) continue
+        substituted = substituted.replace(
+          new RegExp(`\\[\\[${escapeRegex(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
+          value,
+        )
+      }
+
+      const symbolsByLength = [...allNumericSources, ...stringSources].sort(
+        (a, b) => b.symbol.length - a.symbol.length,
+      )
+      for (const v of symbolsByLength) {
+        const value = assignedValues[v.placeholder] ?? assignedStrings[v.placeholder]
+        if (value === undefined) continue
+        substituted = substituted.replace(
+          new RegExp(
+            `(?<![A-Za-z0-9_\u03B1-\u03C9])${escapeRegex(v.symbol)}(?![A-Za-z0-9_\u03B1-\u03C9])`,
+            "g",
+          ),
+          String(value),
+        )
+      }
+
+      substituted = substituteStringsInMolarMassReferences(
+        substituted,
+        stringSources,
+        assignedStrings,
+      )
+      substituted = resolveMolarMasses(substituted, constants)
+      substituted = substituteRemainingMolarMasses(substituted)
+
+      return substituted
+    },
+    [displayTemplateVariables, fixedPlaceholderValues, constants],
+  )
 
   const undefinedTextPlaceholders = useMemo(() => {
     if (!templateDetails) return []
@@ -931,9 +1012,9 @@ export function QuestionDetailDialog({
     }
 
     substituted = resolveMolarMasses(substituted, constants)
+    substituted = substituteRemainingMolarMasses(substituted)
 
-    const expression = substituted.replace(/^[^=]*=\s*/, "")
-    const normalized = normalizeFormulaForEvaluation(expression)
+    const normalized = normalizeFormulaForEvaluation(substituted)
 
     try {
       const value = evaluateExpression(normalized, {}, constants)
@@ -1282,21 +1363,74 @@ export function QuestionDetailDialog({
                         {cs.questions.computedAnswerLabel}
                       </p>
                       {templateDetails.template.formula && sampleVariant ? (
-                        <p className="text-2xl font-bold text-primary">
-                          {sampleVariant.correctAnswer.toFixed(
-                            displayTemplateVariables[0]?.variable.precision ?? 2,
-                          )}
-                          {templateDetails.template.resultUnit ? " " : ""}
-                          <UnitRenderer unit={templateDetails.template.resultUnit} />
-                        </p>
+                        <div className="space-y-3">
+                          {(() => {
+                            const substituted = buildSubstitutedEquation(
+                              activeEquationText,
+                              sampleVariant.assignedValues,
+                              sampleVariant.assignedStrings ?? {},
+                            )
+                            return substituted.trim().length > 0 ? (
+                              <div className="rounded-lg bg-muted/30 p-3">
+                                <p className="text-xs font-medium text-foreground-secondary mb-1">
+                                  {cs.questions.equationLabel}
+                                </p>
+                                <MathRenderer text={renderEquationAsLatex(substituted)} />
+                              </div>
+                            ) : null
+                          })()}
+                          <div className="flex items-center justify-between gap-4">
+                            {sampleVariant.answersData && sampleVariant.answersData.length > 1 ? (
+                              <div className="space-y-1">
+                                {sampleVariant.answersData.map((a) => (
+                                  <p key={a.symbol} className="text-xl font-bold text-primary">
+                                    {a.symbol} ={" "}
+                                    <FormattedResult
+                                      value={a.value}
+                                      precision={Math.max(
+                                        2,
+                                        ...displayTemplateVariables.map(
+                                          (v) => v.variable.precision,
+                                        ),
+                                      )}
+                                      unit={a.unit}
+                                    />
+                                  </p>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-2xl font-bold text-primary">
+                                <FormattedResult
+                                  value={sampleVariant.correctAnswer}
+                                  precision={Math.max(
+                                    2,
+                                    ...displayTemplateVariables.map((v) => v.variable.precision),
+                                  )}
+                                  unit={templateDetails.template.resultUnit}
+                                />
+                              </p>
+                            )}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setSampleSeed((s) => s + 1)}
+                            >
+                              {cs.questions.regenerateMock}
+                            </Button>
+                          </div>
+                        </div>
                       ) : templateDetails.template.numericAnswer != null ? (
                         <div className="space-y-1">
                           <p className="text-2xl font-bold text-primary">
-                            {templateDetails.template.numericAnswer.toFixed(
-                              displayTemplateVariables[0]?.variable.precision ?? 2,
-                            )}
-                            {templateDetails.template.resultUnit ? " " : ""}
-                            <UnitRenderer unit={templateDetails.template.resultUnit} />
+                            <FormattedResult
+                              value={templateDetails.template.numericAnswer}
+                              precision={Math.max(
+                                2,
+                                ...displayTemplateVariables.map((v) => v.variable.precision),
+                              )}
+                              unit={templateDetails.template.resultUnit}
+                            />
                           </p>
                           <p className="text-xs text-foreground-secondary">
                             {cs.questions.importedAnswer}
@@ -1361,9 +1495,11 @@ export function QuestionDetailDialog({
                                     {cs.questions.computedAnswerLabel}
                                   </p>
                                   <p className="text-2xl font-bold text-primary">
-                                    {mockResult.value.toFixed(mockResult.resultPrecision)}
-                                    {templateDetails.template.resultUnit ? " " : ""}
-                                    <UnitRenderer unit={templateDetails.template.resultUnit} />
+                                    <FormattedResult
+                                      value={mockResult.value}
+                                      precision={mockResult.resultPrecision}
+                                      unit={templateDetails.template.resultUnit}
+                                    />
                                   </p>
                                 </div>
                                 <Button

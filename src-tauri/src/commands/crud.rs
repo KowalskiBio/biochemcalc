@@ -197,7 +197,7 @@ pub fn create_topic(
     state: State<'_, AppState>,
     payload: CreateTopicPayload,
 ) -> Result<Topic, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let topic = Topic::new(payload.name);
     TopicRepo::insert(&conn, &topic)?;
     Ok(topic)
@@ -205,13 +205,13 @@ pub fn create_topic(
 
 #[tauri::command]
 pub fn list_topics(state: State<'_, AppState>) -> Result<Vec<Topic>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TopicRepo::list_all(&conn)
 }
 
 #[tauri::command]
 pub fn get_topic(state: State<'_, AppState>, id: Uuid) -> Result<Topic, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TopicRepo::get_by_id(&conn, &id)
 }
 
@@ -227,7 +227,7 @@ pub fn update_topic(
     state: State<'_, AppState>,
     payload: UpdateTopicPayload,
 ) -> Result<Topic, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let topic = Topic {
         id: payload.id,
         name: payload.name,
@@ -239,7 +239,7 @@ pub fn update_topic(
 
 #[tauri::command]
 pub fn delete_topic(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TopicRepo::delete(&conn, &id)
 }
 
@@ -266,7 +266,7 @@ pub fn create_variable(
     state: State<'_, AppState>,
     payload: CreateVariablePayload,
 ) -> Result<Variable, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let variable = match payload.var_type {
         VariableType::String => Variable::new_string(
             payload.name,
@@ -289,13 +289,13 @@ pub fn create_variable(
 
 #[tauri::command]
 pub fn list_variables(state: State<'_, AppState>) -> Result<Vec<Variable>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     VariableRepo::list_all(&conn)
 }
 
 #[tauri::command]
 pub fn get_variable(state: State<'_, AppState>, id: Uuid) -> Result<Variable, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     VariableRepo::get_by_id(&conn, &id)
 }
 
@@ -319,7 +319,7 @@ pub fn update_variable(
     state: State<'_, AppState>,
     payload: UpdateVariablePayload,
 ) -> Result<Variable, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let variable = Variable {
         id: payload.id,
         name: payload.name,
@@ -341,7 +341,7 @@ pub fn update_variable(
 
 #[tauri::command]
 pub fn delete_variable(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     VariableRepo::delete(&conn, &id)
 }
 
@@ -365,7 +365,7 @@ pub fn create_constant(
     state: State<'_, AppState>,
     payload: CreateConstantPayload,
 ) -> Result<Constant, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let mut constant = Constant::new(
         payload.name,
         payload.symbol,
@@ -380,13 +380,13 @@ pub fn create_constant(
 
 #[tauri::command]
 pub fn list_constants(state: State<'_, AppState>) -> Result<Vec<Constant>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     ConstantRepo::list_all(&conn)
 }
 
 #[tauri::command]
 pub fn get_constant(state: State<'_, AppState>, id: Uuid) -> Result<Constant, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     ConstantRepo::get_by_id(&conn, &id)
 }
 
@@ -406,7 +406,7 @@ pub fn update_constant(
     state: State<'_, AppState>,
     payload: UpdateConstantPayload,
 ) -> Result<Constant, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     // Preserve the existing built-in flag so the frontend cannot change it.
     let existing = ConstantRepo::get_by_id(&conn, &payload.id)?;
     let constant = Constant {
@@ -425,7 +425,7 @@ pub fn update_constant(
 
 #[tauri::command]
 pub fn delete_constant(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     ConstantRepo::delete(&conn, &id)
 }
 
@@ -594,7 +594,7 @@ pub fn create_template(
     state: State<'_, AppState>,
     payload: CreateTemplatePayload,
 ) -> Result<Template, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     if TemplateRepo::find_by_question_and_equation(
         &conn,
         payload.question_text.trim(),
@@ -629,13 +629,13 @@ pub fn create_template(
 
 #[tauri::command]
 pub fn list_templates(state: State<'_, AppState>) -> Result<Vec<Template>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TemplateRepo::list_all(&conn)
 }
 
 #[tauri::command]
 pub fn get_template(state: State<'_, AppState>, id: Uuid) -> Result<Template, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TemplateRepo::get_by_id(&conn, &id)
 }
 
@@ -700,7 +700,7 @@ pub fn get_template_with_details(
     state: State<'_, AppState>,
     id: Uuid,
 ) -> Result<TemplateWithDetails, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     load_template_with_details(&conn, &id)
 }
 
@@ -717,7 +717,7 @@ pub fn get_template_location(
     state: State<'_, AppState>,
     id: Uuid,
 ) -> Result<Option<TemplateLocation>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     if let Some((set_id, category_id)) = SetRepo::find_by_template_id(&conn, &id)? {
         let category = CategoryRepo::get_by_id(&conn, &category_id)?;
         Ok(Some(TemplateLocation {
@@ -750,7 +750,7 @@ pub fn update_template(
     state: State<'_, AppState>,
     payload: UpdateTemplatePayload,
 ) -> Result<Template, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     if let Some(existing) = TemplateRepo::find_by_question_and_equation(
         &conn,
         payload.question_text.trim(),
@@ -842,7 +842,7 @@ pub fn update_templates_by_equation(
     state: State<'_, AppState>,
     payload: UpdateTemplatesByEquationPayload,
 ) -> Result<usize, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let old_templates = TemplateRepo::find_by_equation_text(&conn, &payload.old_equation_text)?;
     let affected_ids = TemplateRepo::update_by_equation_text(
         &conn,
@@ -1167,7 +1167,7 @@ pub fn update_template_with_variables(
     payload: UpdateTemplateWithVariablesPayload,
 ) -> Result<TemplateWithDetails, DbError> {
     let id = payload.id;
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     apply_template_variable_mutations(&conn, payload)?;
     drop(conn);
 
@@ -1176,7 +1176,7 @@ pub fn update_template_with_variables(
 
 #[tauri::command]
 pub fn delete_template(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TemplateRepo::delete(&conn, &id)
 }
 
@@ -1187,7 +1187,7 @@ pub fn list_variable_history_by_template(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<crate::models::VariableHistoryEntry>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     VariableHistoryRepo::list_by_template(&conn, &template_id, limit, offset)
 }
 
@@ -1197,7 +1197,7 @@ pub fn list_all_variable_history(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<crate::models::VariableHistoryEntry>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     VariableHistoryRepo::list_all(&conn, limit, offset)
 }
 
@@ -1208,7 +1208,7 @@ pub fn list_template_history_by_template(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<crate::models::TemplateHistoryEntry>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TemplateHistoryRepo::list_by_template(&conn, &template_id, limit, offset)
 }
 
@@ -1218,7 +1218,7 @@ pub fn list_all_template_history(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<crate::models::TemplateHistoryEntry>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     TemplateHistoryRepo::list_all(&conn, limit, offset)
 }
 
@@ -1233,7 +1233,7 @@ pub fn clear_template_history(
     state: State<'_, AppState>,
     payload: ClearTemplateHistoryPayload,
 ) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     VariableHistoryRepo::delete_for_template(&conn, &payload.template_id)?;
     TemplateHistoryRepo::delete_for_template(&conn, &payload.template_id)?;
     Ok(())
@@ -1241,7 +1241,7 @@ pub fn clear_template_history(
 
 #[tauri::command]
 pub fn clear_all_history(state: State<'_, AppState>) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     conn.execute("DELETE FROM variable_history", [])?;
     conn.execute("DELETE FROM template_history", [])?;
     Ok(())
@@ -1263,7 +1263,7 @@ pub fn create_category(
     state: State<'_, AppState>,
     payload: CreateCategoryPayload,
 ) -> Result<crate::models::Category, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let (category, _) = CategoryRepo::create(&conn, payload.topic_id, payload.point_value)?;
     Ok(category)
 }
@@ -1272,7 +1272,7 @@ pub fn create_category(
 pub fn list_categories(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::models::Category>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     CategoryRepo::list_all(&conn)
 }
 
@@ -1281,7 +1281,7 @@ pub fn list_categories_by_topic(
     state: State<'_, AppState>,
     topic_id: Uuid,
 ) -> Result<Vec<crate::models::Category>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     CategoryRepo::list_by_topic(&conn, &topic_id)
 }
 
@@ -1290,7 +1290,7 @@ pub fn get_category(
     state: State<'_, AppState>,
     id: Uuid,
 ) -> Result<crate::models::Category, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     CategoryRepo::get_by_id(&conn, &id)
 }
 
@@ -1299,13 +1299,13 @@ pub fn get_category_with_sets(
     state: State<'_, AppState>,
     id: Uuid,
 ) -> Result<(crate::models::Category, Vec<crate::models::Set>), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     CategoryRepo::get_with_sets(&conn, &id)
 }
 
 #[tauri::command]
 pub fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     CategoryRepo::delete(&conn, &id)
 }
 
@@ -1321,7 +1321,7 @@ pub fn update_set_mode(
     state: State<'_, AppState>,
     payload: UpdateSetModePayload,
 ) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     SetRepo::update_mode(&conn, &payload.set_id, payload.mode)
 }
 
@@ -1337,7 +1337,7 @@ pub fn add_template_to_set(
     state: State<'_, AppState>,
     payload: SetTemplatePayload,
 ) -> Result<crate::models::SetTemplate, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     SetRepo::add_template(&conn, &payload.set_id, &payload.template_id)
 }
 
@@ -1346,7 +1346,7 @@ pub fn remove_template_from_set(
     state: State<'_, AppState>,
     payload: SetTemplatePayload,
 ) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     SetRepo::remove_template(&conn, &payload.set_id, &payload.template_id)
 }
 
@@ -1362,7 +1362,7 @@ pub fn reorder_templates_in_set(
     state: State<'_, AppState>,
     payload: ReorderTemplatesPayload,
 ) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     SetRepo::reorder(&conn, &payload.set_id, &payload.template_ids)
 }
 
@@ -1371,7 +1371,7 @@ pub fn get_set_with_templates(
     state: State<'_, AppState>,
     set_id: Uuid,
 ) -> Result<(crate::models::Set, Vec<TemplateWithDetails>), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let set = conn.query_row(
         "SELECT id, category_id, set_index, mode FROM sets WHERE id = ?1",
         rusqlite::params![set_id],

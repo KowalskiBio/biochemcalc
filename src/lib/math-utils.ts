@@ -1,7 +1,8 @@
 import { normalizeFormulaForEvaluation } from "@/lib/bulk-import-parser"
-import { parseChemicalFormula } from "@/lib/chemical-formula-parser"
-import type { LocalVariableEdit } from "@/lib/types"
-import { extractPlaceholders } from "@/lib/utils"
+import { calculateMolarMass, parseChemicalFormula } from "@/lib/chemical-formula-parser"
+import { ATOMIC_WEIGHTS } from "@/lib/periodic-table-data"
+import type { LocalVariableEdit, VariableWithPlaceholder, Variant } from "@/lib/types"
+import { extractPlaceholders, extractPlaceholderValues } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -15,6 +16,7 @@ type TokenType =
   | "lparen"
   | "rparen"
   | "comma"
+  | "semicolon"
   | "eof"
 
 interface Token {
@@ -65,53 +67,91 @@ function substituteSpecialSymbols(
   return result
 }
 
+const MOLAR_MASS_REFERENCE_REGEX = /M_([A-Za-z0-9_().*·∙]+)/g
+
+function normalizeMolarMassFormula(formulaPart: string): string {
+  return formulaPart.replace(/_(\d+)(H_?2O)/g, ".$1$2").replace(/_/g, "")
+}
+
+function parseMolarMassFormula(
+  formulaPart: string,
+  atomicWeights: Record<string, number> = {},
+): { ok: true; value: number; matched: string } | { ok: false } {
+  const normalized = normalizeMolarMassFormula(formulaPart)
+  const parsed = parseChemicalFormula(normalized, atomicWeights)
+  if (parsed.ok) {
+    return { ok: true, value: parsed.value, matched: formulaPart }
+  }
+
+  for (let end = formulaPart.length - 1; end > 0; end--) {
+    const prefix = formulaPart.slice(0, end)
+    const normalizedPrefix = normalizeMolarMassFormula(prefix)
+    const prefixResult = parseChemicalFormula(normalizedPrefix, atomicWeights)
+    if (prefixResult.ok) {
+      return { ok: true, value: prefixResult.value, matched: prefix }
+    }
+  }
+
+  return { ok: false }
+}
+
 export function resolveMolarMasses(
   text: string,
   atomicWeights: Record<string, number> = {},
 ): string {
-  const result: string[] = []
-  let i = 0
-  while (i < text.length) {
-    if (text.startsWith("M_", i)) {
-      const start = i + 2
-      let end = start
-      let parenDepth = 0
-      while (end < text.length) {
-        const c = text[end]
-        const isFormulaChar =
-          /[A-Za-z0-9_.*·∙]/.test(c)
-        if (isFormulaChar) {
-          end++
-        } else if (c === "(") {
-          parenDepth++
-          end++
-        } else if (c === ")" && parenDepth > 0) {
-          parenDepth--
-          end++
-        } else {
-          break
-        }
+  return text.replace(MOLAR_MASS_REFERENCE_REGEX, (match, formulaPart) => {
+    if (atomicWeights[match] !== undefined) {
+      return String(atomicWeights[match])
+    }
+    const parsed = parseMolarMassFormula(formulaPart, atomicWeights)
+    if (!parsed.ok) return match
+    const rest = match.slice(2 + parsed.matched.length)
+    return String(parsed.value) + rest
+  })
+}
+
+export function extractMolarMassValues(
+  text: string,
+  constants: Record<string, number> = {},
+): Record<string, number> {
+  const result: Record<string, number> = {}
+  for (const match of text.matchAll(MOLAR_MASS_REFERENCE_REGEX)) {
+    const fullMatch = match[0]
+    if (result[fullMatch] !== undefined) continue
+
+    if (constants[fullMatch] !== undefined) {
+      result[fullMatch] = constants[fullMatch]
+      continue
+    }
+
+    const formulaPart = fullMatch.slice(2)
+    const parsed = parseMolarMassFormula(formulaPart, constants)
+    if (parsed.ok) {
+      const key = `M_${parsed.matched}`
+      if (result[key] === undefined) {
+        result[key] = parsed.value
       }
-      const formulaPart = text.slice(start, end)
-      if (atomicWeights[`M_${formulaPart}`] !== undefined) {
-        result.push(String(atomicWeights[`M_${formulaPart}`]))
-      } else {
-        const withHydrateDots = formulaPart.replace(/_(\d+)(H_?2O)/g, ".$1$2")
-        const formula = withHydrateDots.replace(/_/g, "")
-        const parsed = parseChemicalFormula(formula, atomicWeights)
-        if (parsed.ok) {
-          result.push(String(parsed.value))
-        } else {
-          result.push(text.slice(i, end))
-        }
-      }
-      i = end
     } else {
-      result.push(text[i])
-      i++
+      const simpleFormula = formulaPart.replace(/_/g, "")
+      if (simpleFormula in ATOMIC_WEIGHTS) {
+        result[fullMatch] = ATOMIC_WEIGHTS[simpleFormula]
+      }
     }
   }
-  return result.join("")
+  return result
+}
+
+export function substituteRemainingMolarMasses(text: string): string {
+  return text.replace(MOLAR_MASS_REFERENCE_REGEX, (match, formulaPart) => {
+    const parsed = parseMolarMassFormula(formulaPart, ATOMIC_WEIGHTS)
+    if (parsed.ok) {
+      const rest = match.slice(2 + parsed.matched.length)
+      return String(parsed.value) + rest
+    }
+    const simpleFormula = formulaPart.replace(/_/g, "")
+    if (simpleFormula in ATOMIC_WEIGHTS) return String(ATOMIC_WEIGHTS[simpleFormula])
+    return match
+  })
 }
 
 function tokenize(input: string): Token[] {
@@ -140,6 +180,12 @@ function tokenize(input: string): Token[] {
 
     if (char === ",") {
       tokens.push({ type: "comma", value: char })
+      i++
+      continue
+    }
+
+    if (char === ";") {
+      tokens.push({ type: "semicolon", value: char })
       i++
       continue
     }
@@ -228,7 +274,19 @@ interface UnitNode {
   operand: AstNode
 }
 
-type AstNode = NumberNode | IdentifierNode | BinaryNode | UnaryNode | FunctionNode | UnitNode
+interface ParenthesizedNode {
+  kind: "parenthesized"
+  inner: AstNode
+}
+
+type AstNode =
+  | NumberNode
+  | IdentifierNode
+  | BinaryNode
+  | UnaryNode
+  | FunctionNode
+  | UnitNode
+  | ParenthesizedNode
 
 // ---------------------------------------------------------------------------
 // Parser (recursive descent)
@@ -351,7 +409,7 @@ class Parser {
       this.consume()
       const node = this.parseExpression()
       this.expect("rparen")
-      return node
+      return { kind: "parenthesized", inner: node }
     }
 
     if (token.type === "percent") {
@@ -375,6 +433,39 @@ function parseExpressionOnly(input: string): AstNode {
   return parser.parse()
 }
 
+interface FormulaAssignment {
+  target: string
+  expression: string
+}
+
+function isSingleIdentifier(s: string): boolean {
+  if (s.length === 0) return false
+  if (!IDENTIFIER_START.test(s[0])) return false
+  return s.slice(1).split("").every((c) => IDENTIFIER_BODY.test(c))
+}
+
+function parseAssignments(input: string): FormulaAssignment[] {
+  const withoutComment = (input.split("—")[0] ?? input).trim()
+  const parts = withoutComment
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  const assignments: FormulaAssignment[] = []
+  for (const part of parts) {
+    const eqPos = part.indexOf("=")
+    if (eqPos !== -1) {
+      const before = part.slice(0, eqPos).trim()
+      const after = part.slice(eqPos + 1).trim()
+      if (isSingleIdentifier(before) && after.length > 0) {
+        assignments.push({ target: before, expression: after })
+        continue
+      }
+    }
+    assignments.push({ target: "", expression: part })
+  }
+  return assignments
+}
+
 // ---------------------------------------------------------------------------
 // Evaluator
 // ---------------------------------------------------------------------------
@@ -385,13 +476,49 @@ export function evaluateExpression(
   constants: Record<string, number> = {},
 ): number {
   const normalized = normalizeFormulaForEvaluation(expression)
-  const rhs = normalized.includes("=") ? normalized.slice(normalized.indexOf("=") + 1) : normalized
-  const trimmed = rhs.trim()
+  const trimmed = normalized.trim()
+  if (trimmed.length === 0) {
+    throw new Error("Výraz je prázdný")
+  }
+
+  const assignments = parseAssignments(trimmed)
+  if (assignments.length === 1 && assignments[0].target === "") {
+    return evaluateSingleExpression(assignments[0].expression, context, constants)
+  }
+
+  const results: Record<string, number> = { ...context }
+  for (const assignment of assignments) {
+    const value = evaluateSingleExpression(assignment.expression, results, constants)
+    if (assignment.target) {
+      results[assignment.target] = value
+    }
+  }
+
+  for (let i = assignments.length - 1; i >= 0; i--) {
+    if (assignments[i].target) {
+      return results[assignments[i].target]
+    }
+  }
+  return evaluateSingleExpression(assignments[assignments.length - 1].expression, results, constants)
+}
+
+function evaluateSingleExpression(
+  expression: string,
+  context: Record<string, number> = {},
+  constants: Record<string, number> = {},
+): number {
+  const trimmed = expression.trim()
   if (trimmed.length === 0) {
     throw new Error("Výraz je prázdný")
   }
 
   const allConstants = { ...CONSTANTS, ...constants }
+  if (allConstants.N_A !== undefined && allConstants.NA === undefined) {
+    allConstants.NA = allConstants.N_A
+  } else if (allConstants.NA !== undefined && allConstants.N_A === undefined) {
+    allConstants.N_A = allConstants.NA
+  }
+  const molarMassValues = extractMolarMassValues(trimmed, constants)
   const withMolarMasses = resolveMolarMasses(trimmed, constants)
   const prepared = substituteSpecialSymbols(withMolarMasses, Object.keys(constants), (symbol) => {
     const value = constants[symbol]
@@ -399,7 +526,7 @@ export function evaluateExpression(
   })
 
   const node = parseExpressionOnly(prepared)
-  return evaluateNode(node, { ...context, ...allConstants })
+  return evaluateNode(node, { ...context, ...allConstants, ...molarMassValues })
 }
 
 function evaluateNode(node: AstNode, context: Record<string, number>): number {
@@ -413,6 +540,13 @@ function evaluateNode(node: AstNode, context: Record<string, number>): number {
       }
       if (node.name in CONSTANTS) {
         return CONSTANTS[node.name]
+      }
+      if (node.name.startsWith("M_")) {
+        const formulaPart = node.name.slice(2).replace(/_/g, "")
+        const mass = calculateMolarMass(formulaPart)
+        if (mass !== null) {
+          return mass
+        }
       }
       throw new Error(`Neznámá proměnná: ${node.name}`)
     }
@@ -477,6 +611,9 @@ function evaluateNode(node: AstNode, context: Record<string, number>): number {
     case "unit":
       return 1
 
+    case "parenthesized":
+      return evaluateNode(node.inner, context)
+
     default:
       throw new Error("Neplatný výraz")
   }
@@ -486,9 +623,47 @@ function evaluateNode(node: AstNode, context: Record<string, number>): number {
 // LaTeX rendering
 // ---------------------------------------------------------------------------
 
-function needsLatexEscape(name: string): string {
-  const escaped = name.replace(/%/g, "\\%").replace(/_/g, "\\_")
-  return escaped.includes("\\") ? `\\mathrm{${escaped}}` : escaped
+function escapeIdentifierPart(name: string): string {
+  const escaped = name.replace(/%/g, "\\%")
+  // Multi-letter alphabetic identifiers look better in roman type.
+  if (escaped.length > 1 && /^[A-Za-z]+$/.test(escaped)) {
+    return `\\mathrm{${escaped}}`
+  }
+  return escaped
+}
+
+function identifierToLatex(name: string): string {
+  // Molar-mass references: M_<formula> -> M_{\mathrm{<formula>}}
+  if (name.startsWith("M_")) {
+    const formula = name.slice(2)
+    const parts = formula.split("_")
+    const latexParts = parts.map((part) =>
+      part.replace(/(\d+)/g, "_{$1}").replace(/([A-Za-z]+)/g, "\\mathrm{$1}"),
+    )
+    return `M_{${latexParts.join("")}}`
+  }
+
+  const trailingDigits = name.match(/(\d+)$/)
+  const digits = trailingDigits ? trailingDigits[1] : undefined
+  const base = digits ? name.slice(0, -digits.length) : name
+
+  if (!base.includes("_")) {
+    return digits ? `${escapeIdentifierPart(base)}_{${digits}}` : escapeIdentifierPart(base)
+  }
+
+  const parts = base.split("_")
+  const head = parts[0]
+  const tail = parts.slice(1)
+  const subscriptParts = digits ? [...tail, digits] : tail
+  let result = escapeIdentifierPart(head)
+  if (subscriptParts.length > 0) {
+    result += `_{${subscriptParts.map(escapeIdentifierPart).join("")}}`
+  }
+  return result
+}
+
+function stripParentheses(node: AstNode): AstNode {
+  return node.kind === "parenthesized" ? node.inner : node
 }
 
 function nodeToLatex(node: AstNode): string {
@@ -497,17 +672,21 @@ function nodeToLatex(node: AstNode): string {
       return String(node.value)
 
     case "identifier":
-      return needsLatexEscape(node.name)
+      return identifierToLatex(node.name)
 
     case "binary": {
-      const left = nodeToLatex(node.left)
-      const right = nodeToLatex(node.right)
       if (node.operator === "/") {
+        const left = nodeToLatex(stripParentheses(node.left))
+        const right = nodeToLatex(stripParentheses(node.right))
         return `\\frac{${left}}{${right}}`
       }
       if (node.operator === "^") {
+        const left = nodeToLatex(stripParentheses(node.left))
+        const right = nodeToLatex(stripParentheses(node.right))
         return `{${left}}^{${right}}`
       }
+      const left = nodeToLatex(node.left)
+      const right = nodeToLatex(node.right)
       if (node.operator === "=") {
         return `${left} = ${right}`
       }
@@ -534,13 +713,16 @@ function nodeToLatex(node: AstNode): string {
       if (FUNCTIONS.has(node.name)) {
         return `\\${node.name}\\left(${arg}\\right)`
       }
-      return `${needsLatexEscape(node.name)}\\left(${arg}\\right)`
+      return `${identifierToLatex(node.name)}\\left(${arg}\\right)`
     }
 
     case "unit": {
       const operand = nodeToLatex(node.operand)
       return `${operand}\\%`
     }
+
+    case "parenthesized":
+      return `\\left(${nodeToLatex(node.inner)}\\right)`
 
     default:
       return ""
@@ -556,7 +738,7 @@ function preprocessEquation(text: string): string {
     .replace(/³/g, "^3")
 }
 
-export function renderEquationAsLatex(text: string): string {
+function renderSingleEquationAsLatex(text: string): string {
   const trimmed = text.trim()
   if (trimmed.length === 0) {
     return ""
@@ -582,6 +764,27 @@ export function renderEquationAsLatex(text: string): string {
     const escaped = normalized.replace(/\\/g, "\\\\").replace(/_/g, "\\_")
     return `$$\\text{${escaped}}$$`
   }
+}
+
+export function renderEquationAsLatex(text: string): string {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) {
+    return ""
+  }
+
+  const parts = trimmed
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  if (parts.length === 0) {
+    return ""
+  }
+
+  const renderedParts = parts.map((part) => renderSingleEquationAsLatex(part))
+  const inner = renderedParts
+    .map((part) => part.replace(/^\$\$/, "").replace(/\$\$$/, ""))
+    .join(" \\; \\text{;} \\; ")
+  return `$$${inner}$$`
 }
 
 // ---------------------------------------------------------------------------
@@ -613,7 +816,151 @@ export function pickMockValues(
 
 export function formatNumberMaxDecimals(value: number | undefined | null, maxDecimals = 2): string {
   if (value == null || !Number.isFinite(value)) return ""
-  return Number(value.toFixed(maxDecimals)).toString()
+  const decimals = Math.max(0, maxDecimals)
+  const fixed = value.toFixed(decimals)
+  const rounded = Number(fixed)
+  if (rounded === 0 && value !== 0) {
+    const precision = Math.max(0, decimals - 1)
+    return value
+      .toExponential(precision)
+      .replace(/e([+-]?)(\d+)/, (_, sign: string, digits: string) => {
+        return `×10^${sign === "-" ? "-" : ""}${digits}`
+      })
+  }
+  return rounded.toString()
+}
+
+export function substituteStringsInMolarMassReferences(
+  text: string,
+  stringSources: Array<{ placeholder: string; symbol: string }>,
+  assignedStrings: Record<string, string>,
+): string {
+  let result = text
+  for (const v of stringSources) {
+    const value = assignedStrings[v.placeholder] ?? assignedStrings[v.symbol]
+    if (value === undefined) continue
+
+    const replaceRef = (symbol: string) => {
+      const escaped = escapeRegexLiteral(symbol)
+      result = result.replace(new RegExp(`M_${escaped}(?![A-Za-z0-9_])`, "g"), () => `M_${value}`)
+    }
+
+    replaceRef(v.symbol)
+    if (v.placeholder !== v.symbol) {
+      replaceRef(v.placeholder)
+    }
+  }
+  return result
+}
+
+export function buildSubstitutedEquation(
+  equationText: string,
+  variables: VariableWithPlaceholder[],
+  assignedValues: Record<string, number>,
+  assignedStrings: Record<string, string>,
+  constants: Record<string, number>,
+  questionText?: string,
+): string {
+  const text = equationText.trim()
+  if (text.length === 0) return ""
+
+  const numericSources = variables
+    .filter((vwp) => vwp.variable.varType === "numeric" && vwp.placeholder !== "ANS")
+    .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
+  const stringSources = variables
+    .filter((vwp) => vwp.variable.varType === "string" && vwp.placeholder !== "ANS")
+    .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
+
+  const fixedMap = new Map<string, number>()
+  if (questionText) {
+    for (const { symbol, value } of extractPlaceholderValues(questionText)) {
+      if (value === undefined) continue
+      const numeric = Number(value)
+      if (!Number.isNaN(numeric)) {
+        fixedMap.set(symbol, numeric)
+      }
+    }
+  }
+  const fixedSources = Array.from(fixedMap.keys()).map((placeholder) => ({
+    placeholder,
+    symbol: placeholder,
+  }))
+  const allNumericSources = [...numericSources, ...fixedSources]
+
+  let substituted = text
+  for (const v of allNumericSources) {
+    const value = assignedValues[v.placeholder] ?? assignedValues[v.symbol]
+    if (value === undefined) continue
+    substituted = substituted.replace(
+      new RegExp(`\\[\\[${escapeRegexLiteral(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
+      String(value),
+    )
+  }
+  for (const v of stringSources) {
+    const value = assignedStrings[v.placeholder] ?? assignedStrings[v.symbol]
+    if (value === undefined) continue
+    substituted = substituted.replace(
+      new RegExp(`\\[\\[${escapeRegexLiteral(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
+      value,
+    )
+  }
+
+  const symbolsByLength = [...allNumericSources, ...stringSources].sort(
+    (a, b) => b.symbol.length - a.symbol.length,
+  )
+  for (const v of symbolsByLength) {
+    const value =
+      assignedValues[v.placeholder] ??
+      assignedValues[v.symbol] ??
+      assignedStrings[v.placeholder] ??
+      assignedStrings[v.symbol]
+    if (value === undefined) continue
+    substituted = substituted.replace(
+      new RegExp(
+        `(?<![A-Za-z0-9_${GREEK_START}-${GREEK_END}])${escapeRegexLiteral(v.symbol)}(?![A-Za-z0-9_${GREEK_START}-${GREEK_END}])`,
+        "g",
+      ),
+      String(value),
+    )
+  }
+
+  substituted = substituteStringsInMolarMassReferences(substituted, stringSources, assignedStrings)
+  substituted = resolveMolarMasses(substituted, constants)
+  substituted = substituteRemainingMolarMasses(substituted)
+
+  return substituted
+}
+
+export function evaluateVariantAnswer(
+  equationText: string,
+  variables: VariableWithPlaceholder[],
+  variant: Variant,
+  constants: Record<string, number>,
+  questionText?: string,
+):
+  | { ok: true; value: number; substituted: string }
+  | { ok: false; error: string; substituted: string } {
+  const substituted = buildSubstitutedEquation(
+    equationText,
+    variables,
+    variant.assignedValues,
+    variant.assignedStrings ?? {},
+    constants,
+    questionText,
+  )
+  if (substituted.trim().length === 0) {
+    return { ok: false, error: "Equation is empty", substituted }
+  }
+
+  const expression = substituted.replace(/^[^=]*=\s*/, "")
+  const normalized = normalizeFormulaForEvaluation(expression)
+
+  try {
+    const value = evaluateExpression(normalized, {}, constants)
+    return { ok: true, value, substituted }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err), substituted }
+  }
 }
 
 export function createRandom(seed: number): () => number {
@@ -633,6 +980,7 @@ export function createRandom(seed: number): () => number {
 interface VariableReference {
   placeholder: string
   symbol?: string
+  varType?: "numeric" | "string"
 }
 
 export function validateEquationReferences(
@@ -645,11 +993,22 @@ export function validateEquationReferences(
     return []
   }
 
+  // Strip explanatory comments after an em dash so words like "Avogadrova"
+  // inside "— (NA = Avogadrova konstanta)" are not treated as placeholders.
+  const equationWithoutComment = trimmed.split("—")[0] ?? trimmed
+
   const available = new Set<string>()
+  const stringVariables = new Set<string>()
   for (const variable of variables) {
     available.add(variable.placeholder)
     if (variable.symbol) {
       available.add(variable.symbol)
+    }
+    if (variable.varType === "string") {
+      stringVariables.add(variable.placeholder)
+      if (variable.symbol) {
+        stringVariables.add(variable.symbol)
+      }
     }
   }
   for (const symbol of Object.keys(constants)) {
@@ -659,38 +1018,70 @@ export function validateEquationReferences(
   const missing = new Set<string>()
 
   // 1) Explicitly bracketed placeholders.
-  for (const placeholder of extractPlaceholders(trimmed)) {
+  for (const placeholder of extractPlaceholders(equationWithoutComment)) {
     if (!available.has(placeholder)) {
       missing.add(placeholder)
     }
   }
 
-  // 2) Bare symbols on the right-hand side of the equation.
-  const rhs = trimmed.includes("=") ? trimmed.slice(trimmed.indexOf("=") + 1) : trimmed
-  let prepared = preprocessEquation(rhs)
-  prepared = substituteSpecialSymbols(prepared, Object.keys(constants), () => " __CONST__ ")
-  prepared = resolveMolarMasses(prepared, constants)
-  try {
-    const tokens = tokenize(prepared)
-    for (const token of tokens) {
-      if (
-        token.type === "identifier" &&
-        !available.has(token.value) &&
-        !FUNCTIONS.has(token.value)
-      ) {
-        missing.add(token.value)
+  // 2) Validate each assignment in order so that a target defined in one
+  //    clause is available to subsequent clauses (e.g. "ms = ...; mv = mr - ms").
+  const assignments = parseAssignments(equationWithoutComment)
+  for (const assignment of assignments) {
+    let prepared = preprocessEquation(assignment.expression)
+    prepared = substituteSpecialSymbols(prepared, Object.keys(constants), () => " __CONST__ ")
+    prepared = resolveMolarMasses(prepared, constants)
+    const molarMassValues = extractMolarMassValues(prepared, constants)
+    for (const symbol of Object.keys(molarMassValues)) {
+      available.add(symbol)
+    }
+
+    try {
+      const tokens = tokenize(prepared)
+      for (const token of tokens) {
+        if (
+          token.type === "identifier" &&
+          !available.has(token.value) &&
+          !FUNCTIONS.has(token.value)
+        ) {
+          if (token.value.startsWith("M_")) {
+            const formulaPart = token.value.slice(2).replace(/_/g, "")
+            if (calculateMolarMass(formulaPart) !== null) {
+              continue
+            }
+            const varName = token.value.slice(2)
+            if (stringVariables.has(varName)) {
+              continue
+            }
+          }
+          missing.add(token.value)
+        }
+      }
+    } catch {
+      const identifierRegex = new RegExp(
+        `[A-Za-z_${GREEK_START}-${GREEK_END}][A-Za-z0-9_${GREEK_START}-${GREEK_END}%]*`,
+        "g",
+      )
+      for (const match of prepared.matchAll(identifierRegex)) {
+        const value = match[0]
+        if (value !== "__CONST__" && !available.has(value) && !FUNCTIONS.has(value)) {
+          if (value.startsWith("M_")) {
+            const formulaPart = value.slice(2).replace(/_/g, "")
+            if (calculateMolarMass(formulaPart) !== null) {
+              continue
+            }
+            const varName = value.slice(2)
+            if (stringVariables.has(varName)) {
+              continue
+            }
+          }
+          missing.add(value)
+        }
       }
     }
-  } catch {
-    const identifierRegex = new RegExp(
-      `[A-Za-z_${GREEK_START}-${GREEK_END}][A-Za-z0-9_${GREEK_START}-${GREEK_END}%]*`,
-      "g",
-    )
-    for (const match of prepared.matchAll(identifierRegex)) {
-      const value = match[0]
-      if (value !== "__CONST__" && !available.has(value) && !FUNCTIONS.has(value)) {
-        missing.add(value)
-      }
+
+    if (assignment.target) {
+      available.add(assignment.target)
     }
   }
 

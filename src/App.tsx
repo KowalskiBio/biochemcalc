@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "framer-motion"
+import { useEffect } from "react"
 import { Route, Routes } from "react-router-dom"
 
 import { AppShell } from "@/components/layout/app-shell"
@@ -16,36 +16,35 @@ import { TestyPage } from "@/pages/testy-page"
 import { TopicDetailPage } from "@/pages/topic-detail-page"
 import { TopicsPage } from "@/pages/topics-page"
 import { VictorPage } from "@/pages/victor-page"
+import { useUiStore } from "@/stores/ui-store"
 
 export function App() {
+  useEffect(() => {
+    const theme = useUiStore.getState().theme
+    document.documentElement.classList.toggle("dark", theme === "dark")
+  }, [])
+
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
-        className="min-h-screen bg-background"
-      >
-        <AppShell>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/topics" element={<TopicsPage />} />
-            <Route path="/topics/:topicId" element={<TopicDetailPage />} />
-            <Route path="/sets/:setId" element={<SetDetailPage />} />
-            <Route path="/projekty" element={<ProjektyPage />} />
-            <Route path="/testy" element={<TestyPage />} />
-            <Route path="/databaze" element={<DatabazePage />} />
-            <Route path="/vzorce" element={<FormulasPage />} />
-            <Route path="/bulk-import" element={<BulkImportPage />} />
-            <Route path="/constants" element={<ConstantsPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/victor" element={<VictorPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/help" element={<HelpPage />} />
-            <Route path="*" element={<HomePage />} />
-          </Routes>
-        </AppShell>
-      </motion.div>
-    </AnimatePresence>
+    <div className="min-h-screen bg-background">
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/topics" element={<TopicsPage />} />
+          <Route path="/topics/:topicId" element={<TopicDetailPage />} />
+          <Route path="/sets/:setId" element={<SetDetailPage />} />
+          <Route path="/projekty" element={<ProjektyPage />} />
+          <Route path="/testy" element={<TestyPage />} />
+          <Route path="/databaze" element={<DatabazePage />} />
+          <Route path="/vzorce" element={<FormulasPage />} />
+          <Route path="/bulk-import" element={<BulkImportPage />} />
+          <Route path="/constants" element={<ConstantsPage />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/victor" element={<VictorPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="*" element={<HomePage />} />
+        </Routes>
+      </AppShell>
+    </div>
   )
 }

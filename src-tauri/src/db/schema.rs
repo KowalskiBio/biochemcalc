@@ -1,7 +1,8 @@
 use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
-pub const CURRENT_USER_VERSION: u32 = 13;
+#[allow(dead_code)]
+const CURRENT_USER_VERSION: u32 = 13;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {

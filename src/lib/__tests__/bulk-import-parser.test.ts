@@ -5,6 +5,7 @@ import {
   parseBulkImportText,
   parseFormulaText,
 } from "@/lib/bulk-import-parser"
+import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 
 const sampleInput = `Hmotnostní a objemové procento, ředění
 2 body
@@ -67,6 +68,52 @@ describe("parseBulkImportText", () => {
     expect(mv?.unit).toBe("g")
   })
 
+  it("falls back to symbol-based units when context gives none", () => {
+    const input = `Topic
+4 body
+4_1
+Question with [[pH]] and [[c1]]? [c1]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const pH = question.variables.find((v) => v.symbol === "pH")
+    const c1 = question.variables.find((v) => v.symbol === "c1")
+    expect(pH?.unit).toBe("")
+    expect(c1?.unit).toBe("mol/l")
+  })
+
+  it("infers dimensionless units for equilibrium constants", () => {
+    const input = `Topic
+4 body
+4_1
+Hodnota [[Ka=1.8*10^-5]]. [x]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const ka = question.variables.find((v) => v.symbol === "Ka")
+    expect(ka?.unit).toBe("")
+  })
+
+  it("infers volume units for V symbols", () => {
+    const input = `Topic
+4 body
+4_1
+Question with [[V1]]? [V1]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const V1 = question.variables.find((v) => v.symbol === "V1")
+    expect(V1?.unit).toBe("l")
+  })
+
+  it("infers density units for rho symbols", () => {
+    const input = `Topic
+4 body
+4_1
+Question with [[rho_r]]? [rho_r]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const rho = question.variables.find((v) => v.symbol === "rho_r")
+    expect(rho?.unit).toBe("g.cm-3")
+  })
+
   it("treats salt-name placeholders as string variables", () => {
     const result = parseBulkImportText(sampleInput)
     const question = result.categories[0].sets[0].questions[0]
@@ -74,7 +121,52 @@ describe("parseBulkImportText", () => {
     const sA = question.variables.find((v) => v.symbol === "sA")
     expect(sK?.varType).toBe("string")
     expect(sA?.varType).toBe("string")
-    expect(sK?.stringValues).toEqual(["sK"])
+    expect(sK?.stringValues).toEqual(["Li", "Na", "K", "Rb", "Cs"])
+    expect(sA?.stringValues).toEqual(["F", "Cl", "Br", "I"])
+  })
+
+  it("provides default values for KK/AA placeholders", () => {
+    const input = `Topic
+2 body
+2_1
+Question with [[KK]] and [[AA]]? [x]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const KK = question.variables.find((v) => v.symbol === "KK")
+    const AA = question.variables.find((v) => v.symbol === "AA")
+    expect(KK?.varType).toBe("string")
+    expect(AA?.varType).toBe("string")
+    expect(KK?.stringValues).toEqual(["Mg", "Ca", "Sr", "Ba", "Zn", "Cu"])
+    expect(AA?.stringValues).toEqual(["O", "S", "SO4", "CO3"])
+  })
+
+  it("falls back to symbol name for string symbols without defaults", () => {
+    const input = `Topic\n2 body\n2_1\nQuestion with [[molekula2]]? [x]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const mol = question.variables.find((v) => v.symbol === "molekula2")
+    expect(mol?.varType).toBe("string")
+    expect(mol?.stringValues).toEqual(["molekula2"])
+  })
+
+  it("prefers databaze entries over defaults when provided", () => {
+    const customEntries = [{ id: "1", code: "sK", values: ["Custom1", "Custom2"], createdAt: "" }]
+    const result = parseBulkImportText(sampleInput, customEntries)
+    const question = result.categories[0].sets[0].questions[0]
+    const sK = question.variables.find((v) => v.symbol === "sK")
+    expect(sK?.stringValues).toEqual(["Custom1", "Custom2"])
+  })
+
+  it("provides default values for sKK/sAA placeholders", () => {
+    const input = `Topic\n2 body\n2_1\nQuestion with [[sKK]] and [[sAA]]? [x]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const sKK = question.variables.find((v) => v.symbol === "sKK")
+    const sAA = question.variables.find((v) => v.symbol === "sAA")
+    expect(sKK?.varType).toBe("string")
+    expect(sAA?.varType).toBe("string")
+    expect(sKK?.stringValues).toEqual(["Mg", "Ca", "Sr", "Ba"])
+    expect(sAA?.stringValues).toEqual(["O", "S", "SO4"])
   })
 
   it("creates default numeric ranges", () => {
@@ -86,10 +178,58 @@ describe("parseBulkImportText", () => {
     expect(ms?.step).toBe(1)
   })
 
+  it("treats mass fraction w as a dimensionless value between 0 and 1", () => {
+    const input = `Topic\n2 body\n2_1\nHmotnostní zlomek je [[w]]. [x]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const w = question.variables.find((v) => v.symbol === "w")
+    expect(w?.varType).toBe("numeric")
+    expect(w?.minValue).toBe(0.1)
+    expect(w?.maxValue).toBe(0.9)
+    expect(w?.step).toBe(0.1)
+    expect(w?.precision).toBe(1)
+    expect(w?.unit).toBe("—")
+  })
+
+  it("treats atom placeholders as string variables with all known elements", () => {
+    const input = `Topic\n2 body\n2_1\nJaký je poměr atomových hmotností [[atom1]] a [[atom2]]? [w]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const atom1 = question.variables.find((v) => v.symbol === "atom1")
+    const atom2 = question.variables.find((v) => v.symbol === "atom2")
+    expect(atom1?.varType).toBe("string")
+    expect(atom2?.varType).toBe("string")
+    expect(atom1?.stringValues).toEqual(KNOWN_ELEMENTS)
+    expect(atom2?.stringValues).toEqual(KNOWN_ELEMENTS)
+  })
+
+  it("creates fixed numeric variables for fixed-value placeholders", () => {
+    const input = `Topic\n2 body\n2_1\nHodnota [[Ka=1.8*10^-5]] a [[pKa=4.756]]. [x]`
+    const result = parseBulkImportText(input)
+    const question = result.categories[0].sets[0].questions[0]
+    const ka = question.variables.find((v) => v.symbol === "Ka")
+    const pka = question.variables.find((v) => v.symbol === "pKa")
+    expect(ka?.varType).toBe("numeric")
+    expect(ka?.minValue).toBe(1.8e-5)
+    expect(ka?.maxValue).toBe(1.8e-5)
+    expect(pka?.minValue).toBe(4.756)
+  })
+
   it("handles empty input gracefully", () => {
     const result = parseBulkImportText("")
     expect(result.topicName).toBe("")
     expect(result.categories).toEqual([])
+  })
+
+  it("splits semicolon-separated formulas for multi-target pairing", () => {
+    const sampleInput = `Topic\n4 body\n4_3\nQuestion with [[pH]]? [c][wDsc]`
+    const parsedData = parseBulkImportText(sampleInput)
+    const formulaMap = parseFormulaText(`4_3\nc = 10^-pH ; wDsc = 100*10^(pH-14)/c`)
+    const result = pairFormulasWithQuestions(parsedData, formulaMap)
+
+    expect(result.warnings).toEqual([])
+    const question = result.data.categories[0].sets[0].questions[0]
+    expect(question.equationText).toBe("c = 10^-pH; wDsc = 100*10^(pH-14)/c")
   })
 
   it("treats imperative sentences ending with a target block as questions", () => {
@@ -139,6 +279,19 @@ w = ms / mr`
     const result = parseFormulaText("   \n   \n   ")
     expect(result).toEqual({})
   })
+
+  it("ignores point-value headers copied into the formula section", () => {
+    const formulaText = `2_4
+w = 1
+3 body
+2_5
+x = 2`
+
+    const result = parseFormulaText(formulaText)
+    expect(result["2_4"]).toEqual(["w = 1"])
+    expect(result["2_5"]).toEqual(["x = 2"])
+    expect(Object.values(result).flat()).not.toContain("3 body")
+  })
 })
 
 describe("normalizeFormulaForEvaluation", () => {
@@ -161,6 +314,12 @@ describe("normalizeFormulaForEvaluation", () => {
   it("handles multiple conversions", () => {
     const result = normalizeFormulaForEvaluation("w = [ms + mv] × 1,5⁻¹")
     expect(result).toBe("w = (ms + mv) * 1.5-1")
+  })
+
+  it("strips explanatory comments after an em dash", () => {
+    expect(normalizeFormulaForEvaluation("N = (V / 22,4) * NA — (NA = Avogadrova konstanta)")).toBe(
+      "N = (V / 22.4) * NA ",
+    )
   })
 })
 
@@ -218,7 +377,9 @@ extra = 1 + 1`)
 
     const result = pairFormulasWithQuestions(parsedData, formulaMap)
 
-    expect(result.warnings).toEqual(["Sada 2_1: 3 otázky, 3 vzorce — 1 vzorců nebylo spárováno."])
+    expect(result.warnings).toEqual([
+      'Sada 2_1: 3 otázky, 3 vzorce — 1 vzorců nebylo spárováno: "extra = 1 + 1"',
+    ])
     expect(result.data.categories[0].sets[0].questions[0].equationText).toBe("w = ms / mr")
     expect(result.data.categories[0].sets[0].questions[0].formula).toBe("w = ms / mr")
     expect(result.data.categories[0].sets[0].questions[2].equationText).toBe("")
@@ -279,11 +440,11 @@ mv = mr - ms`)
 
     expect(result.warnings).toEqual([])
     expect(result.data.categories[0].sets[0].questions[0].equationText).toBe(
-      "V1 = a + b\nV2 = a - b",
+      "V1 = a + b; V2 = a - b",
     )
-    expect(result.data.categories[0].sets[0].questions[0].formula).toBe("V1 = a + b\nV2 = a - b")
+    expect(result.data.categories[0].sets[0].questions[0].formula).toBe("V1 = a + b; V2 = a - b")
     expect(result.data.categories[0].sets[0].questions[1].equationText).toBe(
-      "ms = mr * w\nmv = mr - ms",
+      "ms = mr * w; mv = mr - ms",
     )
   })
 

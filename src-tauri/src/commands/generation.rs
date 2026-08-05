@@ -1,8 +1,12 @@
 use crate::db::repos::{ConstantRepo, OutputFileRepo, ProjektRepo, TemplateRepo};
 use crate::db::{AppState, DbError};
+use crate::engine::answer_targets::extract_target_symbols;
 use crate::engine::export_writer::{write_txt, ExportQuestion};
+use crate::engine::extract_fixed_placeholders;
+use crate::engine::extract_molar_mass_constants;
 use crate::engine::generator::{
-    generate_numeric_options, generate_variant, generate_variants, open_interval, GenerationError,
+    generate_numeric_options, generate_variant_with_targets, generate_variants_with_targets,
+    open_interval, GenerationError,
 };
 use crate::models::{
     ConstraintType, OutputFile, Projekt, ProjektContent, ProjektQuestion, ResultConstraint,
@@ -11,10 +15,8 @@ use crate::models::{
 use chrono::Utc;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -43,13 +45,31 @@ pub fn generate_for_templates(
     state: State<'_, AppState>,
     payload: GenerateForTemplatesPayload,
 ) -> Result<Vec<GeneratedTemplate>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    crate::util::guard_panic("generate_for_templates", move || {
+        let conn = crate::util::lock_db(&state.db);
+        do_generate_for_templates(&conn, &payload)
+    })
+}
+
+pub fn do_generate_for_templates(
+    conn: &rusqlite::Connection,
+    payload: &GenerateForTemplatesPayload,
+) -> Result<Vec<GeneratedTemplate>, DbError> {
     let mut output = Vec::with_capacity(payload.template_ids.len());
 
-    for template_id in &payload.template_ids {
-        let template = TemplateRepo::get_by_id(&conn, template_id)?;
-        let (variables, constants, constraint) = load_template_dependencies(&conn, &template)?;
-        let variants = generate_variants(
+    for (template_index, template_id) in payload.template_ids.iter().enumerate() {
+        let template = TemplateRepo::get_by_id(conn, template_id)?;
+        let (variables, constants, constraint, fixed_values) =
+            load_template_dependencies(conn, &template)?;
+        let targets = extract_target_symbols(&template.question_text);
+
+        // Give each template its own non-overlapping seed block so the correct
+        // answer position is independent across templates in the same batch.
+        let template_base_seed = payload
+            .base_seed
+            .wrapping_add((template_index as u64).wrapping_mul(payload.count as u64));
+
+        let variants = generate_variants_with_targets(
             template.id,
             &template.formula,
             &variables,
@@ -57,9 +77,11 @@ pub fn generate_for_templates(
             &constraint,
             payload.mode,
             payload.count as usize,
-            payload.base_seed,
+            template_base_seed,
             &payload.difficulty,
             payload.option_count,
+            &fixed_values,
+            &targets,
         )
         .map_err(generation_to_db_error)?;
 
@@ -102,7 +124,17 @@ pub fn export_to_txt(
     state: State<'_, AppState>,
     payload: ExportPayload,
 ) -> Result<ExportResult, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    crate::util::guard_panic("export_to_txt", move || {
+        export_to_txt_inner(app, state, payload)
+    })
+}
+
+fn export_to_txt_inner(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    payload: ExportPayload,
+) -> Result<ExportResult, DbError> {
+    let conn = crate::util::lock_db(&state.db);
     let questions: Vec<ExportQuestion<'_>> = payload
         .questions
         .iter()
@@ -131,7 +163,7 @@ pub fn export_to_txt(
     };
     let file_path = app_data_dir.join(file_name);
 
-    std::fs::write(&file_path, &content)
+    crate::util::atomic_write(&file_path, &content)
         .map_err(|e| DbError::Io(format!("Failed to write export file: {e}")))?;
 
     // Persist output metadata.
@@ -179,11 +211,22 @@ pub fn regenerate_variant(
     state: State<'_, AppState>,
     payload: RegenerateVariantPayload,
 ) -> Result<Variant, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
-    let template = TemplateRepo::get_by_id(&conn, &payload.template_id)?;
-    let (variables, constants, constraint) = load_template_dependencies(&conn, &template)?;
+    crate::util::guard_panic("regenerate_variant", move || {
+        regenerate_variant_inner(state, payload)
+    })
+}
 
-    let mut variant = generate_variant(
+fn regenerate_variant_inner(
+    state: State<'_, AppState>,
+    payload: RegenerateVariantPayload,
+) -> Result<Variant, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    let template = TemplateRepo::get_by_id(&conn, &payload.template_id)?;
+    let (variables, constants, constraint, fixed_values) =
+        load_template_dependencies(&conn, &template)?;
+    let targets = extract_target_symbols(&template.question_text);
+
+    let mut variant = generate_variant_with_targets(
         template.id,
         &template.formula,
         &variables,
@@ -193,6 +236,8 @@ pub fn regenerate_variant(
         payload.seed,
         &payload.difficulty,
         payload.option_count,
+        &fixed_values,
+        &targets,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -246,7 +291,7 @@ pub fn save_projekt(
     state: State<'_, AppState>,
     payload: SaveProjektPayload,
 ) -> Result<Projekt, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let projekt_id = Uuid::new_v4();
 
     let app_data_dir = app
@@ -267,7 +312,7 @@ pub fn save_projekt(
     };
 
     let json = serde_json::to_string_pretty(&content)?;
-    std::fs::write(&file_path, &json)
+    crate::util::atomic_write(&file_path, &json)
         .map_err(|e| DbError::Io(format!("Failed to write projekt file: {e}")))?;
 
     let now = Utc::now();
@@ -301,11 +346,11 @@ pub struct UpdateProjektPayload {
 /// Update an existing projekt's content and metadata.
 #[tauri::command]
 pub fn update_projekt(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
     payload: UpdateProjektPayload,
 ) -> Result<Projekt, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
 
     // Get existing projekt to preserve file path
     let existing = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
@@ -318,7 +363,7 @@ pub fn update_projekt(
     };
 
     let json = serde_json::to_string_pretty(&content)?;
-    std::fs::write(&file_path, &json)
+    crate::util::atomic_write(&file_path, &json)
         .map_err(|e| DbError::Io(format!("Failed to write projekt file: {e}")))?;
 
     let now = Utc::now();
@@ -354,7 +399,7 @@ pub fn load_projekt(
     state: State<'_, AppState>,
     payload: LoadProjektPayload,
 ) -> Result<ProjektContent, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let projekt = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
     let json = std::fs::read_to_string(&projekt.file_path)
         .map_err(|e| DbError::Io(format!("Failed to read projekt file: {e}")))?;
@@ -365,7 +410,7 @@ pub fn load_projekt(
 /// List all projekty (metadata only), newest first.
 #[tauri::command]
 pub fn list_projekty(state: State<'_, AppState>) -> Result<Vec<Projekt>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     ProjektRepo::list_all(&conn)
 }
 
@@ -382,7 +427,7 @@ pub fn delete_projekt(
     state: State<'_, AppState>,
     payload: DeleteProjektPayload,
 ) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let projekt = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
 
     // Best-effort file deletion; DB entry must be removed regardless.
@@ -408,7 +453,17 @@ pub fn export_projekt_to_txt(
     state: State<'_, AppState>,
     payload: ExportProjektToTxtPayload,
 ) -> Result<ExportResult, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    crate::util::guard_panic("export_projekt_to_txt", move || {
+        export_projekt_to_txt_inner(app, state, payload)
+    })
+}
+
+fn export_projekt_to_txt_inner(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    payload: ExportProjektToTxtPayload,
+) -> Result<ExportResult, DbError> {
+    let conn = crate::util::lock_db(&state.db);
     let projekt = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
     let json = std::fs::read_to_string(&projekt.file_path)
         .map_err(|e| DbError::Io(format!("Failed to read projekt file: {e}")))?;
@@ -478,7 +533,7 @@ pub fn export_projekt_to_txt(
     };
     let file_path = app_data_dir.join(&file_name);
 
-    std::fs::write(&file_path, &content_str)
+    crate::util::atomic_write(&file_path, &content_str)
         .map_err(|e| DbError::Io(format!("Failed to write export file: {e}")))?;
 
     Ok(ExportResult {
@@ -494,7 +549,7 @@ pub fn export_projekt_to_txt(
 /// List all exported `.txt` files ordered by creation time (newest first).
 #[tauri::command]
 pub fn list_output_files(state: State<'_, AppState>) -> Result<Vec<OutputFile>, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     OutputFileRepo::list_all(&conn)
 }
 
@@ -504,7 +559,7 @@ pub fn read_output_file(
     state: State<'_, AppState>,
     id: Uuid,
 ) -> Result<OutputFileContent, DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let file = OutputFileRepo::get_by_id(&conn, &id)?;
     let content = std::fs::read_to_string(&file.file_path)
         .map_err(|e| DbError::Io(format!("Failed to read output file: {e}")))?;
@@ -514,7 +569,7 @@ pub fn read_output_file(
 /// Delete an exported file record and its underlying `.txt` file.
 #[tauri::command]
 pub fn delete_output_file(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
-    let conn = state.db.lock().map_err(|e| DbError::Io(e.to_string()))?;
+    let conn = crate::util::lock_db(&state.db);
     let file = OutputFileRepo::get_by_id(&conn, &id)?;
     if std::path::Path::new(&file.file_path).exists() {
         std::fs::remove_file(&file.file_path)
@@ -535,31 +590,7 @@ pub struct OutputFileContent {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Extract numeric placeholder values written inline in question text, e.g.
-/// `[[rho_r=1.3384]]`, and return them as a symbol -> value map.
-/// Non-numeric placeholders (e.g. `[[molekula=glukóza]]`) are ignored.
-fn extract_inline_constants(question_text: &str) -> HashMap<String, f64> {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"\[\[([^\]=\s]+)(?:=([^\]]*))?\]\]").unwrap());
-
-    let mut constants = HashMap::new();
-    for cap in re.captures_iter(question_text) {
-        let symbol = cap[1].trim();
-        let value_str = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-        if value_str.is_empty() {
-            continue;
-        }
-        let value = value_str.replace(',', ".").parse::<f64>();
-        if let Ok(value) = value {
-            constants.insert(symbol.to_string(), value);
-        }
-    }
-    constants
-}
-
 /// Load variables, constants, and a (possibly default) constraint for a template.
-/// Inline numeric placeholder values from the question text are also included
-/// as constants so they can be referenced in the formula.
 fn load_template_dependencies(
     conn: &rusqlite::Connection,
     template: &Template,
@@ -568,6 +599,7 @@ fn load_template_dependencies(
         Vec<crate::models::Variable>,
         HashMap<String, f64>,
         ResultConstraint,
+        HashMap<String, f64>,
     ),
     DbError,
 > {
@@ -580,15 +612,69 @@ fn load_template_dependencies(
         constants.insert(c.symbol.clone(), c.value);
     }
 
-    for (symbol, value) in extract_inline_constants(&template.question_text) {
+    // Auto-resolve any M_* molar mass references in the formula so templates
+    // do not need to manually link every atomic weight as a constant.
+    let molar_constants = extract_molar_mass_constants(&template.formula);
+    for (symbol, value) in molar_constants {
         constants.entry(symbol).or_insert(value);
     }
+
+    // Auto-resolve any other constant symbols referenced in the formula from
+    // the global constants table (e.g. NA, R, π) when they are not explicitly
+    // linked to the template. Skip symbols that belong to variables or answer
+    // targets so that a variable named N is not overwritten by the nitrogen
+    // constant.
+    let all_constants = ConstantRepo::list_all(conn)?;
+    let formula_without_comment = template
+        .formula
+        .split('—')
+        .next()
+        .unwrap_or(&template.formula);
+    let excluded_symbols: std::collections::HashSet<String> = variables
+        .iter()
+        .map(|v| v.symbol.clone())
+        .chain(
+            extract_target_symbols(&template.question_text)
+                .into_iter()
+                .map(|t| t.symbol),
+        )
+        .collect();
+
+    // Token-based matching avoids unsupported Unicode look-around patterns and
+    // guarantees whole-symbol matching (e.g. "N" must not match "NA").
+    let identifier_regex = regex::Regex::new(r"[A-Za-z0-9_α-ω]+").expect("valid identifier regex");
+    let formula_tokens: std::collections::HashSet<String> = identifier_regex
+        .find_iter(formula_without_comment)
+        .map(|m| m.as_str().to_string())
+        .collect();
+    for c in &all_constants {
+        if constants.contains_key(&c.symbol) || excluded_symbols.contains(&c.symbol) {
+            continue;
+        }
+        if formula_tokens.contains(&c.symbol) {
+            constants.insert(c.symbol.clone(), c.value);
+        }
+    }
+
+    let constant_aliases: &[(&str, &str)] = &[("NA", "N_A"), ("N_A", "NA")];
+    for (alias, target) in constant_aliases {
+        if constants.contains_key(*alias) || excluded_symbols.contains(*alias) {
+            continue;
+        }
+        if let Some(&value) = constants.get(*target) {
+            if formula_tokens.contains(*alias) {
+                constants.insert(alias.to_string(), value);
+            }
+        }
+    }
+
+    let fixed_values = extract_fixed_placeholders(&template.question_text);
 
     let constraint = TemplateRepo::get_constraint(conn, &template.id)?.unwrap_or_else(|| {
         ResultConstraint::new(template.id, None, None, None, ConstraintType::Range)
     });
 
-    Ok((variables, constants, constraint))
+    Ok((variables, constants, constraint, fixed_values))
 }
 
 fn generation_to_db_error(err: GenerationError) -> DbError {
@@ -598,20 +684,143 @@ fn generation_to_db_error(err: GenerationError) -> DbError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::repos::{ConstantRepo, TemplateRepo, VariableRepo};
+    use crate::db::AppState;
+    use crate::models::{Constant, TemplateVariable, Variable};
+    use chrono::Utc;
 
-    #[test]
-    fn extract_inline_constants_parses_numeric_placeholders() {
-        let text = "hustota [[rho_r=1,3384]] g/cm3 a objem [[V]] cm3";
-        let constants = extract_inline_constants(text);
-        assert!((constants.get("rho_r").unwrap() - 1.3384).abs() < 1e-10);
-        assert_eq!(constants.get("V"), None);
+    fn setup() -> AppState {
+        AppState::new_in_memory().expect("in-memory state")
     }
 
     #[test]
-    fn extract_inline_constants_ignores_non_numeric_placeholders() {
-        let text = "[[molekula=glukóza]] a [[rho_r=1.5]]";
-        let constants = extract_inline_constants(text);
-        assert_eq!(constants.len(), 1);
-        assert!((constants.get("rho_r").unwrap() - 1.5).abs() < 1e-10);
+    fn load_template_dependencies_auto_resolves_na_and_custom_molar_mass() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+
+        let na = Constant::new(
+            "Avogadro (NA)".into(),
+            "NA".into(),
+            6.022e23,
+            "mol⁻¹".into(),
+            false,
+        );
+        let m_ethanol = Constant::new(
+            "Molar mass ethanol".into(),
+            "M_ethanol".into(),
+            46.07,
+            "g/mol".into(),
+            false,
+        );
+        ConstantRepo::insert(&conn, &na).expect("insert NA");
+        ConstantRepo::insert(&conn, &m_ethanol).expect("insert M_ethanol");
+
+        let template_id = Uuid::new_v4();
+        let template = Template {
+            id: template_id,
+            question_text: "Vypočítejte počet částic pro objem [[V]] L [N]".into(),
+            formula: "N = (V / 22.4) * NA + M_ethanol".into(),
+            equation_text: "N = (V / 22,4) × NA + M_ethanol".into(),
+            numeric_answer: None,
+            result_unit: "".into(),
+            point_value: 2,
+            created_at: Utc::now(),
+        };
+        TemplateRepo::insert(&conn, &template, &[], &[], None).expect("insert template");
+
+        let (_, constants, _, _) = load_template_dependencies(&conn, &template).expect("load");
+
+        assert!(
+            constants.contains_key("NA"),
+            "expected NA to be auto-resolved; got {:?}",
+            constants
+        );
+        assert!(
+            constants.contains_key("M_ethanol"),
+            "expected M_ethanol to be auto-resolved; got {:?}",
+            constants
+        );
+    }
+
+    #[test]
+    fn generate_for_templates_uses_independent_seeds_per_template() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+
+        let mut template_ids = Vec::new();
+        for i in 0..5 {
+            let var = Variable::new(
+                format!("X{i}"),
+                format!("X{i}"),
+                1.0,
+                10.0,
+                1.0,
+                "g".into(),
+                0,
+            );
+            VariableRepo::insert_raw(&conn, &var).expect("insert variable");
+
+            let template = Template::new(
+                format!("Question [[X{i}]] [Y{i}]"),
+                format!("Y{i} = X{i} * 2"),
+                format!("Y{i} = X{i} × 2"),
+                None,
+                "g".into(),
+                2,
+            );
+            let constraint = ResultConstraint::new(
+                template.id,
+                Some(0.0),
+                Some(100.0),
+                None,
+                ConstraintType::Range,
+            );
+            let tv = TemplateVariable {
+                template_id: template.id,
+                variable_id: var.id,
+                placeholder: format!("X{i}"),
+                greater_than_variable_id: None,
+                less_than_variable_id: None,
+            };
+            TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint))
+                .expect("insert template");
+            template_ids.push(template.id);
+        }
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids,
+            count: 1,
+            base_seed: 12345,
+            mode: TemplateMode::Closed,
+            difficulty: "medium".into(),
+            option_count: 5,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        assert_eq!(results.len(), 5);
+
+        let seeds: Vec<u64> = results.iter().map(|r| r.variants[0].seed).collect();
+        let unique_seeds: std::collections::HashSet<u64> = seeds.iter().cloned().collect();
+        assert_eq!(
+            unique_seeds.len(),
+            seeds.len(),
+            "each template should start from a different seed, got {:?}",
+            seeds
+        );
+
+        let positions: Vec<u8> = results
+            .iter()
+            .map(|r| {
+                r.variants[0]
+                    .correct_option
+                    .expect("closed variant has position")
+            })
+            .collect();
+        let unique_positions: std::collections::HashSet<u8> = positions.iter().cloned().collect();
+        assert!(
+            unique_positions.len() > 1,
+            "correct answer positions should vary across templates, got {:?}",
+            positions
+        );
     }
 }

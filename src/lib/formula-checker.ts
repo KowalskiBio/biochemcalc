@@ -4,21 +4,31 @@ const SYMBOL_CHAR_BODY = "a-zA-Z0-9_%α-ωφ"
 const FORMULA_VARIABLE_REGEX = new RegExp(`[${SYMBOL_CHAR_START}][${SYMBOL_CHAR_BODY}]*`, "g")
 
 const TARGET_BLOCK_REGEX = new RegExp(
-  `(?:\\[[${SYMBOL_CHAR_START}][${SYMBOL_CHAR_BODY}]*\\])+\\s*$`,
+  `(?:\\[[${SYMBOL_CHAR_START}][${SYMBOL_CHAR_BODY}]*(?:\\s+[^\\]]+)?\\])+\\s*$`,
 )
 
-const TARGET_SYMBOL_REGEX = new RegExp(`\\[([${SYMBOL_CHAR_START}][${SYMBOL_CHAR_BODY}]*)\\]`, "g")
+export interface AnswerTarget {
+  symbol: string
+  unit?: string
+}
 
-export function extractTargets(text: string): string[] {
+const TARGET_SYMBOL_UNIT_REGEX = new RegExp(
+  `\\[([${SYMBOL_CHAR_START}][${SYMBOL_CHAR_BODY}]*)(?:\\s+([^\\]]+))?\\]`,
+  "g",
+)
+
+export function extractTargets(text: string): AnswerTarget[] {
   const trimmed = text.trim()
   const blockMatch = trimmed.match(TARGET_BLOCK_REGEX)
   if (!blockMatch) {
     return []
   }
 
-  const targets: string[] = []
-  for (const match of blockMatch[0].trim().matchAll(TARGET_SYMBOL_REGEX)) {
-    targets.push(match[1])
+  const targets: AnswerTarget[] = []
+  for (const match of blockMatch[0].trim().matchAll(TARGET_SYMBOL_UNIT_REGEX)) {
+    const symbol = match[1]
+    const unit = match[2]?.trim()
+    targets.push({ symbol, unit })
   }
 
   return targets
@@ -57,17 +67,7 @@ export function matchVariables(
 ): VariableMatchResult {
   const placeholderSet = new Set(placeholders.map((p) => p.symbol))
   const targetSet = new Set(targets)
-
-  const isSatisfied = (variable: string): boolean => {
-    if (targetSet.has(variable)) return true
-    if (variable.startsWith("M_")) {
-      const suffix = variable.slice(2)
-      if (placeholderSet.has(suffix)) return true
-    }
-    return false
-  }
-
-  const required = formulaVariables.filter((v) => !isSatisfied(v))
+  const required = formulaVariables.filter((v) => !targetSet.has(v))
   const present = required.filter((v) => placeholderSet.has(v))
   const missing = required.filter((v) => !placeholderSet.has(v))
 

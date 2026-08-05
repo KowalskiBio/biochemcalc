@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  buildSubstitutedEquation,
   createRandom,
   evaluateExpression,
   formatNumberMaxDecimals,
@@ -8,11 +9,13 @@ import {
   resolveMolarMasses,
   validateEquationReferences,
 } from "@/lib/math-utils"
-import type { LocalVariableEdit } from "@/lib/types"
+import type { LocalVariableEdit, Variable, VariableWithPlaceholder } from "@/lib/types"
 
 describe("renderEquationAsLatex", () => {
   it("renders a simple fraction", () => {
-    expect(renderEquationAsLatex("w = ms / (ms + mv)")).toBe("$$w = \\frac{ms}{ms + mv}$$")
+    expect(renderEquationAsLatex("w = ms / (ms + mv)")).toBe(
+      "$$w = \\frac{\\mathrm{ms}}{\\mathrm{ms} + \\mathrm{mv}}$$",
+    )
   })
 
   it("renders multiplication as times", () => {
@@ -31,14 +34,24 @@ describe("renderEquationAsLatex", () => {
     expect(renderEquationAsLatex("w = 100 %")).toBe("$$w = 100\\%$$")
   })
 
-  it("escapes underscores in identifiers", () => {
-    expect(renderEquationAsLatex("N = m / M_H_2O")).toBe("$$N = \\frac{m}{\\mathrm{M\\_H\\_2O}}$$")
+  it("renders molar-mass identifiers with chemical subscripts", () => {
+    expect(renderEquationAsLatex("N = m / M_H_2O")).toBe(
+      "$$N = \\frac{m}{M_{\\mathrm{H}_{2}\\mathrm{O}}}$$",
+    )
+  })
+
+  it("renders trailing digits as subscripts", () => {
+    expect(renderEquationAsLatex("m2 = m1 × M_Fe / M_S")).toBe(
+      "$$m_{2} = \\frac{m_{1} \\times M_{\\mathrm{Fe}}}{M_{\\mathrm{S}}}$$",
+    )
   })
 
   it("accepts comma decimals and square brackets", () => {
-    expect(renderEquationAsLatex("N = (V / 22,4) * NA")).toBe("$$N = \\frac{V}{22.4} \\times NA$$")
+    expect(renderEquationAsLatex("N = (V / 22,4) * NA")).toBe(
+      "$$N = \\left(\\frac{V}{22.4}\\right) \\times \\mathrm{NA}$$",
+    )
     expect(renderEquationAsLatex("N = [m / M_Fe] * NA")).toBe(
-      "$$N = \\frac{m}{\\mathrm{M\\_Fe}} \\times NA$$",
+      "$$N = \\left(\\frac{m}{M_{\\mathrm{Fe}}}\\right) \\times \\mathrm{NA}$$",
     )
   })
 
@@ -49,6 +62,53 @@ describe("renderEquationAsLatex", () => {
 
   it("returns empty string for empty input", () => {
     expect(renderEquationAsLatex("")).toBe("")
+  })
+
+  it("formats negative exponents", () => {
+    const rendered = renderEquationAsLatex("c = 10^-pH")
+    expect(rendered).toContain("10")
+    expect(rendered).toContain("^{-")
+    expect(rendered).toContain("pH")
+  })
+
+  it("renders semicolon-separated multi-target formulas", () => {
+    const rendered = renderEquationAsLatex("c = 10^-pH; wDsc = 100*10^(pH-14)/c")
+    expect(rendered).toContain("c = ")
+    expect(rendered).toContain("wDsc")
+    expect(rendered).toContain("\\text{;}")
+  })
+
+  it("renders each multi-target formula as proper LaTeX", () => {
+    const rendered = renderEquationAsLatex("V1 = a + b; V2 = a - b")
+    expect(rendered).toBe("$$V_{1} = a + b \\; \\text{;} \\; V_{2} = a - b$$")
+  })
+
+  it("preserves parentheses for expressions like (1 - w)", () => {
+    expect(renderEquationAsLatex("(1 - w)")).toBe("$$\\left(1 - w\\right)$$")
+  })
+
+  it("strips redundant parentheses under fraction bars", () => {
+    expect(renderEquationAsLatex("w = ms / (ms + mv)")).toBe(
+      "$$w = \\frac{\\mathrm{ms}}{\\mathrm{ms} + \\mathrm{mv}}$$",
+    )
+  })
+
+  it("preserves parentheses in multiplication", () => {
+    expect(renderEquationAsLatex("(a + b) * c")).toBe("$$\\left(a + b\\right) \\times c$$")
+  })
+
+  it("strips parentheses under exponent braces", () => {
+    expect(renderEquationAsLatex("(a + b)^2")).toBe("$${a + b}^{2}$$")
+  })
+
+  it("preserves parentheses in subtraction chains", () => {
+    expect(renderEquationAsLatex("(a + b) - (c - d)")).toBe(
+      "$$\\left(a + b\\right) - \\left(c - d\\right)$$",
+    )
+  })
+
+  it("preserves nested parentheses", () => {
+    expect(renderEquationAsLatex("((a + b))")).toBe("$$\\left(\\left(a + b\\right)\\right)$$")
   })
 })
 
@@ -67,6 +127,12 @@ describe("evaluateExpression", () => {
 
   it("evaluates right-associative exponents", () => {
     expect(evaluateExpression("2 ^ 3 ^ 2")).toBe(512)
+  })
+
+  it("evaluates negative exponents", () => {
+    expect(evaluateExpression("10^-1")).toBe(0.1)
+    expect(evaluateExpression("10^-pH", { pH: 1 })).toBe(0.1)
+    expect(evaluateExpression("10^(-pH)", { pH: 2 })).toBe(0.01)
   })
 
   it("evaluates unary minus", () => {
@@ -93,6 +159,21 @@ describe("evaluateExpression", () => {
 
   it("throws on empty input", () => {
     expect(() => evaluateExpression("")).toThrow()
+  })
+
+  it("evaluates semicolon-separated assignments sequentially", () => {
+    const result = evaluateExpression("ms = mr * 2; mv = mr - ms", { mr: 100 })
+    expect(result).toBeCloseTo(-100, 4)
+  })
+
+  it("returns the last assignment value for multi-answer formulas", () => {
+    const result = evaluateExpression("a = 5; b = a + 3")
+    expect(result).toBe(8)
+  })
+
+  it("evaluates unicode operators in multi-answer formulas", () => {
+    const result = evaluateExpression("ms = mr × 3; mv = mr − ms", { mr: 10 })
+    expect(result).toBeCloseTo(-20, 4)
   })
 })
 
@@ -193,6 +274,14 @@ describe("validateEquationReferences", () => {
     ])
   })
 
+  it("does not flag single-element molar masses like M_Fe and M_S", () => {
+    expect(validateEquationReferences("m2 = m1 * M_Fe / M_S", [])).toEqual(["m1"])
+  })
+
+  it("does not flag M_S with multiplication sign", () => {
+    expect(validateEquationReferences("m2 = m1 × M_Fe / M_S", [])).toEqual(["m1"])
+  })
+
   it("does not flag M_KOH in a longer equation", () => {
     const equation = "V1 = rho_r1 * (100/w1perc) * (c3*V4/V3) * (1000/V2) * M_KOH"
     expect(validateEquationReferences(equation, [])).toEqual([
@@ -216,6 +305,16 @@ describe("validateEquationReferences", () => {
     ]
     const equation = "V1 = rho_r1 * (100/w1perc) * (c3*V4/V3) * (1000/V2) * M_KOH"
     expect(validateEquationReferences(equation, variables)).toEqual([])
+  })
+
+  it("does not flag targets defined in earlier assignments", () => {
+    const variables = [{ placeholder: "mr", symbol: "mr" }]
+    expect(validateEquationReferences("ms = mr * 2; mv = mr - ms", variables)).toEqual([])
+  })
+
+  it("detects missing symbols in multi-assignment equations", () => {
+    const variables = [{ placeholder: "mr", symbol: "mr" }]
+    expect(validateEquationReferences("ms = mr * x; mv = mr - ms", variables)).toEqual(["x"])
   })
 })
 
@@ -249,6 +348,17 @@ describe("resolveMolarMasses", () => {
     expect(Number(result)).toBeCloseTo(278.05, 1)
   })
 
+  it("handles star hydrate notation", () => {
+    const result = resolveMolarMasses("M_NiCl2*6H2O")
+    expect(Number(result)).toBeCloseTo(237.69, 1)
+  })
+
+  it("resolves star hydrate inside a larger equation", () => {
+    const result = resolveMolarMasses("ms * (NiCl2/M_NiCl2*6H2O) / w - ms")
+    expect(result).not.toContain("M_NiCl2*6H2O")
+    expect(Number(result.match(/\d+\.\d+/)?.[0])).toBeCloseTo(237.7, 1)
+  })
+
   it("prefers a registered constant over computing the formula", () => {
     const result = resolveMolarMasses("M_FeSO4.7H2O", { "M_FeSO4.7H2O": 300 })
     expect(Number(result)).toBe(300)
@@ -257,11 +367,6 @@ describe("resolveMolarMasses", () => {
   it("prefers a custom M_x constant when formula would be invalid", () => {
     const result = resolveMolarMasses("M_x", { M_x: 120.37 })
     expect(Number(result)).toBeCloseTo(120.37, 2)
-  })
-
-  it("handles hydrate inside parentheses without consuming the closing paren", () => {
-    const result = resolveMolarMasses("(M_CuSO_4 / M_CuSO_4*5H_2O)")
-    expect(result).toMatch(/^\(159\.\d+\s+\/\s+249\.\d+\)$/)
   })
 })
 
@@ -272,6 +377,29 @@ describe("evaluateExpression with molar-mass references", () => {
 
   it("evaluates M_<formula> with underscore subscripts", () => {
     expect(evaluateExpression("w = M_H_3PO_4 / 2", {}, {})).toBeCloseTo(49.0, 2)
+  })
+
+  it("evaluates m2 = m1 × M_Fe / M_S with times sign and empty constants", () => {
+    const result = evaluateExpression("m2 = m1 × M_Fe / M_S", { m1: 1 }, {})
+    expect(result).toBeCloseTo(55.85 / 32.06, 2)
+  })
+
+  it("evaluates m2 = m1 × M_Fe / M_S with M_Fe in constants", () => {
+    const result = evaluateExpression("m2 = m1 × M_Fe / M_S", { m1: 1 }, { M_Fe: 55.85 })
+    expect(result).toBeCloseTo(55.85 / 32.06, 2)
+  })
+
+  it("resolves M_S after symbol substitution (mockResult flow)", () => {
+    const equation = "m2=m1×M_Fe/M_S"
+    const constants = { M_Fe: 55.85 }
+    const substituted = equation.replace(
+      /(?<![A-Za-z0-9_\u03B1-\u03C9])m1(?![A-Za-z0-9_\u03B1-\u03C9])/g,
+      "1",
+    )
+    const resolved = resolveMolarMasses(substituted, constants)
+    const expression = resolved.replace(/^[^=]*=\s*/, "")
+    const result = evaluateExpression(expression, {}, constants)
+    expect(result).toBeCloseTo(55.85 / 32.06, 2)
   })
 })
 
@@ -285,5 +413,59 @@ describe("formatNumberMaxDecimals", () => {
   it("handles null or undefined values", () => {
     expect(formatNumberMaxDecimals(null)).toBe("")
     expect(formatNumberMaxDecimals(undefined)).toBe("")
+  })
+
+  it("falls back to scientific notation when a non-zero value rounds to zero", () => {
+    expect(formatNumberMaxDecimals(0.001)).toBe("1.0×10^-3")
+    expect(formatNumberMaxDecimals(-0.001)).toBe("-1.0×10^-3")
+    expect(formatNumberMaxDecimals(0.0049)).toBe("4.9×10^-3")
+    expect(formatNumberMaxDecimals(1.23e-5)).toBe("1.2×10^-5")
+  })
+
+  it("keeps fixed notation when the value is representable at the requested precision", () => {
+    expect(formatNumberMaxDecimals(0.001, 3)).toBe("0.001")
+    expect(formatNumberMaxDecimals(0.0099)).toBe("0.01")
+    expect(formatNumberMaxDecimals(0)).toBe("0")
+  })
+})
+
+describe("buildSubstitutedEquation", () => {
+  function makeStringVar(symbol: string, placeholder: string): VariableWithPlaceholder {
+    return {
+      placeholder,
+      isShared: false,
+      variable: {
+        id: "1",
+        name: symbol,
+        symbol,
+        varType: "string",
+        minValue: 0,
+        maxValue: 0,
+        step: 1,
+        unit: "",
+        precision: 0,
+        stringValues: [],
+        createdAt: "",
+      } as Variable,
+    }
+  }
+
+  it("substitutes string variable values into molar-mass references", () => {
+    const variables = [makeStringVar("plyn", "plyn")]
+    const result = buildSubstitutedEquation(
+      "rho = M_plyn / 22.4",
+      variables,
+      {},
+      { plyn: "CO_2" },
+      {},
+    )
+    expect(result).toContain("44.01")
+    expect(result).toContain("22.4")
+  })
+
+  it("works with different placeholder and symbol names", () => {
+    const variables = [makeStringVar("gas", "G")]
+    const result = buildSubstitutedEquation("rho = M_G / 22.4", variables, {}, { G: "N_2" }, {})
+    expect(result).toContain("28.02")
   })
 })

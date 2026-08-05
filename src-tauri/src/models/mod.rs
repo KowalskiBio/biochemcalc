@@ -10,6 +10,7 @@ pub mod variant;
 pub use atomic_weights::ATOMIC_ELEMENTS;
 pub use category::{Category, Set, SetTemplate};
 pub use constant::Constant;
+#[allow(unused_imports)]
 pub use meta::{
     AppSetting, CategoryPackage, OutputFile, OutputStatus, Projekt, ProjektContent,
     ProjektQuestion, SetPackage, TemplateHistoryEntry, VariableHistoryEntry, VariantPackage,
@@ -20,4 +21,4 @@ pub use template::{
 };
 pub use topic::Topic;
 pub use variable::{Variable, VariableType};
-pub use variant::Variant;
+pub use variant::{AnswerField, Variant};
