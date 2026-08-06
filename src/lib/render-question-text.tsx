@@ -3,11 +3,26 @@ import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
 import { constantsApi } from "@/lib/api"
-import { formatNumberMaxDecimals } from "@/lib/math-utils"
-import { PLACEHOLDER_REGEX } from "@/lib/utils"
+import { formatNumberMaxDecimals, scientificNotationToHtml } from "@/lib/math-utils"
+import { PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
 import type { DatabazeEntry, VariableWithPlaceholder, Variant } from "./types"
+
+/**
+ * All this renderer needs of a variable: which placeholder it fills and how
+ * to format it. A full `VariableWithPlaceholder` still satisfies it — the
+ * `Partial` half is what keeps the extra authoring fields (sharing,
+ * comparison links) permitted rather than rejected as excess properties, so
+ * the student practice generator, whose payload deliberately omits them, can
+ * reuse this renderer unchanged.
+ */
+export type RenderableVariable = Partial<VariableWithPlaceholder> &
+  Pick<VariableWithPlaceholder, "variable" | "placeholder">
+
+/** Likewise: only the sampled values are ever read off a variant. */
+export type RenderableVariant = Partial<Variant> &
+  Pick<Variant, "assignedValues" | "assignedStrings">
 
 // Tailwind text color classes for X/Y/Z placeholders.
 // X = red, Y = green, Z = blue, then cycle through other colors.
@@ -62,13 +77,37 @@ function formatTextSegment(text: string): string {
 }
 
 function renderConstantValue(value: number): string {
-  return `<span class="inline-flex items-center font-semibold text-gray-600">${value}</span>`
+  const display = scientificNotationToHtml(formatNumberMaxDecimals(value, 4))
+  return `<span class="inline-flex items-center font-semibold text-gray-600">${display}</span>`
+}
+
+/**
+ * A representative value to preview a variable with when no variant has been
+ * generated yet. The midpoint of the configured range (snapped to `step`) is
+ * far more informative than the bare minimum — a template whose mass runs
+ * 1–1000 g previewing as "1 g" reads like a broken question rather than a
+ * sample of what students will actually be asked.
+ */
+export function previewValueForVariable(variable: {
+  minValue: number
+  maxValue: number
+  step: number
+}): number {
+  const { minValue, maxValue, step } = variable
+  if (!Number.isFinite(minValue)) return 0
+  if (!Number.isFinite(maxValue) || maxValue <= minValue) return minValue
+
+  const midpoint = (minValue + maxValue) / 2
+  if (!Number.isFinite(step) || step <= 0) return midpoint
+
+  const snapped = minValue + Math.round((midpoint - minValue) / step) * step
+  return Math.min(maxValue, Math.max(minValue, snapped))
 }
 
 function renderPlaceholderSpan(
   placeholder: string,
   value: string | undefined,
-  variables: VariableWithPlaceholder[],
+  variables: RenderableVariable[],
   databazeEntries: DatabazeEntry[],
   constants: Record<string, number> = {},
 ): string {
@@ -83,7 +122,9 @@ function renderPlaceholderSpan(
     const displayValue =
       variable.varType === "string"
         ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
-        : formatNumberMaxDecimals(variable.minValue, variable.precision)
+        : scientificNotationToHtml(
+            formatNumberMaxDecimals(previewValueForVariable(variable), variable.precision),
+          )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
   const constantValue = constants[placeholder]
@@ -94,11 +135,12 @@ function renderPlaceholderSpan(
 }
 
 export function renderQuestionText(
-  text: string,
-  variables: VariableWithPlaceholder[],
+  rawText: string,
+  variables: RenderableVariable[],
   databazeEntries: DatabazeEntry[] = [],
   constants: Record<string, number> = {},
 ): string {
+  const text = stripAnswerTargets(rawText)
   const segments: string[] = []
   let lastIndex = 0
   for (const match of text.matchAll(PLACEHOLDER_REGEX)) {
@@ -113,8 +155,8 @@ export function renderQuestionText(
 
 interface QuestionTextRendererProps {
   text: string
-  variables: VariableWithPlaceholder[]
-  variant?: Variant
+  variables: RenderableVariable[]
+  variant?: RenderableVariant
   constants?: Record<string, number>
 }
 
@@ -168,12 +210,13 @@ export const QuestionTextRenderer: React.FC<QuestionTextRendererProps> = ({
 }
 
 export function renderQuestionTextWithVariant(
-  text: string,
-  variables: VariableWithPlaceholder[],
-  variant: Variant,
+  rawText: string,
+  variables: RenderableVariable[],
+  variant: RenderableVariant,
   databazeEntries: DatabazeEntry[] = [],
   constants: Record<string, number> = {},
 ): string {
+  const text = stripAnswerTargets(rawText)
   const segments: string[] = []
   let lastIndex = 0
   for (const match of text.matchAll(PLACEHOLDER_REGEX)) {
@@ -198,8 +241,8 @@ export function renderQuestionTextWithVariant(
 function renderPlaceholderSpanWithVariant(
   placeholder: string,
   value: string | undefined,
-  variables: VariableWithPlaceholder[],
-  variant: Variant,
+  variables: RenderableVariable[],
+  variant: RenderableVariant,
   databazeEntries: DatabazeEntry[],
   constants: Record<string, number> = {},
 ): string {
@@ -222,8 +265,11 @@ function renderPlaceholderSpanWithVariant(
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${formatChemicalText(sampledString)}</span>`
       } else {
         const sampledValue = variant.assignedValues[placeholder]
-        const rawValue = sampledValue !== undefined ? sampledValue : variable.minValue
-        const displayValue = formatNumberMaxDecimals(rawValue, variable.precision)
+        const rawValue =
+          sampledValue !== undefined ? sampledValue : previewValueForVariable(variable)
+        const displayValue = scientificNotationToHtml(
+          formatNumberMaxDecimals(rawValue, variable.precision),
+        )
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
     }
@@ -232,7 +278,9 @@ function renderPlaceholderSpanWithVariant(
     const displayValue =
       variable.varType === "string"
         ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
-        : formatNumberMaxDecimals(variable.minValue, variable.precision)
+        : scientificNotationToHtml(
+            formatNumberMaxDecimals(previewValueForVariable(variable), variable.precision),
+          )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
 

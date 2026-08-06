@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
-import { formatNumberMaxDecimals } from "@/lib/math-utils"
+import { formatNumberMaxDecimals, scientificNotationToHtml } from "@/lib/math-utils"
 import { formatChemicalText } from "@/lib/render-question-text"
 import { cn } from "@/lib/utils"
 
@@ -10,15 +10,6 @@ interface FormattedResultProps {
   precision?: number
   unit?: string | null
   className?: string
-}
-
-/**
- * Pre-process scientific notation produced by formatNumberMaxDecimals so the
- * exponent is rendered as a proper superscript. The rest of the text is then
- * passed through the same chemical formatting used for units.
- */
-function formatScientificNotation(text: string): string {
-  return text.replace(/×10\^([+-]?\d+)/g, "×10<sup>$1</sup>")
 }
 
 export function FormattedResult({
@@ -33,7 +24,7 @@ export function FormattedResult({
   }
 
   const text = unit?.trim() ? `${numeric} ${unit.trim()}` : numeric
-  const rendered = formatChemicalText(formatScientificNotation(text))
+  const rendered = formatChemicalText(scientificNotationToHtml(text))
 
   return (
     <span className={cn("inline", className)}>

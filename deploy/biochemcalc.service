@@ -1,4 +1,6 @@
-# biochemcalc — 24/7 unattended operation on a headless VM.
+# biochemcalc — 24/7 unattended operation on a headless VM, served as a
+# real website (HTTP) instead of a Tauri GUI. No X server / WebKitGTK
+# dependency at all anymore — the binary is a plain Axum HTTP server.
 #
 # Install as a per-user service (no root needed):
 #   mkdir -p ~/.config/systemd/user
@@ -7,8 +9,33 @@
 #   systemctl --user enable --now biochemcalc
 #   loginctl enable-linger "$USER"   # keep it running after logout
 #
-# Prerequisites on the VM: WebKitGTK (Tauri runtime dependency) and xvfb.
-# The app is a GUI process; xvfb supplies the virtual display it requires.
+# Deploy layout expected by ExecStart below — deliberately under the
+# service user's own home, not /opt, so nothing here ever needs root:
+#   ~/biochemcalc-web/biochemcalc-server   (release build of the server bin —
+#                                            build ON the target machine's
+#                                            architecture; the frontend's
+#                                            static `dist/` is portable and
+#                                            can be built anywhere and rsynced)
+#   ~/biochemcalc-web/dist/                (output of `npm run build`)
+#
+# First run only: seeding the one teacher account that bootstraps invite-code
+# issuance (nothing can invite the first account into existence). The two
+# `BIOCHEMCALC_ADMIN_*` lines at the bottom are commented out deliberately —
+# uncomment them, start the service once, then comment them out again and
+# `systemctl --user daemon-reload && systemctl --user restart biochemcalc`.
+#
+# Delete them rather than leave them: a unit file is world-readable by
+# default, so a password parked here is a plaintext credential sitting on
+# disk long after the account it created has stopped needing it. Once any
+# account exists the bootstrap is a no-op, so removing the lines costs
+# nothing. If you truly need the credential to persist across rebuilds, put
+# it in an `EnvironmentFile=%h/.config/biochemcalc.env` chmod 600 (or
+# `systemd-creds encrypt`), never inline here.
+#
+# TODO once a domain + TLS exist: the session cookie is intentionally not
+# marked `Secure` yet (see src-tauri/src/http/middleware.rs) because this
+# deploys over plain HTTP. Turn that on the moment HTTPS is available —
+# until then, credentials travel in cleartext on the wire.
 #
 # Logs:
 #   journalctl --user -u biochemcalc -f   # stdout/stderr incl. panics
@@ -19,17 +46,28 @@
 # Do NOT live-sync the app-data directory (Syncthing/Dropbox) while the app
 # runs — syncing an open SQLite file is a corruption vector.
 [Unit]
-Description=biochemcalc (Tauri GUI, headless via Xvfb)
+Description=biochemcalc (web server)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/xvfb-run --auto-servernum /opt/biochemcalc/biochemcalc
+ExecStart=%h/biochemcalc-web/biochemcalc-server
 Restart=always
 RestartSec=5
 # Panics and hook-level diagnostics reach the journal via stderr.
 Environment=RUST_BACKTRACE=1
+Environment=BIOCHEMCALC_BIND_ADDR=0.0.0.0:8080
+Environment=BIOCHEMCALC_DIST_DIR=%h/biochemcalc-web/dist
+# Defaults to ~/.local/share/com.kowalski.biochemcalc if unset — the exact
+# path the previous Tauri desktop build already used, so existing data is
+# picked up unchanged. Uncomment to override:
+# Environment=BIOCHEMCALC_DATA_DIR=/home/YOUR_USER/.local/share/com.kowalski.biochemcalc
+# First-run only — uncomment, start once to seed the teacher account, then
+# comment out again and reload. Left commented so a deployment can never
+# acquire a plaintext password just by copying this file into place:
+# Environment=BIOCHEMCALC_ADMIN_USERNAME=admin
+# Environment=BIOCHEMCALC_ADMIN_PASSWORD=
 
 [Install]
 WantedBy=default.target

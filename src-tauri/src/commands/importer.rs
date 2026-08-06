@@ -1,8 +1,6 @@
 use crate::db::repos::{CategoryRepo, SetRepo, TemplateRepo, TopicRepo, VariableRepo};
 use crate::db::{AppState, DbError};
-use crate::models::{
-    ConstraintType, ResultConstraint, Template, TemplateVariable, Topic, Variable,
-};
+use crate::models::{Template, TemplateVariable, Topic, Variable};
 use serde::Deserialize;
 use tauri::State;
 
@@ -169,9 +167,13 @@ fn import_bulk_question(
         })
         .collect::<Vec<_>>();
 
-    let constraint = ResultConstraint::new(template.id, None, None, Some(0.1), ConstraintType::Sd);
-
-    TemplateRepo::insert(conn, &template, &tvs, &[], Some(&constraint))?;
+    // No result constraint: an imported question has no per-question tolerance
+    // of its own, so the answer interval is driven by the difficulty chosen at
+    // generation time (easy ±50 %, medium ±30 %, hard ±10 %). A blanket
+    // absolute SD here would override that for every imported question and
+    // scale terribly — ±0.1 is ±0.03 % of a 351 g answer but ±20 % of a 0.5
+    // one. Set an SD deliberately per template when a question needs one.
+    TemplateRepo::insert(conn, &template, &tvs, &[], None)?;
     SetRepo::add_template(conn, &set.id, &template.id)?;
 
     Ok(())

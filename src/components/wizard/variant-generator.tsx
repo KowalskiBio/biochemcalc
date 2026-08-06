@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 // Import API
 import { generationApi } from "@/lib/api"
-import { formatNumberMaxDecimals } from "@/lib/math-utils"
+import { formatNumberForText } from "@/lib/math-utils"
 import type {
   ExportInput,
   ExportQuestion,
@@ -244,7 +244,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                             <div className="space-y-1 mb-4">
                               {variant.answersData.map((a) => (
                          <p key={a.symbol} className="text-muted-foreground">
-                                   {a.symbol} = <span className="font-mono tabular">{formatNumberMaxDecimals(a.value)}</span>
+                                   {a.symbol} = <span className="font-mono tabular">{formatNumberForText(a.value)}</span>
                                    {a.unit ? ` ${a.unit}` : ""}
                                  </p>
                               ))}
@@ -253,7 +253,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                         }
                          return (
                            <p className="text-muted-foreground mb-4">
-                             <span className="font-mono tabular">{formatNumberMaxDecimals(variant.correctAnswer)}</span>
+                             <span className="font-mono tabular">{formatNumberForText(variant.correctAnswer)}</span>
                            </p>
                          )
                       })()}
@@ -261,7 +261,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                          <div>
                            <Label>Primary Answer</Label>
                            <Badge variant="default" className="mt-2 font-mono tabular">
-                             {formatNumberMaxDecimals(
+                             {formatNumberForText(
                                previewVariants[selectedPreviewIndex].correctAnswer,
                              )}
                            </Badge>

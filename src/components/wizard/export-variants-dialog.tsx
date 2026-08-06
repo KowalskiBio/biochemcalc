@@ -38,6 +38,7 @@ interface ExportVariantsDialogProps {
   mode: TemplateMode
   closedDifficulty: QuestionDifficulty
   closedOptionCount: number
+  openDifficulty: QuestionDifficulty
 }
 
 interface QuestionRowState {
@@ -52,6 +53,7 @@ export function ExportVariantsDialog({
   mode,
   closedDifficulty,
   closedOptionCount,
+  openDifficulty,
 }: ExportVariantsDialogProps) {
   const { toast } = useToast()
   const [isExporting, setIsExporting] = useState(false)
@@ -92,7 +94,7 @@ export function ExportVariantsDialog({
         count: 1,
         baseSeed: Date.now(),
         mode,
-        difficulty: mode === "closed" ? closedDifficulty : "medium",
+        difficulty: mode === "closed" ? closedDifficulty : openDifficulty,
         optionCount: mode === "closed" ? closedOptionCount : 5,
       })
       .then((results) => {
@@ -120,7 +122,7 @@ export function ExportVariantsDialog({
     return () => {
       cancelled = true
     }
-  }, [open, templates, mode, closedDifficulty, closedOptionCount, toast])
+  }, [open, templates, mode, closedDifficulty, closedOptionCount, openDifficulty, toast])
 
   const includedTemplates = useMemo(() => {
     return templates.filter((t) => rowStates[t.template.id]?.included !== false)
@@ -186,7 +188,7 @@ export function ExportVariantsDialog({
           count,
           baseSeed: Date.now() + i,
           mode,
-          difficulty: mode === "closed" ? closedDifficulty : "medium",
+          difficulty: mode === "closed" ? closedDifficulty : openDifficulty,
           optionCount: mode === "closed" ? closedOptionCount : 5,
         })
 
@@ -240,7 +242,16 @@ export function ExportVariantsDialog({
     } finally {
       setIsExporting(false)
     }
-  }, [includedTemplates, rowStates, mode, closedDifficulty, closedOptionCount, toast, onOpenChange])
+  }, [
+    includedTemplates,
+    rowStates,
+    mode,
+    closedDifficulty,
+    closedOptionCount,
+    openDifficulty,
+    toast,
+    onOpenChange,
+  ])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

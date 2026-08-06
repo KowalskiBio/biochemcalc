@@ -3,10 +3,12 @@ import {
   buildSubstitutedEquation,
   createRandom,
   evaluateExpression,
+  formatNumberForText,
   formatNumberMaxDecimals,
   pickMockValues,
   renderEquationAsLatex,
   resolveMolarMasses,
+  scientificNotationToHtml,
   validateEquationReferences,
 } from "@/lib/math-utils"
 import type { LocalVariableEdit, Variable, VariableWithPlaceholder } from "@/lib/types"
@@ -416,10 +418,50 @@ describe("formatNumberMaxDecimals", () => {
   })
 
   it("falls back to scientific notation when a non-zero value rounds to zero", () => {
-    expect(formatNumberMaxDecimals(0.001)).toBe("1.0×10^-3")
-    expect(formatNumberMaxDecimals(-0.001)).toBe("-1.0×10^-3")
-    expect(formatNumberMaxDecimals(0.0049)).toBe("4.9×10^-3")
-    expect(formatNumberMaxDecimals(1.23e-5)).toBe("1.2×10^-5")
+    expect(formatNumberMaxDecimals(0.001)).toBe("1.00×10^-3")
+    expect(formatNumberMaxDecimals(-0.001)).toBe("-1.00×10^-3")
+    expect(formatNumberMaxDecimals(0.0049)).toBe("4.90×10^-3")
+    expect(formatNumberMaxDecimals(1.23e-5)).toBe("1.23×10^-5")
+  })
+
+  it("uses scientific notation for large values instead of JavaScript's e+ syntax", () => {
+    // Molecule counts land here: the raw toString would be "1.5244...e+25",
+    // which is neither readable nor superscriptable.
+    expect(formatNumberMaxDecimals(1.524493429448685e25)).toBe("1.52×10^25")
+    expect(formatNumberMaxDecimals(6.022e23)).toBe("6.02×10^23")
+    expect(formatNumberMaxDecimals(-1.8433287150633585e25)).toBe("-1.84×10^25")
+    expect(formatNumberMaxDecimals(5.2149e24)).toBe("5.21×10^24")
+  })
+
+  it("never emits raw exponential syntax", () => {
+    for (const value of [1e6, 1e21, 1.5e25, 1e-7, 9.9e-30, 12345.678]) {
+      expect(formatNumberMaxDecimals(value)).not.toMatch(/e[+-]/i)
+    }
+  })
+
+  it("never leaks a bare caret into plain-text output", () => {
+    // Toasts and badges cannot render markup, so the exponent has to be real
+    // superscript characters rather than "^25".
+    expect(formatNumberForText(1.524493429448685e25)).toBe("1.52×10²⁵")
+    expect(formatNumberForText(6.022e23)).toBe("6.02×10²³")
+    expect(formatNumberForText(1.23e-5)).toBe("1.23×10⁻⁵")
+    expect(formatNumberForText(2711.93)).toBe("2711.93")
+    for (const value of [1e6, 1.5e25, 1e-7, 12345.678]) {
+      expect(formatNumberForText(value)).not.toContain("^")
+      expect(formatNumberForText(value)).not.toMatch(/e[+-]/i)
+    }
+  })
+
+  it("converts scientific notation to superscript markup for rendered contexts", () => {
+    expect(scientificNotationToHtml("1.52×10^25")).toBe("1.52×10<sup>25</sup>")
+    expect(scientificNotationToHtml("1.23×10^-5")).toBe("1.23×10<sup>-5</sup>")
+    expect(scientificNotationToHtml("2711.93")).toBe("2711.93")
+  })
+
+  it("keeps ordinary magnitudes in plain decimal form", () => {
+    expect(formatNumberMaxDecimals(2711.93)).toBe("2711.93")
+    expect(formatNumberMaxDecimals(1262.984)).toBe("1262.98")
+    expect(formatNumberMaxDecimals(999999.4)).toBe("999999.4")
   })
 
   it("keeps fixed notation when the value is representable at the requested precision", () => {

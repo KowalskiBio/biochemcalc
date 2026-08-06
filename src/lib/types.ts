@@ -368,30 +368,6 @@ export interface GenerateInput {
   optionCount: number
 }
 
-// API Response types
-
-/**
- * Success response wrapper
- */
-export interface ApiSuccessResponse<T> {
-  data: T
-  success: true
-}
-
-/**
- * Error response wrapper
- */
-export interface ApiErrorResponse {
-  error: string
-  message?: string
-  success: false
-}
-
-/**
- * Generic API response
- */
-export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse
-
 // Pagination types (for future use)
 
 /**
@@ -577,4 +553,135 @@ export interface UpdateProjektInput {
 export interface ExportProjektInput {
   projektId: string
   filename: string
+}
+
+// ============================================================================
+// Auth
+// ============================================================================
+
+export type Role = "teacher" | "student"
+
+export interface User {
+  id: string
+  username: string
+  role: Role
+  createdAt: string
+  /** The bootstrap admin (or, on older deployments, the earliest-created
+   * teacher) — cannot be deleted by anyone, including other teachers. */
+  protected: boolean
+}
+
+export interface InviteCode {
+  code: string
+  role: Role
+  createdBy: string | null
+  createdAt: string
+  expiresAt: string
+  revokedAt: string | null
+  /** How many accounts have registered with this code so far. */
+  useCount: number
+}
+
+export interface LoginInput {
+  username: string
+  password: string
+}
+
+export interface RegisterInput {
+  username: string
+  password: string
+  inviteCode: string
+}
+
+export interface CreateInviteCodeInput {
+  role: Role
+}
+
+// ============================================================================
+// Student practice generator
+// ============================================================================
+
+/** A topic offered to a student, listing only the difficulties it can serve. */
+export interface PracticeTopic {
+  id: string
+  name: string
+  difficulties: PracticeDifficulty[]
+}
+
+export interface PracticeDifficulty {
+  /** 2, 3 or 4 — the point value the teacher filed the question under. */
+  pointValue: number
+  questionCount: number
+}
+
+/** A variable and the placeholder it fills; feeds the question renderer. */
+export interface PracticeVariable {
+  variable: Variable
+  placeholder: string
+}
+
+/** One blank to fill in. Single-answer questions have exactly one. */
+export interface PracticeAnswerSlot {
+  /** The target symbol for multi-answer questions, else undefined. */
+  symbol?: string
+  unit?: string
+  /** Closed mode only — the options to pick between, in display order. */
+  numericOptions?: number[]
+}
+
+/**
+ * A question ready to answer. Carries no correct answer, correct option or
+ * tolerance interval: grading happens on the server against the stored
+ * attempt, so the leaderboard means something.
+ */
+export interface PracticeQuestion {
+  attemptId: string
+  questionText: string
+  pointValue: number
+  mode: TemplateMode
+  resultUnit: string
+  variables: PracticeVariable[]
+  assignedValues: Record<string, number>
+  assignedStrings: Record<string, string>
+  constants: Record<string, number>
+  answerSlots: PracticeAnswerSlot[]
+}
+
+export interface PracticeCorrectAnswer {
+  symbol?: string
+  value: number
+  unit?: string
+}
+
+export interface PracticeAnswerResult {
+  correct: boolean
+  pointValue: number
+  correctOption?: number
+  correctAnswers: PracticeCorrectAnswer[]
+}
+
+export interface NextQuestionInput {
+  topicId: string
+  pointValue: number
+}
+
+export interface SubmitAnswerInput {
+  attemptId: string
+  /** Closed mode: the 1-based option picked. */
+  selectedOption?: number
+  /** Open mode: one value per answer slot, in the order served. */
+  answers?: number[]
+}
+
+export interface LeaderboardEntry {
+  userId: string
+  username: string
+  correctCount: number
+  answeredCount: number
+  points: number
+}
+
+export interface ChangePasswordInput {
+  currentPassword: string
+  newPassword: string
 }

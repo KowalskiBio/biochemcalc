@@ -1,8 +1,7 @@
-import { invoke } from "@tauri-apps/api/core"
 import type { BulkImportData } from "./bulk-import-parser"
+import { ApiError, extractErrorMessage, httpRequest } from "./http"
 // Import all types from types.ts
 import type {
-  ApiResponse,
   Category,
   CategoryInput,
   CategoryWithSets,
@@ -41,78 +40,21 @@ import type {
   VictorSettings,
 } from "./types"
 
+// Re-exported so existing call sites (`import { ApiError } from "@/lib/api"`)
+// don't need to change — the underlying HTTP client moved to `./http`.
+export { ApiError, extractErrorMessage }
+
 // ============================================================================
-// API Error Handling
+// Low-level command dispatch
 // ============================================================================
 
 /**
- * Custom error class for API errors
+ * POST to `/api/cmd/<command>` — the teacher-only surface that mirrors every
+ * command the desktop app's Tauri IPC bridge used to expose. `body` is sent
+ * as-is as the JSON request body (no `{payload: ...}` wrapper).
  */
-export class ApiError extends Error {
-  constructor(
-    public readonly message: string,
-    public readonly code?: string,
-    public readonly details?: unknown,
-  ) {
-    super(message)
-    this.name = "ApiError"
-  }
-}
-
-/**
- * Extract a human-readable message from an unknown error value.
- * Tauri invoke errors may be plain objects, strings, or Error instances.
- */
-export function extractErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error) {
-    return error.message || fallback
-  }
-  if (typeof error === "string" && error.length > 0) {
-    return error
-  }
-  if (typeof error === "object" && error !== null) {
-    const obj = error as Record<string, unknown>
-    const message = obj.message || obj.error || obj.msg
-    if (typeof message === "string" && message.length > 0) {
-      return message
-    }
-  }
-  return fallback
-}
-
-/**
- * Parse API response and handle errors consistently
- */
-function handleApiResponse<T>(response: unknown): T {
-  if (response === null || response === undefined) {
-    return undefined as T
-  }
-
-  if (typeof response === "object") {
-    const obj = response as Record<string, unknown>
-
-    // Check for error response
-    if (obj.success === false) {
-      const errorMessage = (obj.error as string) || (obj.message as string) || "Unknown API error"
-      const details = obj.details
-      throw new ApiError(errorMessage, obj.error as string, details)
-    }
-
-    // Return data from success response
-    if (obj.success === true && "data" in obj) {
-      return obj.data as T
-    }
-
-    // Handle direct response (though our API wraps everything)
-    return response as T
-  }
-
-  const primitiveType = typeof response
-  if (primitiveType === "number" || primitiveType === "string" || primitiveType === "boolean") {
-    return response as T
-  }
-
-  throw new ApiError("Invalid API response format")
+function apiFetch<T>(command: string, body?: unknown): Promise<T> {
+  return httpRequest<T>(`/api/cmd/${command}`, body)
 }
 
 // ============================================================================
@@ -120,89 +62,22 @@ function handleApiResponse<T>(response: unknown): T {
 // ============================================================================
 
 export const topicsApi = {
-  /**
-   * Create a new topic
-   */
-  create: async (input: TopicInput): Promise<Topic> => {
-    try {
-      const response = await invoke<ApiResponse<Topic>>("create_topic", {
-        payload: input,
-      })
-      return handleApiResponse<Topic>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to create topic")
-    }
-  },
+  create: (input: TopicInput): Promise<Topic> => apiFetch<Topic>("create_topic", input),
 
-  /**
-   * List all topics
-   */
-  list: async (): Promise<Topic[]> => {
-    try {
-      const response = await invoke<ApiResponse<Topic[]>>("list_topics")
-      return handleApiResponse<Topic[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to list topics")
-    }
-  },
+  list: (): Promise<Topic[]> => apiFetch<Topic[]>("list_topics"),
 
-  /**
-   * Get a single topic by ID
-   */
-  get: async (id: string): Promise<Topic> => {
-    try {
-      const response = await invoke<ApiResponse<Topic>>("get_topic", { id })
-      return handleApiResponse<Topic>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to get topic ${id}`)
-    }
-  },
+  get: (id: string): Promise<Topic> => apiFetch<Topic>("get_topic", { id }),
 
-  /**
-   * Update a topic
-   */
-  update: async (id: string, name: string): Promise<Topic> => {
-    try {
-      const response = await invoke<ApiResponse<Topic>>("update_topic", {
-        payload: { id, name },
-      })
-      return handleApiResponse<Topic>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to update topic ${id}`)
-    }
-  },
+  update: (id: string, name: string): Promise<Topic> =>
+    apiFetch<Topic>("update_topic", { id, name }),
 
-  /**
-   * Delete a topic
-   */
-  delete: async (id: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_topic", { id })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to delete topic ${id}`)
-    }
-  },
+  delete: (id: string): Promise<void> => apiFetch<void>("delete_topic", { id }),
 
   /**
    * Import templates in bulk from parsed Word-style text.
    */
-  importBulk: async (data: BulkImportData): Promise<Topic> => {
-    try {
-      const response = await invoke<ApiResponse<Topic>>("import_bulk_templates", {
-        payload: data,
-      })
-      return handleApiResponse<Topic>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to import templates")
-    }
-  },
+  importBulk: (data: BulkImportData): Promise<Topic> =>
+    apiFetch<Topic>("import_bulk_templates", data),
 }
 
 // ============================================================================
@@ -210,178 +85,57 @@ export const topicsApi = {
 // ============================================================================
 
 export const variablesApi = {
-  /**
-   * Create a new variable
-   */
-  create: async (input: VariableInput): Promise<Variable> => {
-    try {
-      const response = await invoke<ApiResponse<Variable>>("create_variable", {
-        payload: input,
-      })
-      return handleApiResponse<Variable>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to create variable")
-    }
-  },
+  create: (input: VariableInput): Promise<Variable> =>
+    apiFetch<Variable>("create_variable", input),
 
-  /**
-   * List all variables
-   */
-  list: async (): Promise<Variable[]> => {
-    try {
-      const response = await invoke<ApiResponse<Variable[]>>("list_variables")
-      return handleApiResponse<Variable[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to list variables")
-    }
-  },
+  list: (): Promise<Variable[]> => apiFetch<Variable[]>("list_variables"),
 
-  /**
-   * Get a single variable by ID
-   */
-  get: async (id: string): Promise<Variable> => {
-    try {
-      const response = await invoke<ApiResponse<Variable>>("get_variable", { id })
-      return handleApiResponse<Variable>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to get variable ${id}`)
-    }
-  },
+  get: (id: string): Promise<Variable> => apiFetch<Variable>("get_variable", { id }),
 
-  /**
-   * Update a variable
-   */
-  update: async (id: string, input: Partial<VariableInput>): Promise<Variable> => {
-    try {
-      const response = await invoke<ApiResponse<Variable>>("update_variable", {
-        payload: { id, ...input },
-      })
-      return handleApiResponse<Variable>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to update variable ${id}`)
-    }
-  },
+  update: (id: string, input: Partial<VariableInput>): Promise<Variable> =>
+    apiFetch<Variable>("update_variable", { id, ...input }),
 
-  /**
-   * Delete a variable
-   */
-  delete: async (id: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_variable", { id })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to delete variable ${id}`)
-    }
-  },
+  delete: (id: string): Promise<void> => apiFetch<void>("delete_variable", { id }),
 
   /**
    * List variable history entries for a specific template
    */
-  listHistoryByTemplate: async (
+  listHistoryByTemplate: (
     templateId: string,
     limit: number = 50,
     offset: number = 0,
-  ): Promise<VariableHistoryEntry[]> => {
-    try {
-      const response = await invoke<ApiResponse<VariableHistoryEntry[]>>(
-        "list_variable_history_by_template",
-        {
-          templateId,
-          limit,
-          offset,
-        },
-      )
-      return handleApiResponse<VariableHistoryEntry[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error
-          ? error.message
-          : `Failed to list variable history for template ${templateId}`,
-      )
-    }
-  },
+  ): Promise<VariableHistoryEntry[]> =>
+    apiFetch<VariableHistoryEntry[]>("list_variable_history_by_template", {
+      templateId,
+      limit,
+      offset,
+    }),
 
   /**
    * List all variable history entries
    */
-  listAllHistory: async (
-    limit: number = 50,
-    offset: number = 0,
-  ): Promise<VariableHistoryEntry[]> => {
-    try {
-      const response = await invoke<ApiResponse<VariableHistoryEntry[]>>(
-        "list_all_variable_history",
-        {
-          limit,
-          offset,
-        },
-      )
-      return handleApiResponse<VariableHistoryEntry[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : "Failed to list all variable history",
-      )
-    }
-  },
+  listAllHistory: (limit: number = 50, offset: number = 0): Promise<VariableHistoryEntry[]> =>
+    apiFetch<VariableHistoryEntry[]>("list_all_variable_history", { limit, offset }),
 
   /**
    * List template field history entries for a specific template
    */
-  listTemplateHistoryByTemplate: async (
+  listTemplateHistoryByTemplate: (
     templateId: string,
     limit: number = 50,
     offset: number = 0,
-  ): Promise<TemplateHistoryEntry[]> => {
-    try {
-      const response = await invoke<ApiResponse<TemplateHistoryEntry[]>>(
-        "list_template_history_by_template",
-        {
-          templateId,
-          limit,
-          offset,
-        },
-      )
-      return handleApiResponse<TemplateHistoryEntry[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error
-          ? error.message
-          : `Failed to list template history for template ${templateId}`,
-      )
-    }
-  },
+  ): Promise<TemplateHistoryEntry[]> =>
+    apiFetch<TemplateHistoryEntry[]>("list_template_history_by_template", {
+      templateId,
+      limit,
+      offset,
+    }),
 
   /**
    * List all template field history entries
    */
-  listAllTemplateHistory: async (
-    limit: number = 50,
-    offset: number = 0,
-  ): Promise<TemplateHistoryEntry[]> => {
-    try {
-      const response = await invoke<ApiResponse<TemplateHistoryEntry[]>>(
-        "list_all_template_history",
-        {
-          limit,
-          offset,
-        },
-      )
-      return handleApiResponse<TemplateHistoryEntry[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : "Failed to list all template history",
-      )
-    }
-  },
+  listAllTemplateHistory: (limit: number = 50, offset: number = 0): Promise<TemplateHistoryEntry[]> =>
+    apiFetch<TemplateHistoryEntry[]>("list_all_template_history", { limit, offset }),
 }
 
 // ============================================================================
@@ -389,74 +143,26 @@ export const variablesApi = {
 // ============================================================================
 
 export const constantsApi = {
-  /**
-   * Create a new constant
-   */
-  create: async (input: ConstantInput): Promise<Constant> => {
-    try {
-      const response = await invoke<ApiResponse<Constant>>("create_constant", {
-        payload: { ...input, isBuiltin: false },
-      })
-      return handleApiResponse<Constant>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to create constant")
-    }
-  },
+  create: (input: ConstantInput): Promise<Constant> =>
+    apiFetch<Constant>("create_constant", { ...input, isBuiltin: false }),
 
   /**
    * List all constants (including built-ins)
    */
-  list: async (): Promise<Constant[]> => {
-    try {
-      const response = await invoke<ApiResponse<Constant[]>>("list_constants")
-      return handleApiResponse<Constant[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to list constants")
-    }
-  },
+  list: (): Promise<Constant[]> => apiFetch<Constant[]>("list_constants"),
 
-  /**
-   * Get a single constant by ID
-   */
-  get: async (id: string): Promise<Constant> => {
-    try {
-      const response = await invoke<ApiResponse<Constant>>("get_constant", { id })
-      return handleApiResponse<Constant>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to get constant ${id}`)
-    }
-  },
+  get: (id: string): Promise<Constant> => apiFetch<Constant>("get_constant", { id }),
 
   /**
    * Update a constant (only for custom constants)
    */
-  update: async (id: string, input: Partial<ConstantInput>): Promise<Constant> => {
-    try {
-      const response = await invoke<ApiResponse<Constant>>("update_constant", {
-        payload: { id, ...input },
-      })
-      return handleApiResponse<Constant>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to update constant ${id}`)
-    }
-  },
+  update: (id: string, input: Partial<ConstantInput>): Promise<Constant> =>
+    apiFetch<Constant>("update_constant", { id, ...input }),
 
   /**
    * Delete a constant (only for custom constants)
    */
-  delete: async (id: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_constant", { id })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to delete constant ${id}`)
-    }
-  },
+  delete: (id: string): Promise<void> => apiFetch<void>("delete_constant", { id }),
 }
 
 // ============================================================================
@@ -464,154 +170,47 @@ export const constantsApi = {
 // ============================================================================
 
 export const templatesApi = {
-  /**
-   * Create a new template
-   */
-  create: async (input: TemplateInput): Promise<Template> => {
-    try {
-      const response = await invoke<ApiResponse<Template>>("create_template", {
-        payload: input,
-      })
-      return handleApiResponse<Template>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to create template")
-    }
-  },
+  create: (input: TemplateInput): Promise<Template> =>
+    apiFetch<Template>("create_template", input),
 
-  /**
-   * List all templates
-   */
-  list: async (): Promise<Template[]> => {
-    try {
-      const response = await invoke<ApiResponse<Template[]>>("list_templates")
-      return handleApiResponse<Template[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to list templates")
-    }
-  },
+  list: (): Promise<Template[]> => apiFetch<Template[]>("list_templates"),
 
-  /**
-   * Get a single template by ID
-   */
-  get: async (id: string): Promise<Template> => {
-    try {
-      const response = await invoke<ApiResponse<Template>>("get_template", { id })
-      return handleApiResponse<Template>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to get template ${id}`)
-    }
-  },
+  get: (id: string): Promise<Template> => apiFetch<Template>("get_template", { id }),
 
   /**
    * Get a template with its variables, constants, and constraint
    */
-  getWithDetails: async (id: string): Promise<TemplateWithDetails> => {
-    try {
-      const response = await invoke<ApiResponse<TemplateWithDetails>>("get_template_with_details", {
-        id,
-      })
-      return handleApiResponse<TemplateWithDetails>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to get template ${id} with details`,
-      )
-    }
-  },
+  getWithDetails: (id: string): Promise<TemplateWithDetails> =>
+    apiFetch<TemplateWithDetails>("get_template_with_details", { id }),
 
   /**
    * Get the set/category/topic location of a template.
    */
-  getLocation: async (id: string): Promise<TemplateLocation | null> => {
-    try {
-      const response = await invoke<ApiResponse<TemplateLocation | null>>("get_template_location", {
-        id,
-      })
-      return handleApiResponse<TemplateLocation | null>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to get location for ${id}`,
-      )
-    }
-  },
+  getLocation: (id: string): Promise<TemplateLocation | null> =>
+    apiFetch<TemplateLocation | null>("get_template_location", { id }),
 
-  /**
-   * Update a template
-   */
-  update: async (id: string, input: Partial<TemplateInput>): Promise<Template> => {
-    try {
-      const response = await invoke<ApiResponse<Template>>("update_template", {
-        payload: { id, ...input },
-      })
-      return handleApiResponse<Template>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to update template ${id}`)
-    }
-  },
+  update: (id: string, input: Partial<TemplateInput>): Promise<Template> =>
+    apiFetch<Template>("update_template", { id, ...input }),
 
   /**
    * Update a template together with its variables in one atomic operation.
    */
-  updateWithVariables: async (
+  updateWithVariables: (
     payload: UpdateTemplateWithVariablesPayload,
-  ): Promise<TemplateWithDetails> => {
-    try {
-      const response = await invoke<ApiResponse<TemplateWithDetails>>(
-        "update_template_with_variables",
-        { payload },
-      )
-      return handleApiResponse<TemplateWithDetails>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "string"
-            ? error
-            : `Failed to update template ${payload.id}`
-      throw new ApiError(message, undefined, error)
-    }
-  },
+  ): Promise<TemplateWithDetails> =>
+    apiFetch<TemplateWithDetails>("update_template_with_variables", payload),
 
   /**
    * Update formula/equationText for all templates sharing the same equation text.
    */
-  updateByEquation: async (payload: {
+  updateByEquation: (payload: {
     oldEquationText: string
     newFormula: string
     newEquationText: string
     newResultUnit: string
-  }): Promise<number> => {
-    try {
-      const response = await invoke<ApiResponse<number>>("update_templates_by_equation", {
-        payload,
-      })
-      return handleApiResponse<number>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : "Failed to update templates by equation",
-      )
-    }
-  },
+  }): Promise<number> => apiFetch<number>("update_templates_by_equation", payload),
 
-  /**
-   * Delete a template
-   */
-  delete: async (id: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_template", { id })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to delete template ${id}`)
-    }
-  },
+  delete: (id: string): Promise<void> => apiFetch<void>("delete_template", { id }),
 }
 
 // ============================================================================
@@ -622,96 +221,31 @@ export const categoriesApi = {
   /**
    * Create a new category (2, 3, or 4 points)
    */
-  create: async (input: CategoryInput): Promise<Category> => {
-    // Validate point value
+  create: (input: CategoryInput): Promise<Category> => {
     if (![2, 3, 4].includes(input.pointValue)) {
       throw new ApiError("Category must be 2, 3, or 4 points", "INVALID_POINT_VALUE")
     }
-
-    try {
-      const response = await invoke<ApiResponse<Category>>("create_category", {
-        payload: input,
-      })
-      return handleApiResponse<Category>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to create category")
-    }
+    return apiFetch<Category>("create_category", input)
   },
 
-  /**
-   * List all categories
-   */
-  list: async (): Promise<Category[]> => {
-    try {
-      const response = await invoke<ApiResponse<Category[]>>("list_categories")
-      return handleApiResponse<Category[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to list categories")
-    }
-  },
+  list: (): Promise<Category[]> => apiFetch<Category[]>("list_categories"),
 
-  /**
-   * List categories by topic ID
-   */
-  listByTopic: async (topicId: string): Promise<Category[]> => {
-    try {
-      const response = await invoke<ApiResponse<Category[]>>("list_categories_by_topic", {
-        topicId,
-      })
-      return handleApiResponse<Category[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to list categories for topic ${topicId}`,
-      )
-    }
-  },
+  listByTopic: (topicId: string): Promise<Category[]> =>
+    apiFetch<Category[]>("list_categories_by_topic", { topicId }),
 
   /**
    * Get a category with its sets
    */
   getWithSets: async (id: string): Promise<CategoryWithSets> => {
-    try {
-      const response = await invoke<ApiResponse<[Category, SetModel[]]>>("get_category_with_sets", {
-        id,
-      })
-      const data = handleApiResponse<[Category, SetModel[]]>(response)
-      return { category: data[0], sets: data[1] }
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to get category ${id} with sets`,
-      )
-    }
+    const [category, sets] = await apiFetch<[Category, SetModel[]]>("get_category_with_sets", {
+      id,
+    })
+    return { category, sets }
   },
 
-  /**
-   * Get a single category by ID
-   */
-  get: async (id: string): Promise<Category> => {
-    try {
-      const response = await invoke<ApiResponse<Category>>("get_category", { id })
-      return handleApiResponse<Category>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to get category ${id}`)
-    }
-  },
+  get: (id: string): Promise<Category> => apiFetch<Category>("get_category", { id }),
 
-  /**
-   * Delete a category
-   */
-  delete: async (id: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_category", { id })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : `Failed to delete category ${id}`)
-    }
-  },
+  delete: (id: string): Promise<void> => apiFetch<void>("delete_category", { id }),
 }
 
 // ============================================================================
@@ -719,89 +253,26 @@ export const categoriesApi = {
 // ============================================================================
 
 export const setsApi = {
-  /**
-   * Add a template to a set
-   */
-  addTemplate: async (setId: string, templateId: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("add_template_to_set", {
-        payload: { setId, templateId },
-      })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to add template to set")
-    }
-  },
+  addTemplate: (setId: string, templateId: string): Promise<void> =>
+    apiFetch<void>("add_template_to_set", { setId, templateId }),
 
-  /**
-   * Remove a template from a set
-   */
-  removeTemplate: async (setId: string, templateId: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("remove_template_from_set", {
-        payload: { setId, templateId },
-      })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : "Failed to remove template from set",
-      )
-    }
-  },
+  removeTemplate: (setId: string, templateId: string): Promise<void> =>
+    apiFetch<void>("remove_template_from_set", { setId, templateId }),
 
-  /**
-   * Reorder templates within a set
-   */
-  reorderTemplates: async (setId: string, templateIds: string[]): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("reorder_templates_in_set", {
-        payload: { setId, templateIds },
-      })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : "Failed to reorder templates in set",
-      )
-    }
-  },
+  reorderTemplates: (setId: string, templateIds: string[]): Promise<void> =>
+    apiFetch<void>("reorder_templates_in_set", { setId, templateIds }),
 
-  /**
-   * Update the mode of a set
-   */
-  updateMode: async (input: SetModeInput): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("update_set_mode", {
-        payload: input,
-      })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to update set mode")
-    }
-  },
+  updateMode: (input: SetModeInput): Promise<void> => apiFetch<void>("update_set_mode", input),
 
   /**
    * Get a set with its templates
    */
   getWithTemplates: async (setId: string): Promise<SetWithTemplates> => {
-    try {
-      const response = await invoke<ApiResponse<[SetModel, TemplateWithDetails[]]>>(
-        "get_set_with_templates",
-        {
-          setId,
-        },
-      )
-      const data = handleApiResponse<[SetModel, TemplateWithDetails[]]>(response)
-      return { set: data[0], templates: data[1] }
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to get set ${setId} with templates`,
-      )
-    }
+    const [set, templates] = await apiFetch<[SetModel, TemplateWithDetails[]]>(
+      "get_set_with_templates",
+      { setId },
+    )
+    return { set, templates }
   },
 }
 
@@ -810,90 +281,30 @@ export const setsApi = {
 // ============================================================================
 
 export const generationApi = {
-  /**
-   * Generate variants for a set of templates
-   */
-  generateForTemplates: async (input: GenerateInput): Promise<TemplateVariantResult[]> => {
-    try {
-      const response = await invoke<ApiResponse<TemplateVariantResult[]>>(
-        "generate_for_templates",
-        { payload: input },
-      )
-      return handleApiResponse<TemplateVariantResult[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(extractErrorMessage(error, "Failed to generate variants"))
-    }
-  },
+  generateForTemplates: (input: GenerateInput): Promise<TemplateVariantResult[]> =>
+    apiFetch<TemplateVariantResult[]>("generate_for_templates", input),
 
-  /**
-   * Export generated questions to a text file
-   */
-  exportToTxt: async (input: ExportInput): Promise<ExportResult> => {
-    try {
-      const response = await invoke<ApiResponse<ExportResult>>("export_to_txt", {
-        payload: input,
-      })
-      return handleApiResponse<ExportResult>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to export to text file")
-    }
-  },
+  exportToTxt: (input: ExportInput): Promise<ExportResult> =>
+    apiFetch<ExportResult>("export_to_txt", input),
 
   /**
    * List all exported test files.
    */
-  listOutputFiles: async (): Promise<OutputFile[]> => {
-    try {
-      const response = await invoke<ApiResponse<OutputFile[]>>("list_output_files")
-      return handleApiResponse<OutputFile[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(extractErrorMessage(error, "Failed to list output files"))
-    }
-  },
+  listOutputFiles: (): Promise<OutputFile[]> => apiFetch<OutputFile[]>("list_output_files"),
 
   /**
    * Read an exported test file's content.
    */
-  readOutputFile: async (id: string): Promise<OutputFileContent> => {
-    try {
-      const response = await invoke<ApiResponse<OutputFileContent>>("read_output_file", { id })
-      return handleApiResponse<OutputFileContent>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(extractErrorMessage(error, "Failed to read output file"))
-    }
-  },
+  readOutputFile: (id: string): Promise<OutputFileContent> =>
+    apiFetch<OutputFileContent>("read_output_file", { id }),
 
   /**
    * Delete an exported test file.
    */
-  deleteOutputFile: async (id: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_output_file", { id })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(extractErrorMessage(error, "Failed to delete output file"))
-    }
-  },
+  deleteOutputFile: (id: string): Promise<void> => apiFetch<void>("delete_output_file", { id }),
 
-  /**
-   * Regenerate a variant for a template
-   */
-  regenerateVariant: async (input: RegenerateVariantInput): Promise<Variant> => {
-    try {
-      const response = await invoke<ApiResponse<Variant>>("regenerate_variant", {
-        payload: input,
-      })
-      return handleApiResponse<Variant>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(extractErrorMessage(error, "Failed to regenerate variant"))
-    }
-  },
+  regenerateVariant: (input: RegenerateVariantInput): Promise<Variant> =>
+    apiFetch<Variant>("regenerate_variant", input),
 }
 
 // ============================================================================
@@ -901,48 +312,13 @@ export const generationApi = {
 // ============================================================================
 
 export const victorApi = {
-  /**
-   * Get Victor settings
-   */
-  getSettings: async (): Promise<VictorSettings> => {
-    try {
-      const response = await invoke<ApiResponse<VictorSettings>>("get_victor_settings")
-      return handleApiResponse<VictorSettings>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to get Victor settings")
-    }
-  },
+  getSettings: (): Promise<VictorSettings> => apiFetch<VictorSettings>("get_victor_settings"),
 
-  /**
-   * Set Victor settings
-   */
-  setSettings: async (input: VictorSettings): Promise<VictorSettings> => {
-    try {
-      const response = await invoke<ApiResponse<VictorSettings>>("set_victor_settings", {
-        payload: input,
-      })
-      return handleApiResponse<VictorSettings>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to set Victor settings")
-    }
-  },
+  setSettings: (input: VictorSettings): Promise<VictorSettings> =>
+    apiFetch<VictorSettings>("set_victor_settings", input),
 
-  /**
-   * Chat with Victor
-   */
-  chat: async (request: VictorRequest): Promise<VictorResponse> => {
-    try {
-      const response = await invoke<ApiResponse<VictorResponse>>("chat_with_victor", {
-        payload: request,
-      })
-      return handleApiResponse<VictorResponse>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to chat with Victor")
-    }
-  },
+  chat: (request: VictorRequest): Promise<VictorResponse> =>
+    apiFetch<VictorResponse>("chat_with_victor", request),
 }
 
 // ============================================================================
@@ -950,81 +326,20 @@ export const victorApi = {
 // ============================================================================
 
 export const projektyApi = {
-  save: async (input: SaveProjektInput): Promise<Projekt> => {
-    try {
-      const response = await invoke<ApiResponse<Projekt>>("save_projekt", {
-        payload: input,
-      })
-      return handleApiResponse<Projekt>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to save projekt")
-    }
-  },
+  save: (input: SaveProjektInput): Promise<Projekt> => apiFetch<Projekt>("save_projekt", input),
 
-  load: async (projektId: string): Promise<ProjektContent> => {
-    try {
-      const response = await invoke<ApiResponse<ProjektContent>>("load_projekt", {
-        payload: { projektId },
-      })
-      return handleApiResponse<ProjektContent>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to load projekt ${projektId}`,
-      )
-    }
-  },
+  load: (projektId: string): Promise<ProjektContent> =>
+    apiFetch<ProjektContent>("load_projekt", { projektId }),
 
-  list: async (): Promise<Projekt[]> => {
-    try {
-      const response = await invoke<ApiResponse<Projekt[]>>("list_projekty")
-      return handleApiResponse<Projekt[]>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to list projekty")
-    }
-  },
+  list: (): Promise<Projekt[]> => apiFetch<Projekt[]>("list_projekty"),
 
-  delete: async (projektId: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("delete_projekt", {
-        payload: { projektId },
-      })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : `Failed to delete projekt ${projektId}`,
-      )
-    }
-  },
+  delete: (projektId: string): Promise<void> => apiFetch<void>("delete_projekt", { projektId }),
 
-  update: async (payload: UpdateProjektInput): Promise<Projekt> => {
-    try {
-      const response = await invoke<ApiResponse<Projekt>>("update_projekt", {
-        payload,
-      })
-      return handleApiResponse<Projekt>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to update projekt")
-    }
-  },
+  update: (payload: UpdateProjektInput): Promise<Projekt> =>
+    apiFetch<Projekt>("update_projekt", payload),
 
-  exportToTxt: async (input: ExportProjektInput): Promise<ExportResult> => {
-    try {
-      const response = await invoke<ApiResponse<ExportResult>>("export_projekt_to_txt", {
-        payload: input,
-      })
-      return handleApiResponse<ExportResult>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error ? error.message : "Failed to export projekt to text",
-      )
-    }
-  },
+  exportToTxt: (input: ExportProjektInput): Promise<ExportResult> =>
+    apiFetch<ExportResult>("export_projekt_to_txt", input),
 }
 
 function toHistoryEntry(entry: VariableHistoryEntry): HistoryEntry {
@@ -1079,31 +394,10 @@ export const historyApi = {
     ].sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
   },
 
-  clearByTemplate: async (templateId: string): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("clear_template_history", {
-        payload: { templateId },
-      })
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(
-        error instanceof Error
-          ? error.message
-          : `Failed to clear history for template ${templateId}`,
-      )
-    }
-  },
+  clearByTemplate: (templateId: string): Promise<void> =>
+    apiFetch<void>("clear_template_history", { templateId }),
 
-  clearAll: async (): Promise<void> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("clear_all_history")
-      return handleApiResponse<void>(response)
-    } catch (error) {
-      if (error instanceof ApiError) throw error
-      throw new ApiError(error instanceof Error ? error.message : "Failed to clear all history")
-    }
-  },
+  clearAll: (): Promise<void> => apiFetch<void>("clear_all_history"),
 }
 
 // ============================================================================

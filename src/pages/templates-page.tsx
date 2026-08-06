@@ -25,7 +25,7 @@ import { cs } from "@/i18n/cs"
 // Import API
 import { ApiError, templatesApi } from "@/lib/api"
 import type { Template, TemplateInput, TemplateMode } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, stripAnswerTargets } from "@/lib/utils"
 
 const pageContainerVariants = cva("space-y-6")
 
@@ -262,7 +262,7 @@ export function TemplatesPage() {
                   {filteredTemplates.map((template) => (
                     <TableRow key={template.id}>
                       <TableCell className="max-w-[200px] truncate">
-                        {template.questionText}
+                        {stripAnswerTargets(template.questionText)}
                       </TableCell>
                       <TableCell className="max-w-[150px] truncate font-mono text-sm">
                         {template.formula}

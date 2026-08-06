@@ -23,6 +23,10 @@ path = "src/bin/reparse_test1.rs"
 name = "import_bulk_json"
 path = "src/bin/import_bulk_json.rs"
 
+[[bin]]
+name = "biochemcalc-server"
+path = "src/bin/server.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -42,4 +46,7 @@ evalexpr = "13.1.0"
 regex = "1"
 log = "0.4"
 simplelog = { version = "0.12", default-features = false }
+axum = "0.8.9"
+tower-http = { version = "0.7.0", features = ["fs", "cors"] }
+argon2 = { version = "0.5.3", features = ["std"] }
 

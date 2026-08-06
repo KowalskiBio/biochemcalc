@@ -814,18 +814,86 @@ export function pickMockValues(
   return result
 }
 
+/** Mantissa precision for scientific notation, e.g. `5.21×10^24`. */
+const SCIENTIFIC_MANTISSA_DECIMALS = 2
+
+/**
+ * Above this magnitude a plain decimal string stops being readable — and
+ * JavaScript's own `toString` starts emitting `1.5e+25`, which is neither the
+ * `×10^n` convention used everywhere else in the app nor something
+ * `FormattedResult` can turn into a superscript.
+ */
+const SCIENTIFIC_UPPER_THRESHOLD = 1e6
+
+/** Render as `m×10^n`; `FormattedResult` superscripts the exponent. */
+function toScientificNotation(value: number): string {
+  return value
+    .toExponential(SCIENTIFIC_MANTISSA_DECIMALS)
+    .replace(/e([+-]?)(\d+)/, (_, sign: string, digits: string) => {
+      return `×10^${sign === "-" ? "-" : ""}${digits}`
+    })
+}
+
+/** Matches the `×10^n` form that {@link formatNumberMaxDecimals} produces. */
+const SCIENTIFIC_EXPONENT_REGEX = /×10\^([+-]?\d+)/g
+
+/**
+ * `1.52×10^25` → `1.52×10<sup>25</sup>`, for the places that render markup
+ * (question text, answer chips). Only for in-app rendering — the exported
+ * `.txt` builds its own HTML in the Rust writer.
+ */
+export function scientificNotationToHtml(text: string): string {
+  return text.replace(SCIENTIFIC_EXPONENT_REGEX, "×10<sup>$1</sup>")
+}
+
+const SUPERSCRIPT_CHARS: Record<string, string> = {
+  "0": "⁰",
+  "1": "¹",
+  "2": "²",
+  "3": "³",
+  "4": "⁴",
+  "5": "⁵",
+  "6": "⁶",
+  "7": "⁷",
+  "8": "⁸",
+  "9": "⁹",
+  "-": "⁻",
+  "+": "⁺",
+}
+
+/**
+ * `1.52×10^25` → `1.52×10²⁵` using real superscript characters, for plain-text
+ * places that cannot render markup at all — toasts, badges, labels. Keeps a
+ * bare `^` from ever reaching the screen.
+ */
+export function scientificNotationToUnicode(text: string): string {
+  return text.replace(SCIENTIFIC_EXPONENT_REGEX, (_, exponent: string) => {
+    const digits = [...exponent].map((char) => SUPERSCRIPT_CHARS[char] ?? char).join("")
+    return `×10${digits}`
+  })
+}
+
+/**
+ * A number ready to drop straight into plain text: `1.52×10²⁵`. Prefer
+ * `FormattedResult` where markup renders; use this everywhere else.
+ */
+export function formatNumberForText(
+  value: number | undefined | null,
+  maxDecimals = 2,
+): string {
+  return scientificNotationToUnicode(formatNumberMaxDecimals(value, maxDecimals))
+}
+
 export function formatNumberMaxDecimals(value: number | undefined | null, maxDecimals = 2): string {
   if (value == null || !Number.isFinite(value)) return ""
   const decimals = Math.max(0, maxDecimals)
   const fixed = value.toFixed(decimals)
   const rounded = Number(fixed)
-  if (rounded === 0 && value !== 0) {
-    const precision = Math.max(0, decimals - 1)
-    return value
-      .toExponential(precision)
-      .replace(/e([+-]?)(\d+)/, (_, sign: string, digits: string) => {
-        return `×10^${sign === "-" ? "-" : ""}${digits}`
-      })
+
+  // Too small to survive rounding at this precision, or too large to write
+  // out in full — either way scientific notation is the readable form.
+  if ((rounded === 0 && value !== 0) || Math.abs(rounded) >= SCIENTIFIC_UPPER_THRESHOLD) {
+    return toScientificNotation(value)
   }
   return rounded.toString()
 }

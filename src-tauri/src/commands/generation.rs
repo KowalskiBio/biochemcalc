@@ -15,9 +15,11 @@ use crate::models::{
 use chrono::Utc;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Manager, State};
+use std::path::Path;
+use tauri::State;
 use uuid::Uuid;
 
 /// Input for generating variants for one or more templates.
@@ -120,21 +122,23 @@ pub struct ExportResult {
 
 #[tauri::command]
 pub fn export_to_txt(
-    app: tauri::AppHandle,
     state: State<'_, AppState>,
     payload: ExportPayload,
 ) -> Result<ExportResult, DbError> {
     crate::util::guard_panic("export_to_txt", move || {
-        export_to_txt_inner(app, state, payload)
+        let conn = crate::util::lock_db(&state.db);
+        do_export_to_txt(&conn, &state.data_dir, payload)
     })
 }
 
-fn export_to_txt_inner(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
+/// Shared by the Tauri command above and the HTTP handler in `src/http` —
+/// takes `data_dir` explicitly instead of resolving it from an `AppHandle` so
+/// it has no Tauri dependency at all.
+pub fn do_export_to_txt(
+    conn: &Connection,
+    data_dir: &Path,
     payload: ExportPayload,
 ) -> Result<ExportResult, DbError> {
-    let conn = crate::util::lock_db(&state.db);
     let questions: Vec<ExportQuestion<'_>> = payload
         .questions
         .iter()
@@ -149,11 +153,7 @@ fn export_to_txt_inner(
 
     let content = write_txt(&questions);
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| DbError::Io(format!("Failed to resolve app data dir: {e}")))?;
-    std::fs::create_dir_all(&app_data_dir)
+    std::fs::create_dir_all(data_dir)
         .map_err(|e| DbError::Io(format!("Failed to create app data dir: {e}")))?;
 
     let file_name = if payload.filename.ends_with(".txt") {
@@ -161,7 +161,7 @@ fn export_to_txt_inner(
     } else {
         format!("{}.txt", payload.filename)
     };
-    let file_path = app_data_dir.join(file_name);
+    let file_path = data_dir.join(file_name);
 
     crate::util::atomic_write(&file_path, &content)
         .map_err(|e| DbError::Io(format!("Failed to write export file: {e}")))?;
@@ -212,18 +212,19 @@ pub fn regenerate_variant(
     payload: RegenerateVariantPayload,
 ) -> Result<Variant, DbError> {
     crate::util::guard_panic("regenerate_variant", move || {
-        regenerate_variant_inner(state, payload)
+        let conn = crate::util::lock_db(&state.db);
+        do_regenerate_variant(&conn, payload)
     })
 }
 
-fn regenerate_variant_inner(
-    state: State<'_, AppState>,
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_regenerate_variant(
+    conn: &Connection,
     payload: RegenerateVariantPayload,
 ) -> Result<Variant, DbError> {
-    let conn = crate::util::lock_db(&state.db);
-    let template = TemplateRepo::get_by_id(&conn, &payload.template_id)?;
+    let template = TemplateRepo::get_by_id(conn, &payload.template_id)?;
     let (variables, constants, constraint, fixed_values) =
-        load_template_dependencies(&conn, &template)?;
+        load_template_dependencies(conn, &template)?;
     let targets = extract_target_symbols(&template.question_text);
 
     let mut variant = generate_variant_with_targets(
@@ -283,22 +284,26 @@ pub struct SaveProjektPayload {
     pub questions: Vec<ProjektQuestion>,
 }
 
-/// Persist a projekt as a JSON file in `app_data_dir/projekty/<uuid>.json`
+/// Persist a projekt as a JSON file in `data_dir/projekty/<uuid>.json`
 /// and insert metadata into the database via ProjektRepo.
 #[tauri::command]
 pub fn save_projekt(
-    app: AppHandle,
     state: State<'_, AppState>,
     payload: SaveProjektPayload,
 ) -> Result<Projekt, DbError> {
     let conn = crate::util::lock_db(&state.db);
+    do_save_projekt(&conn, &state.data_dir, payload)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub fn do_save_projekt(
+    conn: &Connection,
+    data_dir: &Path,
+    payload: SaveProjektPayload,
+) -> Result<Projekt, DbError> {
     let projekt_id = Uuid::new_v4();
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| DbError::Io(format!("Failed to resolve app data dir: {e}")))?;
-    let projekty_dir = app_data_dir.join("projekty");
+    let projekty_dir = data_dir.join("projekty");
     std::fs::create_dir_all(&projekty_dir)
         .map_err(|e| DbError::Io(format!("Failed to create projekty dir: {e}")))?;
 
@@ -327,7 +332,7 @@ pub fn save_projekt(
         updated_at: now,
     };
 
-    ProjektRepo::insert(&conn, &projekt)?;
+    ProjektRepo::insert(conn, &projekt)?;
 
     Ok(projekt)
 }
@@ -343,17 +348,27 @@ pub struct UpdateProjektPayload {
     pub questions: Vec<ProjektQuestion>,
 }
 
-/// Update an existing projekt's content and metadata.
+/// Update an existing projekt's content and metadata. Takes no data-dir
+/// parameter — it reuses the file path already stored on the existing
+/// projekt row rather than resolving one itself, so it needs no Tauri
+/// `AppHandle` and works unchanged for both the desktop app and the HTTP
+/// server.
 #[tauri::command]
 pub fn update_projekt(
-    _app: AppHandle,
     state: State<'_, AppState>,
     payload: UpdateProjektPayload,
 ) -> Result<Projekt, DbError> {
     let conn = crate::util::lock_db(&state.db);
+    do_update_projekt(&conn, payload)
+}
 
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_update_projekt(
+    conn: &Connection,
+    payload: UpdateProjektPayload,
+) -> Result<Projekt, DbError> {
     // Get existing projekt to preserve file path
-    let existing = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
+    let existing = ProjektRepo::get_by_id(conn, &payload.projekt_id)?;
     let file_path = existing.file_path.clone();
 
     let question_count = payload.questions.len() as u32;
@@ -381,7 +396,7 @@ pub fn update_projekt(
         updated_at,
     };
 
-    ProjektRepo::update(&conn, &projekt)?;
+    ProjektRepo::update(conn, &projekt)?;
 
     Ok(projekt)
 }
@@ -449,22 +464,22 @@ pub struct ExportProjektToTxtPayload {
 /// Export a saved projekt as a `.txt` file using the same format as `export_to_txt`.
 #[tauri::command]
 pub fn export_projekt_to_txt(
-    app: AppHandle,
     state: State<'_, AppState>,
     payload: ExportProjektToTxtPayload,
 ) -> Result<ExportResult, DbError> {
     crate::util::guard_panic("export_projekt_to_txt", move || {
-        export_projekt_to_txt_inner(app, state, payload)
+        let conn = crate::util::lock_db(&state.db);
+        do_export_projekt_to_txt(&conn, &state.data_dir, payload)
     })
 }
 
-fn export_projekt_to_txt_inner(
-    app: AppHandle,
-    state: State<'_, AppState>,
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub fn do_export_projekt_to_txt(
+    conn: &Connection,
+    data_dir: &Path,
     payload: ExportProjektToTxtPayload,
 ) -> Result<ExportResult, DbError> {
-    let conn = crate::util::lock_db(&state.db);
-    let projekt = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
+    let projekt = ProjektRepo::get_by_id(conn, &payload.projekt_id)?;
     let json = std::fs::read_to_string(&projekt.file_path)
         .map_err(|e| DbError::Io(format!("Failed to read projekt file: {e}")))?;
     let content: ProjektContent = serde_json::from_str(&json)?;
@@ -519,11 +534,7 @@ fn export_projekt_to_txt_inner(
 
     let content_str = write_txt(&questions);
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| DbError::Io(format!("Failed to resolve app data dir: {e}")))?;
-    std::fs::create_dir_all(&app_data_dir)
+    std::fs::create_dir_all(data_dir)
         .map_err(|e| DbError::Io(format!("Failed to create app data dir: {e}")))?;
 
     let file_name = if payload.filename.ends_with(".txt") {
@@ -531,7 +542,7 @@ fn export_projekt_to_txt_inner(
     } else {
         format!("{}.txt", payload.filename)
     };
-    let file_path = app_data_dir.join(&file_name);
+    let file_path = data_dir.join(&file_name);
 
     crate::util::atomic_write(&file_path, &content_str)
         .map_err(|e| DbError::Io(format!("Failed to write export file: {e}")))?;
@@ -590,8 +601,10 @@ pub struct OutputFileContent {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Load variables, constants, and a (possibly default) constraint for a template.
-fn load_template_dependencies(
+/// Load variables, constants, and a (possibly default) constraint for a
+/// template. Shared with `commands::practice` so a question served to a
+/// student resolves its constants exactly as one generated for a test does.
+pub(crate) fn load_template_dependencies(
     conn: &rusqlite::Connection,
     template: &Template,
 ) -> Result<

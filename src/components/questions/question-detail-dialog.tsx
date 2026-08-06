@@ -53,6 +53,7 @@ import {
   extractPlaceholderValues,
   isAtomPlaceholder,
   replacePlaceholder,
+  stripAnswerTargets,
 } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
@@ -1120,7 +1121,9 @@ export function QuestionDetailDialog({
                 ) : (
                   <div className="max-w-none">
                     <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {formatChemicalText(templateDetails.template.questionText)}
+                      {formatChemicalText(
+                        stripAnswerTargets(templateDetails.template.questionText),
+                      )}
                     </ReactMarkdown>
                   </div>
                 )}

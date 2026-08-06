@@ -4,6 +4,7 @@ pub mod constant;
 pub mod meta;
 pub mod template;
 pub mod topic;
+pub mod user;
 pub mod variable;
 pub mod variant;
 
@@ -20,5 +21,6 @@ pub use template::{
     ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateMode, TemplateVariable,
 };
 pub use topic::Topic;
+pub use user::{InviteCode, Role, User};
 pub use variable::{Variable, VariableType};
 pub use variant::{AnswerField, Variant};

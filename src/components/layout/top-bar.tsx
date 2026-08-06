@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority"
-import { Bot, Ellipsis } from "lucide-react"
+import { Bot, Ellipsis, LogOut } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,7 @@ import {
 import { cs } from "@/i18n/cs"
 import { categoriesApi, setsApi, topicsApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useAuthStore } from "@/stores/auth-store"
 
 interface BreadcrumbItem {
   path: string
@@ -66,8 +67,15 @@ const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
 
 export function TopBar() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const logout = useAuthStore((s) => s.logout)
   const [currentTime, setCurrentTime] = useState<string>("")
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([])
+
+  const handleLogout = useCallback(async () => {
+    await logout()
+    navigate("/login", { replace: true })
+  }, [logout, navigate])
 
   useEffect(() => {
     const updateTime = () => {
@@ -254,6 +262,15 @@ export function TopBar() {
         >
           <Bot className="size-5" />
         </Link>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="p-2 rounded-[4px] border border-border hover:bg-muted"
+          aria-label={cs.auth.logout}
+          title={cs.auth.logout}
+        >
+          <LogOut className="size-5" />
+        </button>
         <span className="font-mono text-[12px] tabular text-muted-foreground">{currentTime}</span>
       </div>
     </header>

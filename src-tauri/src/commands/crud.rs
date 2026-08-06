@@ -558,7 +558,7 @@ fn build_template_constants(
         .collect()
 }
 
-fn build_variable_from_payload(payload: CreateVariablePayload) -> Variable {
+pub(crate) fn build_variable_from_payload(payload: CreateVariablePayload) -> Variable {
     match payload.var_type {
         VariableType::String => Variable::new_string(
             payload.name,
@@ -595,8 +595,16 @@ pub fn create_template(
     payload: CreateTemplatePayload,
 ) -> Result<Template, DbError> {
     let conn = crate::util::lock_db(&state.db);
+    do_create_template(&conn, payload)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_create_template(
+    conn: &rusqlite::Connection,
+    payload: CreateTemplatePayload,
+) -> Result<Template, DbError> {
     if TemplateRepo::find_by_question_and_equation(
-        &conn,
+        conn,
         payload.question_text.trim(),
         payload.equation_text.trim(),
     )?
@@ -617,13 +625,7 @@ pub fn create_template(
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
-    TemplateRepo::insert(
-        &conn,
-        &template,
-        &variables,
-        &constants,
-        constraint.as_ref(),
-    )?;
+    TemplateRepo::insert(conn, &template, &variables, &constants, constraint.as_ref())?;
     Ok(template)
 }
 
@@ -658,7 +660,9 @@ pub struct VariableWithPlaceholder {
     pub less_than_variable_id: Option<Uuid>,
 }
 
-fn load_template_with_details(
+/// `pub(crate)` (not private) so the HTTP layer (`src/http`) can reuse it
+/// without going through Tauri's `State<'_, AppState>`.
+pub(crate) fn load_template_with_details(
     conn: &rusqlite::Connection,
     id: &Uuid,
 ) -> Result<TemplateWithDetails, DbError> {
@@ -718,8 +722,16 @@ pub fn get_template_location(
     id: Uuid,
 ) -> Result<Option<TemplateLocation>, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    if let Some((set_id, category_id)) = SetRepo::find_by_template_id(&conn, &id)? {
-        let category = CategoryRepo::get_by_id(&conn, &category_id)?;
+    do_get_template_location(&conn, &id)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_get_template_location(
+    conn: &rusqlite::Connection,
+    id: &Uuid,
+) -> Result<Option<TemplateLocation>, DbError> {
+    if let Some((set_id, category_id)) = SetRepo::find_by_template_id(conn, id)? {
+        let category = CategoryRepo::get_by_id(conn, &category_id)?;
         Ok(Some(TemplateLocation {
             set_id,
             category_id,
@@ -751,8 +763,16 @@ pub fn update_template(
     payload: UpdateTemplatePayload,
 ) -> Result<Template, DbError> {
     let conn = crate::util::lock_db(&state.db);
+    do_update_template(&conn, payload)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_update_template(
+    conn: &rusqlite::Connection,
+    payload: UpdateTemplatePayload,
+) -> Result<Template, DbError> {
     if let Some(existing) = TemplateRepo::find_by_question_and_equation(
-        &conn,
+        conn,
         payload.question_text.trim(),
         payload.equation_text.trim(),
     )? {
@@ -843,9 +863,17 @@ pub fn update_templates_by_equation(
     payload: UpdateTemplatesByEquationPayload,
 ) -> Result<usize, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    let old_templates = TemplateRepo::find_by_equation_text(&conn, &payload.old_equation_text)?;
+    do_update_templates_by_equation(&conn, payload)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_update_templates_by_equation(
+    conn: &rusqlite::Connection,
+    payload: UpdateTemplatesByEquationPayload,
+) -> Result<usize, DbError> {
+    let old_templates = TemplateRepo::find_by_equation_text(conn, &payload.old_equation_text)?;
     let affected_ids = TemplateRepo::update_by_equation_text(
-        &conn,
+        conn,
         &payload.old_equation_text,
         &payload.new_formula,
         &payload.new_equation_text,
@@ -855,7 +883,7 @@ pub fn update_templates_by_equation(
     for old_template in &old_templates {
         if old_template.formula != payload.new_formula {
             TemplateHistoryRepo::record_change(
-                &conn,
+                conn,
                 &old_template.id,
                 "formula",
                 Some(&old_template.formula),
@@ -864,7 +892,7 @@ pub fn update_templates_by_equation(
         }
         if old_template.equation_text != payload.new_equation_text {
             TemplateHistoryRepo::record_change(
-                &conn,
+                conn,
                 &old_template.id,
                 "equationText",
                 Some(&old_template.equation_text),
@@ -873,7 +901,7 @@ pub fn update_templates_by_equation(
         }
         if old_template.result_unit != payload.new_result_unit {
             TemplateHistoryRepo::record_change(
-                &conn,
+                conn,
                 &old_template.id,
                 "resultUnit",
                 Some(&old_template.result_unit),
@@ -1372,6 +1400,14 @@ pub fn get_set_with_templates(
     set_id: Uuid,
 ) -> Result<(crate::models::Set, Vec<TemplateWithDetails>), DbError> {
     let conn = crate::util::lock_db(&state.db);
+    do_get_set_with_templates(&conn, &set_id)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_get_set_with_templates(
+    conn: &rusqlite::Connection,
+    set_id: &Uuid,
+) -> Result<(crate::models::Set, Vec<TemplateWithDetails>), DbError> {
     let set = conn.query_row(
         "SELECT id, category_id, set_index, mode FROM sets WHERE id = ?1",
         rusqlite::params![set_id],
@@ -1389,10 +1425,10 @@ pub fn get_set_with_templates(
             })
         },
     )?;
-    let set_templates = SetRepo::list_templates(&conn, &set_id)?;
+    let set_templates = SetRepo::list_templates(conn, set_id)?;
     let mut templates = Vec::with_capacity(set_templates.len());
     for st in &set_templates {
-        templates.push(load_template_with_details(&conn, &st.template_id)?);
+        templates.push(load_template_with_details(conn, &st.template_id)?);
     }
     Ok((set, templates))
 }

@@ -13,6 +13,54 @@ fn fmt_cz(value: f64, precision: u8) -> String {
     s.replace('.', ",")
 }
 
+/// Mantissa precision for scientific notation, e.g. `5,21×10<sup>24</sup>`.
+const SCIENTIFIC_MANTISSA_DECIMALS: u8 = 2;
+
+/// Above this magnitude a plain decimal stops being readable — a molecule
+/// count would otherwise print as 26 digits, most of them floating-point
+/// noise. Mirrors `SCIENTIFIC_UPPER_THRESHOLD` in `src/lib/math-utils.ts` so
+/// the exported test and the on-screen preview agree.
+const SCIENTIFIC_UPPER_THRESHOLD: f64 = 1e6;
+
+/// Czech-formatted scientific notation with an HTML superscript exponent, the
+/// same shape the UI renders and the same markup the exported question text
+/// already uses for formulae (`H<sub>2</sub>O`, `cm<sup>-3</sup>`).
+fn fmt_scientific_cz(value: f64) -> String {
+    if value == 0.0 || !value.is_finite() {
+        return fmt_cz(value, SCIENTIFIC_MANTISSA_DECIMALS);
+    }
+
+    let mut exponent = value.abs().log10().floor() as i32;
+    // Rounding the mantissa can carry it up to 10,00 (e.g. 9,999×10^5), which
+    // belongs in the next decade instead.
+    let mantissa_rounded: f64 = fmt_cz(value / 10f64.powi(exponent), SCIENTIFIC_MANTISSA_DECIMALS)
+        .replace(',', ".")
+        .parse()
+        .unwrap_or(0.0);
+    if mantissa_rounded.abs() >= 10.0 {
+        exponent += 1;
+    }
+
+    let mantissa = value / 10f64.powi(exponent);
+    format!(
+        "{}×10<sup>{}</sup>",
+        fmt_cz(mantissa, SCIENTIFIC_MANTISSA_DECIMALS),
+        exponent
+    )
+}
+
+/// A number as a student should see it in the exported test: plain Czech
+/// decimal when that reads naturally, scientific notation when it does not.
+fn fmt_value_cz(value: f64, precision: u8) -> String {
+    let plain = fmt_cz(value, precision);
+    let rounded: f64 = plain.replace(',', ".").parse().unwrap_or(value);
+    // Too small to survive rounding, or too large to write out in full.
+    if (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD {
+        return fmt_scientific_cz(value);
+    }
+    plain
+}
+
 /// Apply the same chemical formatting used in the UI renderer:
 /// H2O -> H<sub>2</sub>O, X^2 -> X<sup>2</sup>, a*b -> a×b.
 /// Existing HTML tags (including <sup>, <sub>, &nbsp;) are preserved.
@@ -58,6 +106,11 @@ fn render_question(
     assigned_strings: &HashMap<String, String>,
     precisions: &HashMap<String, u8>,
 ) -> String {
+    // The trailing `[n]` / `[n mol]` markers tell the generator which symbol
+    // to solve for — they are not part of the question and must never reach
+    // the exported test a student sits.
+    let text = crate::engine::answer_targets::strip_answer_targets(text);
+
     static PLACEHOLDER_RE: OnceLock<Regex> = OnceLock::new();
     let re = PLACEHOLDER_RE.get_or_init(|| Regex::new(r"\[\[([^\]]+)\]\]").unwrap());
 
@@ -74,7 +127,7 @@ fn render_question(
             .as_str();
         if let Some(value) = assigned.get(symbol) {
             let precision = precisions.get(symbol).copied().unwrap_or(1);
-            rendered.push_str(&fmt_cz(*value, precision));
+            rendered.push_str(&fmt_value_cz(*value, precision));
         } else if let Some(value) = assigned_strings.get(symbol) {
             rendered.push_str(&format_chemical_text(value));
         } else {
@@ -108,9 +161,9 @@ fn render_multi_closed_options(
                 let value = a.numeric_options.as_ref().unwrap()[idx];
                 let unit = a.unit.as_deref().unwrap_or("");
                 if unit.is_empty() {
-                    fmt_cz(value, precision)
+                    fmt_value_cz(value, precision)
                 } else {
-                    format!("{} {}", fmt_cz(value, precision), unit)
+                    format!("{} {}", fmt_value_cz(value, precision), unit)
                 }
             })
             .collect();
@@ -119,21 +172,46 @@ fn render_multi_closed_options(
     out.push_str(&format!(":r{} ok {}\n", correct_option, point_value));
 }
 
+/// Decimals needed to keep an interval's two bounds distinguishable.
+///
+/// A ±30 % tolerance on an answer of 0.11 spans 0.08–0.15, but printed at one
+/// decimal both ends collapse to `0,1` — an interval that accepts nothing but
+/// the rounded midpoint. Widen the precision until the bounds actually differ.
+fn interval_precision(lo: f64, hi: f64, preferred: u8) -> u8 {
+    const MAX_PRECISION: u8 = 8;
+    let mut precision = preferred;
+    while precision < MAX_PRECISION && fmt_cz(lo, precision) == fmt_cz(hi, precision) {
+        precision += 1;
+    }
+    precision
+}
+
 fn render_multi_open_intervals(
     out: &mut String,
     answers: &[crate::models::AnswerField],
     point_value: u8,
+    result_precision: u8,
 ) {
     let parts: Vec<String> = answers
         .iter()
         .map(|a| {
             let lo = a.interval_lo.expect("open answer field has lower bound");
             let hi = a.interval_hi.expect("open answer field has upper bound");
+            let precision = interval_precision(lo, hi, result_precision);
             let unit = a.unit.as_deref().unwrap_or("");
             if unit.is_empty() {
-                format!("\"{}..{}\"", fmt_cz(lo, 1), fmt_cz(hi, 1))
+                format!(
+                    "\"{}..{}\"",
+                    fmt_value_cz(lo, precision),
+                    fmt_value_cz(hi, precision)
+                )
             } else {
-                format!("\"{}..{}\" {}", fmt_cz(lo, 1), fmt_cz(hi, 1), unit)
+                format!(
+                    "\"{}..{}\" {}",
+                    fmt_value_cz(lo, precision),
+                    fmt_value_cz(hi, precision),
+                    unit
+                )
             }
         })
         .collect();
@@ -187,7 +265,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_cz(*value, q.result_precision),
+                            fmt_value_cz(*value, q.result_precision),
                             q.template.result_unit
                         ));
                     }
@@ -200,7 +278,12 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
             }
             TemplateMode::Open => {
                 if let Some(answers) = &q.variant.answers_data {
-                    render_multi_open_intervals(&mut out, answers, q.template.point_value);
+                    render_multi_open_intervals(
+                        &mut out,
+                        answers,
+                        q.template.point_value,
+                        q.result_precision,
+                    );
                 } else {
                     let lo = q
                         .variant
@@ -210,11 +293,12 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         .variant
                         .interval_hi
                         .expect("open variant has interval upper bound");
+                    let precision = interval_precision(lo, hi, q.result_precision);
                     out.push_str(" :n\n");
                     out.push_str(&format!(
                         ":n=\"{}..{}\" {} ok\n",
-                        fmt_cz(lo, 1),
-                        fmt_cz(hi, 1),
+                        fmt_value_cz(lo, precision),
+                        fmt_value_cz(hi, precision),
                         q.template.point_value
                     ));
                 }
@@ -276,6 +360,218 @@ mod tests {
         assert!(output.contains(" :r1 64,0 g"));
         assert!(output.contains(":r1 ok 3"));
         assert!(!output.contains("Žádná možnost"));
+    }
+
+    /// The trailing `[X]` answer-target marker is an instruction to the
+    /// generator, not part of the question — a student sitting the exported
+    /// test must never see it.
+    #[test]
+    fn answer_target_marker_is_not_exported() {
+        let template = make_template("Vypočítejte látkové množství z [[X]] g vzorku. [X]");
+        let variant = make_closed_variant();
+        let precisions = [("X".to_string(), 1)].into();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            result_precision: 1,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains("Vypočítejte látkové množství z 32,0 g vzorku. (3 b)"),
+            "unexpected question line in:\n{output}"
+        );
+        assert!(
+            !output.contains("[X]"),
+            "answer-target marker leaked into export:\n{output}"
+        );
+    }
+
+    /// Open questions must export a tolerance interval, never multiple-choice
+    /// options — a set configured as closed but generated in open mode used to
+    /// silently export `:r1..:r5` instead.
+    #[test]
+    fn open_mode_exports_interval_not_options() {
+        let template = make_template("Přepočítejte objemové procento na hmotnostní procento.");
+        let variant = Variant {
+            interval_lo: Some(45.1),
+            interval_hi: Some(45.9),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            result_precision: 1,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(output.contains(" :n\n"), "missing open marker in:\n{output}");
+        assert!(
+            output.contains(":n=\"45,1..45,9\" 3 ok"),
+            "missing interval in:\n{output}"
+        );
+        assert!(
+            !output.contains(":r"),
+            "closed-style options leaked into an open export:\n{output}"
+        );
+    }
+
+    #[test]
+    fn large_values_export_as_html_scientific_notation() {
+        assert_eq!(fmt_value_cz(1.524493429448685e25, 2), "1,52×10<sup>25</sup>");
+        assert_eq!(fmt_value_cz(6.022e23, 2), "6,02×10<sup>23</sup>");
+        assert_eq!(fmt_value_cz(-1.8433287150633585e25, 2), "-1,84×10<sup>25</sup>");
+        assert_eq!(fmt_value_cz(5.2149e24, 2), "5,21×10<sup>24</sup>");
+    }
+
+    #[test]
+    fn tiny_values_export_as_html_scientific_notation() {
+        assert_eq!(fmt_value_cz(0.0000123, 2), "1,23×10<sup>-5</sup>");
+    }
+
+    /// A mantissa that rounds up to 10,00 belongs in the next decade.
+    #[test]
+    fn scientific_notation_carries_the_mantissa_into_the_next_decade() {
+        assert_eq!(fmt_value_cz(9.999e6, 2), "1,00×10<sup>7</sup>");
+    }
+
+    /// Just under the threshold stays plain; at it, notation switches.
+    #[test]
+    fn scientific_notation_threshold_boundary() {
+        assert_eq!(fmt_value_cz(999_900.0, 2), "999900,00");
+        assert_eq!(fmt_value_cz(1_000_000.0, 2), "1,00×10<sup>6</sup>");
+    }
+
+    #[test]
+    fn ordinary_magnitudes_stay_plain_czech_decimals() {
+        assert_eq!(fmt_value_cz(2711.93, 2), "2711,93");
+        assert_eq!(fmt_value_cz(0.22, 2), "0,22");
+        assert_eq!(fmt_value_cz(0.0, 2), "0,00");
+        assert_eq!(fmt_value_cz(351.6, 1), "351,6");
+    }
+
+    /// The reported defect: molecule-count options printed as 26 digits of
+    /// mostly floating-point noise instead of readable scientific notation.
+    #[test]
+    fn closed_options_use_scientific_notation_for_molecule_counts() {
+        let template = make_template("Jaký počet molekul obsahuje [[X]] dm^3 chloru?");
+        let variant = Variant {
+            numeric_options: Some(vec![1.524493429448685e25, 1.4181761080182541e25]),
+            correct_option: Some(1),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: [("X".to_string(), 0)].into(),
+            result_precision: 2,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains(" :r1 1,52×10<sup>25</sup>"),
+            "expected HTML scientific notation, got:\n{output}"
+        );
+        assert!(
+            !output.contains("15244934294486"),
+            "raw digit expansion leaked into the export:\n{output}"
+        );
+        assert!(
+            !output.to_lowercase().contains("e+"),
+            "raw exponential syntax leaked into the export:\n{output}"
+        );
+    }
+
+    #[test]
+    fn open_intervals_use_scientific_notation_for_molecule_counts() {
+        let template = make_template("Jaký počet molekul?");
+        let variant = Variant {
+            numeric_options: None,
+            correct_option: None,
+            interval_lo: Some(1.05e25),
+            interval_hi: Some(1.35e25),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            result_precision: 2,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            output.contains(":n=\"1,05×10<sup>25</sup>..1,35×10<sup>25</sup>\""),
+            "expected HTML scientific interval, got:\n{output}"
+        );
+    }
+
+    /// Reproduces a reported export: a ±30 % tolerance around 0.1137 mol
+    /// printed at one decimal collapsed to `"0,1..0,1"`, which accepts only
+    /// the rounded midpoint instead of the intended 0.08–0.15 band.
+    #[test]
+    fn small_answer_interval_does_not_collapse_to_a_single_value() {
+        let template = make_template("Vypočítejte látkové množství.");
+        let variant = Variant {
+            interval_lo: Some(0.0796),
+            interval_hi: Some(0.1478),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            result_precision: 2,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            output.contains(":n=\"0,08..0,15\""),
+            "interval should keep both bounds distinguishable, got:\n{output}"
+        );
+        assert!(
+            !output.contains("0,1..0,1"),
+            "interval collapsed to a single value:\n{output}"
+        );
+    }
+
+    /// Even far below the requested precision the bounds must stay apart.
+    #[test]
+    fn tiny_answer_interval_widens_precision_until_bounds_differ() {
+        let template = make_template("Vypočítejte koncentraci.");
+        let variant = Variant {
+            interval_lo: Some(0.000_21),
+            interval_hi: Some(0.000_39),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            result_precision: 2,
+            mode: TemplateMode::Open,
+        }]);
+
+        let interval = output
+            .lines()
+            .find(|l| l.starts_with(":n="))
+            .expect("interval line");
+        let bounds: Vec<&str> = interval
+            .trim_start_matches(":n=\"")
+            .split("\"")
+            .next()
+            .expect("bounds")
+            .split("..")
+            .collect();
+        assert_ne!(bounds[0], bounds[1], "bounds collapsed in {interval}");
     }
 
     #[test]

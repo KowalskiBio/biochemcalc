@@ -19,6 +19,42 @@ export interface PlaceholderMatch {
 
 export const PLACEHOLDER_REGEX = /\[\[([^\]=\s]+)(?:=([^\]]*))?\]\]/g
 
+/**
+ * Remove the trailing `[n]` / `[n mol]` answer-target markers from question
+ * text. They tell the generator which symbol to solve for and are never part
+ * of the question itself, so they must not be shown to teachers or students.
+ *
+ * Mirrors `scan_targets` in `src-tauri/src/engine/answer_targets.rs` — only a
+ * contiguous run of markers at the very end counts, so a bracketed aside in
+ * the middle of a sentence survives, and `[[x]]` placeholders are untouched.
+ */
+export function stripAnswerTargets(text: string): string {
+  const trimmed = text.trim()
+  let i = trimmed.length
+  let blockStart = trimmed.length
+
+  while (i > 0) {
+    const before = trimmed.slice(0, i)
+    const open = before.lastIndexOf("[")
+    if (open === -1) break
+    if (open + 1 >= i || before[i - 1] !== "]") break
+
+    const inner = before.slice(open + 1, i - 1)
+    if (inner === "" || inner.includes("[") || inner.includes("]")) break
+
+    const symbol = inner.trim().split(/\s/, 1)[0] ?? ""
+    if (symbol !== "") {
+      blockStart = open
+    }
+
+    const trailing = before.slice(0, open).trimEnd()
+    if (trailing === "") break
+    i = trailing.length
+  }
+
+  return trimmed.slice(0, blockStart).trimEnd()
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

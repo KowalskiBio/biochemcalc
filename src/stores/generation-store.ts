@@ -7,8 +7,12 @@ export interface GeneratedTestState {
   mode: TemplateMode | null
   closedDifficulty: QuestionDifficulty
   closedOptionCount: number
+  /** Drives the tolerance interval width of open answers: easy ±50 %,
+   * medium ±30 %, hard ±10 % (see `open_interval` in the Rust engine). */
+  openDifficulty: QuestionDifficulty
   lastClosedDifficulty: QuestionDifficulty
   lastClosedOptionCount: number
+  lastOpenDifficulty: QuestionDifficulty
   generationError: string | null
 }
 
@@ -17,8 +21,10 @@ const defaultGeneratedState: GeneratedTestState = {
   mode: null,
   closedDifficulty: "medium",
   closedOptionCount: 5,
+  openDifficulty: "medium",
   lastClosedDifficulty: "medium",
   lastClosedOptionCount: 5,
+  lastOpenDifficulty: "medium",
   generationError: null,
 }
 

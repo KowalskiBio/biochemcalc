@@ -4,7 +4,36 @@ import {
   extractPlaceholderValues,
   isAtomPlaceholder,
   replacePlaceholder,
+  stripAnswerTargets,
 } from "@/lib/utils"
+
+describe("stripAnswerTargets", () => {
+  it("removes a trailing answer-target marker", () => {
+    expect(
+      stripAnswerTargets("Vypočítejte látkové množství Ca^2+ v [[m]] g Ca(HSO_3)_2. [n]"),
+    ).toBe("Vypočítejte látkové množství Ca^2+ v [[m]] g Ca(HSO_3)_2.")
+  })
+
+  it("removes several trailing markers with units", () => {
+    expect(stripAnswerTargets("Vypočítejte obojí [n mol][m g]")).toBe("Vypočítejte obojí")
+  })
+
+  it("leaves double-bracket placeholders alone", () => {
+    expect(stripAnswerTargets("Vypočítejte pro objem [[V]]")).toBe("Vypočítejte pro objem [[V]]")
+  })
+
+  it("leaves text without markers alone", () => {
+    expect(stripAnswerTargets("Vypočítejte hmotnost roztoku.")).toBe(
+      "Vypočítejte hmotnost roztoku.",
+    )
+  })
+
+  it("only strips the trailing block, keeping bracketed asides mid-sentence", () => {
+    expect(stripAnswerTargets("Vypočítejte [pozor] hmotnost [m]")).toBe(
+      "Vypočítejte [pozor] hmotnost",
+    )
+  })
+})
 
 describe("extractPlaceholders", () => {
   it("extracts simple placeholders", () => {

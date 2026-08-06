@@ -1095,4 +1095,40 @@ mod tests {
         let v = variant.assigned_values["V"];
         assert!((variant.correct_answer - (v / 10.0 * 5.0)).abs() < 1e-9);
     }
+
+    /// The tolerance interval for an open answer widens with easier
+    /// difficulty: easy ±50 %, medium ±30 %, hard ±10 % of the correct value.
+    #[test]
+    fn open_interval_width_follows_difficulty() {
+        let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let correct = 100.0;
+
+        for (difficulty, expected_half_width) in [("easy", 50.0), ("medium", 30.0), ("hard", 10.0)] {
+            let (lo, hi) = open_interval(correct, &constraint, difficulty);
+            assert!(
+                (lo - (correct - expected_half_width)).abs() < 1e-9,
+                "{difficulty}: unexpected lower bound {lo}"
+            );
+            assert!(
+                (hi - (correct + expected_half_width)).abs() < 1e-9,
+                "{difficulty}: unexpected upper bound {hi}"
+            );
+        }
+    }
+
+    /// An explicit teacher-set standard deviation overrides the
+    /// difficulty-derived width.
+    #[test]
+    fn open_interval_prefers_explicit_sd_over_difficulty() {
+        let constraint = ResultConstraint::new(
+            Uuid::new_v4(),
+            None,
+            None,
+            Some(2.5),
+            ConstraintType::Sd,
+        );
+        let (lo, hi) = open_interval(100.0, &constraint, "easy");
+        assert!((lo - 97.5).abs() < 1e-9, "unexpected lower bound {lo}");
+        assert!((hi - 102.5).abs() < 1e-9, "unexpected upper bound {hi}");
+    }
 }

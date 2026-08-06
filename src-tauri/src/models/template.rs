@@ -13,6 +13,26 @@ pub enum TemplateMode {
     Open,
 }
 
+impl TemplateMode {
+    /// The stored spelling — matches the `CHECK (mode IN ('closed', 'open'))`
+    /// constraint every table carrying a mode column declares, and the
+    /// lowercase serde representation above.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TemplateMode::Closed => "closed",
+            TemplateMode::Open => "open",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "closed" => Some(TemplateMode::Closed),
+            "open" => Some(TemplateMode::Open),
+            _ => None,
+        }
+    }
+}
+
 /// Which kind of constraint applies to a result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

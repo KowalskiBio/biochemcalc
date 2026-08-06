@@ -78,6 +78,31 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.pragma_update(None, "user_version", "14")?;
     }
 
+    if user_version < 15 {
+        apply_migration_v15(conn)?;
+        conn.pragma_update(None, "user_version", "15")?;
+    }
+
+    if user_version < 16 {
+        apply_migration_v16(conn)?;
+        conn.pragma_update(None, "user_version", "16")?;
+    }
+
+    if user_version < 17 {
+        apply_migration_v17(conn)?;
+        conn.pragma_update(None, "user_version", "17")?;
+    }
+
+    if user_version < 18 {
+        apply_migration_v18(conn)?;
+        conn.pragma_update(None, "user_version", "18")?;
+    }
+
+    if user_version < 19 {
+        apply_migration_v19(conn)?;
+        conn.pragma_update(None, "user_version", "19")?;
+    }
+
     Ok(())
 }
 
@@ -654,4 +679,339 @@ fn apply_migration_v14(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
 
     Ok(())
+}
+
+/// Accounts, server-side sessions, and teacher-issued invite codes for the
+/// web deployment. `role` gates access at the HTTP layer (see `src/http`);
+/// there is no self-serve signup — registration always consumes a single-use
+/// invite code minted by a teacher (or, for the very first account, seeded at
+/// server startup from `BIOCHEMCALC_ADMIN_USERNAME`/`_PASSWORD`).
+fn apply_migration_v15(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS users (
+            id BLOB PRIMARY KEY NOT NULL,
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('teacher', 'student')),
+            created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase
+        ON users(username COLLATE NOCASE);
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            code TEXT PRIMARY KEY NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('teacher', 'student')),
+            created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT NOT NULL,
+            used_by BLOB REFERENCES users(id) ON DELETE SET NULL,
+            used_at TEXT
+        );
+        ",
+    )?;
+
+    Ok(())
+}
+
+/// Any teacher can delete any *other* account (see `do_delete_user`), but
+/// nothing previously stopped one teacher from deleting a different teacher
+/// — including the very first (bootstrap) admin account, which is how
+/// invite-code issuance gets started at all. Adds a `protected` flag and
+/// retroactively marks the earliest-created teacher account as protected, so
+/// deployments that already have real users (created before this migration
+/// existed) get the same protection without manual intervention.
+fn apply_migration_v16(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE users ADD COLUMN protected INTEGER NOT NULL DEFAULT 0;
+
+        UPDATE users SET protected = 1
+        WHERE role = 'teacher'
+        AND created_at = (SELECT MIN(created_at) FROM users WHERE role = 'teacher');
+        ",
+    )?;
+
+    Ok(())
+}
+
+/// Invite codes change from single-use-forever to multi-use-but-expiring:
+/// one active code per role, reusable by any number of people until it
+/// expires (7 days) or a teacher revokes it. Generating a new code for a role
+/// supersedes the previous one.
+///
+/// Existing rows are migrated conservatively — codes already consumed under
+/// the old single-use rule stay dead rather than silently becoming reusable,
+/// and where a role has several unused codes only the newest survives, so the
+/// new one-active-code-per-role invariant holds from the first startup.
+fn apply_migration_v17(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE invite_codes ADD COLUMN expires_at TEXT;
+        ALTER TABLE invite_codes ADD COLUMN revoked_at TEXT;
+        ALTER TABLE invite_codes ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0;
+        ",
+    )?;
+
+    let now = chrono::Utc::now();
+    let now_str = now.to_rfc3339();
+
+    // A code that was already redeemed must not come back to life as a
+    // multi-use code.
+    conn.execute(
+        "UPDATE invite_codes SET revoked_at = used_at, use_count = 1 WHERE used_at IS NOT NULL",
+        [],
+    )?;
+
+    // Backfill the 7-day window from each code's own creation time. Parsed in
+    // Rust because the stored timestamps are RFC3339 with fractional seconds
+    // and an offset, which SQLite's date functions do not reliably accept.
+    let rows: Vec<(String, String)> = {
+        let mut stmt = conn.prepare("SELECT code, created_at FROM invite_codes")?;
+        let mapped = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        mapped.collect::<rusqlite::Result<_>>()?
+    };
+    for (code, created_at) in rows {
+        let expires_at = chrono::DateTime::parse_from_rfc3339(&created_at)
+            .map(|dt| dt.with_timezone(&chrono::Utc) + chrono::Duration::days(7))
+            .unwrap_or(now)
+            .to_rfc3339();
+        conn.execute(
+            "UPDATE invite_codes SET expires_at = ?2 WHERE code = ?1",
+            rusqlite::params![code, expires_at],
+        )?;
+    }
+
+    // Enforce one active code per role, keeping the most recently created.
+    conn.execute(
+        "UPDATE invite_codes SET revoked_at = ?1
+         WHERE revoked_at IS NULL
+           AND code NOT IN (
+               SELECT code FROM invite_codes a
+               WHERE a.revoked_at IS NULL
+                 AND a.created_at = (
+                     SELECT MAX(b.created_at) FROM invite_codes b
+                     WHERE b.role = a.role AND b.revoked_at IS NULL
+                 )
+           )",
+        rusqlite::params![now_str],
+    )?;
+
+    Ok(())
+}
+
+/// The bulk importer used to stamp every imported question with a blanket
+/// `sd_allowed = 0.1`. Being an *absolute* tolerance it scaled terribly —
+/// ±0.03 % of a 351 g answer but ±20 % of a 0.5 one — and, because an explicit
+/// SD overrides the difficulty setting, it silently disabled the easy/medium/
+/// hard tolerance control on every imported question.
+///
+/// Drop those blanket constraints so tolerance comes from difficulty again.
+/// Only rows that are exactly the importer's fingerprint are touched: an `sd`
+/// constraint of 0.1 carrying no range bounds. Anything a teacher set
+/// deliberately (a different SD, or any min/max) is left alone.
+fn apply_migration_v18(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM result_constraints
+         WHERE constraint_type = 'sd'
+           AND sd_allowed = 0.1
+           AND min_result IS NULL
+           AND max_result IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+/// One row per practice question served to a student, holding the grading
+/// data (correct answer, correct option, tolerance interval) that the client
+/// is deliberately never sent — a student grading their own answers in the
+/// browser would make the leaderboard meaningless.
+///
+/// `template_id`/`topic_id` carry no foreign key on purpose: a teacher
+/// editing or deleting a question later must not silently erase the score a
+/// student already earned answering it.
+fn apply_migration_v19(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS practice_attempts (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            template_id BLOB NOT NULL,
+            topic_id BLOB NOT NULL,
+            point_value INTEGER NOT NULL,
+            mode TEXT NOT NULL CHECK (mode IN ('closed', 'open')),
+            correct_answer REAL NOT NULL,
+            correct_option INTEGER,
+            interval_lo REAL,
+            interval_hi REAL,
+            answers_data TEXT,
+            is_correct INTEGER,
+            created_at TEXT NOT NULL,
+            answered_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_practice_attempts_user
+        ON practice_attempts(user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_practice_attempts_scored
+        ON practice_attempts(user_id, is_correct);
+        ",
+    )?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reproduces exactly what happened on the already-deployed VM: a
+    /// `users` table populated under migration v15 (no `protected` column
+    /// yet), where the first teacher account was created before v16 existed.
+    /// Applying v16 afterwards must retroactively protect that account
+    /// without anyone having to intervene by hand.
+    #[test]
+    fn v16_retroactively_protects_the_earliest_teacher_on_an_existing_v15_database() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+
+        // Bring the DB to exactly v15, matching the pre-v16 production
+        // state. v15's users/sessions/invite_codes tables don't depend on
+        // anything from v1-v14, so applying it alone reproduces the
+        // users-table shape this test cares about.
+        apply_migration_v15(&conn).expect("v15");
+        conn.pragma_update(None, "user_version", "15").expect("set version");
+
+        // `randomblob(16)` rather than a hand-written hex literal — a 16-byte
+        // UUID blob literal is easy to get subtly the wrong length by hand,
+        // and nothing in this test needs the ids to be predictable.
+        conn.execute_batch(
+            "
+            INSERT INTO users (id, username, password_hash, role, created_at) VALUES
+                (randomblob(16), 'first-teacher', 'h', 'teacher', '2026-01-01T00:00:00Z'),
+                (randomblob(16), 'second-teacher', 'h', 'teacher', '2026-01-02T00:00:00Z'),
+                (randomblob(16), 'a-student', 'h', 'student', '2025-12-31T00:00:00Z');
+            ",
+        )
+        .expect("seed pre-v16 users");
+
+        apply_migration_v16(&conn).expect("v16");
+
+        let protected_usernames: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT username FROM users WHERE protected = 1")
+                .expect("prepare");
+            stmt.query_map([], |row| row.get(0))
+                .expect("query")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
+        };
+
+        assert_eq!(protected_usernames, vec!["first-teacher".to_string()]);
+    }
+
+    /// Only the importer's blanket ±0.1 goes; deliberate constraints survive.
+    #[test]
+    fn v18_drops_only_the_blanket_importer_sd_constraint() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        apply_migration_v1(&conn).expect("v1");
+        // This test is about one table's cleanup rule, so drop the FK to
+        // templates rather than seeding a full template per constraint.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+
+        conn.execute_batch(
+            "
+            INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, constraint_type) VALUES
+                (randomblob(16), randomblob(16), NULL, NULL, 0.1,  'sd'),
+                (randomblob(16), randomblob(16), NULL, NULL, 0.1,  'sd'),
+                (randomblob(16), randomblob(16), NULL, NULL, 0.25, 'sd'),
+                (randomblob(16), randomblob(16), 0.0,  99.0, 0.1,  'both'),
+                (randomblob(16), randomblob(16), 1.0,  50.0, NULL, 'range');
+            ",
+        )
+        .expect("seed constraints");
+
+        apply_migration_v18(&conn).expect("v18");
+
+        let remaining: Vec<(Option<f64>, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT sd_allowed, constraint_type FROM result_constraints ORDER BY constraint_type")
+                .expect("prepare");
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("query")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
+        };
+
+        assert_eq!(remaining.len(), 3, "only the blanket 0.1 sd rows should go");
+        assert!(
+            remaining.iter().any(|(sd, t)| *sd == Some(0.25) && t == "sd"),
+            "a deliberately different SD must survive"
+        );
+        assert!(
+            remaining.iter().any(|(_, t)| t == "both"),
+            "a constraint carrying range bounds must survive"
+        );
+        assert!(
+            remaining.iter().any(|(_, t)| t == "range"),
+            "a plain range constraint must survive"
+        );
+    }
+
+    /// Mirrors the live database at the time of the change: two codes already
+    /// redeemed under the old single-use rule, plus four unused student codes
+    /// created in quick succession.
+    #[test]
+    fn v17_keeps_one_active_code_per_role_and_never_revives_used_ones() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        apply_migration_v15(&conn).expect("v15");
+
+        conn.execute_batch(
+            "
+            INSERT INTO invite_codes (code, role, created_by, created_at, used_by, used_at) VALUES
+                ('USEDTEACH','teacher',NULL,'2026-08-05T09:38:37.200132297+00:00',NULL,'2026-08-05T09:40:42.066025641+00:00'),
+                ('USEDSTUD','student',NULL,'2026-08-05T11:16:01.449451529+00:00',NULL,'2026-08-05T11:17:01.074570742+00:00'),
+                ('STUD1','student',NULL,'2026-08-05T12:10:24.231538308+00:00',NULL,NULL),
+                ('STUD2','student',NULL,'2026-08-05T12:10:25.520979480+00:00',NULL,NULL),
+                ('STUD3','student',NULL,'2026-08-05T12:10:26.258201230+00:00',NULL,NULL),
+                ('NEWEST','student',NULL,'2026-08-05T12:10:26.852137011+00:00',NULL,NULL);
+            ",
+        )
+        .expect("seed pre-v17 codes");
+
+        apply_migration_v17(&conn).expect("v17");
+
+        let active: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT code FROM invite_codes WHERE revoked_at IS NULL ORDER BY code")
+                .expect("prepare");
+            stmt.query_map([], |row| row.get(0))
+                .expect("query")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
+        };
+        // Only the newest unused student code survives; the redeemed ones stay
+        // dead and the superseded duplicates are revoked.
+        assert_eq!(active, vec!["NEWEST".to_string()]);
+
+        // Every code carries a 7-day window measured from its own creation.
+        let (created_at, expires_at): (String, String) = conn
+            .query_row(
+                "SELECT created_at, expires_at FROM invite_codes WHERE code = 'NEWEST'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query newest");
+        let created = chrono::DateTime::parse_from_rfc3339(&created_at).expect("created");
+        let expires = chrono::DateTime::parse_from_rfc3339(&expires_at).expect("expires");
+        assert_eq!((expires - created).num_days(), 7);
+    }
 }

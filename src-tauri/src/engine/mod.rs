@@ -4,7 +4,7 @@ pub mod formula;
 pub mod generator;
 pub mod variable_extractor;
 
-pub use answer_targets::{extract_target_symbols, AnswerTarget};
+pub use answer_targets::{extract_target_symbols, strip_answer_targets, AnswerTarget};
 pub use export_writer::{write_txt, ExportQuestion};
 pub use formula::{evaluate, extract_molar_mass_constants, FormulaError};
 pub use generator::{generate_variant, generate_variants, validate_result, GenerationError};

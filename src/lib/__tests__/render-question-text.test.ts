@@ -85,7 +85,38 @@ describe("renderQuestionText", () => {
       },
     ])
     expect(result).toContain("Ca<sup>2+</sup>")
-    expect(result).toContain(">10<")
+    // Previewed with a representative mid-range value (10–20 → 15), not the
+    // bare minimum, so the sample reads like a real question.
+    expect(result).toContain(">15<")
+  })
+
+  it("previews a value inside the configured range, not a hardcoded 1", () => {
+    const result = renderQuestionText("v [[m]] g vzorku", [
+      {
+        placeholder: "m",
+        variable: {
+          id: "1",
+          name: "Mass",
+          symbol: "m",
+          varType: "numeric",
+          minValue: 20,
+          maxValue: 40,
+          step: 1,
+          unit: "g",
+          precision: 0,
+          createdAt: "",
+        },
+        isShared: false,
+      },
+    ])
+    expect(result).toContain(">30<")
+    expect(result).not.toContain(">1<")
+  })
+
+  it("hides the trailing answer-target marker", () => {
+    const result = renderQuestionText("Vypočítejte látkové množství. [n]", [])
+    expect(result).toContain("Vypočítejte látkové množství.")
+    expect(result).not.toContain("[n]")
   })
 })
 
@@ -271,7 +302,8 @@ describe("renderQuestionTextWithVariant", () => {
       [],
       { x: 99 },
     )
-    expect(result).toContain(">5<")
+    // 5–10 previews as its mid-range value, not the constant's 99.
+    expect(result).toContain(">8<")
     expect(result).not.toContain(">99<")
   })
 
@@ -330,6 +362,7 @@ describe("renderQuestionTextWithVariant", () => {
         isShared: false,
       },
     ])
-    expect(result).toContain(">16.12<")
+    // Mid-range preview of 16.1234–100, still rendered at precision 2.
+    expect(result).toContain(">58.12<")
   })
 })

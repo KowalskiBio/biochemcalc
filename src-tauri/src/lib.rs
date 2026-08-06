@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 pub mod engine;
+pub mod http;
 mod models;
 mod util;
 
@@ -60,7 +61,8 @@ fn init_file_logger(app: &tauri::App) {
 
 /// Route every panic to both stderr (captured by systemd/journald on the VM)
 /// and the persistent log file, then flush so nothing is lost on the way down.
-fn install_panic_hook() {
+/// `pub` so `src/bin/server.rs` (a separate binary crate) can reuse it too.
+pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info
             .location()
@@ -80,12 +82,13 @@ pub fn run() {
             init_file_logger(app);
             install_panic_hook();
 
-            let conn = initialize_db(app).unwrap_or_else(|e| {
+            let (conn, data_dir) = initialize_db(app).unwrap_or_else(|e| {
                 log::error!("database initialization failed: {e}");
                 panic!("Failed to initialize the database. The application cannot start: {e}");
             });
             app.manage(AppState {
                 db: std::sync::Mutex::new(conn),
+                data_dir,
             });
 
             // Seed built-in constants and editable atomic weights on first launch.

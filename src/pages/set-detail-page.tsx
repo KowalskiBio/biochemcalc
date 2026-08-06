@@ -39,12 +39,13 @@ import { cs } from "@/i18n/cs"
 import {
   ApiError,
   categoriesApi,
+  constantsApi,
   generationApi,
   projektyApi,
   setsApi,
   templatesApi,
 } from "@/lib/api"
-import { evaluateVariantAnswer, formatNumberMaxDecimals } from "@/lib/math-utils"
+import { evaluateVariantAnswer, formatNumberForText } from "@/lib/math-utils"
 import { QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   ProjektQuestion,
@@ -63,6 +64,15 @@ export function SetDetailPage() {
   const { toast } = useToast()
   const [set, setSet] = useState<SetModel | null>(null)
   const [templateDetails, setTemplateDetails] = useState<TemplateWithDetails[]>([])
+  /**
+   * Every constant in the database, keyed by symbol. The generator resolves a
+   * symbol like `Vk` from here whenever a formula references a constant the
+   * teacher never explicitly linked to the template (see
+   * `load_template_dependencies` in the Rust engine), so the answer check has
+   * to see the same set or it reports "Neznámá proměnná" for answers the
+   * backend computed perfectly well.
+   */
+  const [globalConstants, setGlobalConstants] = useState<Record<string, number>>({})
   const [parentTopicId, setParentTopicId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -76,6 +86,7 @@ export function SetDetailPage() {
   const [projektName, setProjektName] = useState("")
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [showClosedConfigDialog, setShowClosedConfigDialog] = useState(false)
+  const [showOpenConfigDialog, setShowOpenConfigDialog] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const generatedRef = useRef<HTMLDivElement>(null)
 
@@ -86,8 +97,10 @@ export function SetDetailPage() {
     mode: generatedMode,
     closedDifficulty,
     closedOptionCount,
+    openDifficulty,
     lastClosedDifficulty,
     lastClosedOptionCount,
+    lastOpenDifficulty,
     generationError,
   } = generation
 
@@ -105,6 +118,10 @@ export function SetDetailPage() {
       setTemplateDetails(data.templates)
       const category = await categoriesApi.get(data.set.categoryId)
       setParentTopicId(category.topicId)
+      const allConstants = await constantsApi.list()
+      setGlobalConstants(
+        Object.fromEntries(allConstants.map((c) => [c.symbol, c.value])),
+      )
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err)
       toast({
@@ -189,12 +206,17 @@ export function SetDetailPage() {
           difficulty,
           optionCount,
         })
-        setGeneration(setId, {
-          results,
-          mode,
-          lastClosedDifficulty: difficulty,
-          lastClosedOptionCount: optionCount,
-        })
+        setGeneration(
+          setId,
+          mode === "closed"
+            ? {
+                results,
+                mode,
+                lastClosedDifficulty: difficulty,
+                lastClosedOptionCount: optionCount,
+              }
+            : { results, mode, lastOpenDifficulty: difficulty },
+        )
         toast({
           title: "Generování dokončeno",
           description: `Vygenerováno ${results.length} variant.`,
@@ -228,7 +250,7 @@ export function SetDetailPage() {
           mode: generatedMode,
           seed: Math.floor(Math.random() * Number.MAX_SAFE_INTEGER),
           manualAnswer,
-          difficulty: generatedMode === "closed" ? lastClosedDifficulty : "medium",
+          difficulty: generatedMode === "closed" ? lastClosedDifficulty : lastOpenDifficulty,
           optionCount: generatedMode === "closed" ? lastClosedOptionCount : 5,
         })
 
@@ -244,7 +266,7 @@ export function SetDetailPage() {
 
         toast({
           title: "Varianta regenerována",
-          description: `Nová správná odpověď: ${formatNumberMaxDecimals(newVariant.correctAnswer)}`,
+          description: `Nová správná odpověď: ${formatNumberForText(newVariant.correctAnswer)}`,
         })
       } catch (err) {
         const message = err instanceof ApiError ? err.message : String(err)
@@ -257,7 +279,15 @@ export function SetDetailPage() {
         setRegeneratingMap((prev) => ({ ...prev, [templateId]: false }))
       }
     },
-    [setId, generatedMode, lastClosedDifficulty, lastClosedOptionCount, updateGeneration, toast],
+    [
+      setId,
+      generatedMode,
+      lastClosedDifficulty,
+      lastClosedOptionCount,
+      lastOpenDifficulty,
+      updateGeneration,
+      toast,
+    ],
   )
 
   const handleSaveToProjekt = useCallback(async () => {
@@ -386,7 +416,7 @@ export function SetDetailPage() {
               {cs.sets.closedQuestions}
             </Button>
             <Button
-              onClick={() => handleGenerate("open", "medium", 5)}
+              onClick={() => setShowOpenConfigDialog(true)}
               disabled={isGenerating || templateDetails.length === 0}
             >
               {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
@@ -516,9 +546,15 @@ export function SetDetailPage() {
               {generated.map((g, idx) => {
                 const variant = g.variants[0]
                 const details = templateDetailsById.get(g.template.id)
-                const constants = Object.fromEntries(
-                  (details?.constants ?? []).map((c) => [c.symbol, c.value]),
-                )
+                // Constants explicitly linked to the template win; anything
+                // else the formula references falls back to the global table,
+                // exactly as the generator resolves it.
+                const constants = {
+                  ...globalConstants,
+                  ...Object.fromEntries(
+                    (details?.constants ?? []).map((c) => [c.symbol, c.value]),
+                  ),
+                }
                 const optionLabels = ["a", "b", "c", "d", "e"]
                 const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
                 const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
@@ -667,7 +703,7 @@ export function SetDetailPage() {
                             />
                             {recomputed?.ok && hasMismatch && (
                               <span className="ml-2 text-xs text-amber-600">
-                                (backend: {formatNumberMaxDecimals(variant?.correctAnswer)})
+                                (backend: {formatNumberForText(variant?.correctAnswer)})
                               </span>
                             )}
                             {!recomputed?.ok && recomputed?.error && (
@@ -757,9 +793,9 @@ export function SetDetailPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="easy">{cs.difficulty.easy}</SelectItem>
-                  <SelectItem value="medium">{cs.difficulty.medium}</SelectItem>
-                  <SelectItem value="hard">{cs.difficulty.hard}</SelectItem>
+                  <SelectItem value="easy">{cs.sets.closedSpreadEasy}</SelectItem>
+                  <SelectItem value="medium">{cs.sets.closedSpreadMedium}</SelectItem>
+                  <SelectItem value="hard">{cs.sets.closedSpreadHard}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -805,6 +841,51 @@ export function SetDetailPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Open question config: difficulty sets the answer tolerance interval */}
+      <Dialog open={showOpenConfigDialog} onOpenChange={setShowOpenConfigDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>{cs.sets.configureOpen}</DialogTitle>
+            <DialogDescription>{cs.sets.configureOpenDescription}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-6 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="open-difficulty">{cs.sets.difficultyLabel}</Label>
+              <Select
+                value={openDifficulty}
+                onValueChange={(value) =>
+                  setId && setGeneration(setId, { openDifficulty: value as QuestionDifficulty })
+                }
+              >
+                <SelectTrigger id="open-difficulty">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="easy">{cs.sets.openToleranceEasy}</SelectItem>
+                  <SelectItem value="medium">{cs.sets.openToleranceMedium}</SelectItem>
+                  <SelectItem value="hard">{cs.sets.openToleranceHard}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowOpenConfigDialog(false)}>
+              Zrušit
+            </Button>
+            <Button
+              type="button"
+              disabled={isGenerating}
+              onClick={() => {
+                setShowOpenConfigDialog(false)
+                void handleGenerate("open", openDifficulty, 5)
+              }}
+            >
+              {isGenerating ? "Generuji…" : cs.common.generate}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Question Detail Dialog */}
       {selectedTemplateId && (
         <QuestionDetailDialog
@@ -838,9 +919,14 @@ export function SetDetailPage() {
           open={showExportDialog}
           onOpenChange={setShowExportDialog}
           templates={templateDetails}
-          mode={set.mode}
+          // What the teacher actually generated wins over the set's configured
+          // mode — generating open questions in a closed set and exporting
+          // used to silently produce multiple-choice options instead of
+          // tolerance intervals.
+          mode={generatedMode ?? set.mode}
           closedDifficulty={closedDifficulty}
           closedOptionCount={closedOptionCount}
+          openDifficulty={openDifficulty}
         />
       )}
     </div>

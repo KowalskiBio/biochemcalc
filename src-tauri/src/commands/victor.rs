@@ -169,13 +169,30 @@ fn parse_victor_response(raw_content: &str) -> Result<VictorResponse, DbError> {
 #[tauri::command]
 pub fn get_victor_settings(state: State<'_, AppState>) -> Result<VictorSettings, DbError> {
     let conn = crate::util::lock_db(&state.db);
+    do_get_victor_settings(&conn)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_get_victor_settings(conn: &rusqlite::Connection) -> Result<VictorSettings, DbError> {
     let api_base_url =
-        AppSettingsRepo::get_or_default(&conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
-    let api_key = AppSettingsRepo::get_or_default(&conn, KEY_API_KEY, DEFAULT_API_KEY)?;
+        AppSettingsRepo::get_or_default(conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
+    let api_key = AppSettingsRepo::get_or_default(conn, KEY_API_KEY, DEFAULT_API_KEY)?;
     Ok(VictorSettings {
         api_base_url,
         api_key,
     })
+}
+
+/// The (base_url, api_key) pair `chat_with_victor` needs — split out so the
+/// HTTP handler can read settings (sync, inside a DB lock) and then drop the
+/// lock before doing an `await`ed HTTP call, exactly like the Tauri command
+/// already does with its `{ ... }` scope block below.
+pub(crate) fn victor_settings_pair(
+    conn: &rusqlite::Connection,
+) -> Result<(String, String), DbError> {
+    let url = AppSettingsRepo::get_or_default(conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
+    let key = AppSettingsRepo::get_or_default(conn, KEY_API_KEY, DEFAULT_API_KEY)?;
+    Ok((url, key))
 }
 
 #[tauri::command]
@@ -184,8 +201,16 @@ pub fn set_victor_settings(
     payload: VictorSettingsPayload,
 ) -> Result<VictorSettings, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    AppSettingsRepo::set(&conn, KEY_API_BASE_URL, &payload.api_base_url)?;
-    AppSettingsRepo::set(&conn, KEY_API_KEY, &payload.api_key)?;
+    do_set_victor_settings(&conn, payload)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_set_victor_settings(
+    conn: &rusqlite::Connection,
+    payload: VictorSettingsPayload,
+) -> Result<VictorSettings, DbError> {
+    AppSettingsRepo::set(conn, KEY_API_BASE_URL, &payload.api_base_url)?;
+    AppSettingsRepo::set(conn, KEY_API_KEY, &payload.api_key)?;
     Ok(VictorSettings {
         api_base_url: payload.api_base_url,
         api_key: payload.api_key,
@@ -199,11 +224,19 @@ pub async fn chat_with_victor(
 ) -> Result<VictorResponse, DbError> {
     let (api_base_url, api_key) = {
         let conn = crate::util::lock_db(&state.db);
-        let url = AppSettingsRepo::get_or_default(&conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
-        let key = AppSettingsRepo::get_or_default(&conn, KEY_API_KEY, DEFAULT_API_KEY)?;
-        (url, key)
+        victor_settings_pair(&conn)?
     };
+    do_chat_with_victor(&api_base_url, &api_key, payload).await
+}
 
+/// Shared by the Tauri command above and the HTTP handler in `src/http`. No
+/// `Connection`/`AppState` involved at all — this is pure LLM-API plumbing
+/// once the caller already has the settings.
+pub(crate) async fn do_chat_with_victor(
+    api_base_url: &str,
+    api_key: &str,
+    payload: VictorChatPayload,
+) -> Result<VictorResponse, DbError> {
     let request_body = build_llm_request(&payload.question, &payload.history);
 
     let client = reqwest::Client::builder()
@@ -212,7 +245,7 @@ pub async fn chat_with_victor(
         .map_err(|e| DbError::Io(format!("Failed to create HTTP client: {e}")))?;
 
     let mut req_builder = client
-        .post(&api_base_url)
+        .post(api_base_url)
         .header("Content-Type", "application/json");
 
     if !api_key.is_empty() {
