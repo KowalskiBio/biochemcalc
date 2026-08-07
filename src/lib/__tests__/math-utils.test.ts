@@ -3,6 +3,7 @@ import {
   buildSubstitutedEquation,
   createRandom,
   evaluateExpression,
+  evaluateVariantAnswer,
   formatNumberForText,
   formatNumberMaxDecimals,
   pickMockValues,
@@ -11,7 +12,7 @@ import {
   scientificNotationToHtml,
   validateEquationReferences,
 } from "@/lib/math-utils"
-import type { LocalVariableEdit, Variable, VariableWithPlaceholder } from "@/lib/types"
+import type { LocalVariableEdit, Variable, Variant, VariableWithPlaceholder } from "@/lib/types"
 
 describe("renderEquationAsLatex", () => {
   it("renders a simple fraction", () => {
@@ -231,6 +232,37 @@ describe("renderEquationAsLatex", () => {
   it("preserves nested parentheses", () => {
     expect(renderEquationAsLatex("((a + b))")).toBe("$$\\left(\\left(a + b\\right)\\right)$$")
   })
+
+  it("renders a scientific-notation literal as times-10-to-the-power, not raw 'e' text", () => {
+    // String(7.2e-10) is "7.2e-10" — buildSubstitutedEquation embeds sampled
+    // values with String(value), so this exact form is what a tiny/huge
+    // constant (e.g. a Ka) looks like once substituted into equation text.
+    expect(renderEquationAsLatex("x = 7.2e-10 + 1")).toBe(
+      "$$x = 7.2 \\times 10^{-10} + 1$$",
+    )
+  })
+
+  it("does not fall back to \\text{} for an equation containing scientific notation", () => {
+    // Before the tokenizer accepted "e" exponents, "7.2e-10" split into the
+    // number 7.2, identifier "e" (the Euler's-number constant), and "-10" —
+    // an unparseable sequence that made renderSingleEquationAsLatex give up
+    // and dump the raw formula as literal \text{} instead of real math.
+    const rendered = renderEquationAsLatex(
+      "wDsc = 100*(-7.2e-10 + sqrt(7.2e-10^2 + 4*7.2e-10*975))/(2*975)",
+    )
+    expect(rendered).not.toContain("\\text{wDsc")
+    expect(rendered).toContain("\\sqrt")
+    expect(rendered).toContain("10^{-10}")
+  })
+
+  it("parenthesizes a scientific-notation base before squaring it", () => {
+    // 7.2e-10^2 must read as "(7.2 * 10^-10) squared", not two exponents
+    // stacked with nothing to separate them ("10^{-10}^{2}" renders as one
+    // run "-10, 2" — indistinguishable from a typo).
+    expect(renderEquationAsLatex("x = 7.2e-10^2")).toBe(
+      "$$x = {\\left(7.2 \\times 10^{-10}\\right)}^{2}$$",
+    )
+  })
 })
 
 describe("evaluateExpression", () => {
@@ -295,6 +327,15 @@ describe("evaluateExpression", () => {
   it("evaluates unicode operators in multi-answer formulas", () => {
     const result = evaluateExpression("ms = mr × 3; mv = mr − ms", { mr: 10 })
     expect(result).toBeCloseTo(-20, 4)
+  })
+
+  it("evaluates a scientific-notation literal as one number, not number*e-number", () => {
+    // Before the fix, "7.2e-10" tokenized as 7.2, identifier "e" (the
+    // constant Euler's number), then "-10" — silently computing
+    // 7.2*Math.E - 10 (~9.57) instead of the intended 7.2 * 10^-10.
+    expect(evaluateExpression("7.2e-10")).toBeCloseTo(7.2e-10, 20)
+    expect(evaluateExpression("1e-10 + 1e-10")).toBeCloseTo(2e-10, 20)
+    expect(evaluateExpression("6.022e23 / 2")).toBeCloseTo(3.011e23, 15)
   })
 
   it("evaluates a bullet as multiplication", () => {
@@ -657,6 +698,25 @@ describe("buildSubstitutedEquation", () => {
     }
   }
 
+  function makeNumericVar(symbol: string, placeholder = symbol): VariableWithPlaceholder {
+    return {
+      placeholder,
+      isShared: false,
+      variable: {
+        id: symbol,
+        name: symbol,
+        symbol,
+        varType: "numeric",
+        minValue: 0,
+        maxValue: 0,
+        step: 1,
+        unit: "",
+        precision: 0,
+        createdAt: "",
+      } as Variable,
+    }
+  }
+
   it("substitutes string variable values into molar-mass references", () => {
     const variables = [makeStringVar("plyn", "plyn")]
     const result = buildSubstitutedEquation(
@@ -674,5 +734,65 @@ describe("buildSubstitutedEquation", () => {
     const variables = [makeStringVar("gas", "G")]
     const result = buildSubstitutedEquation("rho = M_G / 22.4", variables, {}, { G: "N_2" }, {})
     expect(result).toContain("28.02")
+  })
+
+  it("substitutes a sampled scientific-notation value in String(value) form", () => {
+    // A degenerate numeric range (min === max, e.g. a fixed Ka) samples to
+    // exactly that value; String(7.2e-10) is "7.2e-10", not "0.00000000072".
+    const result = buildSubstitutedEquation(
+      "wDsc = 100 * (-Ka + sqrt(Ka^2 + 4*Ka*c)) / (2*c)",
+      [makeNumericVar("Ka"), makeNumericVar("c")],
+      { Ka: 7.2e-10, c: 975 },
+      {},
+      {},
+    )
+    expect(result).toContain("7.2e-10")
+  })
+})
+
+describe("evaluateVariantAnswer with scientific-notation constants", () => {
+  const makeVariant = (assignedValues: Record<string, number>): Variant => ({
+    id: "v1",
+    templateId: "t1",
+    assignedValues,
+    correctAnswer: 0,
+    seed: 1,
+    createdAt: "",
+  })
+
+  function makeNumericVar(symbol: string): VariableWithPlaceholder {
+    return {
+      placeholder: symbol,
+      isShared: false,
+      variable: {
+        id: symbol,
+        name: symbol,
+        symbol,
+        varType: "numeric",
+        minValue: 0,
+        maxValue: 0,
+        step: 1,
+        unit: "",
+        precision: 0,
+        createdAt: "",
+      } as Variable,
+    }
+  }
+
+  it("computes the dissociation degree for a tiny fixed Ka without erroring", () => {
+    // Reproduces the reported bug exactly: HCN's Ka (7.2e-10) substituted
+    // into the dissociation-degree formula used to throw during parsing
+    // (the LaTeX preview fell back to raw \text{}) because the tokenizer
+    // split "7.2e-10" into 7.2, the constant "e", and "-10".
+    const result = evaluateVariantAnswer(
+      "wDsc = 100 * (-Ka + sqrt(Ka^2 + 4*Ka*c)) / (2*c)",
+      [makeNumericVar("Ka"), makeNumericVar("c")],
+      makeVariant({ Ka: 7.2e-10, c: 975 }),
+      {},
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value).toBeCloseTo(8.593e-5, 7)
+    }
   })
 })

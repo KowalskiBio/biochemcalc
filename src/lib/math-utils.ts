@@ -24,7 +24,14 @@ interface Token {
   value: string
 }
 
-const NUMBER_REGEX = /^[0-9]+(?:\.[0-9]+)?/
+// Trailing exponent is greedy on purpose: a bare number is never followed
+// directly by "e"/"E" in this formula language (there's no implicit
+// multiplication), so "7.2e-10" is always meant as one scientific-notation
+// literal, never "7.2 times the constant e, minus 10". Substituting a very
+// small/large sampled value with `String(value)` (buildSubstitutedEquation)
+// is exactly what produces this form, and it must round-trip back through
+// the tokenizer without splitting into "7.2", identifier "e", "-", "10".
+const NUMBER_REGEX = /^[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/
 
 // Unicode ranges: α (U+03B1) – ω (U+03C9)
 const GREEK_START = "\u03B1"
@@ -779,10 +786,31 @@ function stripParentheses(node: AstNode): AstNode {
   return node.kind === "parenthesized" ? node.inner : node
 }
 
+/**
+ * `String(7.2e-10)` is `"7.2e-10"` — literal `e` notation, which reads as
+ * broken text rather than math if dropped straight into LaTeX. Render it as
+ * `7.2 \times 10^{-10}` instead; every other number passes through as-is.
+ */
+function numberNodeToLatex(value: number): string {
+  const str = String(value)
+  const match = str.match(/^(-?[0-9]+(?:\.[0-9]+)?)e([+-]?[0-9]+)$/)
+  if (!match) return str
+  const [, mantissa, exponent] = match
+  return `${mantissa} \\times 10^{${exponent.replace(/^\+/, "")}}`
+}
+
+/** True for a number that renders as `m \times 10^{n}` — it already ends in
+ * its own superscript, so using it bare as the base of an outer `^` would
+ * stack two exponents with nothing to tell them apart (`10^{-10}^{2}` reads
+ * as one compound "-10, 2", not "(10^-10) squared"). */
+function isScientificNotationNumber(node: AstNode): boolean {
+  return node.kind === "number" && /e[+-]?[0-9]+$/i.test(String(node.value))
+}
+
 function nodeToLatex(node: AstNode): string {
   switch (node.kind) {
     case "number":
-      return String(node.value)
+      return numberNodeToLatex(node.value)
 
     case "identifier":
       return identifierToLatex(node.name)
@@ -794,7 +822,11 @@ function nodeToLatex(node: AstNode): string {
         return `\\frac{${left}}{${right}}`
       }
       if (node.operator === "^") {
-        const left = nodeToLatex(stripParentheses(node.left))
+        const strippedLeft = stripParentheses(node.left)
+        const leftLatex = nodeToLatex(strippedLeft)
+        const left = isScientificNotationNumber(strippedLeft)
+          ? `\\left(${leftLatex}\\right)`
+          : leftLatex
         const right = nodeToLatex(stripParentheses(node.right))
         return `{${left}}^{${right}}`
       }
