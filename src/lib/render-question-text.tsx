@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
 import { constantsApi } from "@/lib/api"
-import { formatNumberMaxDecimals, scientificNotationToUnicode } from "@/lib/math-utils"
+import { formatNumberMaxDecimals, scientificNotationToHtml } from "@/lib/math-utils"
 import { PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
@@ -45,10 +45,13 @@ export function formatChemicalText(text: string): string {
       .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])/g, (_, base, exponent) => {
         return `${base}<sup>${exponent}</sup>`
       })
-      // Subscripts: numeric (H_2, SO_4) AND letter (K_a, K_b, pK_a, n_e).
-      // Non-greedy so H_2SO_4 → H<sub>2</sub>SO<sub>4</sub> not H<sub>2SO</sub>_4.
-      .replace(/([A-Za-z0-9)]|\))_([A-Za-z0-9]+?)/g, (_, base, subscript) => {
-        return `${base}<sub>${subscript}</sub>`
+      // Subscripts: numeric (H_2, SO_4) AND letter (K_a, K_b, pK_a, n_e), plus
+      // chained compound subscripts (K_a_1 → Ka1, one symbol, one subscript).
+      // Each individual "_xxx" segment is non-greedy so H_2SO_4 splits into
+      // two subscripts instead of swallowing "SO"; adjacent segments with no
+      // separator between them merge into a single subscript.
+      .replace(/([A-Za-z0-9)]|\))((?:_[A-Za-z0-9]+?)+)/g, (_, base, subscript) => {
+        return `${base}<sub>${subscript.replace(/_/g, "")}</sub>`
       })
       // Remaining . as multiplication → ×, but keep digit.digit as a decimal point.
       .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
@@ -73,25 +76,18 @@ function getExampleStringValue(
 }
 
 /**
- * The in-app form of any piece of question text — literal prose as well as the
- * values substituted for placeholders. Only × substitutions apply: `<sub>` and
- * `<sup>` markup belongs solely to the exported question and the raw question
- * text, so the preview shows `H_2SO_4` exactly as it was authored rather than
- * mixing rendered subscripts into un-rendered surroundings.
+ * The in-app form of a piece of literal question prose — chemical notation
+ * (`K_a`, `H_2SO_4`, `Ca^2+`) typed directly into the question text renders
+ * as real subscripts/superscripts, same as substituted placeholder values.
+ * Only the raw editable text field and the exported question keep the
+ * authored `_`/`^` characters as plain text.
  */
 function formatTextSegment(text: string): string {
-  return text
-    .replace(/([A-Za-z0-9)])\.(\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
-    .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
-    .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1×$2")
+  return formatChemicalText(text)
 }
 
-/**
- * Numbers get real superscript characters rather than `<sup>` for the same
- * reason — it keeps a bare `^` off the screen without emitting markup.
- */
 function formatNumberSegment(value: number, precision: number): string {
-  return scientificNotationToUnicode(formatNumberMaxDecimals(value, precision))
+  return scientificNotationToHtml(formatNumberMaxDecimals(value, precision))
 }
 
 function renderConstantValue(value: number): string {

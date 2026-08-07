@@ -74,14 +74,20 @@ fn format_chemical_text(text: &str) -> String {
     let hydrate_re = HYDRATE_RE
         .get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·.](\d*)(H[₂2_]?[_₂2]?O)\b").unwrap());
     let sup_re = SUP_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])").unwrap());
-    let sub_re = SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])_([A-Za-z0-9]+?)").unwrap());
+    // Chained compound subscripts (K_a_1 -> Ka1, one symbol, one subscript)
+    // merge into a single <sub>; each "_xxx" segment stays non-greedy so
+    // H_2SO_4 splits into two subscripts instead of swallowing "SO".
+    let sub_re =
+        SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])((?:_[A-Za-z0-9]+?)+)").unwrap());
     let dot_mul_re = DOT_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z)])\.([A-Za-z0-9(])").unwrap());
     let star_mul_re =
         STAR_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·]([A-Za-z0-9(])").unwrap());
 
     let text = hydrate_re.replace_all(text, "$1×$2$3");
     let text = sup_re.replace_all(&text, "$1<sup>$2</sup>");
-    let text = sub_re.replace_all(&text, "$1<sub>$2</sub>");
+    let text = sub_re.replace_all(&text, |caps: &regex::Captures| {
+        format!("{}<sub>{}</sub>", &caps[1], caps[2].replace('_', ""))
+    });
     let text = dot_mul_re.replace_all(&text, "$1×$2");
     star_mul_re.replace_all(&text, "$1×$2").into_owned()
 }
@@ -629,6 +635,33 @@ mod tests {
         assert!(output.contains("H<sub>2</sub>SO<sub>4</sub>"));
         assert!(output.contains("x<sup>2</sup>"));
         assert!(output.contains("32,0 ml"));
+    }
+
+    #[test]
+    fn chained_compound_subscript_merges_into_one() {
+        // K_a_1 names a single symbol (the first dissociation constant of
+        // acid "a"), not two separate subscripts — the regex must not stop
+        // after the first "_a" and leave a literal "_1" behind.
+        let template = make_template("Konstanta K_a_1 pro [[X]] ml.");
+        let variant = Variant {
+            numeric_options: None,
+            correct_option: None,
+            interval_lo: Some(45.1),
+            interval_hi: Some(45.9),
+            ..make_closed_variant()
+        };
+        let precisions = [("X".to_string(), 1)].into();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            result_precision: 1,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(output.contains("K<sub>a1</sub>"));
+        assert!(!output.contains("K_a_1"));
+        assert!(!output.contains("_1"));
     }
 
     #[test]

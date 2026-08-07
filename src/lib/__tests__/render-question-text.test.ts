@@ -64,7 +64,7 @@ describe("formatChemicalText", () => {
 })
 
 describe("renderQuestionText", () => {
-  it("leaves sub/sup notation unformatted while replacing placeholders", () => {
+  it("preserves chemical formatting while replacing placeholders", () => {
     const text = "Kolik gramů [[ms]] Ca^2+?"
     const result = renderQuestionText(text, [
       {
@@ -84,10 +84,7 @@ describe("renderQuestionText", () => {
         isShared: false,
       },
     ])
-    // The in-app preview shows the authored notation as-is; `<sup>` markup is
-    // reserved for the export and the raw question text.
-    expect(result).toContain("Ca^2+")
-    expect(result).not.toContain("<sup>")
+    expect(result).toContain("Ca<sup>2+</sup>")
     // Previewed with a representative mid-range value (10–20 → 15), not the
     // bare minimum, so the sample reads like a real question.
     expect(result).toContain(">15<")
@@ -116,11 +113,37 @@ describe("renderQuestionText", () => {
     expect(result).not.toContain(">1<")
   })
 
-  it("renders scientific notation with superscript characters, not markup", () => {
+  it("renders scientific notation from constants with real superscript markup", () => {
     const result = renderQuestionText("Disociační konstanta je [[Ka]].", [], [], { Ka: 0.000018 })
-    expect(result).toContain("1.80×10⁻⁵")
-    expect(result).not.toContain("<sup>")
-    expect(result).not.toContain("10^")
+    expect(result).toContain("1.80×10<sup>-5</sup>")
+  })
+
+  it("formats chemical notation typed directly into the question prose", () => {
+    const result = renderQuestionText(
+      "Disociační konstanta kyseliny propionové K_a je 1.32×10^-5 v pufru o objemu 31 dm^3.",
+      [],
+    )
+    expect(result).toContain("K<sub>a</sub>")
+    expect(result).toContain("10<sup>-5</sup>")
+    expect(result).toContain("dm<sup>3</sup>")
+    expect(result).not.toContain("K_a")
+    expect(result).not.toContain("dm^3")
+  })
+
+  it("merges a chained compound subscript into one symbol", () => {
+    // K_a_1 names a single symbol (the phosphoric acid's first dissociation
+    // constant), not two separate subscripts — must not stop after "_a" and
+    // leave a literal "_1" trailing.
+    const result = renderQuestionText(
+      "K_a_1 = 7.1×10^-3, K_a_2 = 6.2×10^-8, K_a_3 = 4.4×10^-13.",
+      [],
+    )
+    expect(result).toContain("K<sub>a1</sub>")
+    expect(result).toContain("K<sub>a2</sub>")
+    expect(result).toContain("K<sub>a3</sub>")
+    expect(result).not.toContain("_1")
+    expect(result).not.toContain("_2")
+    expect(result).not.toContain("_3")
   })
 
   it("hides the trailing answer-target marker", () => {
@@ -197,7 +220,7 @@ describe("renderQuestionTextWithVariant", () => {
     expect(result).toContain(">NaCl<")
   })
 
-  it("shows string variable values without sub/sup markup", () => {
+  it("applies chemical formatting to string variable values", () => {
     const text = "Vypočítejte hustotu [[plyn]]. [rho]"
     const result = renderQuestionTextWithVariant(
       text,
@@ -222,8 +245,8 @@ describe("renderQuestionTextWithVariant", () => {
       ],
       { ...makeVariant({}), assignedStrings: { plyn: "N_2" } },
     )
-    expect(result).toContain(">N_2<")
-    expect(result).not.toContain("<sub>")
+    expect(result).toContain("N<sub>2</sub>")
+    expect(result).not.toContain(">N_2<")
   })
 
   it("renders fixed-value placeholders without brackets", () => {
@@ -231,9 +254,7 @@ describe("renderQuestionTextWithVariant", () => {
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}))
     expect(result).toContain(">1.1296<")
     expect(result).not.toContain("[[rho_r=1.1296]]")
-    // `*` still becomes ×, but the exponent stays as authored.
-    expect(result).toContain("g×cm^-3")
-    expect(result).not.toContain("<sup>")
+    expect(result).toContain("g×cm<sup>-3</sup>")
   })
 
   it("converts dots in hydrates to multiplication dots without touching decimals in placeholders", () => {
