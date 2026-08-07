@@ -81,6 +81,57 @@ function renderConstantValue(value: number): string {
   return `<span class="inline-flex items-center font-semibold text-gray-600">${display}</span>`
 }
 
+function hashString(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0
+  }
+  return h
+}
+
+function seededRandom(seed: number): () => number {
+  let s = seed >>> 0
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0
+    return s / 0x100000000
+  }
+}
+
+/**
+ * Builds a fake variant for preview purposes: each placeholder gets a random
+ * value drawn from its configured range, seeded by the template ID so the
+ * same template always shows the same preview values (no flicker on
+ * re-render), but different templates show different values.
+ */
+export function buildPreviewVariant(
+  templateId: string,
+  variables: RenderableVariable[],
+): RenderableVariant {
+  const rng = seededRandom(hashString(templateId))
+  const assignedValues: Record<string, number> = {}
+  const assignedStrings: Record<string, string> = {}
+
+  for (const { placeholder, variable } of variables) {
+    if (!variable) continue
+    if (variable.varType === "string") {
+      const options = variable.stringValues ?? []
+      if (options.length > 0) {
+        assignedStrings[placeholder] = options[Math.floor(rng() * options.length)]
+      }
+    } else {
+      const { minValue, maxValue, step } = variable
+      if (step > 0 && Number.isFinite(minValue) && Number.isFinite(maxValue) && maxValue > minValue) {
+        const steps = Math.floor((maxValue - minValue) / step)
+        assignedValues[placeholder] = minValue + Math.floor(rng() * (steps + 1)) * step
+      } else {
+        assignedValues[placeholder] = previewValueForVariable(variable)
+      }
+    }
+  }
+
+  return { assignedValues, assignedStrings }
+}
+
 /**
  * A representative value to preview a variable with when no variant has been
  * generated yet. The midpoint of the configured range (snapped to `step`) is

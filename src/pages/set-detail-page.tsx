@@ -46,7 +46,7 @@ import {
   templatesApi,
 } from "@/lib/api"
 import { evaluateVariantAnswer, formatNumberForText } from "@/lib/math-utils"
-import { QuestionTextRenderer } from "@/lib/render-question-text"
+import { buildPreviewVariant, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   ProjektQuestion,
   QuestionDifficulty,
@@ -491,6 +491,7 @@ export function SetDetailPage() {
                         <QuestionTextRenderer
                           text={t.template.questionText}
                           variables={t.variables}
+                          variant={buildPreviewVariant(t.template.id, t.variables)}
                           constants={Object.fromEntries(
                             t.constants.map((c) => [c.symbol, c.value]),
                           )}
