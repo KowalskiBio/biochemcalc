@@ -43,20 +43,15 @@ export function DatabazeDialog({
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    if (initialValues) {
+    if (open) {
       setFormData({
-        code: initialValues.code ?? "",
-        values: initialValues.values ?? [],
+        code: initialValues?.code ?? "",
+        values: initialValues?.values ?? [],
       })
-      setValuesText((initialValues.values ?? []).join(", "))
-    }
-  }, [initialValues])
-
-  useEffect(() => {
-    if (!open) {
+      setValuesText((initialValues?.values ?? []).join(", "))
       setErrors({})
     }
-  }, [open])
+  }, [open, initialValues])
 
   const handleChange = useCallback(
     (key: "code", value: string) => {
@@ -159,14 +154,14 @@ export function DatabazeDialog({
             <p className="text-xs text-muted-foreground">{cs.databaze.form.valuesHelp}</p>
             {errors.values && <p className="text-sm text-destructive">{errors.values}</p>}
           </div>
-        </form>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {cs.common.cancel}
-          </Button>
-          <Button onClick={handleSubmit}>{confirmText}</Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              {cs.common.cancel}
+            </Button>
+            <Button type="submit">{confirmText}</Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

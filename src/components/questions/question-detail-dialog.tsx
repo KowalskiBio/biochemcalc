@@ -977,7 +977,23 @@ export function QuestionDetailDialog({
       return { type: "string" as const, mockValues, mockStrings }
     }
 
-    if (numericVariables.length === 0 && fixedPlaceholderValues.size === 0) {
+    // String variables referenced via M_symbol (e.g. `M_plyn` where plyn is a
+    // string variable like "N_2"). The word-boundary regex above won't detect
+    // these because the underscore prefix blocks it; detect them separately and
+    // substitute their molar mass just as the backend does.
+    const molarMassStringSources = visibleVariables
+      .filter((v) => {
+        if (v.varType !== "string") return false
+        const molarMassRegex = new RegExp(`M_${escapeRegex(v.symbol)}(?![A-Za-z0-9_(])`)
+        return molarMassRegex.test(text)
+      })
+      .map((v) => ({ placeholder: v.placeholder, symbol: v.symbol }))
+
+    if (
+      numericVariables.length === 0 &&
+      fixedPlaceholderValues.size === 0 &&
+      molarMassStringSources.length === 0
+    ) {
       return null
     }
 
@@ -1012,6 +1028,11 @@ export function QuestionDetailDialog({
       )
     }
 
+    substituted = substituteStringsInMolarMassReferences(
+      substituted,
+      molarMassStringSources,
+      mockStrings,
+    )
     substituted = resolveMolarMasses(substituted, constants)
     substituted = substituteRemainingMolarMasses(substituted)
 
