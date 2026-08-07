@@ -1,6 +1,7 @@
 import { Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import ReactMarkdown from "react-markdown"
+import rehypeRaw from "rehype-raw"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -36,7 +37,7 @@ import {
   validateEquationReferences,
 } from "@/lib/math-utils"
 import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
-import { QuestionTextRenderer } from "@/lib/render-question-text"
+import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   HistoryEntry,
   LocalVariableEdit,
@@ -1169,8 +1170,16 @@ export function QuestionDetailDialog({
                   />
                 ) : (
                   <div className="max-w-none prose prose-sm dark:prose-invert break-words">
-                    <ReactMarkdown>
-                      {stripAnswerTargets(templateDetails.template.questionText)}
+                    <ReactMarkdown
+                      rehypePlugins={[rehypeRaw]}
+                      components={{
+                        // A stray "*" left over from formula notation (e.g. an
+                        // unspaced multiplication sign formatChemicalText didn't
+                        // catch) must never read as markdown emphasis here.
+                        em: ({ children }) => <>{children}</>,
+                      }}
+                    >
+                      {formatChemicalText(stripAnswerTargets(templateDetails.template.questionText))}
                     </ReactMarkdown>
                   </div>
                 )}
