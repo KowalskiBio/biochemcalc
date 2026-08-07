@@ -52,6 +52,7 @@ import {
   extractPlaceholders,
   extractPlaceholderValues,
   isAtomPlaceholder,
+  parseCzechNumber,
   replacePlaceholder,
   stripAnswerTargets,
 } from "@/lib/utils"
@@ -773,8 +774,8 @@ export function QuestionDetailDialog({
       templateDetails.template.questionText,
     )) {
       if (value === undefined) continue
-      const numeric = Number(value)
-      if (!Number.isNaN(numeric)) {
+      const numeric = parseCzechNumber(value)
+      if (numeric !== undefined) {
         map.set(symbol, numeric)
       }
     }
