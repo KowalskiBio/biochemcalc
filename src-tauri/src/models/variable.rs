@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// The kind of value a variable can hold.
@@ -32,6 +33,9 @@ pub struct Variable {
     pub unit: String,
     pub precision: u8,
     pub string_values: Option<Vec<String>>,
+    /// Per-value numeric constants paired with each string value.
+    /// Index i holds the constants for `string_values[i]`.
+    pub paired_constants: Option<Vec<HashMap<String, f64>>>,
     pub greater_than: Option<String>,
     pub less_than: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -58,6 +62,7 @@ impl Variable {
             unit,
             precision,
             string_values: None,
+            paired_constants: None,
             greater_than: None,
             less_than: None,
             created_at: Utc::now(),
@@ -76,6 +81,7 @@ impl Variable {
             unit: String::new(),
             precision: 0,
             string_values: Some(values),
+            paired_constants: None,
             greater_than: None,
             less_than: None,
             created_at: Utc::now(),

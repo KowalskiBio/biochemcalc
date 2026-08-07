@@ -118,6 +118,7 @@ async fn update_topic(
         id: payload.id,
         name: payload.name,
         created_at: chrono::Utc::now(),
+        for_students: payload.for_students,
     };
     TopicRepo::update(&conn, &topic)?;
     Ok(Json(topic))
@@ -177,6 +178,7 @@ async fn update_variable(
         unit: payload.unit,
         precision: payload.precision,
         string_values: payload.string_values,
+        paired_constants: payload.paired_constants,
         greater_than: None,
         less_than: None,
         created_at: chrono::Utc::now(),

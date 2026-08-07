@@ -40,10 +40,14 @@ export function formatChemicalText(text: string): string {
     text
       // Hydrate separators → × BEFORE sub/sup so H_2O is still raw text.
       .replace(/([A-Za-z0-9)])[*·.](\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
-      .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?)/g, (_, base, exponent) => {
+      // Superscripts: 10^-5, x^2, Ca^2+, PO4^3-, etc.
+      // Handles: digits with optional sign prefix/suffix, or bare sign (^- / ^+).
+      .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])/g, (_, base, exponent) => {
         return `${base}<sup>${exponent}</sup>`
       })
-      .replace(/([A-Z][a-z]?|\))_(\d+)/g, (_, base, subscript) => {
+      // Subscripts: numeric (H_2, SO_4) AND letter (K_a, K_b, pK_a, n_e).
+      // Non-greedy so H_2SO_4 → H<sub>2</sub>SO<sub>4</sub> not H<sub>2SO</sub>_4.
+      .replace(/([A-Za-z0-9)]|\))_([A-Za-z0-9]+?)/g, (_, base, subscript) => {
         return `${base}<sub>${subscript}</sub>`
       })
       // Remaining . as multiplication → ×, but keep digit.digit as a decimal point.
@@ -69,16 +73,26 @@ function getExampleStringValue(
 }
 
 function formatTextSegment(text: string): string {
-  // Hydrate dots → × first, then remaining multiplication dots → ×,
-  // while leaving digit.digit as a decimal point.
-  const withHydrateDots = text.replace(/([A-Za-z0-9)])\.(\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
-  const withDots = withHydrateDots.replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
-  return formatChemicalText(withDots)
+  // Only apply × substitutions in the app — HTML sub/sup belongs only in exports.
+  return text
+    .replace(/([A-Za-z0-9)])\.(\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
+    .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
+    .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1×$2")
 }
 
 function renderConstantValue(value: number): string {
   const display = scientificNotationToHtml(formatNumberMaxDecimals(value, 4))
   return `<span class="inline-flex items-center font-semibold text-gray-600">${display}</span>`
+}
+
+function decimalPlacesInStep(step: number): number {
+  const s = String(step)
+  const dot = s.indexOf(".")
+  return dot === -1 ? 0 : s.length - dot - 1
+}
+
+function effectivePrecision(variable: { precision: number; step: number }): number {
+  return Math.max(variable.precision, decimalPlacesInStep(variable.step))
 }
 
 function hashString(s: string): number {
@@ -116,13 +130,23 @@ export function buildPreviewVariant(
     if (variable.varType === "string") {
       const options = variable.stringValues ?? []
       if (options.length > 0) {
-        assignedStrings[placeholder] = options[Math.floor(rng() * options.length)]
+        const idx = Math.floor(rng() * options.length)
+        assignedStrings[placeholder] = options[idx]
+        const pc = variable.pairedConstants?.[idx]
+        if (pc) {
+          for (const [sym, val] of Object.entries(pc)) {
+            if (!(sym in assignedValues)) assignedValues[sym] = val
+          }
+        }
       }
     } else {
       const { minValue, maxValue, step } = variable
       if (step > 0 && Number.isFinite(minValue) && Number.isFinite(maxValue) && maxValue > minValue) {
         const steps = Math.floor((maxValue - minValue) / step)
-        assignedValues[placeholder] = minValue + Math.floor(rng() * (steps + 1)) * step
+        const raw = minValue + Math.floor(rng() * (steps + 1)) * step
+        const stepStr = String(step)
+        const dec = stepStr.includes(".") ? stepStr.split(".")[1].length : 0
+        assignedValues[placeholder] = dec > 0 ? parseFloat(raw.toFixed(dec)) : Math.round(raw)
       } else {
         assignedValues[placeholder] = previewValueForVariable(variable)
       }
@@ -164,6 +188,19 @@ function renderPlaceholderSpan(
 ): string {
   const fixedValue = value?.trim()
   if (fixedValue !== undefined && fixedValue !== "") {
+    // Check if fixedValue is a string variable placeholder — a linked constant
+    // like [[Ka=wac]] where Ka comes from wac's pairedConstants.
+    const linkedVar = variables.find(
+      (v) => v.placeholder === fixedValue && v.variable.varType === "string",
+    )
+    if (linkedVar) {
+      const pairedConstants = linkedVar.variable.pairedConstants
+      if (pairedConstants && pairedConstants.length > 0) {
+        const val = pairedConstants[0][placeholder]
+        if (val !== undefined) return renderConstantValue(val)
+      }
+      return `<span class="inline-flex items-center font-semibold text-gray-600">[[${placeholder}]]</span>`
+    }
     return `<span class="inline-flex items-center font-semibold text-gray-600">${fixedValue}</span>`
   }
   const idx = variables.findIndex((v) => v.placeholder === placeholder)
@@ -174,7 +211,7 @@ function renderPlaceholderSpan(
       variable.varType === "string"
         ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
         : scientificNotationToHtml(
-            formatNumberMaxDecimals(previewValueForVariable(variable), variable.precision),
+            formatNumberMaxDecimals(previewValueForVariable(variable), effectivePrecision(variable)),
           )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
@@ -299,6 +336,15 @@ function renderPlaceholderSpanWithVariant(
 ): string {
   const fixedValue = value?.trim()
   if (fixedValue !== undefined && fixedValue !== "") {
+    // Check if fixedValue is a string variable placeholder — [[Ka=wac]] form.
+    const linkedVar = variables.find(
+      (v) => v.placeholder === fixedValue && v.variable.varType === "string",
+    )
+    if (linkedVar) {
+      const linkedValue = variant.assignedValues[placeholder]
+      if (linkedValue !== undefined) return renderConstantValue(linkedValue)
+      return `<span class="inline-flex items-center font-semibold text-gray-600">[[${placeholder}]]</span>`
+    }
     return `<span class="inline-flex items-center font-semibold text-gray-600">${fixedValue}</span>`
   }
 
@@ -319,7 +365,7 @@ function renderPlaceholderSpanWithVariant(
         const rawValue =
           sampledValue !== undefined ? sampledValue : previewValueForVariable(variable)
         const displayValue = scientificNotationToHtml(
-          formatNumberMaxDecimals(rawValue, variable.precision),
+          formatNumberMaxDecimals(rawValue, effectivePrecision(variable)),
         )
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
@@ -330,7 +376,7 @@ function renderPlaceholderSpanWithVariant(
       variable.varType === "string"
         ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
         : scientificNotationToHtml(
-            formatNumberMaxDecimals(previewValueForVariable(variable), variable.precision),
+            formatNumberMaxDecimals(previewValueForVariable(variable), effectivePrecision(variable)),
           )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }

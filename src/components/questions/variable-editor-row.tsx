@@ -34,10 +34,65 @@ function getDisplayLabel(v: LocalVariableEdit): string {
   return v.symbol ? `${placeholder} (${v.symbol})` : placeholder
 }
 
+// Allows typing intermediate states like "0." or "-" without losing them.
+function NumericInput({
+  value,
+  onChange,
+  className,
+  min,
+  max,
+  step,
+}: {
+  value: number
+  onChange: (n: number) => void
+  className?: string
+  min?: number
+  max?: number
+  step?: number | string
+}) {
+  const [text, setText] = useState(String(value))
+
+  // Keep text in sync when the prop changes externally (e.g. type switch resets to default).
+  const numericText = Number(text)
+  if (Number.isFinite(numericText) && numericText !== value) {
+    setText(String(value))
+  }
+
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      min={min}
+      max={max}
+      step={step}
+      className={className}
+      onChange={(e) => {
+        const raw = e.target.value
+        setText(raw)
+        const parsed = Number(raw)
+        if (raw !== "" && Number.isFinite(parsed)) {
+          onChange(parsed)
+        }
+      }}
+      onBlur={() => {
+        // Snap display to canonical number on blur (clears trailing dots etc.)
+        const parsed = Number(text)
+        if (Number.isFinite(parsed)) {
+          setText(String(parsed))
+        }
+      }}
+    />
+  )
+}
+
 interface ComparisonSelectorsProps {
   variable: LocalVariableEdit
   allVariables: LocalVariableEdit[]
-  onChange: (field: keyof LocalVariableEdit, value: string | number | string[]) => void
+  onChange: (
+    field: keyof LocalVariableEdit,
+    value: string | number | string[] | Array<Record<string, number>>,
+  ) => void
 }
 
 function ComparisonSelectors({ variable, allVariables, onChange }: ComparisonSelectorsProps) {
@@ -111,11 +166,43 @@ interface VariableEditorRowProps {
   errors: Record<string, string>
   isSaving?: boolean
   allVariables: LocalVariableEdit[]
-  onChange: (field: keyof LocalVariableEdit, value: string | number | string[]) => void
+  onChange: (
+    field: keyof LocalVariableEdit,
+    value: string | number | string[] | Array<Record<string, number>>,
+  ) => void
   onEdit: () => void
   onCancel: () => void
   onSave: () => void
   onRemove: () => void
+}
+
+function serializePairedConstants(pc: Array<Record<string, number>> | undefined): string {
+  if (!pc || pc.length === 0) return ""
+  return pc
+    .map((row) =>
+      Object.entries(row)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", "),
+    )
+    .join("\n")
+}
+
+function parsePairedConstantsText(text: string): Array<Record<string, number>> {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const record: Record<string, number> = {}
+      for (const part of line.split(",")) {
+        const eqIdx = part.indexOf("=")
+        if (eqIdx < 1) continue
+        const key = part.slice(0, eqIdx).trim()
+        const val = parseFloat(part.slice(eqIdx + 1).trim())
+        if (key && !isNaN(val)) record[key] = val
+      }
+      return record
+    })
 }
 
 export function VariableEditorRow({
@@ -133,6 +220,9 @@ export function VariableEditorRow({
 }: VariableEditorRowProps) {
   const [stringValuesInput, setStringValuesInput] = useState(
     variable.stringValues?.join(", ") || "",
+  )
+  const [pairedConstantsInput, setPairedConstantsInput] = useState(
+    serializePairedConstants(variable.pairedConstants),
   )
 
   const displayPlaceholder = variable.placeholder || getAutoPlaceholder(index)
@@ -180,6 +270,17 @@ export function VariableEditorRow({
       }
     }
 
+    const handleStepChange = (value: number) => {
+      onChange("step", value)
+      // Auto-update precision to match the number of decimal places in the step
+      const stepStr = String(value)
+      const dotIndex = stepStr.indexOf(".")
+      const decimalPlaces = dotIndex === -1 ? 0 : stepStr.length - dotIndex - 1
+      if (decimalPlaces > (variable.precision ?? 0)) {
+        onChange("precision", decimalPlaces)
+      }
+    }
+
     const handleStringValuesChange = (value: string) => {
       setStringValuesInput(value)
       const values = value
@@ -222,71 +323,100 @@ export function VariableEditorRow({
         </div>
 
         {isStringType ? (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">{cs.questions.stringValuesInput}</Label>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => handleStringValuesChange(FIRST_THREE_ROWS_ELEMENTS.join(", "))}
-                >
-                  {cs.questions.fillFirstThreeRows}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => handleStringValuesChange(KNOWN_ELEMENTS.join(", "))}
-                >
-                  {cs.questions.fillAllElements}
-                </Button>
+          <>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">{cs.questions.stringValuesInput}</Label>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => handleStringValuesChange(FIRST_THREE_ROWS_ELEMENTS.join(", "))}
+                  >
+                    {cs.questions.fillFirstThreeRows}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() => handleStringValuesChange(KNOWN_ELEMENTS.join(", "))}
+                  >
+                    {cs.questions.fillAllElements}
+                  </Button>
+                </div>
               </div>
+              <Textarea
+                value={stringValuesInput}
+                onChange={(e) => handleStringValuesChange(e.target.value)}
+                rows={2}
+                placeholder="hodnota1, hodnota2, hodnota3"
+                className="min-h-[60px]"
+              />
+              {errors.stringValues && (
+                <p className="text-xs text-red-500">{errors.stringValues}</p>
+              )}
             </div>
-            <Textarea
-              value={stringValuesInput}
-              onChange={(e) => handleStringValuesChange(e.target.value)}
-              rows={2}
-              placeholder="hodnota1, hodnota2, hodnota3"
-              className="min-h-[60px]"
-            />
-            {errors.stringValues && <p className="text-xs text-red-500">{errors.stringValues}</p>}
-          </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Párové konstanty</Label>
+              <p className="text-xs text-muted-foreground">
+                Jedna řada na hodnotu (stejné pořadí). Formát:{" "}
+                <code className="text-xs">Ka=1.8e-5, pKa=4.74</code>
+              </p>
+              <Textarea
+                value={pairedConstantsInput}
+                onChange={(e) => {
+                  setPairedConstantsInput(e.target.value)
+                  onChange("pairedConstants", parsePairedConstantsText(e.target.value))
+                }}
+                rows={3}
+                placeholder={"Ka=1.8e-5, pKa=4.74\nKa=7.3e-10, pKa=9.14"}
+                className="min-h-[80px] font-mono text-xs"
+              />
+            </div>
+          </>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">{cs.questions.variableMin}</Label>
-                <Input
-                  type="number"
-                  value={String(variable.minValue)}
-                  onChange={(e) => onChange("minValue", Number(e.target.value))}
+                <NumericInput
+                  value={variable.minValue}
+                  onChange={(n) => onChange("minValue", n)}
                   className="h-8"
                 />
                 {errors.minValue && <p className="text-xs text-red-500">{errors.minValue}</p>}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">{cs.questions.variableMax}</Label>
-                <Input
-                  type="number"
-                  value={String(variable.maxValue)}
-                  onChange={(e) => onChange("maxValue", Number(e.target.value))}
+                <NumericInput
+                  value={variable.maxValue}
+                  onChange={(n) => onChange("maxValue", n)}
                   className="h-8"
                 />
                 {errors.maxValue && <p className="text-xs text-red-500">{errors.maxValue}</p>}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">{cs.questions.variableStep}</Label>
-                <Input
-                  type="number"
-                  value={String(variable.step)}
-                  onChange={(e) => onChange("step", Number(e.target.value))}
+                <NumericInput
+                  value={variable.step}
+                  onChange={(n) => handleStepChange(n)}
                   className="h-8"
                 />
                 {errors.step && <p className="text-xs text-red-500">{errors.step}</p>}
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">{cs.questions.variablePrecision}</Label>
+                <NumericInput
+                  value={variable.precision ?? 1}
+                  min={0}
+                  max={10}
+                  onChange={(n) => onChange("precision", n)}
+                  className="h-8"
+                />
+                {errors.precision && <p className="text-xs text-red-500">{errors.precision}</p>}
               </div>
             </div>
             <ComparisonSelectors

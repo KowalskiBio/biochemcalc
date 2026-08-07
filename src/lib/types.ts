@@ -9,6 +9,7 @@ export interface Topic {
   id: string
   name: string
   createdAt: string
+  forStudents: boolean
 }
 
 /**
@@ -16,6 +17,7 @@ export interface Topic {
  */
 export interface TopicInput {
   name: string
+  forStudents?: boolean
 }
 
 // Variable model - represents a configurable variable for biochemistry calculations
@@ -30,6 +32,7 @@ export interface Variable {
   unit: string
   precision: number
   stringValues?: string[]
+  pairedConstants?: Array<Record<string, number>>
   createdAt: string
 }
 
@@ -44,6 +47,7 @@ export interface VariableInput {
   unit: string
   precision: number
   stringValues?: string[]
+  pairedConstants?: Array<Record<string, number>>
 }
 
 /**
@@ -197,6 +201,7 @@ export interface LocalVariableEdit {
   unit: string
   precision: number
   stringValues?: string[]
+  pairedConstants?: Array<Record<string, number>>
   greaterThanVariableId?: string
   lessThanVariableId?: string
   isNew: boolean

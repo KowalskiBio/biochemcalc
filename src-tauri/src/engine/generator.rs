@@ -93,13 +93,13 @@ pub fn sample_variable<R: Rng>(variable: &Variable, rng: &mut R) -> f64 {
 }
 
 /// Sample a string value uniformly from the variable's predefined list.
-fn sample_string_variable<R: Rng>(variable: &Variable, rng: &mut R) -> String {
+fn sample_string_variable_with_index<R: Rng>(variable: &Variable, rng: &mut R) -> (String, usize) {
     let values = variable
         .string_values
         .as_ref()
         .expect("string variable must have values");
     let index = rng.random_range(0..values.len());
-    values[index].clone()
+    (values[index].clone(), index)
 }
 
 fn effective_min_for_greater_than(variable: &Variable, target_value: f64) -> Option<f64> {
@@ -215,7 +215,15 @@ fn sample_variables(
                 numeric.insert(v.symbol.clone(), value);
             }
             VariableType::String => {
-                strings.insert(v.symbol.clone(), sample_string_variable(v, &mut rng));
+                let (value, idx) = sample_string_variable_with_index(v, &mut rng);
+                strings.insert(v.symbol.clone(), value);
+                if let Some(constants_list) = &v.paired_constants {
+                    if let Some(constants) = constants_list.get(idx) {
+                        for (sym, &val) in constants {
+                            numeric.entry(sym.clone()).or_insert(val);
+                        }
+                    }
+                }
             }
         }
     }
@@ -698,6 +706,7 @@ mod tests {
             unit: "g".to_string(),
             precision,
             string_values: None,
+            paired_constants: None,
             greater_than: None,
             less_than: None,
             created_at: chrono::Utc::now(),

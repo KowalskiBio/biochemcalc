@@ -18,9 +18,14 @@ impl VariableRepo {
             .as_ref()
             .map(|values| serde_json::to_string(values).unwrap_or_default())
             .unwrap_or_default();
+        let paired_constants_json = v
+            .paired_constants
+            .as_ref()
+            .map(|c| serde_json::to_string(c).unwrap_or_default())
+            .unwrap_or_default();
         conn.execute(
-            "INSERT INTO variables (id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO variables (id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, paired_constants, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 v.id,
                 v.name,
@@ -32,6 +37,7 @@ impl VariableRepo {
                 v.unit,
                 v.precision,
                 string_values_json,
+                paired_constants_json,
                 v.created_at.to_rfc3339(),
             ],
         )?;
@@ -40,7 +46,7 @@ impl VariableRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Variable>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at
+            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at, paired_constants
              FROM variables ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| Ok(parse_variable_row(row)?))?;
@@ -53,7 +59,7 @@ impl VariableRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Variable, DbError> {
         conn.query_row(
-            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at
+            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at, paired_constants
              FROM variables WHERE id = ?1",
             params![id],
             |row| parse_variable_row(row),
@@ -71,9 +77,14 @@ impl VariableRepo {
             .as_ref()
             .map(|values| serde_json::to_string(values).unwrap_or_default())
             .unwrap_or_default();
+        let paired_constants_json = v
+            .paired_constants
+            .as_ref()
+            .map(|c| serde_json::to_string(c).unwrap_or_default())
+            .unwrap_or_default();
         let affected = conn.execute(
             "UPDATE variables SET name=?2, symbol=?3, var_type=?4, min_value=?5, max_value=?6, step=?7, \
-             unit=?8, precision=?9, string_values=?10, created_at=?11 WHERE id=?1",
+             unit=?8, precision=?9, string_values=?10, paired_constants=?11, created_at=?12 WHERE id=?1",
             params![
                 v.id,
                 v.name,
@@ -85,6 +96,7 @@ impl VariableRepo {
                 v.unit,
                 v.precision,
                 string_values_json,
+                paired_constants_json,
                 v.created_at.to_rfc3339(),
             ],
         )?;
@@ -153,6 +165,15 @@ fn parse_string_values(s: String) -> Option<Vec<String>> {
     serde_json::from_str(&s).ok()
 }
 
+fn parse_paired_constants(
+    s: String,
+) -> Option<Vec<std::collections::HashMap<String, f64>>> {
+    if s.is_empty() {
+        return None;
+    }
+    serde_json::from_str(&s).ok()
+}
+
 fn parse_variable_row(row: &rusqlite::Row) -> Result<Variable, rusqlite::Error> {
     Ok(Variable {
         id: row.get(0)?,
@@ -168,6 +189,9 @@ fn parse_variable_row(row: &rusqlite::Row) -> Result<Variable, rusqlite::Error> 
             .get::<_, Option<String>>(9)?
             .map(parse_string_values)
             .flatten(),
+        paired_constants: row
+            .get::<_, Option<String>>(11)?
+            .and_then(|s| parse_paired_constants(s)),
         greater_than: None,
         less_than: None,
         created_at: parse_dt(row.get::<_, String>(10)?),

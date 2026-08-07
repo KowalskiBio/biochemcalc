@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 13;
+const CURRENT_USER_VERSION: u32 = 21;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -101,6 +101,16 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 19 {
         apply_migration_v19(conn)?;
         conn.pragma_update(None, "user_version", "19")?;
+    }
+
+    if user_version < 20 {
+        apply_migration_v20(conn)?;
+        conn.pragma_update(None, "user_version", "20")?;
+    }
+
+    if user_version < 21 {
+        apply_migration_v21(conn)?;
+        conn.pragma_update(None, "user_version", "21")?;
     }
 
     Ok(())
@@ -865,6 +875,20 @@ fn apply_migration_v19(conn: &Connection) -> Result<(), rusqlite::Error> {
         ",
     )?;
 
+    Ok(())
+}
+
+fn apply_migration_v20(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "ALTER TABLE topics ADD COLUMN for_students INTEGER NOT NULL DEFAULT 0;",
+    )?;
+    Ok(())
+}
+
+fn apply_migration_v21(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "ALTER TABLE variables ADD COLUMN paired_constants TEXT NOT NULL DEFAULT '';",
+    )?;
     Ok(())
 }
 

@@ -190,6 +190,8 @@ fn record_template_field_history(
 #[serde(rename_all = "camelCase")]
 pub struct CreateTopicPayload {
     pub name: String,
+    #[serde(default)]
+    pub for_students: bool,
 }
 
 #[tauri::command]
@@ -198,7 +200,8 @@ pub fn create_topic(
     payload: CreateTopicPayload,
 ) -> Result<Topic, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    let topic = Topic::new(payload.name);
+    let mut topic = Topic::new(payload.name);
+    topic.for_students = payload.for_students;
     TopicRepo::insert(&conn, &topic)?;
     Ok(topic)
 }
@@ -220,6 +223,7 @@ pub fn get_topic(state: State<'_, AppState>, id: Uuid) -> Result<Topic, DbError>
 pub struct UpdateTopicPayload {
     pub id: Uuid,
     pub name: String,
+    pub for_students: bool,
 }
 
 #[tauri::command]
@@ -232,6 +236,7 @@ pub fn update_topic(
         id: payload.id,
         name: payload.name,
         created_at: Utc::now(),
+        for_students: payload.for_students,
     };
     TopicRepo::update(&conn, &topic)?;
     Ok(topic)
@@ -259,6 +264,7 @@ pub struct CreateVariablePayload {
     pub unit: String,
     pub precision: u8,
     pub string_values: Option<Vec<String>>,
+    pub paired_constants: Option<Vec<std::collections::HashMap<String, f64>>>,
 }
 
 #[tauri::command]
@@ -268,11 +274,15 @@ pub fn create_variable(
 ) -> Result<Variable, DbError> {
     let conn = crate::util::lock_db(&state.db);
     let variable = match payload.var_type {
-        VariableType::String => Variable::new_string(
-            payload.name,
-            payload.symbol,
-            payload.string_values.unwrap_or_default(),
-        ),
+        VariableType::String => {
+            let mut v = Variable::new_string(
+                payload.name,
+                payload.symbol,
+                payload.string_values.unwrap_or_default(),
+            );
+            v.paired_constants = payload.paired_constants;
+            v
+        }
         VariableType::Numeric => Variable::new(
             payload.name,
             payload.symbol,
@@ -312,6 +322,7 @@ pub struct UpdateVariablePayload {
     pub unit: String,
     pub precision: u8,
     pub string_values: Option<Vec<String>>,
+    pub paired_constants: Option<Vec<std::collections::HashMap<String, f64>>>,
 }
 
 #[tauri::command]
@@ -331,6 +342,7 @@ pub fn update_variable(
         unit: payload.unit,
         precision: payload.precision,
         string_values: payload.string_values,
+        paired_constants: payload.paired_constants,
         greater_than: None,
         less_than: None,
         created_at: Utc::now(),
@@ -560,11 +572,15 @@ fn build_template_constants(
 
 pub(crate) fn build_variable_from_payload(payload: CreateVariablePayload) -> Variable {
     match payload.var_type {
-        VariableType::String => Variable::new_string(
-            payload.name,
-            payload.symbol,
-            payload.string_values.unwrap_or_default(),
-        ),
+        VariableType::String => {
+            let mut v = Variable::new_string(
+                payload.name,
+                payload.symbol,
+                payload.string_values.unwrap_or_default(),
+            );
+            v.paired_constants = payload.paired_constants;
+            v
+        }
         VariableType::Numeric => Variable::new(
             payload.name,
             payload.symbol,
@@ -1045,6 +1061,7 @@ pub fn apply_template_variable_mutations(
                     unit: variable.unit,
                     precision: variable.precision,
                     string_values: variable.string_values.clone(),
+                    paired_constants: variable.paired_constants.clone(),
                     greater_than: None,
                     less_than: None,
                     created_at: Utc::now(),
@@ -1118,8 +1135,8 @@ pub fn apply_template_variable_mutations(
 
     for tv in &new_links {
         tx.execute(
-            "INSERT INTO template_variables (template_id, variable_id, placeholder, greater_than_variable_id, less_than_variable_id) VALUES (?1, ?2, ?3, NULL, NULL)",
-            rusqlite::params![tv.template_id, tv.variable_id, tv.placeholder],
+            "INSERT INTO template_variables (template_id, variable_id, placeholder, greater_than_variable_id, less_than_variable_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![tv.template_id, tv.variable_id, tv.placeholder, tv.greater_than_variable_id, tv.less_than_variable_id],
         )?;
     }
 
@@ -1554,6 +1571,7 @@ mod tests {
             unit: unit.into(),
             precision,
             string_values: None,
+            paired_constants: None,
         }
     }
 
