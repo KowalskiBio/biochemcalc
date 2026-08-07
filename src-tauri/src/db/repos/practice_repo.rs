@@ -67,6 +67,7 @@ impl PracticeRepo {
              JOIN categories c ON c.topic_id = tp.id
              JOIN sets s ON s.category_id = c.id
              JOIN set_templates st ON st.set_id = s.id
+             WHERE tp.for_students = 1
              GROUP BY tp.id, c.point_value
              HAVING COUNT(DISTINCT st.template_id) > 0
              ORDER BY tp.name COLLATE NOCASE, c.point_value",

@@ -73,8 +73,8 @@ fn format_chemical_text(text: &str) -> String {
 
     let hydrate_re = HYDRATE_RE
         .get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·.](\d*)(H[₂2_]?[_₂2]?O)\b").unwrap());
-    let sup_re = SUP_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)(])\^([+-]?\d+[+-]?)").unwrap());
-    let sub_re = SUB_RE.get_or_init(|| Regex::new(r"([A-Z][a-z]?|\))_(\d+)").unwrap());
+    let sup_re = SUP_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])").unwrap());
+    let sub_re = SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])_([A-Za-z0-9]+?)").unwrap());
     let dot_mul_re = DOT_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z)])\.([A-Za-z0-9(])").unwrap());
     let star_mul_re =
         STAR_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·]([A-Za-z0-9(])").unwrap());
@@ -125,11 +125,21 @@ fn render_question(
             .get(1)
             .expect("placeholder regex always has group 1")
             .as_str();
-        if let Some(value) = assigned.get(symbol) {
-            let precision = precisions.get(symbol).copied().unwrap_or(1);
-            rendered.push_str(&fmt_value_cz(*value, precision));
-        } else if let Some(value) = assigned_strings.get(symbol) {
-            rendered.push_str(&format_chemical_text(value));
+        // Handle "Ka=wac" (linked) and "Ka=1.8e-5" (fixed) placeholder forms.
+        // The left side of "=" is the symbol to look up in numeric assignments.
+        let (lookup_key, has_eq) = match symbol.find('=') {
+            Some(pos) => (&symbol[..pos], true),
+            None => (symbol, false),
+        };
+        if let Some(&value) = assigned.get(lookup_key) {
+            let precision = precisions.get(lookup_key).copied().unwrap_or(1);
+            rendered.push_str(&fmt_value_cz(value, precision));
+        } else if !has_eq {
+            if let Some(value) = assigned_strings.get(symbol) {
+                rendered.push_str(&format_chemical_text(value));
+            } else {
+                rendered.push_str(full.as_str());
+            }
         } else {
             rendered.push_str(full.as_str());
         }

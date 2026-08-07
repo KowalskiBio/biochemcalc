@@ -1,7 +1,6 @@
 import { Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import ReactMarkdown from "react-markdown"
-import rehypeRaw from "rehype-raw"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -37,7 +36,7 @@ import {
   validateEquationReferences,
 } from "@/lib/math-utils"
 import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
-import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-text"
+import { QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   HistoryEntry,
   LocalVariableEdit,
@@ -81,6 +80,7 @@ function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
     unit: vwp.variable.unit,
     precision: vwp.variable.precision,
     stringValues: vwp.variable.stringValues,
+    pairedConstants: vwp.variable.pairedConstants,
     greaterThanVariableId: vwp.greaterThanVariableId,
     lessThanVariableId: vwp.lessThanVariableId,
     isNew: false,
@@ -231,6 +231,7 @@ function buildVariableInput(v: LocalVariableEdit): VariableInput {
     unit: v.unit,
     precision: v.precision,
     stringValues: v.stringValues,
+    pairedConstants: v.pairedConstants,
   }
 }
 
@@ -255,7 +256,8 @@ function variableChanged(
     current.placeholder !== original.placeholder ||
     current.greaterThanVariableId !== original.greaterThanVariableId ||
     current.lessThanVariableId !== original.lessThanVariableId ||
-    JSON.stringify(current.stringValues ?? []) !== JSON.stringify(original.stringValues ?? [])
+    JSON.stringify(current.stringValues ?? []) !== JSON.stringify(original.stringValues ?? []) ||
+    JSON.stringify(current.pairedConstants ?? []) !== JSON.stringify(original.pairedConstants ?? [])
   )
 }
 
@@ -697,7 +699,7 @@ export function QuestionDetailDialog({
   const handleVariableChange = (
     key: string,
     field: keyof LocalVariableEdit,
-    value: string | number | string[],
+    value: string | number | string[] | Array<Record<string, number>>,
   ) => {
     setLocalVariables((prev) => {
       const index = prev.findIndex((v) => v.key === key)
@@ -715,6 +717,8 @@ export function QuestionDetailDialog({
         current[field] = typeof value === "number" ? value : Number(value)
       } else if (field === "stringValues") {
         current[field] = Array.isArray(value) ? (value as string[]) : ([String(value)] as string[])
+      } else if (field === "pairedConstants") {
+        current[field] = value as Array<Record<string, number>>
       } else {
         ;(current as Record<string, unknown>)[field] = value
       }
@@ -794,6 +798,14 @@ export function QuestionDetailDialog({
     })
     for (const placeholder of fixedPlaceholderValues.keys()) {
       variables.push({ placeholder, symbol: placeholder, varType: "numeric" as const })
+    }
+    // Add symbols that come from string variable paired constants (e.g. Ka from wac)
+    for (const item of source) {
+      const variable = "variable" in item ? item.variable : item
+      if (variable.varType !== "string" || !variable.pairedConstants?.length) continue
+      for (const sym of Object.keys(variable.pairedConstants[0])) {
+        variables.push({ placeholder: sym, symbol: sym, varType: "numeric" as const })
+      }
     }
     return variables
   }, [isEditingAnswer, visibleVariables, displayTemplateVariables, fixedPlaceholderValues])
@@ -914,6 +926,13 @@ export function QuestionDetailDialog({
     for (const placeholder of fixedPlaceholderValues.keys()) {
       defined.add(placeholder)
     }
+    // Symbols injected by string variable paired constants (e.g. Ka from wac)
+    for (const vwp of displayTemplateVariables) {
+      if (vwp.variable.varType !== "string" || !vwp.variable.pairedConstants?.length) continue
+      for (const sym of Object.keys(vwp.variable.pairedConstants[0])) {
+        defined.add(sym)
+      }
+    }
     return extractPlaceholders(templateDetails.template.questionText).filter(
       (placeholder) => !defined.has(placeholder),
     )
@@ -937,7 +956,10 @@ export function QuestionDetailDialog({
       }
       const totalSteps = Math.floor((maxValue - minValue) / step)
       const randomStep = Math.floor(rng() * (totalSteps + 1))
-      mockValues[placeholder] = minValue + randomStep * step
+      const raw = minValue + randomStep * step
+      const stepStr = String(step)
+      const dec = stepStr.includes(".") ? stepStr.split(".")[1].length : 0
+      mockValues[placeholder] = dec > 0 ? parseFloat(raw.toFixed(dec)) : Math.round(raw)
     }
     for (const [placeholder, value] of fixedPlaceholderValues.entries()) {
       mockValues[placeholder] = value
@@ -950,10 +972,15 @@ export function QuestionDetailDialog({
         (e) => e.code === variable.placeholder || e.code === variable.symbol,
       )
       const values = entry?.values ?? variable.stringValues
-      mockStrings[variable.placeholder] =
-        values && values.length > 0
-          ? values[Math.floor(rng() * values.length)]
-          : variable.placeholder
+      const idx = values && values.length > 0 ? Math.floor(rng() * values.length) : -1
+      mockStrings[variable.placeholder] = idx >= 0 ? values![idx] : variable.placeholder
+      // Inject paired constants for the sampled value index
+      const pc = variable.pairedConstants?.[idx]
+      if (pc) {
+        for (const [sym, val] of Object.entries(pc)) {
+          if (!(sym in mockValues)) mockValues[sym] = val
+        }
+      }
     }
 
     const usedPlaceholders = new Set(extractPlaceholders(text))
@@ -1141,11 +1168,9 @@ export function QuestionDetailDialog({
                     disabled={isSaving}
                   />
                 ) : (
-                  <div className="max-w-none">
-                    <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                      {formatChemicalText(
-                        stripAnswerTargets(templateDetails.template.questionText),
-                      )}
+                  <div className="max-w-none prose prose-sm dark:prose-invert break-words">
+                    <ReactMarkdown>
+                      {stripAnswerTargets(templateDetails.template.questionText)}
                     </ReactMarkdown>
                   </div>
                 )}
