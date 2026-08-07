@@ -64,7 +64,7 @@ describe("formatChemicalText", () => {
 })
 
 describe("renderQuestionText", () => {
-  it("preserves chemical formatting while replacing placeholders", () => {
+  it("leaves sub/sup notation unformatted while replacing placeholders", () => {
     const text = "Kolik gramů [[ms]] Ca^2+?"
     const result = renderQuestionText(text, [
       {
@@ -84,7 +84,10 @@ describe("renderQuestionText", () => {
         isShared: false,
       },
     ])
-    expect(result).toContain("Ca<sup>2+</sup>")
+    // The in-app preview shows the authored notation as-is; `<sup>` markup is
+    // reserved for the export and the raw question text.
+    expect(result).toContain("Ca^2+")
+    expect(result).not.toContain("<sup>")
     // Previewed with a representative mid-range value (10–20 → 15), not the
     // bare minimum, so the sample reads like a real question.
     expect(result).toContain(">15<")
@@ -111,6 +114,13 @@ describe("renderQuestionText", () => {
     ])
     expect(result).toContain(">30<")
     expect(result).not.toContain(">1<")
+  })
+
+  it("renders scientific notation with superscript characters, not markup", () => {
+    const result = renderQuestionText("Disociační konstanta je [[Ka]].", [], [], { Ka: 0.000018 })
+    expect(result).toContain("1.80×10⁻⁵")
+    expect(result).not.toContain("<sup>")
+    expect(result).not.toContain("10^")
   })
 
   it("hides the trailing answer-target marker", () => {
@@ -187,7 +197,7 @@ describe("renderQuestionTextWithVariant", () => {
     expect(result).toContain(">NaCl<")
   })
 
-  it("applies chemical formatting to string variable values", () => {
+  it("shows string variable values without sub/sup markup", () => {
     const text = "Vypočítejte hustotu [[plyn]]. [rho]"
     const result = renderQuestionTextWithVariant(
       text,
@@ -212,8 +222,8 @@ describe("renderQuestionTextWithVariant", () => {
       ],
       { ...makeVariant({}), assignedStrings: { plyn: "N_2" } },
     )
-    expect(result).toContain("N<sub>2</sub>")
-    expect(result).not.toContain(">N_2<")
+    expect(result).toContain(">N_2<")
+    expect(result).not.toContain("<sub>")
   })
 
   it("renders fixed-value placeholders without brackets", () => {
@@ -221,7 +231,9 @@ describe("renderQuestionTextWithVariant", () => {
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}))
     expect(result).toContain(">1.1296<")
     expect(result).not.toContain("[[rho_r=1.1296]]")
-    expect(result).toContain("g×cm<sup>-3</sup>")
+    // `*` still becomes ×, but the exponent stays as authored.
+    expect(result).toContain("g×cm^-3")
+    expect(result).not.toContain("<sup>")
   })
 
   it("converts dots in hydrates to multiplication dots without touching decimals in placeholders", () => {

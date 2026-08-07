@@ -959,8 +959,9 @@ const SCIENTIFIC_EXPONENT_REGEX = /×10\^([+-]?\d+)/g
 
 /**
  * `1.52×10^25` → `1.52×10<sup>25</sup>`, for the places that render markup
- * (question text, answer chips). Only for in-app rendering — the exported
- * `.txt` builds its own HTML in the Rust writer.
+ * (answer chips, units). Question text deliberately does not use this: sub/sup
+ * markup there belongs to the export and the raw text only. Only for in-app
+ * rendering — the exported `.txt` builds its own HTML in the Rust writer.
  */
 export function scientificNotationToHtml(text: string): string {
   return text.replace(SCIENTIFIC_EXPONENT_REGEX, "×10<sup>$1</sup>")
