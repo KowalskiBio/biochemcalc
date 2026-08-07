@@ -525,7 +525,10 @@ mod tests {
     /// A topic with one 2-point question ("double X"), wired up the way the
     /// importer does it: topic → category → set → template.
     fn seed_topic(conn: &Connection, name: &str, point_value: u8) -> Uuid {
-        let topic = Topic::new(name.to_string());
+        let mut topic = Topic::new(name.to_string());
+        // Every test in this module exercises the student-facing practice
+        // flow, which only ever lists topics opted in for students.
+        topic.for_students = true;
         crate::db::repos::TopicRepo::insert(conn, &topic).expect("insert topic");
 
         let (_, sets) = CategoryRepo::create(conn, topic.id, point_value).expect("create category");
