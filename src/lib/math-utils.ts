@@ -69,6 +69,40 @@ function substituteSpecialSymbols(
 
 const MOLAR_MASS_REFERENCE_REGEX = /M_([A-Za-z0-9_().*·∙]+)/g
 
+/**
+ * An adduct separator inside an `M_` identifier: the `.` in `M_FeSO4.7H2O`.
+ * `*`, `·` and `∙` are also multiplication operators, so the tokenizer only
+ * swallows a separator when what follows looks like the formula of the attached
+ * molecule — an optional count and then an element symbol, which is always
+ * capitalised. That keeps `M_NaCl * 2` and `M_H_2O·n` as multiplications while
+ * `M_NiCl2*6H2O` stays one identifier, matching what
+ * MOLAR_MASS_REFERENCE_REGEX already captures for evaluation.
+ */
+const MOLAR_MASS_SEPARATOR_REGEX = /^[.*·∙]\d*[A-Z]/
+
+/**
+ * Scans the chemical group opening at `input[start]` — the `(OH)` in
+ * `M_Ca(OH)2`, or the whole `(Cu(NH3)4)` in `M_(Cu(NH3)4)SO4` — and returns the
+ * index just past its closing bracket. Returns -1 when the group is unbalanced
+ * or holds anything that cannot be part of a formula, so `M_x(a+b)` is left to
+ * the parser as a function call rather than being swallowed half-way.
+ */
+function readFormulaGroup(input: string, start: number): number {
+  let depth = 0
+  for (let i = start; i < input.length; i++) {
+    const char = input[i]
+    if (char === "(") {
+      depth++
+    } else if (char === ")") {
+      depth--
+      if (depth === 0) return i + 1
+    } else if (!/[A-Za-z0-9_]/.test(char)) {
+      return -1
+    }
+  }
+  return -1
+}
+
 function normalizeMolarMassFormula(formulaPart: string): string {
   return formulaPart.replace(/_(\d+)(H_?2O)/g, ".$1$2").replace(/_/g, "")
 }
@@ -204,7 +238,8 @@ function tokenize(input: string): Token[] {
       char === "^" ||
       char === "=" ||
       char === "×" ||
-      char === "·"
+      char === "·" ||
+      char === "∙"
     ) {
       tokens.push({ type: "operator", value: char })
       i++
@@ -221,9 +256,31 @@ function tokenize(input: string): Token[] {
     if (IDENTIFIER_START.test(char)) {
       let value = char
       i++
-      while (i < input.length && IDENTIFIER_BODY.test(input[i])) {
-        value += input[i]
-        i++
+      while (i < input.length) {
+        if (IDENTIFIER_BODY.test(input[i])) {
+          value += input[i]
+          i++
+          continue
+        }
+        // A molar-mass reference reaches further than a plain identifier: it may
+        // carry bracketed groups and adducts, exactly as
+        // MOLAR_MASS_REFERENCE_REGEX captures them for evaluation.
+        if (value.startsWith("M_")) {
+          if (MOLAR_MASS_SEPARATOR_REGEX.test(input.slice(i))) {
+            value += input[i]
+            i++
+            continue
+          }
+          if (input[i] === "(") {
+            const groupEnd = readFormulaGroup(input, i)
+            if (groupEnd !== -1) {
+              value += input.slice(i, groupEnd)
+              i = groupEnd
+              continue
+            }
+          }
+        }
+        break
       }
       tokens.push({ type: "identifier", value })
       continue
@@ -252,7 +309,7 @@ interface IdentifierNode {
 
 interface BinaryNode {
   kind: "binary"
-  operator: "+" | "-" | "*" | "/" | "^" | "=" | "×" | "·"
+  operator: "+" | "-" | "*" | "/" | "^" | "=" | "×" | "·" | "∙"
   left: AstNode
   right: AstNode
 }
@@ -354,9 +411,10 @@ class Parser {
       (this.peek().value === "*" ||
         this.peek().value === "/" ||
         this.peek().value === "×" ||
-        this.peek().value === "·")
+        this.peek().value === "·" ||
+        this.peek().value === "∙")
     ) {
-      const operator = this.consume().value as "*" | "/" | "×" | "·"
+      const operator = this.consume().value as "*" | "/" | "×" | "·" | "∙"
       const right = this.parsePower()
       node = { kind: "binary", operator, left: node, right }
     }
@@ -441,7 +499,10 @@ interface FormulaAssignment {
 function isSingleIdentifier(s: string): boolean {
   if (s.length === 0) return false
   if (!IDENTIFIER_START.test(s[0])) return false
-  return s.slice(1).split("").every((c) => IDENTIFIER_BODY.test(c))
+  return s
+    .slice(1)
+    .split("")
+    .every((c) => IDENTIFIER_BODY.test(c))
 }
 
 function parseAssignments(input: string): FormulaAssignment[] {
@@ -499,7 +560,11 @@ export function evaluateExpression(
       return results[assignments[i].target]
     }
   }
-  return evaluateSingleExpression(assignments[assignments.length - 1].expression, results, constants)
+  return evaluateSingleExpression(
+    assignments[assignments.length - 1].expression,
+    results,
+    constants,
+  )
 }
 
 function evaluateSingleExpression(
@@ -542,7 +607,7 @@ function evaluateNode(node: AstNode, context: Record<string, number>): number {
         return CONSTANTS[node.name]
       }
       if (node.name.startsWith("M_")) {
-        const formulaPart = node.name.slice(2).replace(/_/g, "")
+        const formulaPart = normalizeMolarMassFormula(node.name.slice(2))
         const mass = calculateMolarMass(formulaPart)
         if (mass !== null) {
           return mass
@@ -563,6 +628,7 @@ function evaluateNode(node: AstNode, context: Record<string, number>): number {
         case "*":
         case "×":
         case "·":
+        case "∙":
           return left * right
         case "/":
           if (right === 0) {
@@ -632,15 +698,62 @@ function escapeIdentifierPart(name: string): string {
   return escaped
 }
 
+/**
+ * The explicit adduct separators of a molar-mass formula: the `·` in
+ * `CuSO4·5H2O`. Unambiguous, so anything after one is an attached molecule —
+ * water or otherwise (`CuSO4·6NH3`). They must never reach the output: KaTeX
+ * has no glyph for `∙`, and a bare `·` would draw as an operator.
+ */
+const ADDUCT_SEPARATOR_REGEX = /[.*·∙]/
+
+/**
+ * The water-of-crystallisation tail written with the underscore separator: the
+ * `_5H_2O` in `M_CuSO_4_5H_2O`. Underscores are otherwise subscript markers, so
+ * unlike ADDUCT_SEPARATOR_REGEX this only applies to a trailing water molecule —
+ * the same shape `normalizeMolarMassFormula` rewrites before computing, so what
+ * we draw matches what we compute. The count is optional: `CaSO_4_H_2O` is a
+ * monohydrate.
+ */
+const UNDERSCORE_WATER_TAIL_REGEX = /_(\d*)(H_?2O)$/
+
+function formulaSegmentToLatex(segment: string): string {
+  return (
+    segment
+      .split("_")
+      .map((part) => part.replace(/(\d+)/g, "_{$1}").replace(/([A-Za-z]+)/g, "\\mathrm{$1}"))
+      .join("")
+      // A digits-only part following one that already ended in digits would emit
+      // `_{4}_{2}` — a double subscript, which KaTeX refuses to render at all.
+      // The empty group keeps it valid; the notation is ambiguous either way.
+      .replace(/(_\{\d+\})(?=_\{)/g, "$1{}")
+  )
+}
+
+function adductToLatex(adduct: string): string {
+  // The count in front multiplies the whole attached molecule, so it is a
+  // coefficient rather than a subscript on the atom that follows it.
+  const count = adduct.match(/^\d+/)?.[0] ?? ""
+  return `${count}${formulaSegmentToLatex(adduct.slice(count.length))}`
+}
+
+function molarMassFormulaToLatex(formula: string): string {
+  const segments = formula.split(ADDUCT_SEPARATOR_REGEX)
+  let anhydrous = segments[0]
+  const adducts = segments.slice(1).map(adductToLatex)
+
+  const water = anhydrous.match(UNDERSCORE_WATER_TAIL_REGEX)
+  if (water) {
+    anhydrous = anhydrous.slice(0, anhydrous.length - water[0].length)
+    adducts.unshift(`${water[1]}\\mathrm{H}_{2}\\mathrm{O}`)
+  }
+
+  return [formulaSegmentToLatex(anhydrous), ...adducts].join(" \\cdot ")
+}
+
 function identifierToLatex(name: string): string {
   // Molar-mass references: M_<formula> -> M_{\mathrm{<formula>}}
   if (name.startsWith("M_")) {
-    const formula = name.slice(2)
-    const parts = formula.split("_")
-    const latexParts = parts.map((part) =>
-      part.replace(/(\d+)/g, "_{$1}").replace(/([A-Za-z]+)/g, "\\mathrm{$1}"),
-    )
-    return `M_{${latexParts.join("")}}`
+    return `M_{${molarMassFormulaToLatex(name.slice(2))}}`
   }
 
   const trailingDigits = name.match(/(\d+)$/)
@@ -694,7 +807,7 @@ function nodeToLatex(node: AstNode): string {
       let renderedOp: string
       if (op === "*" || op === "×") {
         renderedOp = "\\times "
-      } else if (op === "·") {
+      } else if (op === "·" || op === "∙") {
         renderedOp = "\\cdot "
       } else {
         renderedOp = `${op} `
@@ -729,9 +842,19 @@ function nodeToLatex(node: AstNode): string {
   }
 }
 
+const PLACEHOLDER_REGEX = /\[\[([^\]=\s]+)(?:=[^\]]*)?\]\]/g
+
+/**
+ * A placeholder naming the substance of a molar mass. It belongs to that
+ * identifier, so it is unwrapped without the separating spaces the general case
+ * needs: `M_[[LATKA]]` is one reference, not `M_` next to `LATKA`.
+ */
+const MOLAR_MASS_PLACEHOLDER_REGEX = new RegExp(`(?<=M_)${PLACEHOLDER_REGEX.source}`, "g")
+
 function preprocessEquation(text: string): string {
   return text
-    .replace(/\[\[([^\]=\s]+)(?:=[^\]]*)?\]\]/g, " $1 ")
+    .replace(MOLAR_MASS_PLACEHOLDER_REGEX, "$1")
+    .replace(PLACEHOLDER_REGEX, " $1 ")
     .replace(/⁻/g, "^-")
     .replace(/¹/g, "^1")
     .replace(/²/g, "^2")
@@ -744,12 +867,10 @@ function renderSingleEquationAsLatex(text: string): string {
     return ""
   }
 
-  const withSuperscripts = trimmed
-    .replace(/⁻/g, "^-")
-    .replace(/¹/g, "^1")
-    .replace(/²/g, "^2")
-    .replace(/³/g, "^3")
-  const normalized = normalizeFormulaForEvaluation(withSuperscripts)
+  // Placeholders are unwrapped before normalisation: it rewrites `[` as `(`,
+  // which would leave nothing for preprocessEquation to recognise and draw
+  // `[[MASS=5]]` as a doubly parenthesised equation.
+  const normalized = normalizeFormulaForEvaluation(preprocessEquation(trimmed))
 
   if (normalized.includes("$") || normalized.includes("\\frac")) {
     const escaped = normalized.replace(/_/g, "\\_")
@@ -757,8 +878,7 @@ function renderSingleEquationAsLatex(text: string): string {
   }
 
   try {
-    const prepared = preprocessEquation(normalized)
-    const node = parseExpression(prepared)
+    const node = parseExpression(normalized)
     return `$$${nodeToLatex(node)}$$`
   } catch {
     const escaped = normalized.replace(/\\/g, "\\\\").replace(/_/g, "\\_")
@@ -877,10 +997,7 @@ export function scientificNotationToUnicode(text: string): string {
  * A number ready to drop straight into plain text: `1.52×10²⁵`. Prefer
  * `FormattedResult` where markup renders; use this everywhere else.
  */
-export function formatNumberForText(
-  value: number | undefined | null,
-  maxDecimals = 2,
-): string {
+export function formatNumberForText(value: number | undefined | null, maxDecimals = 2): string {
   return scientificNotationToUnicode(formatNumberMaxDecimals(value, maxDecimals))
 }
 
@@ -1096,7 +1213,11 @@ export function validateEquationReferences(
   //    clause is available to subsequent clauses (e.g. "ms = ...; mv = mr - ms").
   const assignments = parseAssignments(equationWithoutComment)
   for (const assignment of assignments) {
-    let prepared = preprocessEquation(assignment.expression)
+    // Validate the same text the evaluator will see: `[Cu(NH3)4]` only parses
+    // as a formula once its brackets are round ones, and `÷`/`×` only tokenize
+    // once rewritten. Placeholders are expanded first, before their `[[` is
+    // turned into parentheses.
+    let prepared = normalizeFormulaForEvaluation(preprocessEquation(assignment.expression))
     prepared = substituteSpecialSymbols(prepared, Object.keys(constants), () => " __CONST__ ")
     prepared = resolveMolarMasses(prepared, constants)
     const molarMassValues = extractMolarMassValues(prepared, constants)
@@ -1113,7 +1234,7 @@ export function validateEquationReferences(
           !FUNCTIONS.has(token.value)
         ) {
           if (token.value.startsWith("M_")) {
-            const formulaPart = token.value.slice(2).replace(/_/g, "")
+            const formulaPart = normalizeMolarMassFormula(token.value.slice(2))
             if (calculateMolarMass(formulaPart) !== null) {
               continue
             }
@@ -1134,7 +1255,7 @@ export function validateEquationReferences(
         const value = match[0]
         if (value !== "__CONST__" && !available.has(value) && !FUNCTIONS.has(value)) {
           if (value.startsWith("M_")) {
-            const formulaPart = value.slice(2).replace(/_/g, "")
+            const formulaPart = normalizeMolarMassFormula(value.slice(2))
             if (calculateMolarMass(formulaPart) !== null) {
               continue
             }

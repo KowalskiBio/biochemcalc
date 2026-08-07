@@ -1,6 +1,6 @@
 import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import type { DatabazeEntry } from "@/lib/types"
-import { isAtomPlaceholder } from "@/lib/utils"
+import { isAtomPlaceholder, parseCzechNumber } from "@/lib/utils"
 
 export type BulkImportVarType = "numeric" | "string"
 
@@ -22,6 +22,12 @@ export interface BulkImportQuestion {
   equationText: string
   targets: string[]
   variables: BulkImportVariableInput[]
+  /**
+   * Known answers from `[pH = 5.383]` markers, keyed by target symbol. Import
+   * checks the paired formula against them; they are stripped from
+   * `questionText` and never sent to the backend.
+   */
+  expectedAnswers?: Record<string, number>
 }
 
 export interface BulkImportSet {
@@ -43,11 +49,21 @@ export type FormulaMap = Record<string, string[]>
 
 const PLACEHOLDER_REGEX = /\[\[([a-zA-Zα-ωφ][a-zA-Z0-9_%_α-ωφ]*)(?:=([^\]]*))?\]\]/g
 
-import { extractTargets as extractAnswerTargets } from "@/lib/formula-checker"
+import { extractTargets as extractAnswerTargets, stripExpectedValues } from "@/lib/formula-checker"
 
 const POINT_VALUE_REGEX = /^(\d+)\s*body\s*$/i
 
 const SET_INDEX_REGEX = /^(\d+)_(\d+)\s*$/
+
+/**
+ * The set header as it is written in the source documents — `Sada 3` under a
+ * preceding `3 body` heading — alongside the compact `3_1` form. Accepting both
+ * means a pasted assignment needs no rewriting of its structure.
+ */
+const SET_NAME_REGEX = /^Sada\s+(\d+)\s*$/i
+
+/** Point value assumed for a set that appears before any `N body` heading. */
+const DEFAULT_POINT_VALUE = 2
 
 const KNOWN_STRING_SYMBOLS = new Set(["sK", "sA", "KK", "AA", "sKK", "sAA", "molekula2"])
 
@@ -72,27 +88,12 @@ const UNIT_PATTERNS: { pattern: RegExp; unit: string }[] = [
   { pattern: /litrech\b/, unit: "l" },
 ]
 
-function extractTargets(text: string): string[] {
-  return extractAnswerTargets(text).map((target) => target.symbol)
-}
-
 interface PlaceholderInfo {
   symbol: string
   fixedValue?: number
 }
 
-function parseScientificNotation(value: string): number | undefined {
-  const normalized = value
-    .trim()
-    .replace(/,/g, ".")
-    .replace(/\s+/g, "")
-    .replace(/×10\^?/g, "e")
-    .replace(/x10\^?/g, "e")
-    .replace(/\*10\^?/g, "e")
-    .replace(/\.10\^?/g, "e")
-  const parsed = Number(normalized)
-  return Number.isFinite(parsed) ? parsed : undefined
-}
+const parseScientificNotation = parseCzechNumber
 
 function extractPlaceholders(text: string): PlaceholderInfo[] {
   const seen = new Set<string>()
@@ -263,18 +264,26 @@ function buildVariableInput(
 
 function parseQuestion(line: string, databazeEntries: DatabazeEntry[] = []): BulkImportQuestion {
   const trimmed = line.trim()
-  const targets = extractTargets(trimmed)
+  const answerTargets = extractAnswerTargets(trimmed)
   const placeholders = extractPlaceholders(trimmed)
   const variables = placeholders.map(({ symbol, fixedValue }) =>
     buildVariableInput(symbol, trimmed, databazeEntries, fixedValue),
   )
 
+  const expectedAnswers: Record<string, number> = {}
+  for (const target of answerTargets) {
+    if (target.expected !== undefined) {
+      expectedAnswers[target.symbol] = target.expected
+    }
+  }
+
   return {
-    questionText: trimmed,
+    questionText: stripExpectedValues(trimmed),
     formula: "",
     equationText: "",
-    targets,
+    targets: answerTargets.map((target) => target.symbol),
     variables,
+    ...(Object.keys(expectedAnswers).length > 0 ? { expectedAnswers } : {}),
   }
 }
 
@@ -288,10 +297,56 @@ function isQuestionLine(line: string): boolean {
   )
 }
 
-export function parseBulkImportText(
+/** Markers like `(X)` that tag a value in an assignment not yet converted. */
+const VARIANT_MARKER_REGEX = /\([A-Z]\)/
+
+const SKIPPED_SAMPLE_LIMIT = 3
+const UNCONVERTED_SAMPLE_LIMIT = 5
+
+function quoteLine(lineNumber: number, text: string): string {
+  const shortened = text.length > 60 ? `${text.slice(0, 60)}…` : text
+  return `řádek ${lineNumber}: „${shortened}"`
+}
+
+function buildSkippedWarnings(
+  skipped: { lineNumber: number; text: string }[],
+  unconverted: { lineNumber: number; text: string }[],
+): string[] {
+  const warnings: string[] = []
+
+  for (const line of unconverted.slice(0, UNCONVERTED_SAMPLE_LIMIT)) {
+    warnings.push(
+      `Vypadá jako otázka se značkami (X), ale nemá žádné [[proměnné]] — ${quoteLine(line.lineNumber, line.text)}`,
+    )
+  }
+  if (unconverted.length > UNCONVERTED_SAMPLE_LIMIT) {
+    warnings.push(
+      `…a dalších ${unconverted.length - UNCONVERTED_SAMPLE_LIMIT} řádků se značkami (X) bez [[proměnných]].`,
+    )
+  }
+
+  if (skipped.length > 0) {
+    const samples = skipped
+      .slice(0, SKIPPED_SAMPLE_LIMIT)
+      .map((line) => quoteLine(line.lineNumber, line.text))
+      .join("; ")
+    warnings.push(
+      `Přeskočeno ${skipped.length} řádků bez [[proměnných]] (${samples}${skipped.length > SKIPPED_SAMPLE_LIMIT ? "; …" : ""}).`,
+    )
+  }
+
+  return warnings
+}
+
+/**
+ * Parse the question blob, reporting what was left out. Every line that is not
+ * a heading or a question is dropped, so without the warnings an unconverted
+ * assignment imports as an empty topic and looks like it worked.
+ */
+export function parseBulkImport(
   text: string,
   databazeEntries: DatabazeEntry[] = [],
-): BulkImportData {
+): { data: BulkImportData; warnings: string[] } {
   const lines = text.split(/\r?\n/)
 
   let topicName = ""
@@ -309,6 +364,21 @@ export function parseBulkImportText(
   const categories: BulkImportCategory[] = []
   let currentCategory: BulkImportCategory | null = null
   let currentSet: BulkImportSet | null = null
+  const skipped: { lineNumber: number; text: string }[] = []
+  const unconverted: { lineNumber: number; text: string }[] = []
+
+  function startSet(setIndex: number, pointValue: number): BulkImportSet {
+    let category = currentCategory
+    if (!category) {
+      category = { pointValue, sets: [] }
+      categories.push(category)
+      currentCategory = category
+    }
+    const set: BulkImportSet = { setIndex, questions: [] }
+    category.sets.push(set)
+    currentSet = set
+    return set
+  }
 
   for (; idx < lines.length; idx++) {
     const line = lines[idx]
@@ -330,46 +400,45 @@ export function parseBulkImportText(
 
     const setMatch = trimmed.match(SET_INDEX_REGEX)
     if (setMatch) {
-      currentSet = {
-        setIndex: Number.parseInt(setMatch[2], 10),
-        questions: [],
-      }
-      if (!currentCategory) {
-        currentCategory = {
-          pointValue: Number.parseInt(setMatch[1], 10),
-          sets: [],
-        }
-        categories.push(currentCategory)
-      }
-      currentCategory.sets.push(currentSet)
+      startSet(Number.parseInt(setMatch[2], 10), Number.parseInt(setMatch[1], 10))
+      continue
+    }
+
+    const setNameMatch = trimmed.match(SET_NAME_REGEX)
+    if (setNameMatch) {
+      startSet(
+        Number.parseInt(setNameMatch[1], 10),
+        currentCategory?.pointValue ?? DEFAULT_POINT_VALUE,
+      )
       continue
     }
 
     if (isQuestionLine(trimmed)) {
       const question = parseQuestion(trimmed, databazeEntries)
-      if (currentSet) {
-        currentSet.questions.push(question)
-      } else {
-        if (!currentCategory) {
-          currentCategory = {
-            pointValue: 2,
-            sets: [],
-          }
-          categories.push(currentCategory)
-        }
-        currentSet = {
-          setIndex: currentCategory.sets.length + 1,
-          questions: [question],
-        }
-        currentCategory.sets.push(currentSet)
-      }
+      const set =
+        currentSet ?? startSet((currentCategory?.sets.length ?? 0) + 1, DEFAULT_POINT_VALUE)
+      set.questions.push(question)
+      continue
+    }
+
+    if (VARIANT_MARKER_REGEX.test(trimmed)) {
+      unconverted.push({ lineNumber: idx + 1, text: trimmed })
+    } else {
+      skipped.push({ lineNumber: idx + 1, text: trimmed })
     }
   }
 
   return {
-    topicName,
-    categories,
+    data: { topicName, categories },
+    warnings: buildSkippedWarnings(skipped, unconverted),
   }
+}
+
+export function parseBulkImportText(
+  text: string,
+  databazeEntries: DatabazeEntry[] = [],
+): BulkImportData {
+  return parseBulkImport(text, databazeEntries).data
 }
 
 export function parseFormulaText(text: string): FormulaMap {
@@ -377,6 +446,7 @@ export function parseFormulaText(text: string): FormulaMap {
   const formulaMap: FormulaMap = {}
 
   let currentSetKey: string | null = null
+  let currentPointValue = DEFAULT_POINT_VALUE
   const currentFormulas: string[] = []
 
   function flushCurrentSet() {
@@ -392,14 +462,19 @@ export function parseFormulaText(text: string): FormulaMap {
       continue
     }
 
-    if (POINT_VALUE_REGEX.test(trimmed)) {
+    const pointMatch = trimmed.match(POINT_VALUE_REGEX)
+    if (pointMatch) {
+      currentPointValue = Number.parseInt(pointMatch[1], 10)
       continue
     }
 
     const setMatch = trimmed.match(SET_INDEX_REGEX)
-    if (setMatch) {
+    const setNameMatch = setMatch ? null : trimmed.match(SET_NAME_REGEX)
+    if (setMatch || setNameMatch) {
       flushCurrentSet()
-      currentSetKey = `${setMatch[1]}_${setMatch[2]}`
+      currentSetKey = setMatch
+        ? `${setMatch[1]}_${setMatch[2]}`
+        : `${currentPointValue}_${setNameMatch?.[1]}`
     } else if (currentSetKey) {
       const parts = trimmed
         .split(";")

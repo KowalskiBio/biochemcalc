@@ -566,6 +566,7 @@ export const cs = {
     pairingStatus: "{paired}/{total} spárováno",
     pairingNotPaired: "nespárováno",
     warningsHeader: "Upozornění",
+    answerCheckHeader: "Vzorec nesouhlasí se zadaným výsledkem",
   },
 
   // Question detail dialog

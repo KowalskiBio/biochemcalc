@@ -42,6 +42,117 @@ describe("renderEquationAsLatex", () => {
     )
   })
 
+  it("renders the hydrate count as a coefficient, not a subscript", () => {
+    expect(renderEquationAsLatex("m = M_CuSO_4_5H_2O")).toBe(
+      "$$m = M_{\\mathrm{CuSO}_{4} \\cdot 5\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+    expect(renderEquationAsLatex("m = M_NiCl_2_6H_2O")).toBe(
+      "$$m = M_{\\mathrm{NiCl}_{2} \\cdot 6\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+    expect(renderEquationAsLatex("m = M_Na_2SO_3_7H_2O")).toBe(
+      "$$m = M_{\\mathrm{Na}_{2}\\mathrm{SO}_{3} \\cdot 7\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+  })
+
+  it("renders hydrates written with a dot, star, middle dot or bullet separator", () => {
+    expect(renderEquationAsLatex("m = M_FeSO4.7H2O")).toBe(
+      "$$m = M_{\\mathrm{FeSO}_{4} \\cdot 7\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+    expect(renderEquationAsLatex("m = M_NiCl2*6H2O")).toBe(
+      "$$m = M_{\\mathrm{NiCl}_{2} \\cdot 6\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+    expect(renderEquationAsLatex("m = M_CuSO4·5H2O")).toBe(
+      "$$m = M_{\\mathrm{CuSO}_{4} \\cdot 5\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+    expect(renderEquationAsLatex("m = M_CuSO4∙5H2O")).toBe(
+      "$$m = M_{\\mathrm{CuSO}_{4} \\cdot 5\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+  })
+
+  it("renders a dot hydrate inside a larger equation", () => {
+    expect(renderEquationAsLatex("n = m / M_FeSO4.7H2O")).toBe(
+      "$$n = \\frac{m}{M_{\\mathrm{FeSO}_{4} \\cdot 7\\mathrm{H}_{2}\\mathrm{O}}}$$",
+    )
+  })
+
+  it("renders an adduct that is not water", () => {
+    expect(renderEquationAsLatex("m = M_CuSO4·6NH3")).toBe(
+      "$$m = M_{\\mathrm{CuSO}_{4} \\cdot 6\\mathrm{NH}_{3}}$$",
+    )
+  })
+
+  it("never leaves a raw separator for KaTeX, which has no glyph for ∙", () => {
+    for (const formula of [
+      "M_FeSO4.7H2O",
+      "M_NiCl2*6H2O",
+      "M_CuSO4·5H2O",
+      "M_CuSO4∙5H2O",
+      "M_CuSO4·6NH3",
+      "M_KAl(SO4)2·12H2O",
+    ]) {
+      expect(renderEquationAsLatex(`m = ${formula}`)).not.toMatch(/[·∙*]|\.(?!\d)/)
+    }
+  })
+
+  it("renders bracketed groups inside a molar mass", () => {
+    expect(renderEquationAsLatex("m = M_Ca(OH)2")).toBe(
+      "$$m = M_{\\mathrm{Ca}(\\mathrm{OH})_{2}}$$",
+    )
+    expect(renderEquationAsLatex("m = M_Ca(OH)_2")).toBe(
+      "$$m = M_{\\mathrm{Ca}(\\mathrm{OH})_{2}}$$",
+    )
+    expect(renderEquationAsLatex("n = m / M_Al2(SO4)3")).toBe(
+      "$$n = \\frac{m}{M_{\\mathrm{Al}_{2}(\\mathrm{SO}_{4})_{3}}}$$",
+    )
+    // Square brackets around a complex ion are normalised to round ones.
+    expect(renderEquationAsLatex("m = M_[Cu(NH3)4]SO4")).toBe(
+      "$$m = M_{(\\mathrm{Cu}(\\mathrm{NH}_{3})_{4})\\mathrm{SO}_{4}}$$",
+    )
+  })
+
+  it("renders a bracketed group and a hydrate together", () => {
+    expect(renderEquationAsLatex("m = M_KAl(SO4)2·12H2O")).toBe(
+      "$$m = M_{\\mathrm{KAl}(\\mathrm{SO}_{4})_{2} \\cdot 12\\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+  })
+
+  it("keeps multiplication after a molar mass out of the identifier", () => {
+    expect(renderEquationAsLatex("m = M_NaCl*2")).toBe("$$m = M_{\\mathrm{NaCl}} \\times 2$$")
+    expect(renderEquationAsLatex("m = M_H_2O·n")).toBe(
+      "$$m = M_{\\mathrm{H}_{2}\\mathrm{O}} \\cdot n$$",
+    )
+    expect(renderEquationAsLatex("c = (n * M_NaCl) / V")).toBe(
+      "$$c = \\frac{n \\times M_{\\mathrm{NaCl}}}{V}$$",
+    )
+  })
+
+  it("leaves a parenthesised expression after a molar mass alone", () => {
+    // Only a chemical group is part of the identifier — `(a + b)` is not one.
+    expect(renderEquationAsLatex("m = M_x(a+b)")).toBe(
+      "$$m = M_{\\mathrm{x}}\\left(a + b\\right)$$",
+    )
+  })
+
+  it("renders a bullet as multiplication outside a molar mass", () => {
+    expect(renderEquationAsLatex("V = n ∙ 22,4")).toBe("$$V = n \\cdot 22.4$$")
+  })
+
+  it("still parses dot decimals", () => {
+    expect(renderEquationAsLatex("V = n * 22.4")).toBe("$$V = n \\times 22.4$$")
+  })
+
+  it("renders a monohydrate with no explicit count", () => {
+    expect(renderEquationAsLatex("m = M_CaSO_4_H_2O")).toBe(
+      "$$m = M_{\\mathrm{CaSO}_{4} \\cdot \\mathrm{H}_{2}\\mathrm{O}}$$",
+    )
+  })
+
+  it("never emits a double subscript, which KaTeX rejects", () => {
+    for (const formula of ["M_CuSO_4_5H_2O", "M_Ca_3_PO4_2", "M_H_2SO_4", "M_H_2O", "M_KOH"]) {
+      expect(renderEquationAsLatex(`m = ${formula}`)).not.toMatch(/_\{\d+\}_\{/)
+    }
+  })
+
   it("renders trailing digits as subscripts", () => {
     expect(renderEquationAsLatex("m2 = m1 × M_Fe / M_S")).toBe(
       "$$m_{2} = \\frac{m_{1} \\times M_{\\mathrm{Fe}}}{M_{\\mathrm{S}}}$$",
@@ -54,6 +165,14 @@ describe("renderEquationAsLatex", () => {
     )
     expect(renderEquationAsLatex("N = [m / M_Fe] * NA")).toBe(
       "$$N = \\left(\\frac{m}{M_{\\mathrm{Fe}}}\\right) \\times \\mathrm{NA}$$",
+    )
+  })
+
+  it("renders a placeholder as its bare name", () => {
+    expect(renderEquationAsLatex("m = [[MASS]] * 2")).toBe("$$m = \\mathrm{MASS} \\times 2$$")
+    expect(renderEquationAsLatex("m = [[MASS=5]] * 2")).toBe("$$m = \\mathrm{MASS} \\times 2$$")
+    expect(renderEquationAsLatex("n = m / M_[[LATKA]]")).toBe(
+      "$$n = \\frac{m}{M_{\\mathrm{LATKA}}}$$",
     )
   })
 
@@ -177,6 +296,28 @@ describe("evaluateExpression", () => {
     const result = evaluateExpression("ms = mr × 3; mv = mr − ms", { mr: 10 })
     expect(result).toBeCloseTo(-20, 4)
   })
+
+  it("evaluates a bullet as multiplication", () => {
+    expect(evaluateExpression("2 ∙ 3")).toBe(6)
+  })
+
+  it("evaluates molar masses with bracketed groups", () => {
+    expect(evaluateExpression("M_Ca(OH)2")).toBeCloseTo(74.1, 2)
+    expect(evaluateExpression("M_Ca(OH)2 * 2")).toBeCloseTo(148.2, 2)
+    expect(evaluateExpression("m / M_Al2(SO4)3", { m: 342.15 })).toBeCloseTo(1, 2)
+  })
+
+  it("evaluates every hydrate notation to the same mass", () => {
+    const forms = ["M_CuSO4.5H2O", "M_CuSO4*5H2O", "M_CuSO4·5H2O", "M_CuSO4∙5H2O", "M_CuSO_4_5H_2O"]
+    const values = forms.map((form) => evaluateExpression(form))
+    for (const value of values) {
+      expect(value).toBeCloseTo(249.71, 2)
+    }
+  })
+
+  it("evaluates a bracketed group and a hydrate together", () => {
+    expect(evaluateExpression("M_KAl(SO4)2·12H2O")).toBeCloseTo(474.44, 2)
+  })
 })
 
 describe("pickMockValues", () => {
@@ -278,6 +419,30 @@ describe("validateEquationReferences", () => {
 
   it("does not flag single-element molar masses like M_Fe and M_S", () => {
     expect(validateEquationReferences("m2 = m1 * M_Fe / M_S", [])).toEqual(["m1"])
+  })
+
+  it("does not flag molar masses with bracketed groups or hydrates", () => {
+    for (const formula of [
+      "M_Ca(OH)2",
+      "M_Al2(SO4)3",
+      "M_[Cu(NH3)4]SO4",
+      "M_Al2[SO4]3",
+      "M_FeSO4.7H2O",
+      "M_NiCl2*6H2O",
+      "M_KAl(SO4)2·12H2O",
+      "M_CuSO4∙5H2O",
+    ]) {
+      expect(validateEquationReferences(`m = n * ${formula}`, [{ placeholder: "n" }])).toEqual([])
+    }
+  })
+
+  it("does not flag a string placeholder naming the substance", () => {
+    expect(
+      validateEquationReferences("n = m / M_[[LATKA]]", [
+        { placeholder: "m" },
+        { placeholder: "LATKA", varType: "string" },
+      ]),
+    ).toEqual([])
   })
 
   it("does not flag M_S with multiplication sign", () => {

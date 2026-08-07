@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   normalizeFormulaForEvaluation,
   pairFormulasWithQuestions,
+  parseBulkImport,
   parseBulkImportText,
   parseFormulaText,
 } from "@/lib/bulk-import-parser"
@@ -243,6 +244,121 @@ Kolik gramů [[molekula2]] je nutno rozpustit? [ms]`
     expect(result.categories[0].sets[0].questions).toHaveLength(3)
     expect(result.categories[0].sets[0].questions[0].targets).toEqual(["wperc"])
     expect(result.categories[0].sets[0].questions[2].targets).toEqual(["ms"])
+  })
+})
+
+describe("parseBulkImport set headers written as words", () => {
+  const input = `pH
+2 body
+Sada 1
+Vypočítejte pH roztoku kyseliny sírové o koncentraci [[c=0.89]] mmol.l-1. [pH]
+Sada 2
+Vypočítejte pH roztoku hydroxidu draselného o koncentraci [[c=6.74]] mmol.l-1. [pH]
+3 body
+Sada 1
+Roztok kyseliny dusičné má objem [[V1=60.6]] l a pH = [[pH1=4.29]]. [pH]`
+
+  it("accepts `Sada N` under the preceding point heading", () => {
+    const { data } = parseBulkImport(input)
+    expect(data.categories.map((c) => c.pointValue)).toEqual([2, 3])
+    expect(data.categories[0].sets.map((s) => s.setIndex)).toEqual([1, 2])
+    expect(data.categories[1].sets[0].setIndex).toBe(1)
+  })
+
+  it("puts each question in its own set", () => {
+    const { data } = parseBulkImport(input)
+    expect(data.categories[0].sets[0].questions).toHaveLength(1)
+    expect(data.categories[0].sets[1].questions).toHaveLength(1)
+  })
+
+  it("pairs formulas keyed by the same word headers", () => {
+    const formulaMap = parseFormulaText(`2 body
+Sada 1
+pH = -log(2 * c / 1000)
+Sada 2
+pH = 14 + log(c / 1000)`)
+    expect(formulaMap["2_1"]).toEqual(["pH = -log(2 * c / 1000)"])
+    expect(formulaMap["2_2"]).toEqual(["pH = 14 + log(c / 1000)"])
+  })
+})
+
+describe("parseBulkImport warnings", () => {
+  it("reports lines dropped for having no placeholder", () => {
+    const { data, warnings } = parseBulkImport(`pH
+2 body
+Sada 1
+Vypočítejte pH roztoku o koncentraci [[c=0.89]] mmol.l-1. [pH]
+Postup:
+1. Kyselina sírová bude disociovat ve vodném prostředí
+pH(roztok H2SO4) = -log 2c(H3O+)`)
+    expect(data.categories[0].sets[0].questions).toHaveLength(1)
+    expect(warnings.join("\n")).toContain("Přeskočeno 3 řádků")
+  })
+
+  it("calls out an assignment whose (X) markers were never converted", () => {
+    const { data, warnings } = parseBulkImport(`pH
+2 body
+Sada 1
+Vypočítejte pH roztoku kyseliny sírové o koncentraci 0.89 (X) mmol.l-1. pH roztoku je 2.75`)
+    expect(data.categories[0]?.sets[0]?.questions ?? []).toHaveLength(0)
+    expect(warnings.join("\n")).toContain("značkami (X)")
+    expect(warnings.join("\n")).toContain("řádek 4")
+  })
+
+  it("stays quiet for a fully converted document", () => {
+    const { warnings } = parseBulkImport(`pH
+2 body
+Sada 1
+Vypočítejte pH roztoku o koncentraci [[c=0.89]] mmol.l-1. [pH]`)
+    expect(warnings).toEqual([])
+  })
+})
+
+describe("parseBulkImport expected answers", () => {
+  it("reads the known answer out of the target marker", () => {
+    const { data } = parseBulkImport(`pH
+2 body
+Sada 1
+Vypočítejte pH roztoku o koncentraci [[c=0.89]] mmol.l-1. [pH = 2.75]`)
+    const question = data.categories[0].sets[0].questions[0]
+    expect(question.expectedAnswers).toEqual({ pH: 2.75 })
+    expect(question.targets).toEqual(["pH"])
+  })
+
+  it("strips the known answer from the question text", () => {
+    const { data } = parseBulkImport(`pH
+2 body
+Sada 1
+Kolik gramů kyseliny na [[V=530]] ml? [m = 19.64 g]`)
+    const question = data.categories[0].sets[0].questions[0]
+    expect(question.questionText).toBe("Kolik gramů kyseliny na [[V=530]] ml? [m g]")
+    expect(question.expectedAnswers).toEqual({ m: 19.64 })
+  })
+
+  it("reads Czech decimal commas and powers of ten", () => {
+    const { data } = parseBulkImport(`pH
+2 body
+Sada 1
+Disociační konstanta [[c=0.16]] M roztoku? [Ka = 1,98.10-5]
+Určete koncentraci a stupeň disociace [[pH=10.03]]. [c = 0,028 M][alpha = 0,376 %]`)
+    const questions = data.categories[0].sets[0].questions
+    expect(questions[0].expectedAnswers?.Ka).toBeCloseTo(1.98e-5, 10)
+    expect(questions[1].expectedAnswers).toEqual({ c: 0.028, alpha: 0.376 })
+    expect(questions[1].questionText).toBe(
+      "Určete koncentraci a stupeň disociace [[pH=10.03]]. [c M][alpha %]",
+    )
+  })
+
+  it("leaves questions without a known answer alone", () => {
+    const { data } = parseBulkImport(`pH
+2 body
+Sada 1
+Vypočítejte pH roztoku [[c=0.1]] M. [pH]
+Kolik gramů v [[V=1]] l? [m g]`)
+    const questions = data.categories[0].sets[0].questions
+    expect(questions[0].expectedAnswers).toBeUndefined()
+    expect(questions[0].questionText).toBe("Vypočítejte pH roztoku [[c=0.1]] M. [pH]")
+    expect(questions[1].questionText).toBe("Kolik gramů v [[V=1]] l? [m g]")
   })
 })
 

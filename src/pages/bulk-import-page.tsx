@@ -17,9 +17,10 @@ import { cs } from "@/i18n/cs"
 import { ApiError, constantsApi, extractErrorMessage, topicsApi } from "@/lib/api"
 import {
   pairFormulasWithQuestions,
-  parseBulkImportText,
+  parseBulkImport,
   parseFormulaText,
 } from "@/lib/bulk-import-parser"
+import { describeFailedChecks, verifyExpectedAnswers } from "@/lib/bulk-import-verify"
 import {
   MOLAR_MASS_UNIT,
   type BulkImportEntry as MolarMassBulkImportEntry,
@@ -63,6 +64,7 @@ export function BulkImportPage() {
   const [molarMassErrors, setMolarMassErrors] = useState<string[]>([])
   const [isImportingMolarMasses, setIsImportingMolarMasses] = useState(false)
   const [atomicWeights, setAtomicWeights] = useState<Record<string, number>>({})
+  const [constantValues, setConstantValues] = useState<Record<string, number>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -70,13 +72,16 @@ export function BulkImportPage() {
       try {
         const allConstants = await constantsApi.list()
         const weights: Record<string, number> = {}
+        const values: Record<string, number> = {}
         for (const c of allConstants) {
+          values[c.symbol] = c.value
           if (c.unit === MOLAR_MASS_UNIT) {
             weights[c.symbol] = c.value
           }
         }
         if (!cancelled) {
           setAtomicWeights(weights)
+          setConstantValues(values)
         }
       } catch (error) {
         void error
@@ -93,22 +98,23 @@ export function BulkImportPage() {
     [atomicWeights, molarMassText],
   )
 
-  const parsedData = useMemo(() => {
+  const parseResult = useMemo(() => {
     if (!inputText.trim()) {
       setParseError(null)
       return null
     }
     try {
+      const parsedQuestions = parseBulkImport(inputText, databazeEntries)
       if (mode === "questions") {
-        const result = parseBulkImportText(inputText, databazeEntries)
         setParseError(null)
-        return result
-      } else {
-        const parsedQuestions = parseBulkImportText(inputText, databazeEntries)
-        const parsedFormulas = parseFormulaText(formulaText)
-        const pairingResult = pairFormulasWithQuestions(parsedQuestions, parsedFormulas)
-        setParseError(null)
-        return pairingResult.data
+        return parsedQuestions
+      }
+      const parsedFormulas = parseFormulaText(formulaText)
+      const pairingResult = pairFormulasWithQuestions(parsedQuestions.data, parsedFormulas)
+      setParseError(null)
+      return {
+        data: pairingResult.data,
+        warnings: [...parsedQuestions.warnings, ...pairingResult.warnings],
       }
     } catch (err) {
       setParseError(extractErrorMessage(err, "Failed to parse import text"))
@@ -116,19 +122,15 @@ export function BulkImportPage() {
     }
   }, [inputText, formulaText, mode, databazeEntries])
 
-  const pairingWarnings = useMemo(() => {
-    if (mode !== "questions-and-formulas" || !inputText.trim() || !formulaText.trim()) {
-      return []
-    }
-    try {
-      const parsedQuestions = parseBulkImportText(inputText, databazeEntries)
-      const parsedFormulas = parseFormulaText(formulaText)
-      const pairingResult = pairFormulasWithQuestions(parsedQuestions, parsedFormulas)
-      return pairingResult.warnings
-    } catch {
-      return []
-    }
-  }, [inputText, formulaText, mode, databazeEntries])
+  const parsedData = parseResult?.data ?? null
+  const pairingWarnings = parseResult?.warnings ?? []
+
+  // Questions that state a known answer are checked against their formula, so a
+  // mispaired or mistyped equation is caught before anything is written.
+  const answerCheckWarnings = useMemo(() => {
+    if (!parsedData) return []
+    return describeFailedChecks(verifyExpectedAnswers(parsedData, constantValues))
+  }, [parsedData, constantValues])
 
   const totalQuestions = useMemo(() => {
     if (!parsedData) return 0
@@ -351,6 +353,19 @@ export function BulkImportPage() {
                 </p>
                 <ul className="text-sm text-amber-700 dark:text-amber-300">
                   {pairingWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {parsedData && answerCheckWarnings.length > 0 && (
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                <p className="font-medium text-red-800 dark:text-red-200 mb-1">
+                  {cs.bulkImport.answerCheckHeader}
+                </p>
+                <ul className="text-sm text-red-700 dark:text-red-300">
+                  {answerCheckWarnings.map((warning) => (
                     <li key={warning}>{warning}</li>
                   ))}
                 </ul>
