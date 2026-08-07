@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildSubstitutedEquation,
   createRandom,
+  evaluateAllAssignments,
   evaluateExpression,
   evaluateVariantAnswer,
   formatNumberForText,
@@ -358,6 +359,39 @@ describe("evaluateExpression", () => {
 
   it("evaluates a bracketed group and a hydrate together", () => {
     expect(evaluateExpression("M_KAl(SO4)2·12H2O")).toBeCloseTo(474.44, 2)
+  })
+})
+
+describe("evaluateAllAssignments", () => {
+  it("returns every named target in order, not just the last", () => {
+    // Reported bug: the "Testovací výsledek" preview (question-detail-dialog's
+    // mockResult fallback, used whenever real server generation fails) only
+    // ever showed evaluateExpression's single return value — the LAST named
+    // target — silently dropping every earlier one for a multi-answer
+    // formula like "c = ...; wDsc = ...".
+    const result = evaluateAllAssignments("c = 10^(2*pH-28)/Kb + 10^(pH-14); wDsc = 100*10^(pH-14)/c", {
+      pH: 4.7,
+      Kb: 4e-7,
+    })
+    expect(result.map((r) => r.symbol)).toEqual(["c", "wDsc"])
+    expect(result[0].value).toBeCloseTo(5.0182e-10, 13)
+    expect(result[1].value).toBeCloseTo(99.87, 1)
+  })
+
+  it("returns a single-item array for a formula with one target", () => {
+    expect(evaluateAllAssignments("a = 2 + 3")).toEqual([{ symbol: "a", value: 5 }])
+  })
+
+  it("returns an empty array for an unnamed expression", () => {
+    expect(evaluateAllAssignments("2 + 3")).toEqual([])
+  })
+
+  it("later targets can reference earlier ones", () => {
+    const result = evaluateAllAssignments("ms = mr * 2; mv = mr - ms", { mr: 100 })
+    expect(result).toEqual([
+      { symbol: "ms", value: 200 },
+      { symbol: "mv", value: -100 },
+    ])
   })
 })
 

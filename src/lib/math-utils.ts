@@ -574,6 +574,37 @@ export function evaluateExpression(
   )
 }
 
+/**
+ * Every named target of a semicolon-separated multi-answer formula
+ * ("c = ...; wDsc = ..."), in declaration order, alongside its computed
+ * value — unlike {@link evaluateExpression}, which only returns the last
+ * target's value. Used wherever a preview needs to show all of a
+ * multi-answer question's answers, not just the graded one.
+ */
+export function evaluateAllAssignments(
+  expression: string,
+  context: Record<string, number> = {},
+  constants: Record<string, number> = {},
+): Array<{ symbol: string; value: number }> {
+  const normalized = normalizeFormulaForEvaluation(expression)
+  const trimmed = normalized.trim()
+  if (trimmed.length === 0) {
+    throw new Error("Výraz je prázdný")
+  }
+
+  const assignments = parseAssignments(trimmed)
+  const results: Record<string, number> = { ...context }
+  const named: Array<{ symbol: string; value: number }> = []
+  for (const assignment of assignments) {
+    const value = evaluateSingleExpression(assignment.expression, results, constants)
+    if (assignment.target) {
+      results[assignment.target] = value
+      named.push({ symbol: assignment.target, value })
+    }
+  }
+  return named
+}
+
 function evaluateSingleExpression(
   expression: string,
   context: Record<string, number> = {},
