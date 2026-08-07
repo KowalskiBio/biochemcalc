@@ -748,6 +748,42 @@ describe("buildSubstitutedEquation", () => {
     )
     expect(result).toContain("7.2e-10")
   })
+
+  it("substitutes a symbol injected by a string variable's paired constants", () => {
+    // Reproduces the reported bug: "Ka" isn't its own declared variable, it's
+    // only ever introduced via wac's pairedConstants and referenced in the
+    // question/formula as "[[Ka=wac]]" / bare "Ka". Before this fix, neither
+    // the bracket form nor the bare formula identifier ever substituted,
+    // because "Ka" wasn't registered as a known symbol at all.
+    const wac: VariableWithPlaceholder = {
+      placeholder: "wac",
+      isShared: false,
+      variable: {
+        id: "1",
+        name: "wac",
+        symbol: "wac",
+        varType: "string",
+        minValue: 0,
+        maxValue: 0,
+        step: 1,
+        unit: "",
+        precision: 0,
+        stringValues: ["CH_3COOH", "kyselina citrónové"],
+        pairedConstants: [{ Ka: 1.75e-5 }, { Ka: 8.6e-4 }],
+        createdAt: "",
+      } as Variable,
+    }
+    const result = buildSubstitutedEquation(
+      "wDsc = 100 * (-Ka + sqrt(Ka^2 + 4*Ka*c)) / (2*c)",
+      [wac, makeNumericVar("c")],
+      { Ka: 1.75e-5, c: 0.1 },
+      { wac: "CH_3COOH" },
+      {},
+      "Vypočítejte stupeň disociace [[wac]] v [[c]] M roztoku. (Ka = [[Ka=wac]]).",
+    )
+    expect(result).not.toMatch(/(?<![A-Za-z0-9_])Ka(?![A-Za-z0-9_])/)
+    expect(result).toContain("0.0000175")
+  })
 })
 
 describe("evaluateVariantAnswer with scientific-notation constants", () => {

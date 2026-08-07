@@ -1102,7 +1102,19 @@ export function buildSubstitutedEquation(
     placeholder,
     symbol: placeholder,
   }))
-  const allNumericSources = [...numericSources, ...fixedSources]
+  // Symbols injected by string variable paired constants (e.g. Ka from wac,
+  // referenced in the text as [[Ka=wac]]) — assignedValues already carries
+  // these (the generator resolves the linked value at sample time), but
+  // without registering the symbol here neither the bracket form nor the
+  // bare identifier in the formula ever gets substituted.
+  const pairedConstantSources = variables.flatMap((vwp) => {
+    if (vwp.variable.varType !== "string" || !vwp.variable.pairedConstants?.length) return []
+    return Object.keys(vwp.variable.pairedConstants[0]).map((sym) => ({
+      placeholder: sym,
+      symbol: sym,
+    }))
+  })
+  const allNumericSources = [...numericSources, ...fixedSources, ...pairedConstantSources]
 
   let substituted = text
   for (const v of allNumericSources) {

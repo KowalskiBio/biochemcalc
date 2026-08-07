@@ -873,7 +873,17 @@ export function QuestionDetailDialog({
         placeholder,
         symbol: placeholder,
       }))
-      const allNumericSources = [...numericSources, ...fixedSources]
+      // Symbols injected by string variable paired constants (e.g. Ka from
+      // wac, referenced in the text as [[Ka=wac]]) — without these, neither
+      // the bracket form nor the bare symbol in the formula ever substitutes.
+      const pairedConstantSources = displayTemplateVariables.flatMap((vwp) => {
+        if (vwp.variable.varType !== "string" || !vwp.variable.pairedConstants?.length) return []
+        return Object.keys(vwp.variable.pairedConstants[0]).map((sym) => ({
+          placeholder: sym,
+          symbol: sym,
+        }))
+      })
+      const allNumericSources = [...numericSources, ...fixedSources, ...pairedConstantSources]
 
       let substituted = text
       for (const v of allNumericSources) {
@@ -1026,12 +1036,17 @@ export function QuestionDetailDialog({
       return null
     }
 
+    const pairedConstantSources = visibleVariables.flatMap((v) => {
+      if (v.varType !== "string" || !v.pairedConstants?.length) return []
+      return Object.keys(v.pairedConstants[0]).map((sym) => ({ placeholder: sym, symbol: sym }))
+    })
     const allNumericSources = [
       ...numericVariables,
       ...Array.from(fixedPlaceholderValues.keys()).map((placeholder) => ({
         placeholder,
         symbol: placeholder,
       })),
+      ...pairedConstantSources,
     ]
 
     let substituted = text
