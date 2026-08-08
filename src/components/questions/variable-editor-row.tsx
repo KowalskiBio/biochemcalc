@@ -176,7 +176,7 @@ interface VariableEditorRowProps {
   onRemove: () => void
 }
 
-function serializePairedConstants(pc: Array<Record<string, number>> | undefined): string {
+export function serializePairedConstants(pc: Array<Record<string, number>> | undefined): string {
   if (!pc || pc.length === 0) return ""
   return pc
     .map((row) =>
@@ -187,19 +187,26 @@ function serializePairedConstants(pc: Array<Record<string, number>> | undefined)
     .join("\n")
 }
 
-function parsePairedConstantsText(text: string): Array<Record<string, number>> {
+// Matches each "key=number" pair directly rather than splitting the line on
+// "," first — a bare split breaks on a Czech decimal comma inside the number
+// itself ("Ka=1,75e-5" turns into "Ka=1" and a dangling "75e-5"), silently
+// dropping most of the value. The number group accepts either separator, so
+// "1.75e-5" and "1,75e-5" both parse, while "," between pairs on the same
+// line ("Ka=1.8e-5, pKa=4.74") still works since it just isn't part of either
+// match.
+const PAIRED_CONSTANT_REGEX = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)/g
+
+export function parsePairedConstantsText(text: string): Array<Record<string, number>> {
   return text
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .map((line) => {
       const record: Record<string, number> = {}
-      for (const part of line.split(",")) {
-        const eqIdx = part.indexOf("=")
-        if (eqIdx < 1) continue
-        const key = part.slice(0, eqIdx).trim()
-        const val = parseFloat(part.slice(eqIdx + 1).trim())
-        if (key && !isNaN(val)) record[key] = val
+      for (const match of line.matchAll(PAIRED_CONSTANT_REGEX)) {
+        const key = match[1]
+        const val = parseFloat(match[2].replace(",", "."))
+        if (!isNaN(val)) record[key] = val
       }
       return record
     })
