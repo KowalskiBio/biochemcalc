@@ -384,7 +384,7 @@ export function StudentPracticePage() {
                       placeholder={cs.student.answerPlaceholder}
                       value={openAnswers[slotIdx] ?? ""}
                       disabled={result != null || isSubmitting}
-                      className="w-36"
+                      className="w-28"
                       onChange={(e) =>
                         setOpenAnswers((prev) =>
                           prev.map((value, idx) => (idx === slotIdx ? e.target.value : value)),
@@ -397,8 +397,10 @@ export function StudentPracticePage() {
                         }
                       }}
                     />
-                    {slot.unit && (
-                      <span className="text-sm font-medium text-foreground">{slot.unit}</span>
+                    {(slot.unit ?? question.resultUnit) && (
+                      <span className="text-sm font-medium text-foreground">
+                        {slot.unit ?? question.resultUnit}
+                      </span>
                     )}
                   </div>
                 ))}
