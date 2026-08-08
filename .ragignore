@@ -1,0 +1,8 @@
+# Files git tracks but that add nothing to semantic search.
+# One fnmatch pattern per line; matched against the project-relative path and
+# the bare filename. Anything .gitignore already excludes is skipped anyway.
+
+# Bulk-import fixtures: byte-identical to each other, ~48 KB of variable
+# definitions each. They crowd out real code on chemistry-flavoured queries.
+test1_bulk.json
+bulk_import_payload.json
