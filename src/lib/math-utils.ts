@@ -1064,6 +1064,31 @@ export function formatNumberForText(value: number | undefined | null, maxDecimal
   return scientificNotationToUnicode(formatNumberMaxDecimals(value, maxDecimals))
 }
 
+/**
+ * Multiple-choice options can be numerically distinct yet render identically
+ * at a fixed precision — e.g. 0.038 and 0.042 both read "0.04" at two
+ * decimals — which is exactly what makes small-magnitude results (percentages
+ * under 1%, tiny concentrations) look like duplicate answer choices. Widen
+ * the decimal count just enough that every option in the set formats to a
+ * distinct string, without touching sets that are already distinguishable.
+ */
+export function resolveOptionsPrecision(
+  values: Array<number | null | undefined>,
+  basePrecision = 2,
+  maxPrecision = 6,
+): number {
+  const finite = values.filter((v): v is number => v != null && Number.isFinite(v))
+  if (finite.length < 2) return basePrecision
+
+  for (let precision = basePrecision; precision <= maxPrecision; precision++) {
+    const formatted = finite.map((v) => formatNumberMaxDecimals(v, precision))
+    if (new Set(formatted).size === formatted.length) {
+      return precision
+    }
+  }
+  return maxPrecision
+}
+
 export function formatNumberMaxDecimals(value: number | undefined | null, maxDecimals = 2): string {
   if (value == null || !Number.isFinite(value)) return ""
   const decimals = Math.max(0, maxDecimals)

@@ -5,6 +5,7 @@ import type {
   PracticeAnswerResult,
   PracticeQuestion,
   PracticeTopic,
+  ReportQuestionInput,
   SubmitAnswerInput,
 } from "./types"
 
@@ -30,6 +31,10 @@ export const studentApi = {
    */
   submitAnswer: (input: SubmitAnswerInput): Promise<PracticeAnswerResult> =>
     httpRequest<PracticeAnswerResult>("/api/student/submit-answer", input),
+
+  /** Report the currently displayed question as broken ("Co je s otázkou špatně?"). */
+  reportQuestion: (input: ReportQuestionInput): Promise<void> =>
+    httpRequest<void>("/api/student/report-question", input),
 
   leaderboard: (): Promise<LeaderboardEntry[]> =>
     httpRequest<LeaderboardEntry[]>("/api/student/leaderboard"),

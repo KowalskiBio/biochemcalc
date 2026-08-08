@@ -14,6 +14,7 @@ import { HomePage } from "@/pages/home"
 import { LoginPage } from "@/pages/login-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
+import { ReportsPage } from "@/pages/reports-page"
 import { SetDetailPage } from "@/pages/set-detail-page"
 import { SettingsPage } from "@/pages/settings-page"
 import { StudentLeaderboardPage } from "@/pages/student-leaderboard-page"
@@ -41,6 +42,7 @@ function TeacherRoutes() {
         <Route path="/bulk-import" element={<BulkImportPage />} />
         <Route path="/constants" element={<ConstantsPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/hlaseni" element={<ReportsPage />} />
         <Route path="/victor" element={<VictorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/help" element={<HelpPage />} />

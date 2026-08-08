@@ -45,7 +45,11 @@ import {
   setsApi,
   templatesApi,
 } from "@/lib/api"
-import { evaluateVariantAnswer, formatNumberForText } from "@/lib/math-utils"
+import {
+  evaluateVariantAnswer,
+  formatNumberForText,
+  resolveOptionsPrecision,
+} from "@/lib/math-utils"
 import { buildPreviewVariant, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   ProjektQuestion,
@@ -559,6 +563,10 @@ export function SetDetailPage() {
                 const optionLabels = ["a", "b", "c", "d", "e"]
                 const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
                 const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
+                // Small-magnitude answers can collapse to identical strings at
+                // the default precision, so widen just enough to keep every
+                // option distinct.
+                const optionsPrecision = resolveOptionsPrecision(options)
                 const correctOption = variant?.correctOption
                 const equationText = g.template.equationText?.trim() || g.template.formula
                 const recomputed =
@@ -606,42 +614,54 @@ export function SetDetailPage() {
                     {generatedMode === "closed" &&
                       (hasMultiAnswers && variant?.answersData ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {variant.answersData[0].numericOptions?.map((_, optionIdx) => {
-                            const label = optionLabels[optionIdx]
-                            const isCorrect =
-                              optionIdx + 1 ===
-                              (variant.answersData?.[0]?.correctOption ?? correctOption)
-                            return (
-                              <div
-                                key={label}
-                                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-                                  isCorrect
-                                    ? "border-green-500 bg-green-50 dark:bg-green-950/30"
-                                    : "bg-muted/30"
-                                }`}
-                              >
-                                <span
-                                  className={`font-semibold ${
-                                    isCorrect ? "text-green-700 dark:text-green-300" : ""
+                          {(() => {
+                            const answersData = variant.answersData ?? []
+                            // Small-magnitude answers can collapse to identical
+                            // strings at the default precision, so widen per
+                            // slot just enough to keep every option distinct.
+                            const optionsPrecision = answersData.map((a) =>
+                              resolveOptionsPrecision(a.numericOptions ?? []),
+                            )
+                            return answersData[0]?.numericOptions?.map((_, optionIdx) => {
+                              const label = optionLabels[optionIdx]
+                              const isCorrect =
+                                optionIdx + 1 === (answersData[0]?.correctOption ?? correctOption)
+                              return (
+                                <div
+                                  key={label}
+                                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                                    isCorrect
+                                      ? "border-green-500 bg-green-50 dark:bg-green-950/30"
+                                      : "bg-muted/30"
                                   }`}
                                 >
-                                  {label})
-                                </span>
-                                <span>
-                                  {variant.answersData?.map((a, idx) => {
-                                    const value = a.numericOptions?.[optionIdx]
-                                    if (value == null) return null
-                                    return (
-                                      <span key={a.symbol}>
-                                        {idx > 0 && ", "}
-                                        <FormattedResult value={value} unit={a.unit} />
-                                      </span>
-                                    )
-                                  })}
-                                </span>
-                              </div>
-                            )
-                          })}
+                                  <span
+                                    className={`font-semibold ${
+                                      isCorrect ? "text-green-700 dark:text-green-300" : ""
+                                    }`}
+                                  >
+                                    {label})
+                                  </span>
+                                  <span>
+                                    {answersData.map((a, idx) => {
+                                      const value = a.numericOptions?.[optionIdx]
+                                      if (value == null) return null
+                                      return (
+                                        <span key={a.symbol}>
+                                          {idx > 0 && ", "}
+                                          <FormattedResult
+                                            value={value}
+                                            unit={a.unit}
+                                            precision={optionsPrecision[idx]}
+                                          />
+                                        </span>
+                                      )
+                                    })}
+                                  </span>
+                                </div>
+                              )
+                            })
+                          })()}
                         </div>
                       ) : options.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -665,7 +685,11 @@ export function SetDetailPage() {
                                   {label})
                                 </span>
                                 <span>
-                                  <FormattedResult value={value} unit={g.template.resultUnit} />
+                                  <FormattedResult
+                                    value={value}
+                                    unit={g.template.resultUnit}
+                                    precision={optionsPrecision}
+                                  />
                                 </span>
                               </div>
                             )

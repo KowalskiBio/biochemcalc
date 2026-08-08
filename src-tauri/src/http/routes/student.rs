@@ -10,6 +10,7 @@ use crate::commands::practice::{
     NextQuestionPayload, PracticeAnswerResult, PracticeQuestion, PracticeTopic,
     SubmitAnswerPayload,
 };
+use crate::commands::reports::{do_report_question, ReportQuestionPayload};
 use crate::db::AppState;
 use crate::http::error::HttpError;
 use crate::http::middleware::CurrentUser;
@@ -48,10 +49,21 @@ async fn leaderboard(
     Ok(Json(do_leaderboard(&conn)?))
 }
 
+async fn report_question(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<ReportQuestionPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_report_question(&conn, &user.id, &payload)?;
+    Ok(())
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/topics", post(topics))
         .route("/next-question", post(next_question))
         .route("/submit-answer", post(submit_answer))
         .route("/leaderboard", post(leaderboard))
+        .route("/report-question", post(report_question))
 }
