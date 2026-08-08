@@ -3,6 +3,7 @@ import {
   BookOpen,
   Database,
   FileText,
+  Flag,
   FlaskConical,
   FolderOpen,
   HelpCircle,
@@ -15,8 +16,11 @@ import {
   Upload,
 } from "lucide-react"
 import type React from "react"
+import { useEffect, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
+import { Badge } from "@/components/ui/badge"
 import { cs } from "@/i18n/cs"
+import { reportsApi } from "@/lib/reports-api"
 import { cn } from "@/lib/utils"
 import { useUiStore } from "@/stores/ui-store"
 
@@ -72,6 +76,11 @@ const navItems: NavItem[] = [
     icon: <History className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.history,
   },
+  {
+    path: "/hlaseni",
+    icon: <Flag className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.hlaseni,
+  },
 ]
 
 const bottomNavItems: NavItem[] = [
@@ -121,10 +130,25 @@ const themeToggleVariants = cva(
 export function Sidebar() {
   const location = useLocation()
   const darkMode = useUiStore((state) => state.theme === "dark")
+  const [reportCount, setReportCount] = useState<number>(0)
 
   const toggleDarkMode = () => {
     useUiStore.getState().toggleTheme()
   }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Re-fetch count when navigating to ensure badge stays up-to-date
+  useEffect(() => {
+    const fetchReportCount = async () => {
+      try {
+        const reports = await reportsApi.list()
+        setReportCount(reports.length)
+      } catch {
+        // Silently ignore errors (403 for students)
+      }
+    }
+
+    fetchReportCount()
+  }, [location.pathname])
 
   return (
     <div className={cn(sidebarVariants())}>
@@ -135,8 +159,12 @@ export function Sidebar() {
             <FlaskConical className="size-4 text-[hsl(var(--card))]" strokeWidth={1.75} />
           </div>
           <div className="flex flex-col">
-            <span className="font-semibold text-[hsl(var(--sidebar-foreground))] tracking-tight">BiochemCalc</span>
-            <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-[hsl(var(--sidebar-foreground))]/40">LAB v1</span>
+            <span className="font-semibold text-[hsl(var(--sidebar-foreground))] tracking-tight">
+              BiochemCalc
+            </span>
+            <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-[hsl(var(--sidebar-foreground))]/40">
+              LAB v1
+            </span>
           </div>
         </div>
       </div>
@@ -149,6 +177,7 @@ export function Sidebar() {
         <div className={cn(navSectionVariants())}>
           {navItems.map((item) => {
             const isActive = location.pathname === item.path
+            const isReports = item.path === "/hlaseni"
             return (
               <Link
                 key={item.path}
@@ -164,6 +193,11 @@ export function Sidebar() {
                   {item.icon}
                 </span>
                 <span className={cn(navLabelVariants())}>{item.label}</span>
+                {isReports && reportCount > 0 && (
+                  <Badge variant="default" className="ml-auto px-2 py-0.5 text-[10px] font-mono">
+                    {reportCount}
+                  </Badge>
+                )}
               </Link>
             )
           })}
@@ -202,7 +236,11 @@ export function Sidebar() {
           className={cn(themeToggleVariants())}
           aria-label={darkMode ? cs.theme.light : cs.theme.dark}
         >
-          {darkMode ? <Sun className="size-4" strokeWidth={1.75} /> : <Moon className="size-4" strokeWidth={1.75} />}
+          {darkMode ? (
+            <Sun className="size-4" strokeWidth={1.75} />
+          ) : (
+            <Moon className="size-4" strokeWidth={1.75} />
+          )}
         </button>
 
         <div className="px-3 pt-1 text-[10px] text-[hsl(var(--sidebar-foreground))]/30 font-mono">

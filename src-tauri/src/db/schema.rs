@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 21;
+const CURRENT_USER_VERSION: u32 = 22;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -111,6 +111,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 21 {
         apply_migration_v21(conn)?;
         conn.pragma_update(None, "user_version", "21")?;
+    }
+
+    if user_version < 22 {
+        apply_migration_v22(conn)?;
+        conn.pragma_update(None, "user_version", "22")?;
     }
 
     Ok(())
@@ -892,6 +897,33 @@ fn apply_migration_v21(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// One row per question a student reported as broken, holding the frozen
+/// snapshot of exactly what the student was served.
+///
+/// `question_reports` deliberately carries NO foreign keys: a report must
+/// never block deleting the underlying template, topic, or user account.
+fn apply_migration_v22(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE practice_attempts ADD COLUMN assigned_values TEXT;
+        ALTER TABLE practice_attempts ADD COLUMN assigned_strings TEXT;
+        ALTER TABLE practice_attempts ADD COLUMN numeric_options TEXT;
+
+        CREATE TABLE IF NOT EXISTS question_reports (
+            id BLOB PRIMARY KEY NOT NULL,
+            attempt_id BLOB NOT NULL UNIQUE,
+            user_id BLOB NOT NULL,
+            topic_id BLOB NOT NULL,
+            point_value INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            snapshot TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1037,5 +1069,145 @@ mod tests {
         let created = chrono::DateTime::parse_from_rfc3339(&created_at).expect("created");
         let expires = chrono::DateTime::parse_from_rfc3339(&expires_at).expect("expires");
         assert_eq!((expires - created).num_days(), 7);
+    }
+
+    /// A report inserts with uuid blobs and an RFC3339 timestamp — the same
+    /// shapes `practice_repo` uses for `practice_attempts`.
+    fn insert_report(conn: &Connection, attempt_id: uuid::Uuid) {
+        conn.execute(
+            "INSERT INTO question_reports (id, attempt_id, user_id, topic_id, point_value, message, snapshot, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                uuid::Uuid::new_v4(),
+                attempt_id,
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4(),
+                3,
+                "Špatná jednotka u výsledku.",
+                r#"{"question_text":"Kolik molů?","assigned_values":{"n":2.0}}"#,
+                "2026-08-07T12:00:00+00:00",
+            ],
+        )
+        .expect("insert question_reports");
+    }
+
+    fn user_version(conn: &Connection) -> u32 {
+        conn.pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("user_version")
+    }
+
+    #[test]
+    fn v22_creates_question_reports_and_extends_practice_attempts() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        assert_eq!(user_version(&conn), 22);
+
+        // The three variant columns must exist on practice_attempts.
+        conn.execute_batch(
+            "SELECT assigned_values, assigned_strings, numeric_options FROM practice_attempts LIMIT 1;",
+        )
+        .expect("new practice_attempts columns");
+
+        let attempt_id = uuid::Uuid::new_v4();
+        insert_report(&conn, attempt_id);
+        // One report per served question: the second insert on the same
+        // attempt must be rejected by UNIQUE(attempt_id).
+        let duplicate = conn.execute(
+            "INSERT INTO question_reports (id, attempt_id, user_id, topic_id, point_value, message, snapshot, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                uuid::Uuid::new_v4(),
+                attempt_id,
+                uuid::Uuid::new_v4(),
+                uuid::Uuid::new_v4(),
+                3,
+                "duplicitní hlášení",
+                r#"{"question_text":"?"}"#,
+                "2026-08-07T12:01:00+00:00",
+            ],
+        );
+        assert!(duplicate.is_err(), "UNIQUE(attempt_id) must reject a second report");
+    }
+
+    type MigrationFn = fn(&Connection) -> Result<(), rusqlite::Error>;
+
+    /// A database that last saw v21 must pick up exactly the v22 block:
+    /// replay the ladder by hand up to v21 (mirroring how run_migrations
+    /// builds a fresh database), seed an old-shape attempt row, then let
+    /// run_migrations finish the job.
+    #[test]
+    fn v22_applies_cleanly_on_a_pre_v22_database() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+
+        let migrations: [MigrationFn; 21] = [
+            apply_migration_v1,
+            apply_migration_v2,
+            apply_migration_v3,
+            apply_migration_v4,
+            apply_migration_v5,
+            apply_migration_v6,
+            apply_migration_v7,
+            apply_migration_v8,
+            apply_migration_v9,
+            apply_migration_v10,
+            apply_migration_v11,
+            apply_migration_v12,
+            apply_migration_v13,
+            apply_migration_v14,
+            apply_migration_v15,
+            apply_migration_v16,
+            apply_migration_v17,
+            apply_migration_v18,
+            apply_migration_v19,
+            apply_migration_v20,
+            apply_migration_v21,
+        ];
+        for (index, apply) in migrations.iter().enumerate() {
+            apply(&conn).unwrap_or_else(|e| panic!("v{}: {e}", index + 1));
+            conn.pragma_update(None, "user_version", format!("{}", index + 1))
+                .expect("set version");
+        }
+        assert_eq!(user_version(&conn), 21);
+
+        // Seed an attempt in the v19 shape (no variant columns yet). No FK
+        // targets exist, so drop enforcement like the v18 test does rather
+        // than seeding a full template/user graph.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch(
+            "
+            INSERT INTO practice_attempts (
+                id, user_id, template_id, topic_id, point_value, mode,
+                correct_answer, correct_option, interval_lo, interval_hi,
+                answers_data, is_correct, created_at, answered_at
+            ) VALUES (
+                randomblob(16), randomblob(16), randomblob(16), randomblob(16), 2, 'open',
+                42.0, NULL, 41.0, 43.0,
+                NULL, NULL, '2026-08-06T10:00:00+00:00', NULL
+            );
+            ",
+        )
+        .expect("seed pre-v22 attempt");
+
+        run_migrations(&conn).expect("migrate v21 -> v22");
+
+        assert_eq!(user_version(&conn), 22);
+        // The pre-existing row survives, with NULLs in the new columns.
+        let (assigned_values, assigned_strings, numeric_options): (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT assigned_values, assigned_strings, numeric_options FROM practice_attempts",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read migrated attempt");
+        assert_eq!(assigned_values, None);
+        assert_eq!(assigned_strings, None);
+        assert_eq!(numeric_options, None);
+
+        insert_report(&conn, uuid::Uuid::new_v4());
     }
 }
