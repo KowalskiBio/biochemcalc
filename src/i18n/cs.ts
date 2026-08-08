@@ -109,6 +109,15 @@ export const cs = {
     settingsDescription: "Váš účet a vzhled aplikace.",
     appearance: "Vzhled",
     appearanceDescription: "Přepnout mezi světlým a tmavým režimem.",
+
+    report: "Nahlásit otázku",
+    reportTitle: "Nahlásit chybu v otázce",
+    reportPrompt: "Popište, co je na otázce špatně. Vaše hlášení uvidí vyučující.",
+    reportPlaceholder: "Co je na otázce špatně?",
+    reportSuccess: "Hlášení bylo odesláno",
+    reportError: "Hlášení se nepodařilo odeslat",
+    reportSending: "Odesílám...",
+    reportSubmit: "Odeslat hlášení",
   },
 
   // Question reports (teacher inbox)

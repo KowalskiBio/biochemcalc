@@ -1,5 +1,6 @@
-import { Check, Loader2, RefreshCw, Target, X } from "lucide-react"
+import { Check, Flag, Loader2, RefreshCw, Target, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { ReportQuestionDialog } from "@/components/practice/report-question-dialog"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,6 +18,7 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { extractErrorMessage } from "@/lib/http"
+import { resolveOptionsPrecision } from "@/lib/math-utils"
 import { QuestionTextRenderer } from "@/lib/render-question-text"
 import { studentApi } from "@/lib/student-api"
 import type { PracticeAnswerResult, PracticeQuestion, PracticeTopic } from "@/lib/types"
@@ -59,6 +61,7 @@ export function StudentPracticePage() {
   const [result, setResult] = useState<PracticeAnswerResult | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [session, setSession] = useState({ correct: 0, total: 0 })
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
 
   const selectedTopic = useMemo(
     () => topics.find((t) => t.id === topicId) ?? null,
@@ -195,6 +198,8 @@ export function StudentPracticePage() {
   // the options line up row by row: row `i` is option a/b/c… across all the
   // quantities the question asks for at once.
   const optionRowCount = question?.answerSlots[0]?.numericOptions?.length ?? 0
+  const optionsPrecision =
+    question?.answerSlots.map((slot) => resolveOptionsPrecision(slot.numericOptions ?? [])) ?? []
 
   return (
     <div className="space-y-6">
@@ -287,7 +292,8 @@ export function StudentPracticePage() {
       )}
 
       {question && (
-        <Card>
+        <>
+          <Card>
           <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
             <div>
               <CardTitle className="text-lg">{cs.student.questionHeading}</CardTitle>
@@ -295,9 +301,21 @@ export function StudentPracticePage() {
                 {isClosed ? cs.student.closedHint : cs.student.openHint}
               </CardDescription>
             </div>
-            <Badge variant="outline">
-              {cs.student.difficultyPoints.replace("{value}", String(question.pointValue))}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">
+                {cs.student.difficultyPoints.replace("{value}", String(question.pointValue))}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsReportDialogOpen(true)}
+                className="h-8 w-8"
+                title={cs.student.report}
+                aria-label={cs.student.report}
+              >
+                <Flag className="size-4" />
+              </Button>
+            </div>
           </CardHeader>
 
           <CardContent className="space-y-6">
@@ -345,6 +363,7 @@ export function StudentPracticePage() {
                               <FormattedResult
                                 value={value}
                                 unit={slot.unit ?? question.resultUnit}
+                                precision={optionsPrecision[slotIdx]}
                               />
                             </span>
                           )
@@ -447,6 +466,12 @@ export function StudentPracticePage() {
             </div>
           </CardContent>
         </Card>
+          <ReportQuestionDialog
+            open={isReportDialogOpen}
+            onOpenChange={setIsReportDialogOpen}
+            attemptId={question.attemptId}
+          />
+        </>
       )}
     </div>
   )
