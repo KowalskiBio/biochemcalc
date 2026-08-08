@@ -374,13 +374,9 @@ export function StudentPracticePage() {
                 })}
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="flex flex-wrap gap-3">
                 {question.answerSlots.map((slot, slotIdx) => (
-                  <div key={slot.symbol ?? slotIdx} className="space-y-2">
-                    <Label htmlFor={`answer-${slotIdx}`}>
-                      {slot.symbol ? `${slot.symbol}` : cs.student.answerLabel}
-                      {slot.unit ? ` (${slot.unit})` : ""}
-                    </Label>
+                  <div key={slot.symbol ?? slotIdx} className="flex items-center gap-2">
                     <Input
                       id={`answer-${slotIdx}`}
                       inputMode="decimal"
@@ -388,6 +384,7 @@ export function StudentPracticePage() {
                       placeholder={cs.student.answerPlaceholder}
                       value={openAnswers[slotIdx] ?? ""}
                       disabled={result != null || isSubmitting}
+                      className="w-36"
                       onChange={(e) =>
                         setOpenAnswers((prev) =>
                           prev.map((value, idx) => (idx === slotIdx ? e.target.value : value)),
@@ -400,6 +397,9 @@ export function StudentPracticePage() {
                         }
                       }}
                     />
+                    {slot.unit && (
+                      <span className="text-sm font-medium text-foreground">{slot.unit}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -435,7 +435,6 @@ export function StudentPracticePage() {
                     {result.correctAnswers.map((answer, idx) => (
                       <span key={answer.symbol ?? idx}>
                         {idx > 0 && "; "}
-                        {answer.symbol ? `${answer.symbol} = ` : ""}
                         <FormattedResult
                           value={answer.value}
                           unit={answer.unit ?? question.resultUnit}
