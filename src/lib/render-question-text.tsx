@@ -45,10 +45,13 @@ export function formatChemicalText(text: string): string {
       .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])/g, (_, base, exponent) => {
         return `${base}<sup>${exponent}</sup>`
       })
-      // Subscripts: numeric (H_2, SO_4) AND letter (K_a, K_b, pK_a, n_e).
-      // Non-greedy so H_2SO_4 → H<sub>2</sub>SO<sub>4</sub> not H<sub>2SO</sub>_4.
-      .replace(/([A-Za-z0-9)]|\))_([A-Za-z0-9]+?)/g, (_, base, subscript) => {
-        return `${base}<sub>${subscript}</sub>`
+      // Subscripts: numeric (H_2, SO_4) AND letter (K_a, K_b, pK_a, n_e), plus
+      // chained compound subscripts (K_a_1 → Ka1, one symbol, one subscript).
+      // Each individual "_xxx" segment is non-greedy so H_2SO_4 splits into
+      // two subscripts instead of swallowing "SO"; adjacent segments with no
+      // separator between them merge into a single subscript.
+      .replace(/([A-Za-z0-9)]|\))((?:_[A-Za-z0-9]+?)+)/g, (_, base, subscript) => {
+        return `${base}<sub>${subscript.replace(/_/g, "")}</sub>`
       })
       // Remaining . as multiplication → ×, but keep digit.digit as a decimal point.
       .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
@@ -72,16 +75,23 @@ function getExampleStringValue(
   return placeholder
 }
 
+/**
+ * The in-app form of a piece of literal question prose — chemical notation
+ * (`K_a`, `H_2SO_4`, `Ca^2+`) typed directly into the question text renders
+ * as real subscripts/superscripts, same as substituted placeholder values.
+ * Only the raw editable text field and the exported question keep the
+ * authored `_`/`^` characters as plain text.
+ */
 function formatTextSegment(text: string): string {
-  // Only apply × substitutions in the app — HTML sub/sup belongs only in exports.
-  return text
-    .replace(/([A-Za-z0-9)])\.(\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
-    .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
-    .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1×$2")
+  return formatChemicalText(text)
+}
+
+function formatNumberSegment(value: number, precision: number): string {
+  return scientificNotationToHtml(formatNumberMaxDecimals(value, precision))
 }
 
 function renderConstantValue(value: number): string {
-  const display = scientificNotationToHtml(formatNumberMaxDecimals(value, 4))
+  const display = formatNumberSegment(value, 4)
   return `<span class="inline-flex items-center font-semibold text-gray-600">${display}</span>`
 }
 
@@ -201,7 +211,7 @@ function renderPlaceholderSpan(
       }
       return `<span class="inline-flex items-center font-semibold text-gray-600">[[${placeholder}]]</span>`
     }
-    return `<span class="inline-flex items-center font-semibold text-gray-600">${fixedValue}</span>`
+    return `<span class="inline-flex items-center font-semibold text-gray-600">${formatTextSegment(fixedValue)}</span>`
   }
   const idx = variables.findIndex((v) => v.placeholder === placeholder)
   if (idx !== -1) {
@@ -209,10 +219,8 @@ function renderPlaceholderSpan(
     const variable = variables[idx].variable
     const displayValue =
       variable.varType === "string"
-        ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
-        : scientificNotationToHtml(
-            formatNumberMaxDecimals(previewValueForVariable(variable), effectivePrecision(variable)),
-          )
+        ? formatTextSegment(getExampleStringValue(placeholder, variable, databazeEntries))
+        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable))
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
   const constantValue = constants[placeholder]
@@ -345,7 +353,7 @@ function renderPlaceholderSpanWithVariant(
       if (linkedValue !== undefined) return renderConstantValue(linkedValue)
       return `<span class="inline-flex items-center font-semibold text-gray-600">[[${placeholder}]]</span>`
     }
-    return `<span class="inline-flex items-center font-semibold text-gray-600">${fixedValue}</span>`
+    return `<span class="inline-flex items-center font-semibold text-gray-600">${formatTextSegment(fixedValue)}</span>`
   }
 
   const idx = variables.findIndex((v) => v.placeholder === placeholder)
@@ -359,14 +367,12 @@ function renderPlaceholderSpanWithVariant(
         const sampledString =
           variant.assignedStrings?.[placeholder] ||
           getExampleStringValue(placeholder, variable, databazeEntries)
-        return `<span class="inline-flex items-center font-semibold ${colorClass}">${formatChemicalText(sampledString)}</span>`
+        return `<span class="inline-flex items-center font-semibold ${colorClass}">${formatTextSegment(sampledString)}</span>`
       } else {
         const sampledValue = variant.assignedValues[placeholder]
         const rawValue =
           sampledValue !== undefined ? sampledValue : previewValueForVariable(variable)
-        const displayValue = scientificNotationToHtml(
-          formatNumberMaxDecimals(rawValue, effectivePrecision(variable)),
-        )
+        const displayValue = formatNumberSegment(rawValue, effectivePrecision(variable))
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
     }
@@ -374,10 +380,8 @@ function renderPlaceholderSpanWithVariant(
     // Fallback to original behavior
     const displayValue =
       variable.varType === "string"
-        ? formatChemicalText(getExampleStringValue(placeholder, variable, databazeEntries))
-        : scientificNotationToHtml(
-            formatNumberMaxDecimals(previewValueForVariable(variable), effectivePrecision(variable)),
-          )
+        ? formatTextSegment(getExampleStringValue(placeholder, variable, databazeEntries))
+        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable))
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
 

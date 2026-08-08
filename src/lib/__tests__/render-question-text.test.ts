@@ -113,6 +113,39 @@ describe("renderQuestionText", () => {
     expect(result).not.toContain(">1<")
   })
 
+  it("renders scientific notation from constants with real superscript markup", () => {
+    const result = renderQuestionText("Disociační konstanta je [[Ka]].", [], [], { Ka: 0.000018 })
+    expect(result).toContain("1.80×10<sup>-5</sup>")
+  })
+
+  it("formats chemical notation typed directly into the question prose", () => {
+    const result = renderQuestionText(
+      "Disociační konstanta kyseliny propionové K_a je 1.32×10^-5 v pufru o objemu 31 dm^3.",
+      [],
+    )
+    expect(result).toContain("K<sub>a</sub>")
+    expect(result).toContain("10<sup>-5</sup>")
+    expect(result).toContain("dm<sup>3</sup>")
+    expect(result).not.toContain("K_a")
+    expect(result).not.toContain("dm^3")
+  })
+
+  it("merges a chained compound subscript into one symbol", () => {
+    // K_a_1 names a single symbol (the phosphoric acid's first dissociation
+    // constant), not two separate subscripts — must not stop after "_a" and
+    // leave a literal "_1" trailing.
+    const result = renderQuestionText(
+      "K_a_1 = 7.1×10^-3, K_a_2 = 6.2×10^-8, K_a_3 = 4.4×10^-13.",
+      [],
+    )
+    expect(result).toContain("K<sub>a1</sub>")
+    expect(result).toContain("K<sub>a2</sub>")
+    expect(result).toContain("K<sub>a3</sub>")
+    expect(result).not.toContain("_1")
+    expect(result).not.toContain("_2")
+    expect(result).not.toContain("_3")
+  })
+
   it("hides the trailing answer-target marker", () => {
     const result = renderQuestionText("Vypočítejte látkové množství. [n]", [])
     expect(result).toContain("Vypočítejte látkové množství.")

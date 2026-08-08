@@ -24,7 +24,14 @@ interface Token {
   value: string
 }
 
-const NUMBER_REGEX = /^[0-9]+(?:\.[0-9]+)?/
+// Trailing exponent is greedy on purpose: a bare number is never followed
+// directly by "e"/"E" in this formula language (there's no implicit
+// multiplication), so "7.2e-10" is always meant as one scientific-notation
+// literal, never "7.2 times the constant e, minus 10". Substituting a very
+// small/large sampled value with `String(value)` (buildSubstitutedEquation)
+// is exactly what produces this form, and it must round-trip back through
+// the tokenizer without splitting into "7.2", identifier "e", "-", "10".
+const NUMBER_REGEX = /^[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/
 
 // Unicode ranges: α (U+03B1) – ω (U+03C9)
 const GREEK_START = "\u03B1"
@@ -567,6 +574,37 @@ export function evaluateExpression(
   )
 }
 
+/**
+ * Every named target of a semicolon-separated multi-answer formula
+ * ("c = ...; wDsc = ..."), in declaration order, alongside its computed
+ * value — unlike {@link evaluateExpression}, which only returns the last
+ * target's value. Used wherever a preview needs to show all of a
+ * multi-answer question's answers, not just the graded one.
+ */
+export function evaluateAllAssignments(
+  expression: string,
+  context: Record<string, number> = {},
+  constants: Record<string, number> = {},
+): Array<{ symbol: string; value: number }> {
+  const normalized = normalizeFormulaForEvaluation(expression)
+  const trimmed = normalized.trim()
+  if (trimmed.length === 0) {
+    throw new Error("Výraz je prázdný")
+  }
+
+  const assignments = parseAssignments(trimmed)
+  const results: Record<string, number> = { ...context }
+  const named: Array<{ symbol: string; value: number }> = []
+  for (const assignment of assignments) {
+    const value = evaluateSingleExpression(assignment.expression, results, constants)
+    if (assignment.target) {
+      results[assignment.target] = value
+      named.push({ symbol: assignment.target, value })
+    }
+  }
+  return named
+}
+
 function evaluateSingleExpression(
   expression: string,
   context: Record<string, number> = {},
@@ -779,10 +817,31 @@ function stripParentheses(node: AstNode): AstNode {
   return node.kind === "parenthesized" ? node.inner : node
 }
 
+/**
+ * `String(7.2e-10)` is `"7.2e-10"` — literal `e` notation, which reads as
+ * broken text rather than math if dropped straight into LaTeX. Render it as
+ * `7.2 \times 10^{-10}` instead; every other number passes through as-is.
+ */
+function numberNodeToLatex(value: number): string {
+  const str = String(value)
+  const match = str.match(/^(-?[0-9]+(?:\.[0-9]+)?)e([+-]?[0-9]+)$/)
+  if (!match) return str
+  const [, mantissa, exponent] = match
+  return `${mantissa} \\times 10^{${exponent.replace(/^\+/, "")}}`
+}
+
+/** True for a number that renders as `m \times 10^{n}` — it already ends in
+ * its own superscript, so using it bare as the base of an outer `^` would
+ * stack two exponents with nothing to tell them apart (`10^{-10}^{2}` reads
+ * as one compound "-10, 2", not "(10^-10) squared"). */
+function isScientificNotationNumber(node: AstNode): boolean {
+  return node.kind === "number" && /e[+-]?[0-9]+$/i.test(String(node.value))
+}
+
 function nodeToLatex(node: AstNode): string {
   switch (node.kind) {
     case "number":
-      return String(node.value)
+      return numberNodeToLatex(node.value)
 
     case "identifier":
       return identifierToLatex(node.name)
@@ -794,7 +853,11 @@ function nodeToLatex(node: AstNode): string {
         return `\\frac{${left}}{${right}}`
       }
       if (node.operator === "^") {
-        const left = nodeToLatex(stripParentheses(node.left))
+        const strippedLeft = stripParentheses(node.left)
+        const leftLatex = nodeToLatex(strippedLeft)
+        const left = isScientificNotationNumber(strippedLeft)
+          ? `\\left(${leftLatex}\\right)`
+          : leftLatex
         const right = nodeToLatex(stripParentheses(node.right))
         return `{${left}}^{${right}}`
       }
@@ -959,8 +1022,8 @@ const SCIENTIFIC_EXPONENT_REGEX = /×10\^([+-]?\d+)/g
 
 /**
  * `1.52×10^25` → `1.52×10<sup>25</sup>`, for the places that render markup
- * (question text, answer chips). Only for in-app rendering — the exported
- * `.txt` builds its own HTML in the Rust writer.
+ * (question text, answer chips, units). Only for in-app rendering — the
+ * exported `.txt` builds its own HTML in the Rust writer.
  */
 export function scientificNotationToHtml(text: string): string {
   return text.replace(SCIENTIFIC_EXPONENT_REGEX, "×10<sup>$1</sup>")
@@ -1070,7 +1133,19 @@ export function buildSubstitutedEquation(
     placeholder,
     symbol: placeholder,
   }))
-  const allNumericSources = [...numericSources, ...fixedSources]
+  // Symbols injected by string variable paired constants (e.g. Ka from wac,
+  // referenced in the text as [[Ka=wac]]) — assignedValues already carries
+  // these (the generator resolves the linked value at sample time), but
+  // without registering the symbol here neither the bracket form nor the
+  // bare identifier in the formula ever gets substituted.
+  const pairedConstantSources = variables.flatMap((vwp) => {
+    if (vwp.variable.varType !== "string" || !vwp.variable.pairedConstants?.length) return []
+    return Object.keys(vwp.variable.pairedConstants[0]).map((sym) => ({
+      placeholder: sym,
+      symbol: sym,
+    }))
+  })
+  const allNumericSources = [...numericSources, ...fixedSources, ...pairedConstantSources]
 
   let substituted = text
   for (const v of allNumericSources) {

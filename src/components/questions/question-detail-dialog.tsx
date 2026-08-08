@@ -1,6 +1,7 @@
 import { Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import ReactMarkdown from "react-markdown"
+import rehypeRaw from "rehype-raw"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,6 +28,7 @@ import { normalizeFormulaForEvaluation } from "@/lib/bulk-import-parser"
 import { extractTargets } from "@/lib/formula-checker"
 import {
   createRandom,
+  evaluateAllAssignments,
   evaluateExpression,
   extractMolarMassValues,
   renderEquationAsLatex,
@@ -36,7 +38,7 @@ import {
   validateEquationReferences,
 } from "@/lib/math-utils"
 import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
-import { QuestionTextRenderer } from "@/lib/render-question-text"
+import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   HistoryEntry,
   LocalVariableEdit,
@@ -872,7 +874,17 @@ export function QuestionDetailDialog({
         placeholder,
         symbol: placeholder,
       }))
-      const allNumericSources = [...numericSources, ...fixedSources]
+      // Symbols injected by string variable paired constants (e.g. Ka from
+      // wac, referenced in the text as [[Ka=wac]]) — without these, neither
+      // the bracket form nor the bare symbol in the formula ever substitutes.
+      const pairedConstantSources = displayTemplateVariables.flatMap((vwp) => {
+        if (vwp.variable.varType !== "string" || !vwp.variable.pairedConstants?.length) return []
+        return Object.keys(vwp.variable.pairedConstants[0]).map((sym) => ({
+          placeholder: sym,
+          symbol: sym,
+        }))
+      })
+      const allNumericSources = [...numericSources, ...fixedSources, ...pairedConstantSources]
 
       let substituted = text
       for (const v of allNumericSources) {
@@ -1025,12 +1037,17 @@ export function QuestionDetailDialog({
       return null
     }
 
+    const pairedConstantSources = visibleVariables.flatMap((v) => {
+      if (v.varType !== "string" || !v.pairedConstants?.length) return []
+      return Object.keys(v.pairedConstants[0]).map((sym) => ({ placeholder: sym, symbol: sym }))
+    })
     const allNumericSources = [
       ...numericVariables,
       ...Array.from(fixedPlaceholderValues.keys()).map((placeholder) => ({
         placeholder,
         symbol: placeholder,
       })),
+      ...pairedConstantSources,
     ]
 
     let substituted = text
@@ -1073,6 +1090,20 @@ export function QuestionDetailDialog({
         ...referencedVariables.filter((v) => v.varType === "numeric").map((v) => v.precision),
         ...referencedFixedPlaceholders.map(() => 2),
       )
+      // Multiple semicolon-separated targets (e.g. "c = ...; wDsc = ...")
+      // each get their own answer line — evaluateExpression alone only
+      // surfaces the last one.
+      const allTargets = evaluateAllAssignments(normalized, {}, constants)
+      const targetUnits = templateDetails
+        ? extractTargets(templateDetails.template.questionText)
+        : []
+      const answersData =
+        allTargets.length > 1
+          ? allTargets.map((t) => ({
+              ...t,
+              unit: targetUnits.find((target) => target.symbol === t.symbol)?.unit,
+            }))
+          : undefined
       return {
         type: "numeric" as const,
         value,
@@ -1080,6 +1111,7 @@ export function QuestionDetailDialog({
         mockStrings,
         substituted,
         resultPrecision,
+        answersData,
       }
     } catch (err) {
       return {
@@ -1096,6 +1128,7 @@ export function QuestionDetailDialog({
     mockSeed,
     constants,
     fixedPlaceholderValues,
+    templateDetails,
   ])
 
   return (
@@ -1169,8 +1202,16 @@ export function QuestionDetailDialog({
                   />
                 ) : (
                   <div className="max-w-none prose prose-sm dark:prose-invert break-words">
-                    <ReactMarkdown>
-                      {stripAnswerTargets(templateDetails.template.questionText)}
+                    <ReactMarkdown
+                      rehypePlugins={[rehypeRaw]}
+                      components={{
+                        // A stray "*" left over from formula notation (e.g. an
+                        // unspaced multiplication sign formatChemicalText didn't
+                        // catch) must never read as markdown emphasis here.
+                        em: ({ children }) => <>{children}</>,
+                      }}
+                    >
+                      {formatChemicalText(stripAnswerTargets(templateDetails.template.questionText))}
                     </ReactMarkdown>
                   </div>
                 )}
@@ -1544,13 +1585,28 @@ export function QuestionDetailDialog({
                                   <p className="text-xs font-medium text-foreground-secondary mb-1">
                                     {cs.questions.computedAnswerLabel}
                                   </p>
-                                  <p className="text-2xl font-bold text-primary">
-                                    <FormattedResult
-                                      value={mockResult.value}
-                                      precision={mockResult.resultPrecision}
-                                      unit={templateDetails.template.resultUnit}
-                                    />
-                                  </p>
+                                  {mockResult.answersData ? (
+                                    <div className="space-y-1">
+                                      {mockResult.answersData.map((a) => (
+                                        <p key={a.symbol} className="text-xl font-bold text-primary">
+                                          {a.symbol} ={" "}
+                                          <FormattedResult
+                                            value={a.value}
+                                            precision={mockResult.resultPrecision}
+                                            unit={a.unit ?? templateDetails.template.resultUnit}
+                                          />
+                                        </p>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-2xl font-bold text-primary">
+                                      <FormattedResult
+                                        value={mockResult.value}
+                                        precision={mockResult.resultPrecision}
+                                        unit={templateDetails.template.resultUnit}
+                                      />
+                                    </p>
+                                  )}
                                 </div>
                                 <Button
                                   type="button"
