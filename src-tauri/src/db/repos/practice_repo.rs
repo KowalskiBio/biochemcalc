@@ -8,6 +8,7 @@ use crate::db::DbError;
 use crate::models::{AnswerField, TemplateMode};
 use chrono::Utc;
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// A served-but-not-yet-graded question, plus everything needed to grade it.
@@ -25,6 +26,12 @@ pub struct PracticeAttemptRecord {
     pub interval_hi: Option<f64>,
     /// Present only for multi-answer questions (`[n mol][m g]`-style).
     pub answers_data: Option<Vec<AnswerField>>,
+    /// The random values drawn for each placeholder when this question was
+    /// served. Stored so reports can reconstruct the exact question snapshot.
+    pub assigned_values: HashMap<String, f64>,
+    pub assigned_strings: HashMap<String, String>,
+    /// Closed single-answer only: the numeric options as served.
+    pub numeric_options: Option<Vec<f64>>,
 }
 
 /// One row of the leaderboard. `correct_count` is the headline score —
@@ -110,13 +117,21 @@ impl PracticeRepo {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
+        let assigned_values = serde_json::to_string(&attempt.assigned_values)?;
+        let assigned_strings = serde_json::to_string(&attempt.assigned_strings)?;
+        let numeric_options = attempt
+            .numeric_options
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
 
         conn.execute(
             "INSERT INTO practice_attempts (
                  id, user_id, template_id, topic_id, point_value, mode,
                  correct_answer, correct_option, interval_lo, interval_hi,
-                 answers_data, is_correct, created_at, answered_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL)",
+                 answers_data, is_correct, created_at, answered_at,
+                 assigned_values, assigned_strings, numeric_options
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15)",
             params![
                 attempt.id,
                 attempt.user_id,
@@ -130,6 +145,9 @@ impl PracticeRepo {
                 attempt.interval_hi,
                 answers_data,
                 Utc::now().to_rfc3339(),
+                assigned_values,
+                assigned_strings,
+                numeric_options,
             ],
         )?;
         Ok(())
@@ -144,37 +162,87 @@ impl PracticeRepo {
         id: &Uuid,
         user_id: &Uuid,
     ) -> Result<Option<PracticeAttemptRecord>, DbError> {
-        let result = conn.query_row(
+        Self::find_by_query(
+            conn,
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
-                    correct_answer, correct_option, interval_lo, interval_hi, answers_data
+                    correct_answer, correct_option, interval_lo, interval_hi, answers_data,
+                    assigned_values, assigned_strings, numeric_options
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2 AND is_correct IS NULL",
             params![id, user_id],
-            |row| {
-                let mode: String = row.get(5)?;
-                let answers_data: Option<String> = row.get(10)?;
-                Ok((
-                    PracticeAttemptRecord {
-                        id: row.get(0)?,
-                        user_id: row.get(1)?,
-                        template_id: row.get(2)?,
-                        topic_id: row.get(3)?,
-                        point_value: row.get(4)?,
-                        mode: TemplateMode::parse(&mode).unwrap_or(TemplateMode::Open),
-                        correct_answer: row.get(6)?,
-                        correct_option: row.get(7)?,
-                        interval_lo: row.get(8)?,
-                        interval_hi: row.get(9)?,
-                        answers_data: None,
-                    },
-                    answers_data,
-                ))
-            },
-        );
+        )
+    }
+
+    /// Any attempt belonging to this user (pending or answered).
+    /// Used by the question reports module to verify ownership.
+    pub fn find_by_id_for_user(
+        conn: &Connection,
+        id: &Uuid,
+        user_id: &Uuid,
+    ) -> Result<Option<PracticeAttemptRecord>, DbError> {
+        Self::find_by_query(
+            conn,
+            "SELECT id, user_id, template_id, topic_id, point_value, mode,
+                    correct_answer, correct_option, interval_lo, interval_hi, answers_data,
+                    assigned_values, assigned_strings, numeric_options
+             FROM practice_attempts
+             WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id],
+        )
+    }
+
+    fn find_by_query(
+        conn: &Connection,
+        sql: &str,
+        p: impl rusqlite::Params,
+    ) -> Result<Option<PracticeAttemptRecord>, DbError> {
+        let result = conn.query_row(sql, p, |row| {
+            let mode: String = row.get(5)?;
+            let answers_data_json: Option<String> = row.get(10)?;
+            let assigned_values_json: Option<String> = row.get(11)?;
+            let assigned_strings_json: Option<String> = row.get(12)?;
+            let numeric_options_json: Option<String> = row.get(13)?;
+            Ok((
+                PracticeAttemptRecord {
+                    id: row.get(0)?,
+                    user_id: row.get(1)?,
+                    template_id: row.get(2)?,
+                    topic_id: row.get(3)?,
+                    point_value: row.get(4)?,
+                    mode: TemplateMode::parse(&mode).unwrap_or(TemplateMode::Open),
+                    correct_answer: row.get(6)?,
+                    correct_option: row.get(7)?,
+                    interval_lo: row.get(8)?,
+                    interval_hi: row.get(9)?,
+                    answers_data: None,
+                    assigned_values: HashMap::new(),
+                    assigned_strings: HashMap::new(),
+                    numeric_options: None,
+                },
+                answers_data_json,
+                assigned_values_json,
+                assigned_strings_json,
+                numeric_options_json,
+            ))
+        });
 
         match result {
-            Ok((mut record, answers_json)) => {
+            Ok((mut record, answers_json, av_json, as_json, no_json)) => {
                 record.answers_data = answers_json
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?;
+                record.assigned_values = av_json
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                record.assigned_strings = as_json
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                record.numeric_options = no_json
                     .as_deref()
                     .map(serde_json::from_str)
                     .transpose()?;
@@ -268,6 +336,9 @@ mod tests {
             interval_lo: Some(41.0),
             interval_hi: Some(43.0),
             answers_data: None,
+            assigned_values: HashMap::new(),
+            assigned_strings: HashMap::new(),
+            numeric_options: None,
         }
     }
 

@@ -93,7 +93,7 @@ pub struct PracticeDifficulty {
 /// Structurally a subset of the teacher-side `VariableWithPlaceholder`, minus
 /// the authoring-only fields (sharing, comparison links) a student's view has
 /// no use for.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PracticeVariable {
     pub variable: crate::models::Variable,
@@ -102,7 +102,7 @@ pub struct PracticeVariable {
 
 /// One blank a student has to fill in. For an ordinary single-answer question
 /// there is exactly one, carrying the template's own result unit.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PracticeAnswerSlot {
     /// `None` for a single-answer question; the target symbol (`n`, `m`, …)
@@ -146,7 +146,7 @@ pub struct PracticeAnswerResult {
     pub correct_answers: Vec<PracticeCorrectAnswer>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PracticeCorrectAnswer {
     pub symbol: Option<String>,
@@ -278,6 +278,9 @@ fn build_question(
         interval_lo: variant.interval_lo,
         interval_hi: variant.interval_hi,
         answers_data: variant.answers_data.clone(),
+        assigned_values: variant.assigned_values.clone(),
+        assigned_strings: variant.assigned_strings.clone(),
+        numeric_options: variant.numeric_options.clone(),
     };
     PracticeRepo::insert(conn, &attempt)?;
 
@@ -319,7 +322,7 @@ fn build_question(
 /// the question text can reference a constant the *formula* never mentions
 /// (so `load_template_dependencies` wouldn't have resolved it), and the
 /// teacher UI likewise renders against the full global table.
-fn constants_for_rendering(
+pub fn constants_for_rendering(
     conn: &Connection,
     resolved: &HashMap<String, f64>,
 ) -> Result<HashMap<String, f64>, DbError> {
@@ -333,7 +336,7 @@ fn constants_for_rendering(
 
 /// One slot per answer the question asks for, carrying the closed-mode
 /// options but never which of them is right.
-fn answer_slots(
+pub fn answer_slots(
     result_unit: &str,
     mode: TemplateMode,
     variant: &Variant,
@@ -448,7 +451,7 @@ fn within(answer: f64, expected: f64, lo: Option<f64>, hi: Option<f64>) -> bool 
     }
 }
 
-fn correct_answers(attempt: &PracticeAttemptRecord) -> Vec<PracticeCorrectAnswer> {
+pub fn correct_answers(attempt: &PracticeAttemptRecord) -> Vec<PracticeCorrectAnswer> {
     match attempt.answers_data.as_ref() {
         Some(fields) if !fields.is_empty() => fields
             .iter()

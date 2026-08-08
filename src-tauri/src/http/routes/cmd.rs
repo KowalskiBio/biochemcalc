@@ -9,6 +9,10 @@
 //! (`src/commands/importer.rs`) and are dev-only debugging tools, not
 //! something any web user should be able to trigger.
 
+use crate::commands::reports::{
+    do_delete_question_report, do_get_question_report, do_list_question_reports,
+    QuestionReportDetail, QuestionReportSummary,
+};
 use crate::commands::{
     self, BulkImportTemplatesPayload, ClearTemplateHistoryPayload, CreateCategoryPayload,
     CreateConstantPayload, CreateTemplatePayload, CreateTopicPayload, CreateVariablePayload,
@@ -688,6 +692,30 @@ async fn chat_with_victor(
     ))
 }
 
+async fn list_question_reports(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<QuestionReportSummary>>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(do_list_question_reports(&conn)?))
+}
+
+async fn get_question_report(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<IdBody>,
+) -> Result<Json<QuestionReportDetail>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(do_get_question_report(&conn, &payload.id)?))
+}
+
+async fn delete_question_report(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<IdBody>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    do_delete_question_report(&conn, &payload.id)?;
+    Ok(())
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/create_topic", post(create_topic))
@@ -768,4 +796,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/get_victor_settings", post(get_victor_settings))
         .route("/set_victor_settings", post(set_victor_settings))
         .route("/chat_with_victor", post(chat_with_victor))
+        .route("/list_question_reports", post(list_question_reports))
+        .route("/get_question_report", post(get_question_report))
+        .route("/delete_question_report", post(delete_question_report))
 }

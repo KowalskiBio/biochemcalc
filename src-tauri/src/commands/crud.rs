@@ -724,7 +724,7 @@ pub fn get_template_with_details(
     load_template_with_details(&conn, &id)
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateLocation {
     pub set_id: Uuid,

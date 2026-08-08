@@ -690,3 +690,40 @@ export interface ChangePasswordInput {
   currentPassword: string
   newPassword: string
 }
+
+export interface ReportQuestionInput {
+  attemptId: string
+  message: string
+}
+
+export interface QuestionReportSummary {
+  id: string
+  studentUsername: string
+  topicName: string
+  pointValue: number
+  message: string
+  createdAt: string
+}
+
+export interface QuestionReportDetail {
+  id: string
+  attemptId: string
+  templateId: string
+  message: string
+  createdAt: string
+  studentUsername: string
+  topicName: string
+  pointValue: number
+  isCorrect: boolean | null
+  location: TemplateLocation | null
+  questionText: string
+  resultUnit: string
+  mode: TemplateMode
+  variables: PracticeVariable[]
+  assignedValues: Record<string, number>
+  assignedStrings: Record<string, string>
+  constants: Record<string, number>
+  answerSlots: PracticeAnswerSlot[]
+  correctAnswers: PracticeCorrectAnswer[]
+  correctOption?: number
+}

@@ -3,6 +3,7 @@ mod crud;
 mod generation;
 pub(crate) mod importer;
 pub mod practice;
+pub mod reports;
 mod victor;
 
 pub use crud::*;
