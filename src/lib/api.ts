@@ -68,8 +68,8 @@ export const topicsApi = {
 
   get: (id: string): Promise<Topic> => apiFetch<Topic>("get_topic", { id }),
 
-  update: (id: string, name: string): Promise<Topic> =>
-    apiFetch<Topic>("update_topic", { id, name }),
+  update: (id: string, name: string, forStudents: boolean): Promise<Topic> =>
+    apiFetch<Topic>("update_topic", { id, name, forStudents }),
 
   delete: (id: string): Promise<void> => apiFetch<void>("delete_topic", { id }),
 

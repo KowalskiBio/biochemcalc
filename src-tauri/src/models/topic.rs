@@ -9,6 +9,9 @@ pub struct Topic {
     pub id: Uuid,
     pub name: String,
     pub created_at: DateTime<Utc>,
+    /// When true the topic is visible to students in the practice generator.
+    /// When false it is teacher-only (not shown to students).
+    pub for_students: bool,
 }
 
 impl Topic {
@@ -17,6 +20,7 @@ impl Topic {
             id: Uuid::new_v4(),
             name,
             created_at: Utc::now(),
+            for_students: false,
         }
     }
 }

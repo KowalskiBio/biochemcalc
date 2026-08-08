@@ -1,4 +1,4 @@
-import { BookOpen, Plus } from "lucide-react"
+import { BookOpen, GraduationCap, Lock, Plus } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -14,6 +14,7 @@ export function TopicsPage() {
   const { toast } = useToast()
   const [topics, setTopics] = useState<Topic[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [toggling, setToggling] = useState<string | null>(null)
 
   const fetchTopics = useCallback(async () => {
     try {
@@ -22,11 +23,7 @@ export function TopicsPage() {
       setTopics(data)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err)
-      toast({
-        title: "Chyba",
-        description: message,
-        variant: "destructive",
-      })
+      toast({ title: "Chyba", description: message, variant: "destructive" })
     } finally {
       setIsLoading(false)
     }
@@ -36,15 +33,33 @@ export function TopicsPage() {
     fetchTopics()
   }, [fetchTopics])
 
+  const handleToggle = useCallback(
+    async (topic: Topic, e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (toggling) return
+      setToggling(topic.id)
+      try {
+        const updated = await topicsApi.update(topic.id, topic.name, !topic.forStudents)
+        setTopics((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err)
+        toast({ title: "Chyba", description: message, variant: "destructive" })
+      } finally {
+        setToggling(null)
+      }
+    },
+    [toggling, toast],
+  )
+
   return (
-    <div
-      className="space-y-6"
-    >
-      <div
-      >
+    <div className="space-y-6">
+      <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.topics.pageTitle}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {cs.topics.pageTitle}
+            </h1>
             <p className="text-sm text-muted-foreground mt-1">{cs.topics.pageDescription}</p>
           </div>
           <Button asChild variant="outline">
@@ -56,8 +71,7 @@ export function TopicsPage() {
         </div>
       </div>
 
-      <div
-      >
+      <div>
         {isLoading ? (
           <Card>
             <CardContent className="py-8 text-center">
@@ -86,6 +100,30 @@ export function TopicsPage() {
                         {new Date(topic.createdAt).toLocaleDateString("cs-CZ")}
                       </CardDescription>
                     </CardHeader>
+                    <CardContent>
+                      <button
+                        type="button"
+                        disabled={toggling === topic.id}
+                        onClick={(e) => handleToggle(topic, e)}
+                        className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border transition-colors w-full justify-center ${
+                          topic.forStudents
+                            ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                            : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        {topic.forStudents ? (
+                          <>
+                            <GraduationCap className="size-4" />
+                            Pro studenty
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="size-4" />
+                            Pouze pro učitele
+                          </>
+                        )}
+                      </button>
+                    </CardContent>
                   </Card>
                 </Link>
               </div>

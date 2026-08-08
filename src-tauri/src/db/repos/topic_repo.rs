@@ -8,20 +8,22 @@ pub struct TopicRepo;
 impl TopicRepo {
     pub fn insert(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO topics (id, name, created_at) VALUES (?1, ?2, ?3)",
-            params![topic.id, topic.name, topic.created_at.to_rfc3339()],
+            "INSERT INTO topics (id, name, created_at, for_students) VALUES (?1, ?2, ?3, ?4)",
+            params![topic.id, topic.name, topic.created_at.to_rfc3339(), topic.for_students as i32],
         )?;
         Ok(())
     }
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Topic>, DbError> {
-        let mut stmt =
-            conn.prepare("SELECT id, name, created_at FROM topics ORDER BY created_at DESC")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, created_at, for_students FROM topics ORDER BY created_at DESC",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok(Topic {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 created_at: parse_dt(row.get::<_, String>(2)?),
+                for_students: row.get::<_, i32>(3)? != 0,
             })
         })?;
         let mut items = Vec::new();
@@ -36,13 +38,14 @@ impl TopicRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Topic, DbError> {
         conn.query_row(
-            "SELECT id, name, created_at FROM topics WHERE id = ?1",
+            "SELECT id, name, created_at, for_students FROM topics WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Topic {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     created_at: parse_dt(row.get::<_, String>(2)?),
+                    for_students: row.get::<_, i32>(3)? != 0,
                 })
             },
         )
@@ -54,8 +57,8 @@ impl TopicRepo {
 
     pub fn update(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         let affected = conn.execute(
-            "UPDATE topics SET name=?2, created_at=?3 WHERE id=?1",
-            params![topic.id, topic.name, topic.created_at.to_rfc3339()],
+            "UPDATE topics SET name=?2, created_at=?3, for_students=?4 WHERE id=?1",
+            params![topic.id, topic.name, topic.created_at.to_rfc3339(), topic.for_students as i32],
         )?;
         if affected == 0 {
             return Err(DbError::NotFound(format!("Topic {}", topic.id)));
@@ -133,5 +136,15 @@ mod tests {
         TopicRepo::delete(&conn, &t.id).expect("delete");
         let result = TopicRepo::get_by_id(&conn, &t.id);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn for_students_flag_persists() {
+        let conn = setup_conn();
+        let mut t = Topic::new("Student Topic".into());
+        t.for_students = true;
+        TopicRepo::insert(&conn, &t).expect("insert");
+        let fetched = TopicRepo::get_by_id(&conn, &t.id).expect("get");
+        assert!(fetched.for_students);
     }
 }
