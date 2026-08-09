@@ -469,21 +469,33 @@ pub struct ConstraintInput {
     pub constraint_type: ConstraintType,
 }
 
+// `rename_all = "camelCase"` at the container level does not reliably reach
+// multi-word field names inside variants of an internally-tagged enum
+// (`tag = "action"`) — serde re-derives each variant from a buffered
+// `Content` after reading the tag, and that path silently drops fields whose
+// camelCase name came only from `rename_all` rather than an explicit
+// per-field `#[serde(rename = ...)]`. Verified: with only `rename_all`,
+// `greaterThanVariableId`/`lessThanVariableId` deserialized to `None` even
+// when present in the JSON — explicit renames on every field fix it.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "action")]
+#[serde(tag = "action")]
 pub enum VariableMutation {
     #[serde(rename = "keep")]
     Keep {
         #[serde(rename = "variableId")]
         variable_id: Uuid,
         placeholder: String,
+        #[serde(rename = "greaterThanVariableId")]
         greater_than_variable_id: Option<Uuid>,
+        #[serde(rename = "lessThanVariableId")]
         less_than_variable_id: Option<Uuid>,
     },
     #[serde(rename = "create")]
     Create {
         placeholder: String,
+        #[serde(rename = "greaterThanVariableId")]
         greater_than_variable_id: Option<Uuid>,
+        #[serde(rename = "lessThanVariableId")]
         less_than_variable_id: Option<Uuid>,
         variable: CreateVariablePayload,
     },
@@ -492,7 +504,9 @@ pub enum VariableMutation {
         #[serde(rename = "variableId")]
         variable_id: Uuid,
         placeholder: String,
+        #[serde(rename = "greaterThanVariableId")]
         greater_than_variable_id: Option<Uuid>,
+        #[serde(rename = "lessThanVariableId")]
         less_than_variable_id: Option<Uuid>,
         variable: CreateVariablePayload,
     },
@@ -501,7 +515,9 @@ pub enum VariableMutation {
         #[serde(rename = "oldVariableId")]
         old_variable_id: Uuid,
         placeholder: String,
+        #[serde(rename = "greaterThanVariableId")]
         greater_than_variable_id: Option<Uuid>,
+        #[serde(rename = "lessThanVariableId")]
         less_than_variable_id: Option<Uuid>,
         variable: CreateVariablePayload,
     },
@@ -1598,6 +1614,32 @@ mod tests {
         }
     }
 
+    // Regression test for a real bug: `rename_all = "camelCase"` on this
+    // internally-tagged enum silently failed to rename multi-word fields
+    // inside variants, so `greaterThanVariableId`/`lessThanVariableId`
+    // deserialized to `None` even when present in the JSON — every save
+    // of a comparison constraint was a no-op. Fixed with explicit per-field
+    // `#[serde(rename = ...)]` on every variant; this pins that down.
+    #[test]
+    fn deserialize_update_mutation_preserves_greater_than_variable_id() {
+        let json = r#"{"action":"update","variableId":"f6af41e1-e014-4028-95d8-c7be98b53a22","placeholder":"ms","greaterThanVariableId":"a6d3bd7c-56fc-408b-98c7-ba870c7ac421","variable":{"name":"ms","symbol":"ms","varType":"numeric","minValue":1,"maxValue":1000,"step":1,"unit":"g","precision":0,"stringValues":null,"pairedConstants":null}}"#;
+        let mutation: VariableMutation = serde_json::from_str(json).expect("deserialize");
+        match mutation {
+            VariableMutation::Update {
+                greater_than_variable_id,
+                less_than_variable_id,
+                ..
+            } => {
+                assert_eq!(
+                    greater_than_variable_id,
+                    Some("a6d3bd7c-56fc-408b-98c7-ba870c7ac421".parse().unwrap())
+                );
+                assert_eq!(less_than_variable_id, None);
+            }
+            _ => panic!("expected Update variant"),
+        }
+    }
+
     #[test]
     fn update_template_with_variables_keeps_existing_link() {
         let state = setup();
@@ -1625,6 +1667,45 @@ mod tests {
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].variable_id, variable.id);
         assert_eq!(links[0].placeholder, "V00");
+    }
+
+    #[test]
+    fn update_template_with_variables_persists_greater_than_constraint() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let (_, _, _, template_id) = create_topic_category_set_template(&conn);
+        let x = create_variable(&conn, "X");
+        let y = create_variable(&conn, "Y");
+
+        conn.execute(
+            "INSERT INTO template_variables (template_id, variable_id, placeholder, greater_than_variable_id, less_than_variable_id) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params![template_id, x.id, "X"],
+        )
+        .expect("insert link x");
+        conn.execute(
+            "INSERT INTO template_variables (template_id, variable_id, placeholder, greater_than_variable_id, less_than_variable_id) VALUES (?1, ?2, ?3, NULL, NULL)",
+            rusqlite::params![template_id, y.id, "Y"],
+        )
+        .expect("insert link y");
+
+        // Deserialize from JSON (not a struct literal) so this exercises the
+        // same tagged-enum path the HTTP layer uses.
+        let json = format!(
+            r#"[{{"action":"update","variableId":"{x_id}","placeholder":"X","greaterThanVariableId":"{y_id}","variable":{{"name":"X","symbol":"X","varType":"numeric","minValue":1,"maxValue":100,"step":1,"unit":"g","precision":1,"stringValues":null,"pairedConstants":null}}}},{{"action":"keep","variableId":"{y_id}","placeholder":"Y"}}]"#,
+            x_id = x.id,
+            y_id = y.id,
+        );
+        let mutations: Vec<VariableMutation> = serde_json::from_str(&json).expect("deserialize");
+
+        let mut payload = build_payload(template_id);
+        payload.question_text = "Roztok obsahuje [[X]] g látky a [[Y]] g vody.".into();
+        payload.variable_mutations = mutations;
+
+        apply_template_variable_mutations(&conn, payload).expect("apply mutations");
+
+        let links = TemplateRepo::get_variables(&conn, &template_id).expect("get variables");
+        let x_link = links.iter().find(|l| l.variable_id == x.id).expect("x link");
+        assert_eq!(x_link.greater_than_variable_id, Some(y.id));
     }
 
     #[test]
