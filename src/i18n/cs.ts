@@ -744,6 +744,8 @@ export const cs = {
     lessThan: "Menší než",
     noComparison: "Žádné",
     comparisonConstraint: "Vztah k jiné proměnné",
+    impliedLessThan: "Automaticky: musí být menší než {variable}",
+    impliedGreaterThan: "Automaticky: musí být větší než {variable}",
     validation: {
       nameRequired: "Název je povinný",
       symbolRequired: "Symbol je povinný",

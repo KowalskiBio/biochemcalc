@@ -1,5 +1,5 @@
 import { Pencil, Save, Trash2, X } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -51,12 +51,20 @@ function NumericInput({
   step?: number | string
 }) {
   const [text, setText] = useState(String(value))
+  // Tracks the last value *we* pushed via onChange, so the sync effect below
+  // can tell "parent echoed our own edit" apart from "value changed
+  // externally" (e.g. a type switch resetting to a default) — without it,
+  // every render would re-derive Number(text), and Number("") === 0 would
+  // make an in-progress deletion look like a stale/external value and snap
+  // the field back before the user could type a replacement.
+  const lastEmitted = useRef(value)
 
-  // Keep text in sync when the prop changes externally (e.g. type switch resets to default).
-  const numericText = Number(text)
-  if (Number.isFinite(numericText) && numericText !== value) {
-    setText(String(value))
-  }
+  useEffect(() => {
+    if (value !== lastEmitted.current) {
+      lastEmitted.current = value
+      setText(String(value))
+    }
+  }, [value])
 
   return (
     <Input
@@ -72,14 +80,18 @@ function NumericInput({
         setText(raw)
         const parsed = Number(raw)
         if (raw !== "" && Number.isFinite(parsed)) {
+          lastEmitted.current = parsed
           onChange(parsed)
         }
       }}
       onBlur={() => {
-        // Snap display to canonical number on blur (clears trailing dots etc.)
+        // Snap display to canonical number on blur (clears trailing dots etc.);
+        // an empty or invalid field reverts to the last committed value.
         const parsed = Number(text)
-        if (Number.isFinite(parsed)) {
+        if (text !== "" && Number.isFinite(parsed)) {
           setText(String(parsed))
+        } else {
+          setText(String(lastEmitted.current))
         }
       }}
     />
@@ -101,6 +113,16 @@ function ComparisonSelectors({ variable, allVariables, onChange }: ComparisonSel
       v.key !== variable.key && !v.isRemoved && v.varType === "numeric" && v.variableId !== null,
   )
 
+  // Another variable may already constrain this one from the other side
+  // (e.g. X was set "greater than Y" — opening Y's editor should immediately
+  // show "Y must be less than X" without Y having its own field set).
+  const impliedLessThan = allVariables.find(
+    (v) => !v.isRemoved && v.greaterThanVariableId === variable.variableId,
+  )
+  const impliedGreaterThan = allVariables.find(
+    (v) => !v.isRemoved && v.lessThanVariableId === variable.variableId,
+  )
+
   const handleGreaterThanChange = (value: string) => {
     onChange("greaterThanVariableId", value === "__none__" ? "" : value)
     if (value !== "__none__") {
@@ -116,44 +138,57 @@ function ComparisonSelectors({ variable, allVariables, onChange }: ComparisonSel
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <div className="space-y-1">
-        <Label className="text-xs">{cs.questions.greaterThan}</Label>
-        <Select
-          value={variable.greaterThanVariableId || "__none__"}
-          onValueChange={handleGreaterThanChange}
-        >
-          <SelectTrigger className="h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">{cs.questions.noComparison}</SelectItem>
-            {candidates.map((v) => (
-              <SelectItem key={v.key} value={v.variableId as string}>
-                {getDisplayLabel(v)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{cs.questions.lessThan}</Label>
-        <Select
-          value={variable.lessThanVariableId || "__none__"}
-          onValueChange={handleLessThanChange}
-        >
-          <SelectTrigger className="h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">{cs.questions.noComparison}</SelectItem>
-            {candidates.map((v) => (
-              <SelectItem key={v.key} value={v.variableId as string}>
-                {getDisplayLabel(v)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="space-y-2">
+      {(impliedLessThan || impliedGreaterThan) && (
+        <p className="text-xs text-muted-foreground">
+          {impliedLessThan &&
+            cs.questions.impliedLessThan.replace("{variable}", getDisplayLabel(impliedLessThan))}
+          {impliedGreaterThan &&
+            cs.questions.impliedGreaterThan.replace(
+              "{variable}",
+              getDisplayLabel(impliedGreaterThan),
+            )}
+        </p>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs">{cs.questions.greaterThan}</Label>
+          <Select
+            value={variable.greaterThanVariableId || "__none__"}
+            onValueChange={handleGreaterThanChange}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">{cs.questions.noComparison}</SelectItem>
+              {candidates.map((v) => (
+                <SelectItem key={v.key} value={v.variableId as string}>
+                  {getDisplayLabel(v)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{cs.questions.lessThan}</Label>
+          <Select
+            value={variable.lessThanVariableId || "__none__"}
+            onValueChange={handleLessThanChange}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">{cs.questions.noComparison}</SelectItem>
+              {candidates.map((v) => (
+                <SelectItem key={v.key} value={v.variableId as string}>
+                  {getDisplayLabel(v)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </div>
   )

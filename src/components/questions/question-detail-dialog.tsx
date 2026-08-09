@@ -222,6 +222,14 @@ function validateComparisonConstraints(
   return errors
 }
 
+// The editor UI stores "no comparison" as "" (the Select's sentinel-cleared
+// state), but the backend's Option<Uuid> rejects "" outright — it only
+// accepts a valid UUID or an absent/null field. Sending "" through fails
+// deserialization for the whole request, silently dropping the entire save.
+function emptyToUndefined(id: string | undefined): string | undefined {
+  return id ? id : undefined
+}
+
 function buildVariableInput(v: LocalVariableEdit): VariableInput {
   return {
     name: v.name,
@@ -505,8 +513,8 @@ export function QuestionDetailDialog({
         variableMutations.push({
           action: "create",
           placeholder: v.placeholder,
-          greaterThanVariableId: v.greaterThanVariableId,
-          lessThanVariableId: v.lessThanVariableId,
+          greaterThanVariableId: emptyToUndefined(v.greaterThanVariableId),
+          lessThanVariableId: emptyToUndefined(v.lessThanVariableId),
           variable: buildVariableInput(v),
         })
       } else if (v.variableId) {
@@ -517,8 +525,8 @@ export function QuestionDetailDialog({
               action: "clone",
               oldVariableId: v.variableId,
               placeholder: v.placeholder,
-              greaterThanVariableId: v.greaterThanVariableId,
-              lessThanVariableId: v.lessThanVariableId,
+              greaterThanVariableId: emptyToUndefined(v.greaterThanVariableId),
+              lessThanVariableId: emptyToUndefined(v.lessThanVariableId),
               variable: buildVariableInput(v),
             })
           } else {
@@ -526,8 +534,8 @@ export function QuestionDetailDialog({
               action: "update",
               variableId: v.variableId,
               placeholder: v.placeholder,
-              greaterThanVariableId: v.greaterThanVariableId,
-              lessThanVariableId: v.lessThanVariableId,
+              greaterThanVariableId: emptyToUndefined(v.greaterThanVariableId),
+              lessThanVariableId: emptyToUndefined(v.lessThanVariableId),
               variable: buildVariableInput(v),
             })
           }
@@ -536,8 +544,8 @@ export function QuestionDetailDialog({
             action: "keep",
             variableId: v.variableId,
             placeholder: v.placeholder,
-            greaterThanVariableId: v.greaterThanVariableId,
-            lessThanVariableId: v.lessThanVariableId,
+            greaterThanVariableId: emptyToUndefined(v.greaterThanVariableId),
+            lessThanVariableId: emptyToUndefined(v.lessThanVariableId),
           })
         }
       }
