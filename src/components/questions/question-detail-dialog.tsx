@@ -94,19 +94,6 @@ function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
   }
 }
 
-function getNextPlaceholder(variables: LocalVariableEdit[]): string {
-  const placeholders = ["X", "Y", "Z"]
-  const used = new Set(variables.map((v) => v.placeholder))
-  for (const ph of placeholders) {
-    if (!used.has(ph)) return ph
-  }
-  let index = 1
-  while (used.has(`V${String(index).padStart(2, "0")}`)) {
-    index++
-  }
-  return `V${String(index).padStart(2, "0")}`
-}
-
 function validateVariable(v: LocalVariableEdit): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!v.name.trim()) {
@@ -679,30 +666,7 @@ export function QuestionDetailDialog({
   }
 
   const handleAddVariable = () => {
-    const placeholder = getNextPlaceholder(localVariables)
-    const isElement = isAtomPlaceholder(placeholder)
-    const newVariable: LocalVariableEdit = {
-      key: `new-${placeholder}-${Date.now()}`,
-      variableId: null,
-      placeholder,
-      name: cs.questions.variableDefaultName.replace("{placeholder}", placeholder),
-      symbol: placeholder,
-      varType: isElement ? "string" : "numeric",
-      minValue: 0,
-      maxValue: 100,
-      step: 1,
-      unit: "",
-      precision: isElement ? 0 : 1,
-      stringValues: isElement ? [...KNOWN_ELEMENTS] : [],
-      greaterThanVariableId: undefined,
-      lessThanVariableId: undefined,
-      isNew: true,
-      isRemoved: false,
-      isDirty: true,
-      isShared: false,
-    }
-    setLocalVariables((prev) => [...prev, newVariable])
-    setEditingVariableKey(newVariable.key)
+    syncVariablesFromText(editText, localVariables)
   }
 
   const syncVariablesFromText = useCallback(
@@ -745,11 +709,9 @@ export function QuestionDetailDialog({
 
       // Mark variables no longer present in text as removed rather than deleting
       // them immediately, so their ranges/units are preserved if the user
-      // re-typing the placeholder is only temporary. New variables (added via
-      // "Add Variable" button) are spared — the user hasn't had a chance to
-      // type their placeholder into the text yet.
+      // re-typing the placeholder is only temporary.
       for (const variable of currentVariables) {
-        if (!seen.has(variable.placeholder) && !variable.isRemoved && !variable.isNew) {
+        if (!seen.has(variable.placeholder) && !variable.isRemoved) {
           nextVariables.push({ ...variable, isRemoved: true, isDirty: true })
         }
       }
