@@ -1212,7 +1212,7 @@ export function QuestionDetailDialog({
         )}
 
         {templateDetails && (
-          <div className="space-y-6">
+          <div className="space-y-6 min-w-0">
             {/* Question Text */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
@@ -1785,34 +1785,50 @@ export function QuestionDetailDialog({
                     {cs.questions.historyEmpty}
                   </p>
                 ) : (
-                  <Table>
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>{cs.questions.historyColumns.date}</TableHead>
-                        <TableHead>{cs.questions.historyColumns.variable}</TableHead>
-                        <TableHead>{cs.questions.historyColumns.field}</TableHead>
-                        <TableHead>{cs.questions.historyColumns.oldValue}</TableHead>
-                        <TableHead>{cs.questions.historyColumns.newValue}</TableHead>
+                        <TableHead className="w-[120px]">
+                          {cs.questions.historyColumns.date}
+                        </TableHead>
+                        <TableHead className="w-[100px]">
+                          {cs.questions.historyColumns.variable}
+                        </TableHead>
+                        <TableHead className="w-[100px]">
+                          {cs.questions.historyColumns.field}
+                        </TableHead>
+                        <TableHead className="break-words">
+                          {cs.questions.historyColumns.oldValue}
+                        </TableHead>
+                        <TableHead className="break-words">
+                          {cs.questions.historyColumns.newValue}
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {historyEntries.map((entry) => (
                         <TableRow key={entry.id}>
-                          <TableCell>{new Date(entry.changedAt).toLocaleString("cs-CZ")}</TableCell>
-                          <TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {new Date(entry.changedAt).toLocaleString("cs-CZ")}
+                          </TableCell>
+                          <TableCell className="break-words">
                             {entry.kind === "template"
                               ? cs.questions.historyColumns.template
                               : entry.variableId}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             {entry.fieldName in cs.questions.historyFields
                               ? cs.questions.historyFields[
                                   entry.fieldName as keyof typeof cs.questions.historyFields
                                 ]
                               : entry.fieldName}
                           </TableCell>
-                          <TableCell>{entry.oldValue || "—"}</TableCell>
-                          <TableCell>{entry.newValue || "—"}</TableCell>
+                          <TableCell className="break-words align-top">
+                            {entry.oldValue || "—"}
+                          </TableCell>
+                          <TableCell className="break-words align-top">
+                            {entry.newValue || "—"}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

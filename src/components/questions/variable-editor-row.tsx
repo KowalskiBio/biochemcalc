@@ -397,9 +397,7 @@ export function VariableEditorRow({
                 placeholder="hodnota1, hodnota2, hodnota3"
                 className="min-h-[60px]"
               />
-              {errors.stringValues && (
-                <p className="text-xs text-red-500">{errors.stringValues}</p>
-              )}
+              {errors.stringValues && <p className="text-xs text-red-500">{errors.stringValues}</p>}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Párové konstanty</Label>
@@ -533,7 +531,7 @@ export function VariableEditorRow({
               <span className="text-foreground-secondary text-xs">
                 {cs.questions.stringValuesLabel}
               </span>
-              <p>{(variable.stringValues || []).join(", ")}</p>
+              <p className="break-words">{(variable.stringValues || []).join(", ")}</p>
             </div>
           )}
         </div>
