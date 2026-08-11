@@ -70,6 +70,13 @@ interface QuestionDetailDialogProps {
   open: boolean
   onClose: () => void
   onDelete?: (templateId: string) => void
+  /**
+   * Fired after every successful save (question text/variables, answer
+   * settings, or the force-scientific toggle). The parent uses this to
+   * refresh its own template list so the change is visible without a
+   * full page reload.
+   */
+  onSaved?: () => void
 }
 
 function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
@@ -270,6 +277,7 @@ export function QuestionDetailDialog({
   open,
   onClose,
   onDelete,
+  onSaved,
 }: QuestionDetailDialogProps) {
   const [templateDetails, setTemplateDetails] = useState<TemplateWithDetails | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -592,6 +600,7 @@ export function QuestionDetailDialog({
       setIsEditingAnswer(false)
       setValidationErrors({})
       await loadTemplateDetails()
+      onSaved?.()
       toast({
         title: cs.questions.saveSuccess,
       })
@@ -647,7 +656,7 @@ export function QuestionDetailDialog({
         resultUnit: editResultUnit,
         pointValue: templateDetails.template.pointValue,
         significantDigits: sigDigits,
-      forceScientific,
+        forceScientific,
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: templateDetails.template.constraint,
@@ -659,6 +668,7 @@ export function QuestionDetailDialog({
       setLocalVariables(updatedLocals)
       setOriginalVariables(updatedLocals.map((v) => ({ ...v })))
       setIsEditingAnswer(false)
+      onSaved?.()
       toast({
         title: cs.questions.saveSuccess,
       })
@@ -702,6 +712,7 @@ export function QuestionDetailDialog({
     try {
       const response = await templatesApi.updateWithVariables(payload)
       setTemplateDetails(response)
+      onSaved?.()
     } catch (err) {
       setForceScientific(!newValue)
       const message = err instanceof ApiError ? err.message : String(err)

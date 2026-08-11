@@ -290,6 +290,18 @@ export function SetDetailPage() {
     setIsDeleteDialogOpen(true)
   }, [])
 
+  const refreshTemplate = useCallback(
+    async (templateId: string) => {
+      try {
+        const details = await templatesApi.getWithDetails(templateId)
+        setTemplateDetails((prev) => prev.map((t) => (t.template.id === templateId ? details : t)))
+      } catch {
+        void loadData()
+      }
+    },
+    [loadData],
+  )
+
   const handleGenerate = useCallback(
     async (mode: TemplateMode, difficulty: QuestionDifficulty, optionCount: number) => {
       if (!setId || templateDetails.length === 0) return
@@ -408,18 +420,19 @@ export function SetDetailPage() {
 
       const questions: ProjektQuestion[] = generated.map((g) => {
         const variant = g.variants[0]
+        const tmpl = templateDetailsById.get(g.template.id)?.template ?? g.template
         return {
           templateId: g.template.id,
-          questionText: g.template.questionText,
-          resultUnit: g.template.resultUnit,
-          pointValue: g.template.pointValue,
+          questionText: tmpl.questionText,
+          resultUnit: tmpl.resultUnit,
+          pointValue: tmpl.pointValue,
           correctAnswer: variant?.correctAnswer,
           assignedValues: variant?.assignedValues || {},
           assignedStrings: variant?.assignedStrings || {},
           variablePrecisions: {},
           resultPrecision: 2,
-          significantDigits: g.template.significantDigits,
-          forceScientific: g.template.forceScientific ?? false,
+          significantDigits: tmpl.significantDigits,
+          forceScientific: tmpl.forceScientific ?? false,
           numericOptions: variant?.numericOptions,
           correctOption: variant?.correctOption,
           intervalLo: variant?.intervalLo,
@@ -456,7 +469,7 @@ export function SetDetailPage() {
     } finally {
       setSavingToProjekt(null)
     }
-  }, [generated, generatedMode, set, projektName, toast])
+  }, [generated, generatedMode, set, projektName, toast, templateDetailsById])
 
   if (isLoading) {
     return (
@@ -721,6 +734,7 @@ export function SetDetailPage() {
                 {generated.map((g, idx) => {
                   const variant = g.variants[0]
                   const details = templateDetailsById.get(g.template.id)
+                  const tmpl = details?.template ?? g.template
                   // Constants explicitly linked to the template win; anything
                   // else the formula references falls back to the global table,
                   // exactly as the generator resolves it.
@@ -733,14 +747,14 @@ export function SetDetailPage() {
                   const optionLabels = ["a", "b", "c", "d", "e"]
                   const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
                   const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
-                  const sigDigits = g.template.significantDigits
-                  const forceSci = g.template.forceScientific ?? false
+                  const sigDigits = tmpl.significantDigits
+                  const forceSci = tmpl.forceScientific ?? false
                   // Small-magnitude answers can collapse to identical strings at
                   // the default precision, so widen just enough to keep every
                   // option distinct.
                   const optionsPrecision = resolveOptionsPrecision(options)
                   const correctOption = variant?.correctOption
-                  const equationText = g.template.equationText?.trim() || g.template.formula
+                  const equationText = tmpl.equationText?.trim() || tmpl.formula
                   const recomputed =
                     equationText && variant
                       ? evaluateVariantAnswer(
@@ -748,7 +762,7 @@ export function SetDetailPage() {
                           details?.variables ?? [],
                           variant,
                           constants,
-                          g.template.questionText,
+                          tmpl.questionText,
                         )
                       : null
                   const hasMismatch =
@@ -762,7 +776,7 @@ export function SetDetailPage() {
                         <div className="space-y-1">
                           <p className="text-sm font-medium text-muted-foreground">{idx + 1}.</p>
                           <QuestionTextRenderer
-                            text={g.template.questionText}
+                            text={tmpl.questionText}
                             variables={details?.variables ?? []}
                             variant={variant}
                             constants={constants}
@@ -861,7 +875,7 @@ export function SetDetailPage() {
                                   <span>
                                     <FormattedResult
                                       value={value}
-                                      unit={g.template.resultUnit}
+                                      unit={tmpl.resultUnit}
                                       precision={optionsPrecision}
                                       significantDigits={sigDigits}
                                       forceScientific={forceSci}
@@ -917,7 +931,7 @@ export function SetDetailPage() {
                               Správná odpověď:{" "}
                               <FormattedResult
                                 value={recomputed?.ok ? recomputed.value : variant?.correctAnswer}
-                                unit={g.template.resultUnit}
+                                unit={tmpl.resultUnit}
                                 significantDigits={sigDigits}
                                 forceScientific={forceSci}
                               />
@@ -1113,6 +1127,7 @@ export function SetDetailPage() {
           templateId={selectedTemplateId}
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}
+          onSaved={() => void refreshTemplate(selectedTemplateId)}
           onDelete={() => {
             setDialogOpen(false)
             void loadData()
