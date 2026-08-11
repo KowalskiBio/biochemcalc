@@ -147,6 +147,8 @@ pub struct ProjektQuestion {
     pub assigned_values: std::collections::HashMap<String, serde_json::Value>,
     pub assigned_strings: std::collections::HashMap<String, String>,
     pub variable_precisions: std::collections::HashMap<String, u8>,
+    #[serde(default)]
+    pub variable_significant_digits: std::collections::HashMap<String, u8>,
     pub result_precision: u8,
     pub numeric_options: Option<Vec<f64>>,
     pub correct_option: Option<u8>,

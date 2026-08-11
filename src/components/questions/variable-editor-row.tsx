@@ -450,15 +450,25 @@ export function VariableEditorRow({
                 {errors.step && <p className="text-xs text-red-500">{errors.step}</p>}
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">{cs.questions.variablePrecision}</Label>
-                <NumericInput
-                  value={variable.precision ?? 1}
-                  min={0}
-                  max={10}
-                  onChange={(n) => onChange("precision", n)}
+                <Label className="text-xs">{cs.questions.significantDigits}</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={variable.significantDigits ?? ""}
                   className="h-8"
+                  placeholder="—"
+                  onChange={(e) => {
+                    const raw = e.target.value.trim()
+                    if (raw === "") {
+                      onChange("significantDigits", undefined as unknown as number)
+                    } else {
+                      const n = Number(raw)
+                      if (Number.isFinite(n) && n >= 1 && n <= 10) {
+                        onChange("significantDigits", Math.floor(n))
+                      }
+                    }
+                  }}
                 />
-                {errors.precision && <p className="text-xs text-red-500">{errors.precision}</p>}
               </div>
             </div>
             <ComparisonSelectors

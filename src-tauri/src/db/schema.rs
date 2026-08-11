@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 22;
+const CURRENT_USER_VERSION: u32 = 25;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -118,6 +118,26 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.pragma_update(None, "user_version", "22")?;
     }
 
+    if user_version < 23 {
+        apply_migration_v23(conn)?;
+        conn.pragma_update(None, "user_version", "23")?;
+    }
+
+    if user_version < 24 {
+        apply_migration_v24(conn)?;
+        conn.pragma_update(None, "user_version", "24")?;
+    }
+
+    if user_version < 25 {
+        apply_migration_v25(conn)?;
+        conn.pragma_update(None, "user_version", "25")?;
+    }
+
+    if user_version < 26 {
+        apply_migration_v26(conn)?;
+        conn.pragma_update(None, "user_version", "26")?;
+    }
+
     Ok(())
 }
 
@@ -207,8 +227,9 @@ fn apply_migration_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE TABLE IF NOT EXISTS sets (
             id BLOB PRIMARY KEY NOT NULL,
             category_id BLOB NOT NULL,
-            set_index INTEGER NOT NULL CHECK (set_index BETWEEN 1 AND 4),
+            set_index INTEGER NOT NULL,
             mode TEXT NOT NULL CHECK (mode IN ('closed', 'open')),
+            name TEXT,
             UNIQUE (category_id, set_index),
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
         );
@@ -924,6 +945,47 @@ fn apply_migration_v22(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Drop the `CHECK (set_index BETWEEN 1 AND 4)` constraint from the `sets`
+/// table so teachers can append additional sets beyond the initial four.
+fn apply_migration_v23(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS sets_new (
+            id BLOB PRIMARY KEY NOT NULL,
+            category_id BLOB NOT NULL,
+            set_index INTEGER NOT NULL,
+            mode TEXT NOT NULL CHECK (mode IN ('closed', 'open')),
+            UNIQUE (category_id, set_index),
+            FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO sets_new (id, category_id, set_index, mode)
+        SELECT id, category_id, set_index, mode FROM sets;
+
+        DROP TABLE sets;
+        ALTER TABLE sets_new RENAME TO sets;
+
+        CREATE INDEX IF NOT EXISTS idx_sets_category ON sets(category_id);
+        ",
+    )?;
+    Ok(())
+}
+
+fn apply_migration_v24(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE sets ADD COLUMN name TEXT;")?;
+    Ok(())
+}
+
+fn apply_migration_v25(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE templates ADD COLUMN significant_digits INTEGER;")?;
+    Ok(())
+}
+
+fn apply_migration_v26(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE variables ADD COLUMN significant_digits INTEGER;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1101,7 +1163,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 22);
+        assert_eq!(user_version(&conn), 26);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1189,9 +1251,9 @@ mod tests {
         )
         .expect("seed pre-v22 attempt");
 
-        run_migrations(&conn).expect("migrate v21 -> v22");
+        run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 22);
+        assert_eq!(user_version(&conn), 26);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,

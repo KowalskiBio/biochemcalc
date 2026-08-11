@@ -709,6 +709,7 @@ mod tests {
             paired_constants: None,
             greater_than: None,
             less_than: None,
+            significant_digits: None,
             created_at: chrono::Utc::now(),
         }
     }

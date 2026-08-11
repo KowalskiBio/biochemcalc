@@ -198,15 +198,20 @@ export function ExportVariantsDialog({
         // Build ExportQuestion for each variant
         for (const variant of templateResult.variants) {
           const variablePrecisions: Record<string, number> = {}
+          const variableSignificantDigits: Record<string, number> = {}
           for (const v of templateDetails.variables) {
             variablePrecisions[v.variable.symbol] = v.variable.precision
+            if (v.variable.significantDigits) {
+              variableSignificantDigits[v.variable.symbol] = v.variable.significantDigits
+            }
           }
 
           exportQuestions.push({
             template: templateDetails.template,
             variant,
             variablePrecisions,
-            resultPrecision: 2,
+            variableSignificantDigits,
+            resultPrecision: templateDetails.template.significantDigits ?? 2,
             mode,
           })
         }

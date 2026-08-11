@@ -38,6 +38,9 @@ pub struct Variable {
     pub paired_constants: Option<Vec<HashMap<String, f64>>>,
     pub greater_than: Option<String>,
     pub less_than: Option<String>,
+    /// When set, displayed values use this many significant figures instead
+    /// of the fixed decimal-place `precision`.
+    pub significant_digits: Option<u8>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -65,6 +68,7 @@ impl Variable {
             paired_constants: None,
             greater_than: None,
             less_than: None,
+            significant_digits: None,
             created_at: Utc::now(),
         }
     }
@@ -84,6 +88,7 @@ impl Variable {
             paired_constants: None,
             greater_than: None,
             less_than: None,
+            significant_digits: None,
             created_at: Utc::now(),
         }
     }

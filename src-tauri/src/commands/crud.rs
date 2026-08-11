@@ -265,6 +265,8 @@ pub struct CreateVariablePayload {
     pub precision: u8,
     pub string_values: Option<Vec<String>>,
     pub paired_constants: Option<Vec<std::collections::HashMap<String, f64>>>,
+    #[serde(default)]
+    pub significant_digits: Option<u8>,
 }
 
 #[tauri::command]
@@ -281,17 +283,22 @@ pub fn create_variable(
                 payload.string_values.unwrap_or_default(),
             );
             v.paired_constants = payload.paired_constants;
+            v.significant_digits = payload.significant_digits;
             v
         }
-        VariableType::Numeric => Variable::new(
-            payload.name,
-            payload.symbol,
-            payload.min_value,
-            payload.max_value,
-            payload.step,
-            payload.unit,
-            payload.precision,
-        ),
+        VariableType::Numeric => {
+            let mut v = Variable::new(
+                payload.name,
+                payload.symbol,
+                payload.min_value,
+                payload.max_value,
+                payload.step,
+                payload.unit,
+                payload.precision,
+            );
+            v.significant_digits = payload.significant_digits;
+            v
+        }
     };
     VariableRepo::insert(&conn, &variable)?;
     Ok(variable)
@@ -323,6 +330,8 @@ pub struct UpdateVariablePayload {
     pub precision: u8,
     pub string_values: Option<Vec<String>>,
     pub paired_constants: Option<Vec<std::collections::HashMap<String, f64>>>,
+    #[serde(default)]
+    pub significant_digits: Option<u8>,
 }
 
 #[tauri::command]
@@ -345,6 +354,7 @@ pub fn update_variable(
         paired_constants: payload.paired_constants,
         greater_than: None,
         less_than: None,
+        significant_digits: payload.significant_digits,
         created_at: Utc::now(),
     };
     VariableRepo::update(&conn, &variable)?;
@@ -538,6 +548,7 @@ pub struct UpdateTemplateWithVariablesPayload {
     pub numeric_answer: Option<f64>,
     pub result_unit: String,
     pub point_value: u8,
+    pub significant_digits: Option<u8>,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -552,6 +563,7 @@ pub struct CreateTemplatePayload {
     pub numeric_answer: Option<f64>,
     pub result_unit: String,
     pub point_value: u8,
+    pub significant_digits: Option<u8>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -646,7 +658,7 @@ pub(crate) fn do_create_template(
             "Otázka se stejným zněním a vzorcem již existuje.".into(),
         ));
     }
-    let template = Template::new(
+    let mut template = Template::new(
         payload.question_text,
         payload.formula,
         payload.equation_text,
@@ -654,6 +666,7 @@ pub(crate) fn do_create_template(
         payload.result_unit,
         payload.point_value,
     );
+    template.significant_digits = payload.significant_digits;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
@@ -784,6 +797,7 @@ pub struct UpdateTemplatePayload {
     pub numeric_answer: Option<f64>,
     pub result_unit: String,
     pub point_value: u8,
+    pub significant_digits: Option<u8>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -822,12 +836,13 @@ pub(crate) fn do_update_template(
         numeric_answer: payload.numeric_answer,
         result_unit: payload.result_unit,
         point_value: payload.point_value,
+        significant_digits: payload.significant_digits,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, created_at=?8 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, created_at=?9 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -836,6 +851,7 @@ pub(crate) fn do_update_template(
             template.numeric_answer,
             template.result_unit,
             template.point_value,
+            template.significant_digits,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -992,11 +1008,12 @@ pub fn apply_template_variable_mutations(
         numeric_answer: payload.numeric_answer,
         result_unit: payload.result_unit.clone(),
         point_value: payload.point_value,
+        significant_digits: payload.significant_digits,
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, created_at=?8 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, created_at=?9 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1005,6 +1022,7 @@ pub fn apply_template_variable_mutations(
             template.numeric_answer,
             template.result_unit,
             template.point_value,
+            template.significant_digits,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1080,6 +1098,7 @@ pub fn apply_template_variable_mutations(
                     paired_constants: variable.paired_constants.clone(),
                     greater_than: None,
                     less_than: None,
+                    significant_digits: variable.significant_digits,
                     created_at: Utc::now(),
                 };
                 VariableRepo::update(&tx, &updated)?;
@@ -1372,6 +1391,54 @@ pub fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), DbErr
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateSetPayload {
+    pub category_id: Uuid,
+    pub mode: TemplateMode,
+}
+
+#[tauri::command]
+pub fn create_set(
+    state: State<'_, AppState>,
+    payload: CreateSetPayload,
+) -> Result<crate::models::Set, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    SetRepo::create(&conn, payload.category_id, payload.mode)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSetNamePayload {
+    pub set_id: Uuid,
+    pub name: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_set_name(
+    state: State<'_, AppState>,
+    payload: UpdateSetNamePayload,
+) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    SetRepo::update_name(&conn, &payload.set_id, payload.name.as_deref())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveSetPayload {
+    pub set_id: Uuid,
+    pub target_category_id: Uuid,
+}
+
+#[tauri::command]
+pub fn move_set(
+    state: State<'_, AppState>,
+    payload: MoveSetPayload,
+) -> Result<u8, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    SetRepo::move_to_category(&conn, &payload.set_id, &payload.target_category_id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateSetModePayload {
     pub set_id: Uuid,
     pub mode: TemplateMode,
@@ -1442,7 +1509,7 @@ pub(crate) fn do_get_set_with_templates(
     set_id: &Uuid,
 ) -> Result<(crate::models::Set, Vec<TemplateWithDetails>), DbError> {
     let set = conn.query_row(
-        "SELECT id, category_id, set_index, mode FROM sets WHERE id = ?1",
+        "SELECT id, category_id, set_index, mode, name FROM sets WHERE id = ?1",
         rusqlite::params![set_id],
         |row| {
             let mode_str: String = row.get(3)?;
@@ -1455,6 +1522,7 @@ pub(crate) fn do_get_set_with_templates(
                 category_id: row.get(1)?,
                 set_index: row.get(2)?,
                 mode,
+                name: row.get(4)?,
             })
         },
     )?;
@@ -1562,6 +1630,7 @@ mod tests {
             numeric_answer: None,
             result_unit: "g".into(),
             point_value: 2,
+            significant_digits: None,
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,
@@ -1588,6 +1657,7 @@ mod tests {
             precision,
             string_values: None,
             paired_constants: None,
+            significant_digits: None,
         }
     }
 

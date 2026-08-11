@@ -62,13 +62,12 @@ fn fmt_value_cz(value: f64, precision: u8) -> String {
 }
 
 /// Apply the same chemical formatting used in the UI renderer:
-/// H2O -> H<sub>2</sub>O, X^2 -> X<sup>2</sup>, a*b -> a×b.
+/// H2O -> H<sub>2</sub>O, X^2 -> X<sup>2</sup>, a*b -> a.b.
 /// Existing HTML tags (including <sup>, <sub>, &nbsp;) are preserved.
 fn format_chemical_text(text: &str) -> String {
     static HYDRATE_RE: OnceLock<Regex> = OnceLock::new();
     static SUP_RE: OnceLock<Regex> = OnceLock::new();
     static SUB_RE: OnceLock<Regex> = OnceLock::new();
-    static DOT_MUL_RE: OnceLock<Regex> = OnceLock::new();
     static STAR_MUL_RE: OnceLock<Regex> = OnceLock::new();
 
     let hydrate_re = HYDRATE_RE
@@ -79,31 +78,52 @@ fn format_chemical_text(text: &str) -> String {
     // H_2SO_4 splits into two subscripts instead of swallowing "SO".
     let sub_re =
         SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])((?:_[A-Za-z0-9]+?)+)").unwrap());
-    let dot_mul_re = DOT_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z)])\.([A-Za-z0-9(])").unwrap());
     let star_mul_re =
         STAR_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·]([A-Za-z0-9(])").unwrap());
 
-    let text = hydrate_re.replace_all(text, "$1×$2$3");
+    let text = hydrate_re.replace_all(text, "$1.$2$3");
     let text = sup_re.replace_all(&text, "$1<sup>$2</sup>");
     let text = sub_re.replace_all(&text, |caps: &regex::Captures| {
         format!("{}<sub>{}</sub>", &caps[1], caps[2].replace('_', ""))
     });
-    let text = dot_mul_re.replace_all(&text, "$1×$2");
-    star_mul_re.replace_all(&text, "$1×$2").into_owned()
+    star_mul_re.replace_all(&text, "$1.$2").into_owned()
 }
 
 /// Apply chemical formatting so the exported static text matches the UI renderer.
 fn format_text_segment(text: &str) -> String {
-    static DOT_HYDRATE_RE: OnceLock<Regex> = OnceLock::new();
-    static DOT_MUL_RE: OnceLock<Regex> = OnceLock::new();
+    format_chemical_text(text)
+}
 
-    let dot_hydrate_re = DOT_HYDRATE_RE
-        .get_or_init(|| Regex::new(r"([A-Za-z0-9)])\.(\d*)(H[₂2_]?[_₂2]?O)\b").unwrap());
-    let dot_mul_re = DOT_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z)])\.([A-Za-z0-9(])").unwrap());
+/// Format a value using significant figures, with Czech decimal comma.
+fn fmt_significant_cz(value: f64, sig_digits: u8) -> String {
+    if value == 0.0 || !value.is_finite() {
+        let zeros = if sig_digits > 1 { sig_digits - 1 } else { 0 };
+        return format!("0,{}", "0".repeat(zeros as usize));
+    }
+    let abs = value.abs();
+    let order = abs.log10().floor() as i32;
+    let decimals = (sig_digits as i32 - 1 - order).max(0) as u8;
+    fmt_cz(value, decimals)
+}
 
-    let text = dot_hydrate_re.replace_all(text, "$1×$2$3");
-    let text = dot_mul_re.replace_all(&text, "$1×$2");
-    format_chemical_text(&text)
+/// Format a variable value for export: significant digits when set, otherwise
+/// fixed precision.
+fn fmt_variable_value(
+    value: f64,
+    precision: u8,
+    sig_digits: Option<u8>,
+) -> String {
+    match sig_digits {
+        Some(n) => {
+            let formatted = fmt_significant_cz(value, n);
+            let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
+            if (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD {
+                return fmt_scientific_cz(value);
+            }
+            formatted
+        }
+        None => fmt_value_cz(value, precision),
+    }
 }
 
 fn render_question(
@@ -111,6 +131,7 @@ fn render_question(
     assigned: &HashMap<String, f64>,
     assigned_strings: &HashMap<String, String>,
     precisions: &HashMap<String, u8>,
+    significant_digits: &HashMap<String, u8>,
 ) -> String {
     // The trailing `[n]` / `[n mol]` markers tell the generator which symbol
     // to solve for — they are not part of the question and must never reach
@@ -139,7 +160,8 @@ fn render_question(
         };
         if let Some(&value) = assigned.get(lookup_key) {
             let precision = precisions.get(lookup_key).copied().unwrap_or(1);
-            rendered.push_str(&fmt_value_cz(value, precision));
+            let sig_digits = significant_digits.get(lookup_key).copied();
+            rendered.push_str(&fmt_variable_value(value, precision, sig_digits));
         } else if !has_eq {
             if let Some(value) = assigned_strings.get(symbol) {
                 rendered.push_str(&format_chemical_text(value));
@@ -240,6 +262,7 @@ pub struct ExportQuestion<'a> {
     pub template: &'a Template,
     pub variant: &'a Variant,
     pub variable_precisions: HashMap<String, u8>,
+    pub variable_significant_digits: HashMap<String, u8>,
     pub result_precision: u8,
     pub mode: TemplateMode,
 }
@@ -258,6 +281,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
             &q.variant.assigned_values,
             &q.variant.assigned_strings,
             &q.variable_precisions,
+            &q.variable_significant_digits,
         );
         out.push_str(&format!("{} ({} b)\n\n", rendered, q.template.point_value));
 
@@ -341,6 +365,7 @@ mod tests {
             numeric_answer: None,
             result_unit: "g".to_string(),
             point_value: 3,
+            significant_digits: None,
             created_at: Utc::now(),
         }
     }
@@ -368,6 +393,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
@@ -390,6 +416,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
@@ -421,6 +448,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Open,
         }]);
@@ -484,6 +512,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: [("X".to_string(), 0)].into(),
+            variable_significant_digits: HashMap::new(),
             result_precision: 2,
             mode: TemplateMode::Closed,
         }]);
@@ -516,6 +545,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
             result_precision: 2,
             mode: TemplateMode::Open,
         }]);
@@ -543,6 +573,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
             result_precision: 2,
             mode: TemplateMode::Open,
         }]);
@@ -572,6 +603,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
             result_precision: 2,
             mode: TemplateMode::Open,
         }]);
@@ -605,6 +637,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Open,
         }]);
@@ -628,6 +661,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Open,
         }]);
@@ -655,6 +689,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Open,
         }]);
@@ -676,6 +711,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
@@ -699,6 +735,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Open,
         }]);
@@ -737,6 +774,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
@@ -774,6 +812,7 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Open,
         }]);
@@ -790,12 +829,13 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("FeSO4×7H2O"));
-        assert!(!output.contains("FeSO4.7H2O"));
+        assert!(output.contains("FeSO4.7H2O"));
+        assert!(!output.contains("FeSO4×7H2O"));
     }
 
     #[test]
@@ -807,11 +847,12 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("FeSO4×7H<sub>2</sub>O"));
+        assert!(output.contains("FeSO4.7H<sub>2</sub>O"));
         assert!(!output.contains("FeSO4*7H_2O"));
     }
 
@@ -824,11 +865,12 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("g×cm<sup>-3</sup>"));
+        assert!(output.contains("g.cm<sup>-3</sup>"));
         assert!(output.contains("1.5"));
     }
 
@@ -841,11 +883,12 @@ mod tests {
             template: &template,
             variant: &variant,
             variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
             result_precision: 1,
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("g×cm<sup>-3</sup>"));
+        assert!(output.contains("g.cm<sup>-3</sup>"));
         assert!(output.contains("1.5"));
     }
 }

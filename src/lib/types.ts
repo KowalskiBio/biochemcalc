@@ -33,6 +33,7 @@ export interface Variable {
   precision: number
   stringValues?: string[]
   pairedConstants?: Array<Record<string, number>>
+  significantDigits?: number
   createdAt: string
 }
 
@@ -48,6 +49,7 @@ export interface VariableInput {
   precision: number
   stringValues?: string[]
   pairedConstants?: Array<Record<string, number>>
+  significantDigits?: number
 }
 
 /**
@@ -135,6 +137,7 @@ export interface Template {
   numericAnswer?: number
   resultUnit: string
   pointValue: number
+  significantDigits?: number
   createdAt: string
   // Extended with related data
   variables?: TemplateVariableInput[]
@@ -183,6 +186,7 @@ export interface UpdateTemplateWithVariablesPayload {
   numericAnswer?: number
   resultUnit: string
   pointValue: number
+  significantDigits?: number
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -202,6 +206,7 @@ export interface LocalVariableEdit {
   precision: number
   stringValues?: string[]
   pairedConstants?: Array<Record<string, number>>
+  significantDigits?: number
   greaterThanVariableId?: string
   lessThanVariableId?: string
   isNew: boolean
@@ -220,6 +225,7 @@ export interface TemplateInput {
   numericAnswer?: number
   resultUnit: string
   pointValue: number
+  significantDigits?: number
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -251,6 +257,7 @@ export interface Set {
   categoryId: string
   setIndex: number
   mode: TemplateMode
+  name?: string
 }
 
 /**
@@ -319,6 +326,7 @@ export interface ExportQuestion {
   template: Template
   variant: Variant
   variablePrecisions: Record<string, number>
+  variableSignificantDigits?: Record<string, number>
   resultPrecision: number
   mode: TemplateMode
 }
@@ -516,6 +524,7 @@ export interface ProjektQuestion {
   assignedValues: Record<string, unknown>
   assignedStrings?: Record<string, string>
   variablePrecisions: Record<string, number>
+  variableSignificantDigits?: Record<string, number>
   resultPrecision: number
   numericOptions?: number[]
   correctOption?: number

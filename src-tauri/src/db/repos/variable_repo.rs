@@ -24,8 +24,8 @@ impl VariableRepo {
             .map(|c| serde_json::to_string(c).unwrap_or_default())
             .unwrap_or_default();
         conn.execute(
-            "INSERT INTO variables (id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, paired_constants, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO variables (id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, paired_constants, significant_digits, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 v.id,
                 v.name,
@@ -38,6 +38,7 @@ impl VariableRepo {
                 v.precision,
                 string_values_json,
                 paired_constants_json,
+                v.significant_digits,
                 v.created_at.to_rfc3339(),
             ],
         )?;
@@ -46,7 +47,7 @@ impl VariableRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Variable>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at, paired_constants
+            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at, paired_constants, significant_digits
              FROM variables ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| Ok(parse_variable_row(row)?))?;
@@ -59,7 +60,7 @@ impl VariableRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Variable, DbError> {
         conn.query_row(
-            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at, paired_constants
+            "SELECT id, name, symbol, var_type, min_value, max_value, step, unit, precision, string_values, created_at, paired_constants, significant_digits
              FROM variables WHERE id = ?1",
             params![id],
             |row| parse_variable_row(row),
@@ -84,7 +85,7 @@ impl VariableRepo {
             .unwrap_or_default();
         let affected = conn.execute(
             "UPDATE variables SET name=?2, symbol=?3, var_type=?4, min_value=?5, max_value=?6, step=?7, \
-             unit=?8, precision=?9, string_values=?10, paired_constants=?11, created_at=?12 WHERE id=?1",
+             unit=?8, precision=?9, string_values=?10, paired_constants=?11, created_at=?12, significant_digits=?13 WHERE id=?1",
             params![
                 v.id,
                 v.name,
@@ -98,6 +99,7 @@ impl VariableRepo {
                 string_values_json,
                 paired_constants_json,
                 v.created_at.to_rfc3339(),
+                v.significant_digits,
             ],
         )?;
         if affected == 0 {
@@ -194,6 +196,7 @@ fn parse_variable_row(row: &rusqlite::Row) -> Result<Variable, rusqlite::Error> 
             .and_then(|s| parse_paired_constants(s)),
         greater_than: None,
         less_than: None,
+        significant_digits: row.get::<_, Option<u8>>(12)?,
         created_at: parse_dt(row.get::<_, String>(10)?),
     })
 }

@@ -15,14 +15,15 @@ use crate::commands::reports::{
 };
 use crate::commands::{
     self, BulkImportTemplatesPayload, ClearTemplateHistoryPayload, CreateCategoryPayload,
-    CreateConstantPayload, CreateTemplatePayload, CreateTopicPayload, CreateVariablePayload,
-    DeleteProjektPayload, ExportPayload, ExportProjektToTxtPayload, ExportResult,
-    GenerateForTemplatesPayload, GeneratedTemplate, LoadProjektPayload, OutputFileContent,
-    RegenerateVariantPayload, ReorderTemplatesPayload, SaveProjektPayload, SetTemplatePayload,
-    TemplateLocation, TemplateWithDetails, UpdateConstantPayload, UpdateProjektPayload,
-    UpdateSetModePayload, UpdateTemplatePayload, UpdateTemplateWithVariablesPayload,
-    UpdateTemplatesByEquationPayload, UpdateTopicPayload, UpdateVariablePayload,
-    VictorChatPayload, VictorResponse, VictorSettings, VictorSettingsPayload,
+    CreateConstantPayload, CreateSetPayload, CreateTemplatePayload, CreateTopicPayload,
+    CreateVariablePayload, DeleteProjektPayload, ExportPayload, ExportProjektToTxtPayload,
+    ExportResult, GenerateForTemplatesPayload, GeneratedTemplate, LoadProjektPayload,
+    MoveSetPayload, OutputFileContent, RegenerateVariantPayload, ReorderTemplatesPayload,
+    SaveProjektPayload, SetTemplatePayload, TemplateLocation, TemplateWithDetails,
+    UpdateConstantPayload, UpdateProjektPayload, UpdateSetNamePayload, UpdateSetModePayload,
+    UpdateTemplatePayload, UpdateTemplateWithVariablesPayload, UpdateTemplatesByEquationPayload,
+    UpdateTopicPayload, UpdateVariablePayload, VictorChatPayload, VictorResponse,
+    VictorSettings, VictorSettingsPayload,
 };
 use crate::db::repos::{
     CategoryRepo, ConstantRepo, OutputFileRepo, ProjektRepo, SetRepo, TemplateHistoryRepo,
@@ -185,6 +186,7 @@ async fn update_variable(
         paired_constants: payload.paired_constants,
         greater_than: None,
         less_than: None,
+        significant_digits: payload.significant_digits,
         created_at: chrono::Utc::now(),
     };
     VariableRepo::update(&conn, &variable)?;
@@ -465,6 +467,39 @@ async fn delete_category(
     let conn = conn!(state);
     CategoryRepo::delete(&conn, &body.id)?;
     Ok(())
+}
+
+async fn create_set(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateSetPayload>,
+) -> Result<Json<Set>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(SetRepo::create(
+        &conn,
+        payload.category_id,
+        payload.mode,
+    )?))
+}
+
+async fn update_set_name(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<UpdateSetNamePayload>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    SetRepo::update_name(&conn, &payload.set_id, payload.name.as_deref())?;
+    Ok(())
+}
+
+async fn move_set(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<MoveSetPayload>,
+) -> Result<Json<u8>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(SetRepo::move_to_category(
+        &conn,
+        &payload.set_id,
+        &payload.target_category_id,
+    )?))
 }
 
 async fn update_set_mode(
@@ -769,6 +804,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/get_category", post(get_category))
         .route("/get_category_with_sets", post(get_category_with_sets))
         .route("/delete_category", post(delete_category))
+        .route("/create_set", post(create_set))
+        .route("/update_set_name", post(update_set_name))
+        .route("/move_set", post(move_set))
         .route("/update_set_mode", post(update_set_mode))
         .route("/add_template_to_set", post(add_template_to_set))
         .route(

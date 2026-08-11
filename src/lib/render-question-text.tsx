@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
 import { constantsApi } from "@/lib/api"
-import { formatNumberMaxDecimals, scientificNotationToHtml } from "@/lib/math-utils"
+import { formatNumberMaxDecimals, formatSignificantDigits, scientificNotationToHtml } from "@/lib/math-utils"
 import { PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
@@ -38,8 +38,8 @@ export const VARIABLE_COLORS = [
 export function formatChemicalText(text: string): string {
   return (
     text
-      // Hydrate separators → × BEFORE sub/sup so H_2O is still raw text.
-      .replace(/([A-Za-z0-9)])[*·.](\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1×$2$3")
+      // Hydrate separators → . BEFORE sub/sup so H_2O is still raw text.
+      .replace(/([A-Za-z0-9)])[*·.](\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1.$2$3")
       // Superscripts: 10^-5, x^2, Ca^2+, PO4^3-, etc.
       // Handles: digits with optional sign prefix/suffix, or bare sign (^- / ^+).
       .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])/g, (_, base, exponent) => {
@@ -53,10 +53,9 @@ export function formatChemicalText(text: string): string {
       .replace(/([A-Za-z0-9)]|\))((?:_[A-Za-z0-9]+?)+)/g, (_, base, subscript) => {
         return `${base}<sub>${subscript.replace(/_/g, "")}</sub>`
       })
-      // Remaining . as multiplication → ×, but keep digit.digit as a decimal point.
-      .replace(/([A-Za-z)])\.(?=[A-Za-z0-9(])/gu, "$1×")
-      // Remaining * / · between formula characters → ×.
-      .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1×$2")
+      // Remaining * / · between formula characters → . (dot, not ×).
+      // A bare . is already the desired output, so no explicit . → . pass.
+      .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1.$2")
   )
 }
 
@@ -86,8 +85,11 @@ function formatTextSegment(text: string): string {
   return formatChemicalText(text)
 }
 
-function formatNumberSegment(value: number, precision: number): string {
-  return scientificNotationToHtml(formatNumberMaxDecimals(value, precision))
+function formatNumberSegment(value: number, precision: number, significantDigits?: number): string {
+  const formatted = significantDigits
+    ? formatSignificantDigits(value, significantDigits)
+    : formatNumberMaxDecimals(value, precision)
+  return scientificNotationToHtml(formatted)
 }
 
 function renderConstantValue(value: number): string {
@@ -220,7 +222,7 @@ function renderPlaceholderSpan(
     const displayValue =
       variable.varType === "string"
         ? formatTextSegment(getExampleStringValue(placeholder, variable, databazeEntries))
-        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable))
+        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable), variable.significantDigits)
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
   const constantValue = constants[placeholder]
@@ -372,7 +374,7 @@ function renderPlaceholderSpanWithVariant(
         const sampledValue = variant.assignedValues[placeholder]
         const rawValue =
           sampledValue !== undefined ? sampledValue : previewValueForVariable(variable)
-        const displayValue = formatNumberSegment(rawValue, effectivePrecision(variable))
+        const displayValue = formatNumberSegment(rawValue, effectivePrecision(variable), variable.significantDigits)
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
     }
@@ -381,7 +383,7 @@ function renderPlaceholderSpanWithVariant(
     const displayValue =
       variable.varType === "string"
         ? formatTextSegment(getExampleStringValue(placeholder, variable, databazeEntries))
-        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable))
+        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable), variable.significantDigits)
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
 

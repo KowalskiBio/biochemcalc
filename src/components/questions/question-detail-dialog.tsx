@@ -83,6 +83,7 @@ function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
     precision: vwp.variable.precision,
     stringValues: vwp.variable.stringValues,
     pairedConstants: vwp.variable.pairedConstants,
+    significantDigits: vwp.variable.significantDigits,
     greaterThanVariableId: vwp.greaterThanVariableId,
     lessThanVariableId: vwp.lessThanVariableId,
     isNew: false,
@@ -242,6 +243,7 @@ function buildVariableInput(v: LocalVariableEdit): VariableInput {
     precision: v.precision,
     stringValues: v.stringValues,
     pairedConstants: v.pairedConstants,
+    significantDigits: v.significantDigits,
   }
 }
 
@@ -263,6 +265,7 @@ function variableChanged(
     current.step !== original.step ||
     current.unit !== original.unit ||
     current.precision !== original.precision ||
+    current.significantDigits !== original.significantDigits ||
     current.placeholder !== original.placeholder ||
     current.greaterThanVariableId !== original.greaterThanVariableId ||
     current.lessThanVariableId !== original.lessThanVariableId ||
@@ -293,6 +296,7 @@ export function QuestionDetailDialog({
   const [isEditingAnswer, setIsEditingAnswer] = useState(false)
   const [editEquationText, setEditEquationText] = useState("")
   const [editResultUnit, setEditResultUnit] = useState("")
+  const [editSignificantDigits, setEditSignificantDigits] = useState<string>("")
   const [mockSeed, setMockSeed] = useState(0)
   const [sampleSeed, setSampleSeed] = useState(1)
 
@@ -344,6 +348,11 @@ export function QuestionDetailDialog({
       setEditText(details.template.questionText)
       setEditEquationText(details.template.equationText ?? "")
       setEditResultUnit(details.template.resultUnit)
+      setEditSignificantDigits(
+        details.template.significantDigits != null
+          ? String(details.template.significantDigits)
+          : "",
+      )
       setIsEditingAnswer(false)
       setEditingVariableKey(null)
       setValidationErrors({})
@@ -471,8 +480,11 @@ export function QuestionDetailDialog({
     if (editText !== (templateDetails?.template.questionText ?? "")) return true
     if (editEquationText !== (templateDetails?.template.equationText ?? "")) return true
     if (editResultUnit !== (templateDetails?.template.resultUnit ?? "")) return true
+    const currentSigDigits = templateDetails?.template.significantDigits
+    const newSigDigits = editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+    if (newSigDigits !== currentSigDigits) return true
     return dirtyVariableKeys.size > 0
-  }, [editText, editEquationText, editResultUnit, templateDetails, dirtyVariableKeys])
+  }, [editText, editEquationText, editResultUnit, editSignificantDigits, templateDetails, dirtyVariableKeys])
 
   const handleSave = async () => {
     if (!templateDetails) return
@@ -551,6 +563,8 @@ export function QuestionDetailDialog({
       }
     }
 
+    const sigDigits = editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+
     const payload: UpdateTemplateWithVariablesPayload = {
       id: templateId,
       questionText: editText,
@@ -559,6 +573,7 @@ export function QuestionDetailDialog({
       numericAnswer: templateDetails.template.numericAnswer,
       resultUnit: editResultUnit,
       pointValue: templateDetails.template.pointValue,
+      significantDigits: sigDigits,
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
       constraint: templateDetails.template.constraint,
@@ -591,6 +606,11 @@ export function QuestionDetailDialog({
     setEditText(templateDetails?.template.questionText ?? "")
     setEditEquationText(templateDetails?.template.equationText ?? "")
     setEditResultUnit(templateDetails?.template.resultUnit ?? "")
+    setEditSignificantDigits(
+      templateDetails?.template.significantDigits != null
+        ? String(templateDetails.template.significantDigits)
+        : "",
+    )
     setIsEditingAnswer(false)
     setLocalVariables(originalVariables.map((v) => ({ ...v })))
     setIsEditingText(false)
@@ -609,6 +629,8 @@ export function QuestionDetailDialog({
         placeholder: vwp.placeholder,
       }))
 
+      const sigDigits = editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+
       const payload: UpdateTemplateWithVariablesPayload = {
         id: templateId,
         questionText: templateDetails.template.questionText,
@@ -617,6 +639,7 @@ export function QuestionDetailDialog({
         numericAnswer: templateDetails.template.numericAnswer,
         resultUnit: editResultUnit,
         pointValue: templateDetails.template.pointValue,
+        significantDigits: sigDigits,
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: templateDetails.template.constraint,
@@ -761,6 +784,10 @@ export function QuestionDetailDialog({
   const displayTemplateVariables = templateDetails
     ? templateDetails.variables.filter((vwp) => vwp.placeholder !== "ANS")
     : []
+  const displayPrecision = templateDetails?.template.significantDigits ?? Math.max(
+    2,
+    ...displayTemplateVariables.map((v) => v.variable.precision),
+  )
 
   const placeholderHelp = displayTemplateVariables.length > 0 && (
     <div className="text-xs text-foreground-secondary">
@@ -1093,7 +1120,7 @@ export function QuestionDetailDialog({
 
     try {
       const value = evaluateExpression(normalized, {}, constants)
-      const resultPrecision = Math.max(
+      const resultPrecision = templateDetails?.template.significantDigits ?? Math.max(
         2,
         ...referencedVariables.filter((v) => v.varType === "numeric").map((v) => v.precision),
         ...referencedFixedPlaceholders.map(() => 2),
@@ -1339,6 +1366,23 @@ export function QuestionDetailDialog({
                         disabled={isSaving}
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="significantDigits">{cs.questions.significantDigits}</Label>
+                      <Input
+                        id="significantDigits"
+                        type="number"
+                        value={editSignificantDigits}
+                        onChange={(e) => setEditSignificantDigits(e.target.value)}
+                        placeholder="např. 4"
+                        min={1}
+                        max={10}
+                        disabled={isSaving}
+                        className="max-w-[120px]"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {cs.questions.significantDigitsHelp}
+                      </p>
+                    </div>
                     {editEquationText.trim().length > 0 && (
                       <div className="rounded-lg bg-muted/50 p-4 space-y-2">
                         <p className="text-sm font-medium text-foreground-secondary">
@@ -1486,12 +1530,8 @@ export function QuestionDetailDialog({
                                     {a.symbol} ={" "}
                                     <FormattedResult
                                       value={a.value}
-                                      precision={Math.max(
-                                        2,
-                                        ...displayTemplateVariables.map(
-                                          (v) => v.variable.precision,
-                                        ),
-                                      )}
+                                      precision={displayPrecision}
+                                      significantDigits={templateDetails?.template.significantDigits}
                                       unit={a.unit}
                                     />
                                   </p>
@@ -1501,10 +1541,8 @@ export function QuestionDetailDialog({
                               <p className="text-2xl font-bold text-primary">
                                 <FormattedResult
                                   value={sampleVariant.correctAnswer}
-                                  precision={Math.max(
-                                    2,
-                                    ...displayTemplateVariables.map((v) => v.variable.precision),
-                                  )}
+                                  precision={displayPrecision}
+                                  significantDigits={templateDetails?.template.significantDigits}
                                   unit={templateDetails.template.resultUnit}
                                 />
                               </p>
@@ -1524,10 +1562,8 @@ export function QuestionDetailDialog({
                           <p className="text-2xl font-bold text-primary">
                             <FormattedResult
                               value={templateDetails.template.numericAnswer}
-                              precision={Math.max(
-                                2,
-                                ...displayTemplateVariables.map((v) => v.variable.precision),
-                              )}
+                              precision={displayPrecision}
+                              significantDigits={templateDetails?.template.significantDigits}
                               unit={templateDetails.template.resultUnit}
                             />
                           </p>
@@ -1601,6 +1637,7 @@ export function QuestionDetailDialog({
                                           <FormattedResult
                                             value={a.value}
                                             precision={mockResult.resultPrecision}
+                                            significantDigits={templateDetails?.template.significantDigits}
                                             unit={a.unit ?? templateDetails.template.resultUnit}
                                           />
                                         </p>
@@ -1611,6 +1648,7 @@ export function QuestionDetailDialog({
                                       <FormattedResult
                                         value={mockResult.value}
                                         precision={mockResult.resultPrecision}
+                                        significantDigits={templateDetails?.template.significantDigits}
                                         unit={templateDetails.template.resultUnit}
                                       />
                                     </p>
