@@ -87,7 +87,7 @@ function StudentSidebar() {
         </div>
         <div className="flex flex-col overflow-hidden">
           <span className="font-semibold text-[hsl(var(--sidebar-foreground))] tracking-tight">
-            BiochemCalc
+            Biocal
           </span>
           <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-[hsl(var(--sidebar-foreground))]/40 truncate">
             {username}

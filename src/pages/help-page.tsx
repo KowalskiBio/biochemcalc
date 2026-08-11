@@ -19,7 +19,7 @@ export function HelpPage() {
               <HelpCircle className="size-5" />O aplikaci
             </CardTitle>
             <CardDescription>
-              BiochemCalc — generátor variabilních biochemických výpočtových úloh.
+              Biocal — generátor variabilních biochemických výpočtových úloh.
             </CardDescription>
           </CardHeader>
           <CardContent>

@@ -39,7 +39,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
   const [previewVariants, setPreviewVariants] = useState<Variant[]>([])
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0)
   const [filename, setFilename] = useState<string>(
-    `biochemcalc_${new Date().toISOString().slice(0, 10)}`,
+    `biocal_${new Date().toISOString().slice(0, 10)}`,
   )
 
   // Generate variants for all sets
@@ -308,7 +308,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                 id="filename"
                 value={filename}
                 onChange={(e) => setFilename(e.target.value)}
-                placeholder="e.g., biochemcalc_assignment"
+                placeholder="e.g., biocal_assignment"
               />
               <p className="text-xs text-muted-foreground">Will be saved as .txt file</p>
             </div>
@@ -316,7 +316,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
             <div className="flex gap-4">
               <Button
                 variant="outline"
-                onClick={() => setFilename(`biochemcalc_${new Date().toISOString().slice(0, 10)}`)}
+                onClick={() => setFilename(`biocal_${new Date().toISOString().slice(0, 10)}`)}
               >
                 Use Today's Date
               </Button>

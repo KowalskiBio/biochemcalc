@@ -8,11 +8,11 @@ import {
   FolderOpen,
   HelpCircle,
   History,
-  Home,
   Moon,
   Settings,
   Sigma,
   Sun,
+  Trophy,
   Upload,
 } from "lucide-react"
 import type React from "react"
@@ -31,11 +31,6 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  {
-    path: "/",
-    icon: <Home className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.home,
-  },
   {
     path: "/topics",
     icon: <BookOpen className="size-[18px]" strokeWidth={1.75} />,
@@ -80,6 +75,11 @@ const navItems: NavItem[] = [
     path: "/hlaseni",
     icon: <Flag className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.hlaseni,
+  },
+  {
+    path: "/leaderboard",
+    icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.leaderboard,
   },
 ]
 
@@ -160,7 +160,7 @@ export function Sidebar() {
           </div>
           <div className="flex flex-col">
             <span className="font-semibold text-[hsl(var(--sidebar-foreground))] tracking-tight">
-              BiochemCalc
+              Biocal
             </span>
             <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-[hsl(var(--sidebar-foreground))]/40">
               LAB v1

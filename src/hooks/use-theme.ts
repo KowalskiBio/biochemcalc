@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 
 /**
- * Theme hook for managing dark mode in BiochemCalc
+ * Theme hook for managing dark mode in Biocal
  * Uses Tailwind CSS "class" strategy: toggles .dark class on <html> element
  * Persists preference to localStorage
  * Respects prefers-reduced-motion

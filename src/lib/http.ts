@@ -1,5 +1,5 @@
 /**
- * Low-level HTTP client for the biochemcalc backend, replacing Tauri's
+ * Low-level HTTP client for the biocal backend, replacing Tauri's
  * `invoke()`. The server responds with the raw value on success, or a
  * `{"kind": "...", "message": "..."}` JSON body on failure (see the Rust
  * `DbError` serialization in `src-tauri/src/db/mod.rs`).

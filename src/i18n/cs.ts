@@ -1,4 +1,4 @@
-// BiochemCalc Czech translations
+// Biocal Czech translations
 // Generated: 2026-07-08
 // Czech Biochemistry Teachers - Professional Educators
 
@@ -859,9 +859,9 @@ export const cs = {
 
   // Home page
   home: {
-    title: "BiochemCalc",
+    title: "Biocal",
     subtitle: "Generátor variabilních biochemických výpočtových úloh",
-    welcome: "Vítejte v BiochemCalc",
+    welcome: "Vítejte v Biocal",
     description:
       "Vytvářejte proměnné, konstanty a šablony pro generování jedinečných biochemických výpočtových úloh.",
     stats: {
@@ -1114,11 +1114,11 @@ export const cs = {
 
   // App metadata
   app: {
-    name: "BiochemCalc",
-    shortName: "BiochemCalc",
+    name: "Biocal",
+    shortName: "Biocal",
     description: "Generátor variabilních biochemických výpočtových úloh pro učitele",
     version: "1.0.0",
-    author: "BiochemCalc Team",
+    author: "Biocal Team",
     license: "MIT",
   },
 } as const
