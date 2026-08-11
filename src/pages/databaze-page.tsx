@@ -229,6 +229,7 @@ export function DatabazePage() {
           c.name.toLowerCase().includes(query) ||
           (c.formula?.toLowerCase().includes(query) ?? false),
       )
+      .sort((a, b) => a.value - b.value)
   }, [molarMasses, searchQuery, showAtomicWeights, isAtomicWeightEntry])
 
   const handleBulkImportMolarMasses = useCallback(
