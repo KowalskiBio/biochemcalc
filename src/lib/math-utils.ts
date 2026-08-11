@@ -1112,7 +1112,11 @@ export function formatSignificantDigits(
   }
 
   const order = Math.floor(Math.log10(abs))
-  const decimalPlaces = Math.max(0, sigDigits - 1 - order)
+  const decimalPlaces = sigDigits - 1 - order
+  if (decimalPlaces < 0) {
+    const factor = 10 ** -decimalPlaces
+    return (Math.round(value / factor) * factor).toFixed(0)
+  }
   return value.toFixed(decimalPlaces)
 }
 
@@ -1292,7 +1296,11 @@ export function formatValueForSubstitution(
       const mantissaDigits = significantDigits - 1
       return `${mantissa.toFixed(mantissaDigits)}e${order}`
     }
-    const decimalPlaces = Math.max(0, significantDigits - 1 - order)
+    const decimalPlaces = significantDigits - 1 - order
+    if (decimalPlaces < 0) {
+      const factor = 10 ** -decimalPlaces
+      return (Math.round(value / factor) * factor).toFixed(0)
+    }
     return value.toFixed(decimalPlaces)
   }
   return String(value)

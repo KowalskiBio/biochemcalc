@@ -102,8 +102,13 @@ fn fmt_significant_cz(value: f64, sig_digits: u8) -> String {
     }
     let abs = value.abs();
     let order = abs.log10().floor() as i32;
-    let decimals = (sig_digits as i32 - 1 - order).max(0) as u8;
-    fmt_cz(value, decimals)
+    let decimals = sig_digits as i32 - 1 - order;
+    if decimals < 0 {
+        let factor = 10f64.powi(-decimals);
+        let rounded = (value / factor).round() * factor;
+        return fmt_cz(rounded, 0);
+    }
+    fmt_cz(value, decimals as u8)
 }
 
 /// Format a variable value for export: significant digits when set, otherwise
@@ -1063,5 +1068,15 @@ mod tests {
             output.contains(" :r1 12,35 g"),
             "expected 2 max decimals (12,35) for option 1, got:\n{output}"
         );
+    }
+
+    #[test]
+    fn significant_digits_round_large_numbers_to_correct_magnitude() {
+        assert_eq!(fmt_significant_cz(111554.0, 2), "110000");
+        assert_eq!(fmt_significant_cz(111554.0, 3), "112000");
+        assert_eq!(fmt_significant_cz(111554.0, 4), "111600");
+        assert_eq!(fmt_significant_cz(111554.0, 5), "111550");
+        assert_eq!(fmt_significant_cz(111554.0, 6), "111554");
+        assert_eq!(fmt_significant_cz(111554.0, 7), "111554,0");
     }
 }

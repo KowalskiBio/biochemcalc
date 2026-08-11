@@ -745,6 +745,15 @@ describe("formatSignificantDigits", () => {
     expect(formatSignificantDigits(undefined, 3)).toBe("")
     expect(formatSignificantDigits(Number.NaN, 3)).toBe("")
   })
+
+  it("rounds large numbers to the correct magnitude when sig digits < integer digits", () => {
+    expect(formatSignificantDigits(111554, 2)).toBe("110000")
+    expect(formatSignificantDigits(111554, 3)).toBe("112000")
+    expect(formatSignificantDigits(111554, 4)).toBe("111600")
+    expect(formatSignificantDigits(111554, 5)).toBe("111550")
+    expect(formatSignificantDigits(111554, 6)).toBe("111554")
+    expect(formatSignificantDigits(111554, 7)).toBe("111554.0")
+  })
 })
 
 describe("buildSubstitutedEquation", () => {
