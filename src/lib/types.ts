@@ -139,6 +139,7 @@ export interface Template {
   pointValue: number
   significantDigits?: number
   forceScientific?: boolean
+  decoyFormula?: string
   createdAt: string
   // Extended with related data
   variables?: TemplateVariableInput[]
@@ -189,6 +190,7 @@ export interface UpdateTemplateWithVariablesPayload {
   pointValue: number
   significantDigits?: number
   forceScientific?: boolean
+  decoyFormula?: string
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -229,6 +231,7 @@ export interface TemplateInput {
   pointValue: number
   significantDigits?: number
   forceScientific?: boolean
+  decoyFormula?: string
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
