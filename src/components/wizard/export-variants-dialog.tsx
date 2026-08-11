@@ -217,7 +217,8 @@ export function ExportVariantsDialog({
             variant,
             variablePrecisions,
             variableSignificantDigits,
-            resultPrecision: templateDetails.template.significantDigits ?? 2,
+            resultPrecision: 2,
+            resultSignificantDigits: templateDetails.template.significantDigits,
             mode,
           })
         }

@@ -328,6 +328,7 @@ export interface ExportQuestion {
   variablePrecisions: Record<string, number>
   variableSignificantDigits?: Record<string, number>
   resultPrecision: number
+  resultSignificantDigits?: number
   mode: TemplateMode
 }
 
@@ -526,6 +527,7 @@ export interface ProjektQuestion {
   variablePrecisions: Record<string, number>
   variableSignificantDigits?: Record<string, number>
   resultPrecision: number
+  significantDigits?: number
   numericOptions?: number[]
   correctOption?: number
   intervalLo?: number

@@ -124,7 +124,8 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
           template: result.template,
           variant: variant,
           variablePrecisions: variablePrecisions,
-          resultPrecision: 2, // Default precision
+          resultPrecision: 2,
+          resultSignificantDigits: result.template.significantDigits,
           mode: "closed",
         })
       }
