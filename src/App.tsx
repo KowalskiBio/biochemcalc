@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { Route, Routes } from "react-router-dom"
+import { Route, Routes, Navigate } from "react-router-dom"
 
 import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
@@ -10,7 +10,6 @@ import { DatabazePage } from "@/pages/databaze-page"
 import { FormulasPage } from "@/pages/formulas-page"
 import { HelpPage } from "@/pages/help-page"
 import { HistoryPage } from "@/pages/history-page"
-import { HomePage } from "@/pages/home"
 import { LoginPage } from "@/pages/login-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
@@ -31,7 +30,7 @@ function TeacherRoutes() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<Navigate to="/topics" replace />} />
         <Route path="/topics" element={<TopicsPage />} />
         <Route path="/topics/:topicId" element={<TopicDetailPage />} />
         <Route path="/sets/:setId" element={<SetDetailPage />} />
@@ -43,10 +42,11 @@ function TeacherRoutes() {
         <Route path="/constants" element={<ConstantsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/hlaseni" element={<ReportsPage />} />
+        <Route path="/leaderboard" element={<StudentLeaderboardPage />} />
         <Route path="/victor" element={<VictorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/help" element={<HelpPage />} />
-        <Route path="*" element={<HomePage />} />
+        <Route path="*" element={<Navigate to="/topics" replace />} />
       </Routes>
     </AppShell>
   )
