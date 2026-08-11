@@ -3,7 +3,11 @@ import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
 import { constantsApi } from "@/lib/api"
-import { formatNumberMaxDecimals, formatSignificantDigits, scientificNotationToHtml } from "@/lib/math-utils"
+import {
+  formatNumberMaxDecimals,
+  formatSignificantDigits,
+  scientificNotationToHtml,
+} from "@/lib/math-utils"
 import { PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
@@ -153,7 +157,12 @@ export function buildPreviewVariant(
       }
     } else {
       const { minValue, maxValue, step } = variable
-      if (step > 0 && Number.isFinite(minValue) && Number.isFinite(maxValue) && maxValue > minValue) {
+      if (
+        step > 0 &&
+        Number.isFinite(minValue) &&
+        Number.isFinite(maxValue) &&
+        maxValue > minValue
+      ) {
         const steps = Math.floor((maxValue - minValue) / step)
         const raw = minValue + Math.floor(rng() * (steps + 1)) * step
         const stepStr = String(step)
@@ -222,7 +231,11 @@ function renderPlaceholderSpan(
     const displayValue =
       variable.varType === "string"
         ? formatTextSegment(getExampleStringValue(placeholder, variable, databazeEntries))
-        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable), variable.significantDigits)
+        : formatNumberSegment(
+            previewValueForVariable(variable),
+            effectivePrecision(variable),
+            variable.significantDigits,
+          )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
   const constantValue = constants[placeholder]
@@ -374,7 +387,11 @@ function renderPlaceholderSpanWithVariant(
         const sampledValue = variant.assignedValues[placeholder]
         const rawValue =
           sampledValue !== undefined ? sampledValue : previewValueForVariable(variable)
-        const displayValue = formatNumberSegment(rawValue, effectivePrecision(variable), variable.significantDigits)
+        const displayValue = formatNumberSegment(
+          rawValue,
+          effectivePrecision(variable),
+          variable.significantDigits,
+        )
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
     }
@@ -383,7 +400,11 @@ function renderPlaceholderSpanWithVariant(
     const displayValue =
       variable.varType === "string"
         ? formatTextSegment(getExampleStringValue(placeholder, variable, databazeEntries))
-        : formatNumberSegment(previewValueForVariable(variable), effectivePrecision(variable), variable.significantDigits)
+        : formatNumberSegment(
+            previewValueForVariable(variable),
+            effectivePrecision(variable),
+            variable.significantDigits,
+          )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
 

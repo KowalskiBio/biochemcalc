@@ -253,7 +253,9 @@ export function BulkImportPage() {
       <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.bulkImport.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {cs.bulkImport.title}
+            </h1>
             <p className="text-sm text-muted-foreground mt-1">{cs.bulkImport.description}</p>
           </div>
           <Button variant="outline" onClick={loadSample}>
@@ -263,7 +265,7 @@ export function BulkImportPage() {
         </div>
       </div>
 
-       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>{cs.bulkImport.inputTitle}</CardTitle>
@@ -390,47 +392,48 @@ export function BulkImportPage() {
                           key={`${category.pointValue}-${set.setIndex}`}
                           className="pl-4 border-l-2 border-muted"
                         >
-                           <div className="flex items-center gap-2 mb-1">
-                             <p className="text-sm text-muted-foreground">
-                               {cs.topics.setIndex.replace("{index}", String(set.setIndex))} ·{" "}
-                               <span className="font-mono tabular">{set.questions.length}</span>{" "}
-                               {set.questions.length === 1
-                                 ? "otázka"
-                                 : set.questions.length >= 2 && set.questions.length <= 4
-                                   ? "otázky"
-                                   : "otázek"}
-                             </p>
-                             {mode === "questions-and-formulas" && (
-                               <span
-                                 className={`text-xs px-2 py-0.5 rounded-full ${
-                                   pairingStatus.paired === pairingStatus.total
-                                     ? "bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200"
-                                     : "bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200"
-                                 }`}
-                               >
-                                 {cs.bulkImport.pairingStatus
-                                   .replace("{paired}", String(pairingStatus.paired))
-                                   .replace("{total}", String(pairingStatus.total))}
-                               </span>
-                             )}
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-sm text-muted-foreground">
+                              {cs.topics.setIndex.replace("{index}", String(set.setIndex))} ·{" "}
+                              <span className="font-mono tabular">{set.questions.length}</span>{" "}
+                              {set.questions.length === 1
+                                ? "otázka"
+                                : set.questions.length >= 2 && set.questions.length <= 4
+                                  ? "otázky"
+                                  : "otázek"}
+                            </p>
+                            {mode === "questions-and-formulas" && (
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full ${
+                                  pairingStatus.paired === pairingStatus.total
+                                    ? "bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200"
+                                    : "bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200"
+                                }`}
+                              >
+                                {cs.bulkImport.pairingStatus
+                                  .replace("{paired}", String(pairingStatus.paired))
+                                  .replace("{total}", String(pairingStatus.total))}
+                              </span>
+                            )}
                           </div>
-                           <ul className="space-y-1">
-                             {set.questions.map((question, idx) => (
-                               <li
-                                 key={`${category.pointValue}-${set.setIndex}-${question.questionText}`}
-                                 className="text-sm text-muted-foreground truncate"
-                                 title={question.questionText}
-                               >
-                                 <span className="font-mono tabular">{idx + 1}</span>. {question.questionText.slice(0, 80)}
-                                 {question.questionText.length > 80 ? "…" : ""}
-                                 {question.formula && mode === "questions-and-formulas" && (
-                                   <span className="ml-2 text-xs text-muted-foreground">
-                                     ({question.equationText})
-                                   </span>
-                                 )}
-                               </li>
-                             ))}
-                           </ul>
+                          <ul className="space-y-1">
+                            {set.questions.map((question, idx) => (
+                              <li
+                                key={`${category.pointValue}-${set.setIndex}-${question.questionText}`}
+                                className="text-sm text-muted-foreground truncate"
+                                title={question.questionText}
+                              >
+                                <span className="font-mono tabular">{idx + 1}</span>.{" "}
+                                {question.questionText.slice(0, 80)}
+                                {question.questionText.length > 80 ? "…" : ""}
+                                {question.formula && mode === "questions-and-formulas" && (
+                                  <span className="ml-2 text-xs text-muted-foreground">
+                                    ({question.equationText})
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )
                     })}
@@ -440,9 +443,9 @@ export function BulkImportPage() {
             )}
           </CardContent>
         </Card>
-       </div>
+      </div>
 
-       <div>
+      <div>
         <Card>
           <CardHeader>
             <CardTitle>{cs.databaze.atomicWeights.bulkImportTitle}</CardTitle>
@@ -494,8 +497,8 @@ export function BulkImportPage() {
                 : cs.databaze.atomicWeights.bulkImport}
             </Button>
           </CardContent>
-         </Card>
-       </div>
-     </div>
+        </Card>
+      </div>
+    </div>
   )
 }

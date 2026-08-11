@@ -25,7 +25,8 @@ export function AccountCard() {
     return null
   }
 
-  const roleLabel = user.role === "teacher" ? cs.settings.users.roleTeacher : cs.settings.users.roleStudent
+  const roleLabel =
+    user.role === "teacher" ? cs.settings.users.roleTeacher : cs.settings.users.roleStudent
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

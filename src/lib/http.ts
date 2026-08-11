@@ -66,9 +66,7 @@ export async function httpRequest<T>(path: string, body?: unknown): Promise<T> {
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch (error) {
-    throw new ApiError(
-      error instanceof Error ? error.message : "Network request failed",
-    )
+    throw new ApiError(error instanceof Error ? error.message : "Network request failed")
   }
 
   const parsed = await parseBody(response)

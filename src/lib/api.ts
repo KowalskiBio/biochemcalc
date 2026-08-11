@@ -86,8 +86,7 @@ export const topicsApi = {
 // ============================================================================
 
 export const variablesApi = {
-  create: (input: VariableInput): Promise<Variable> =>
-    apiFetch<Variable>("create_variable", input),
+  create: (input: VariableInput): Promise<Variable> => apiFetch<Variable>("create_variable", input),
 
   list: (): Promise<Variable[]> => apiFetch<Variable[]>("list_variables"),
 
@@ -135,7 +134,10 @@ export const variablesApi = {
   /**
    * List all template field history entries
    */
-  listAllTemplateHistory: (limit: number = 50, offset: number = 0): Promise<TemplateHistoryEntry[]> =>
+  listAllTemplateHistory: (
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<TemplateHistoryEntry[]> =>
     apiFetch<TemplateHistoryEntry[]>("list_all_template_history", { limit, offset }),
 }
 
@@ -171,8 +173,7 @@ export const constantsApi = {
 // ============================================================================
 
 export const templatesApi = {
-  create: (input: TemplateInput): Promise<Template> =>
-    apiFetch<Template>("create_template", input),
+  create: (input: TemplateInput): Promise<Template> => apiFetch<Template>("create_template", input),
 
   list: (): Promise<Template[]> => apiFetch<Template[]>("list_templates"),
 

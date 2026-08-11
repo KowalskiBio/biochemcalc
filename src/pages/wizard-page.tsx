@@ -210,18 +210,20 @@ export function WizardPage() {
     handleComplete,
   ])
 
-   return (
+  return (
     <div className={cn(pageContainerVariants())}>
       {/* Page header */}
       <div>
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.wizard.title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {cs.wizard.title}
+          </h1>
           <p className="text-sm text-muted-foreground max-w-2xl">{cs.wizard.description}</p>
         </div>
       </div>
 
-       {/* Stepper */}
-       <div className={cn(contentSectionVariants())}>
+      {/* Stepper */}
+      <div className={cn(contentSectionVariants())}>
         <Card>
           <CardHeader>
             <CardTitle>Průvodce generováním</CardTitle>
@@ -238,17 +240,14 @@ export function WizardPage() {
               </p>
             </div>
 
-             {/* Stepper */}
+            {/* Stepper */}
             <div className={cn(stepperContainerVariants())}>
               {steps.map((step, index) => {
                 const isActive = step.id === currentStep
                 const isCompleted = step.id < currentStep
 
                 return (
-                  <div
-                    key={step.id}
-                    className={cn(stepContainerVariants())}
-                  >
+                  <div key={step.id} className={cn(stepContainerVariants())}>
                     {/* Step circle */}
                     <div
                       className={cn(
@@ -274,9 +273,9 @@ export function WizardPage() {
                       <span className="text-xs text-foreground-muted hidden sm:block">
                         {step.description}
                       </span>
-                     </div>
+                    </div>
 
-                     {/* Step line (not for last step) */}
+                    {/* Step line (not for last step) */}
                     {index < steps.length - 1 && (
                       <div className={cn(stepLineVariants({ completed: isCompleted }))} />
                     )}
@@ -288,8 +287,8 @@ export function WizardPage() {
         </Card>
       </div>
 
-       {/* Step content */}
-       <div className={cn(contentSectionVariants())}>
+      {/* Step content */}
+      <div className={cn(contentSectionVariants())}>
         <Card>
           <CardHeader>
             <CardTitle>{steps[currentStep - 1].label}</CardTitle>
@@ -299,14 +298,14 @@ export function WizardPage() {
         </Card>
       </div>
 
-       {/* Action buttons - shown only in some steps */}
-       {currentStep === 1 && (
+      {/* Action buttons - shown only in some steps */}
+      {currentStep === 1 && (
         <div className="flex justify-between gap-4">
           <Button variant="outline" onClick={() => /* Cancel */ {}}>
             {cs.common.cancel}
           </Button>
         </div>
-       )}
-     </div>
+      )}
+    </div>
   )
 }

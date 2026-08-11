@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { parsePairedConstantsText, serializePairedConstants } from "@/components/questions/variable-editor-row"
+import {
+  parsePairedConstantsText,
+  serializePairedConstants,
+} from "@/components/questions/variable-editor-row"
 
 describe("parsePairedConstantsText", () => {
   it("parses a period-decimal value per the documented format", () => {

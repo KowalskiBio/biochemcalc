@@ -57,16 +57,10 @@ export function HomePage() {
           <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-accent mb-2">
             PŘEHLED
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {cs.home.welcome}
-          </h1>
-          <p className="text-muted-foreground max-w-2xl mt-1">
-            {cs.home.description}
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{cs.home.welcome}</h1>
+          <p className="text-muted-foreground max-w-2xl mt-1">{cs.home.description}</p>
         </div>
-        <div className="font-mono text-[12px] tabular text-muted-foreground">
-          {formattedDate}
-        </div>
+        <div className="font-mono text-[12px] tabular text-muted-foreground">{formattedDate}</div>
       </div>
 
       {/* Stats panel - single bordered rule-separated panel */}
@@ -77,12 +71,8 @@ export function HomePage() {
               <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
                 {stat.label}
               </div>
-              <div className="font-mono text-3xl tabular text-foreground">
-                {stat.value}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {stat.description}
-              </div>
+              <div className="font-mono text-3xl tabular text-foreground">{stat.value}</div>
+              <div className="text-xs text-muted-foreground mt-1">{stat.description}</div>
             </div>
           ))}
         </div>
@@ -109,11 +99,7 @@ export function HomePage() {
         </div>
         <div className="space-y-1">
           {quickActions.map((action) => (
-            <Link
-              key={action.path}
-              to={action.path}
-              className="block"
-            >
+            <Link key={action.path} to={action.path} className="block">
               <div className="flex items-center justify-between p-4 hover:bg-muted/60 transition-colors rounded-[4px] border-b border-border last:border-0">
                 <span className="text-sm font-medium">{action.title}</span>
                 <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">

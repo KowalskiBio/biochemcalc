@@ -138,10 +138,12 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
     onNext(exportInput)
   }, [generatedVariants, filename, toast, onNext])
 
-   return (
+  return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-base font-semibold tracking-tight text-foreground">Generate Variants</h3>
+        <h3 className="text-base font-semibold tracking-tight text-foreground">
+          Generate Variants
+        </h3>
         <p className="text-sm text-muted-foreground">
           Configure the number of variants and seed for reproducible generation
         </p>
@@ -166,11 +168,16 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
               min={1}
               max={100}
             />
-             <p className="text-xs text-muted-foreground">
-               Total variants:{" "}
-               <span className="font-mono tabular">{variantCount *
-                 Array.from(templateAssignments.values()).reduce((sum, ids) => sum + ids.length, 0)}</span>
-             </p>
+            <p className="text-xs text-muted-foreground">
+              Total variants:{" "}
+              <span className="font-mono tabular">
+                {variantCount *
+                  Array.from(templateAssignments.values()).reduce(
+                    (sum, ids) => sum + ids.length,
+                    0,
+                  )}
+              </span>
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -182,55 +189,53 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
               onChange={(e) => setBaseSeed(parseInt(e.target.value, 10) || 0)}
               placeholder="Enter seed for reproducible results"
             />
-             <p className="text-xs text-muted-foreground">
-               Using the same seed will generate the same variants
-             </p>
+            <p className="text-xs text-muted-foreground">
+              Using the same seed will generate the same variants
+            </p>
           </div>
         </CardContent>
       </Card>
 
-       {/* Generate button */}
-       <div className="flex justify-center">
-         <Button size="lg" onClick={handleGenerate} disabled={isGenerating}>
-           {isGenerating ? (
-             <>
-               <Clock className="size-4 mr-2 animate-spin" />
-               Generating...
-               <Progress value={generationProgress} className="ml-4 w-20" />
-             </>
-           ) : (
-             <>
-               {cs.common.generate} Variants
-             </>
-           )}
-         </Button>
-       </div>
+      {/* Generate button */}
+      <div className="flex justify-center">
+        <Button size="lg" onClick={handleGenerate} disabled={isGenerating}>
+          {isGenerating ? (
+            <>
+              <Clock className="size-4 mr-2 animate-spin" />
+              Generating...
+              <Progress value={generationProgress} className="ml-4 w-20" />
+            </>
+          ) : (
+            <>{cs.common.generate} Variants</>
+          )}
+        </Button>
+      </div>
 
-       {/* Preview */}
-       {previewVariants.length > 0 && (
-         <Card>
-           <CardHeader>
-             <CardTitle>Variant Preview</CardTitle>
-             <CardDescription>Preview of the first variant from each template</CardDescription>
-           </CardHeader>
-           <CardContent>
-             <div className="space-y-4">
-               <div className="flex gap-2 mb-4">
-                 {previewVariants.map((variant, index) => (
-                   <div
-                     key={variant.id}
-                     className={selectedPreviewIndex === index ? "opacity-100" : "opacity-50"}
-                   >
-                     <Button
-                       size="sm"
-                       variant={selectedPreviewIndex === index ? "default" : "outline"}
-                       onClick={() => setSelectedPreviewIndex(index)}
-                     >
-                       Variant <span className="font-mono tabular">{index + 1}</span>
-                     </Button>
-                   </div>
-                 ))}
-               </div>
+      {/* Preview */}
+      {previewVariants.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Variant Preview</CardTitle>
+            <CardDescription>Preview of the first variant from each template</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex gap-2 mb-4">
+                {previewVariants.map((variant, index) => (
+                  <div
+                    key={variant.id}
+                    className={selectedPreviewIndex === index ? "opacity-100" : "opacity-50"}
+                  >
+                    <Button
+                      size="sm"
+                      variant={selectedPreviewIndex === index ? "default" : "outline"}
+                      onClick={() => setSelectedPreviewIndex(index)}
+                    >
+                      Variant <span className="font-mono tabular">{index + 1}</span>
+                    </Button>
+                  </div>
+                ))}
+              </div>
 
               {selectedPreviewIndex < previewVariants.length && (
                 <div className="p-4 bg-muted rounded-lg">
@@ -243,36 +248,41 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                           return (
                             <div className="space-y-1 mb-4">
                               {variant.answersData.map((a) => (
-                         <p key={a.symbol} className="text-muted-foreground">
-                                   {a.symbol} = <span className="font-mono tabular">{formatNumberForText(a.value)}</span>
-                                   {a.unit ? ` ${a.unit}` : ""}
-                                 </p>
+                                <p key={a.symbol} className="text-muted-foreground">
+                                  {a.symbol} ={" "}
+                                  <span className="font-mono tabular">
+                                    {formatNumberForText(a.value)}
+                                  </span>
+                                  {a.unit ? ` ${a.unit}` : ""}
+                                </p>
                               ))}
                             </div>
                           )
                         }
-                         return (
-                           <p className="text-muted-foreground mb-4">
-                             <span className="font-mono tabular">{formatNumberForText(variant.correctAnswer)}</span>
-                           </p>
-                         )
+                        return (
+                          <p className="text-muted-foreground mb-4">
+                            <span className="font-mono tabular">
+                              {formatNumberForText(variant.correctAnswer)}
+                            </span>
+                          </p>
+                        )
                       })()}
-                       <div className="grid grid-cols-2 gap-4">
-                         <div>
-                           <Label>Primary Answer</Label>
-                           <Badge variant="default" className="mt-2 font-mono tabular">
-                             {formatNumberForText(
-                               previewVariants[selectedPreviewIndex].correctAnswer,
-                             )}
-                           </Badge>
-                         </div>
-                         <div>
-                           <Label>Seed</Label>
-                           <Badge variant="secondary" className="mt-2 font-mono tabular">
-                             {previewVariants[selectedPreviewIndex].seed}
-                           </Badge>
-                         </div>
-                       </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>Primary Answer</Label>
+                          <Badge variant="default" className="mt-2 font-mono tabular">
+                            {formatNumberForText(
+                              previewVariants[selectedPreviewIndex].correctAnswer,
+                            )}
+                          </Badge>
+                        </div>
+                        <div>
+                          <Label>Seed</Label>
+                          <Badge variant="secondary" className="mt-2 font-mono tabular">
+                            {previewVariants[selectedPreviewIndex].seed}
+                          </Badge>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -298,7 +308,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                 onChange={(e) => setFilename(e.target.value)}
                 placeholder="e.g., biochemcalc_assignment"
               />
-               <p className="text-xs text-muted-foreground">Will be saved as .txt file</p>
+              <p className="text-xs text-muted-foreground">Will be saved as .txt file</p>
             </div>
 
             <div className="flex gap-4">
@@ -326,5 +336,3 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
     </div>
   )
 }
-
-

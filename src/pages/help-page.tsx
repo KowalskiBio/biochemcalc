@@ -4,17 +4,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export function HelpPage() {
   return (
-    <div
-      className="space-y-6"
-    >
-      <div
-      >
+    <div className="space-y-6">
+      <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Nápověda</h1>
-        <p className="text-sm text-muted-foreground mt-1">Informace o aplikaci a návody k použití.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Informace o aplikaci a návody k použití.
+        </p>
       </div>
 
-      <div
-      >
+      <div>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

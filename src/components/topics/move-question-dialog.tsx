@@ -52,22 +52,16 @@ export function MoveQuestionDialog({
   const [isMoving, setIsMoving] = useState(false)
 
   const sortedCategories = useMemo(
-    () =>
-      [...categoriesWithSets].sort((a, b) => a.category.pointValue - b.category.pointValue),
+    () => [...categoriesWithSets].sort((a, b) => a.category.pointValue - b.category.pointValue),
     [categoriesWithSets],
   )
 
-  const currentCategory = sortedCategories.find((c) =>
-    c.sets.some((s) => s.id === currentSetId),
-  )
+  const currentCategory = sortedCategories.find((c) => c.sets.some((s) => s.id === currentSetId))
   const currentPointValue = currentCategory?.category.pointValue ?? template.pointValue
 
   const targetCategory = sortedCategories.find((c) => c.category.id === targetCategoryId)
   const targetSets = useMemo(
-    () =>
-      targetCategory
-        ? [...targetCategory.sets].sort((a, b) => a.setIndex - b.setIndex)
-        : [],
+    () => (targetCategory ? [...targetCategory.sets].sort((a, b) => a.setIndex - b.setIndex) : []),
     [targetCategory],
   )
 
@@ -205,11 +199,14 @@ export function MoveQuestionDialog({
           </div>
 
           {isSameSet && targetSetId && (
-            <p className="text-sm text-amber-600 col-span-4 text-center">{cs.topics.sameSetWarning}</p>
+            <p className="text-sm text-amber-600 col-span-4 text-center">
+              {cs.topics.sameSetWarning}
+            </p>
           )}
           {isPointValueChanged && targetCategory && (
             <p className="text-sm text-muted-foreground col-span-4 text-center">
-              Bodová hodnota se změní z {currentPointValue}b na {targetCategory.category.pointValue}b.
+              Bodová hodnota se změní z {currentPointValue}b na {targetCategory.category.pointValue}
+              b.
             </p>
           )}
         </div>

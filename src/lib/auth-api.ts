@@ -16,8 +16,7 @@ import type {
 export const authApi = {
   login: (input: LoginInput): Promise<User> => httpRequest<User>("/api/auth/login", input),
 
-  register: (input: RegisterInput): Promise<User> =>
-    httpRequest<User>("/api/auth/register", input),
+  register: (input: RegisterInput): Promise<User> => httpRequest<User>("/api/auth/register", input),
 
   logout: (): Promise<void> => httpRequest<void>("/api/auth/logout"),
 
@@ -39,8 +38,7 @@ export const authApi = {
   /**
    * Teacher-only: codes that can still be handed out (not expired, not revoked).
    */
-  listInviteCodes: (): Promise<InviteCode[]> =>
-    httpRequest<InviteCode[]>("/api/auth/invite-codes"),
+  listInviteCodes: (): Promise<InviteCode[]> => httpRequest<InviteCode[]>("/api/auth/invite-codes"),
 
   /**
    * Teacher-only: retire a code immediately.
@@ -57,6 +55,5 @@ export const authApi = {
    * Teacher-only: delete an account (not your own — the server rejects
    * that to avoid the last teacher locking themselves out).
    */
-  deleteUser: (id: string): Promise<void> =>
-    httpRequest<void>("/api/auth/users/delete", { id }),
+  deleteUser: (id: string): Promise<void> => httpRequest<void>("/api/auth/users/delete", { id }),
 }

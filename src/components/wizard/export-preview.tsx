@@ -76,18 +76,18 @@ export function ExportPreview({ exportInput, onBack, onComplete }: ExportPreview
     }
   }, [exportInput, exportResult, handleExport])
 
-   if (!exportResult) {
-     return (
-       <div className="flex items-center justify-center py-12">
-         <div className="text-center space-y-4">
-           <div className="inline-block p-4 bg-muted rounded-full">
-             <FileText className="size-8 text-muted-foreground" />
-           </div>
-           <p className="text-muted-foreground">Exporting your assignment...</p>
-         </div>
-       </div>
-     )
-   }
+  if (!exportResult) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-center space-y-4">
+          <div className="inline-block p-4 bg-muted rounded-full">
+            <FileText className="size-8 text-muted-foreground" />
+          </div>
+          <p className="text-muted-foreground">Exporting your assignment...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -105,25 +105,27 @@ export function ExportPreview({ exportInput, onBack, onComplete }: ExportPreview
           <CardDescription>Your assignment has been generated successfully</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-           <div className="grid grid-cols-2 gap-4">
-             <div>
-               <Label>Filename</Label>
-               <Badge variant="default" className="mt-2 block font-mono tabular">
-                 {exportResult.filePath.split("/").pop() || exportInput.filename}
-               </Badge>
-             </div>
-             <div>
-               <Label>File Path</Label>
-               <Badge variant="secondary" className="mt-2 block truncate font-mono">
-                 {exportResult.filePath}
-               </Badge>
-             </div>
-           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Filename</Label>
+              <Badge variant="default" className="mt-2 block font-mono tabular">
+                {exportResult.filePath.split("/").pop() || exportInput.filename}
+              </Badge>
+            </div>
+            <div>
+              <Label>File Path</Label>
+              <Badge variant="secondary" className="mt-2 block truncate font-mono">
+                {exportResult.filePath}
+              </Badge>
+            </div>
+          </div>
 
-           <div className="space-y-2">
-             <Label>Character Count</Label>
-             <Badge variant="outline" className="font-mono tabular">{exportResult.content.length} characters</Badge>
-           </div>
+          <div className="space-y-2">
+            <Label>Character Count</Label>
+            <Badge variant="outline" className="font-mono tabular">
+              {exportResult.content.length} characters
+            </Badge>
+          </div>
         </CardContent>
       </Card>
 

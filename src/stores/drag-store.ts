@@ -27,8 +27,7 @@ export const useCarryStore = create<CarryState>((set) => ({
   mouseY: 0,
   startQuestionCarry: (template, sourceSetId) =>
     set({ kind: "question", template, sourceSetId, isCarrying: true }),
-  startSetCarry: (carriedSet) =>
-    set({ kind: "set", set: carriedSet, isCarrying: true }),
+  startSetCarry: (carriedSet) => set({ kind: "set", set: carriedSet, isCarrying: true }),
   updateMouse: (x, y) => set({ mouseX: x, mouseY: y }),
   endCarry: () =>
     set({ kind: null, template: null, set: null, sourceSetId: null, isCarrying: false }),

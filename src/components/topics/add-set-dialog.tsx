@@ -43,8 +43,7 @@ export function AddSetDialog({
   const [isCreating, setIsCreating] = useState(false)
 
   const sortedCategories = useMemo(
-    () =>
-      [...categoriesWithSets].sort((a, b) => a.category.pointValue - b.category.pointValue),
+    () => [...categoriesWithSets].sort((a, b) => a.category.pointValue - b.category.pointValue),
     [categoriesWithSets],
   )
 

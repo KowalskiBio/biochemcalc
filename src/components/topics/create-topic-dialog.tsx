@@ -104,7 +104,8 @@ export function CreateTopicDialog({ open, onOpenChange, onCreated }: CreateTopic
                   : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
               }`}
             >
-              {forStudents ? "✓ " : ""}{cs.topics.forStudentsHelp}
+              {forStudents ? "✓ " : ""}
+              {cs.topics.forStudentsHelp}
             </button>
           </div>
         </div>

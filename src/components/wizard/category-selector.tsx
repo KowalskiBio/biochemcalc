@@ -92,16 +92,16 @@ export function CategorySelector({ selectedCategory, onCategorySelect }: Categor
       <h3 className="text-lg font-semibold">Select a Category</h3>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-         {/* Create new category button */}
-         <Card
-           className="cursor-pointer transition-shadow border-dashed border-border"
-           onClick={() => setIsDialogOpen(true)}
-         >
-           <CardContent className="flex flex-col items-center justify-center h-32">
-             <Plus className="size-8 text-muted-foreground mb-2" />
-             <p className="text-sm text-muted-foreground">Create new category</p>
-           </CardContent>
-         </Card>
+        {/* Create new category button */}
+        <Card
+          className="cursor-pointer transition-shadow border-dashed border-border"
+          onClick={() => setIsDialogOpen(true)}
+        >
+          <CardContent className="flex flex-col items-center justify-center h-32">
+            <Plus className="size-8 text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">Create new category</p>
+          </CardContent>
+        </Card>
 
         {/* Existing categories */}
         {isLoading ? (
@@ -120,12 +120,14 @@ export function CategorySelector({ selectedCategory, onCategorySelect }: Categor
           categories.map((category) => (
             <Card
               key={category.id}
-               className={`cursor-pointer transition-all ${selectedCategory?.id === category.id ? "ring-2 ring-primary border-primary" : ""}`}
+              className={`cursor-pointer transition-all ${selectedCategory?.id === category.id ? "ring-2 ring-primary border-primary" : ""}`}
               onClick={() => onCategorySelect(category)}
             >
               <CardHeader>
-                <CardTitle className="text-center"><span className="font-mono tabular">{category.pointValue}</span>-point category</CardTitle>
-                 <CardDescription className="text-center text-muted-foreground">
+                <CardTitle className="text-center">
+                  <span className="font-mono tabular">{category.pointValue}</span>-point category
+                </CardTitle>
+                <CardDescription className="text-center text-muted-foreground">
                   {category.pointValue === 2 && "2-point questions"}
                   {category.pointValue === 3 && "3-point questions"}
                   {category.pointValue === 4 && "4-point questions"}
