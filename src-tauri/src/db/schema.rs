@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 27;
+const CURRENT_USER_VERSION: u32 = 28;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -141,6 +141,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 27 {
         apply_migration_v27(conn)?;
         conn.pragma_update(None, "user_version", "27")?;
+    }
+
+    if user_version < 28 {
+        apply_migration_v28(conn)?;
+        conn.pragma_update(None, "user_version", "28")?;
     }
 
     Ok(())
@@ -996,6 +1001,11 @@ fn apply_migration_v27(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+fn apply_migration_v28(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE templates ADD COLUMN decoy_formula TEXT;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1173,7 +1183,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 27);
+        assert_eq!(user_version(&conn), 28);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1263,7 +1273,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 27);
+        assert_eq!(user_version(&conn), 28);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1281,5 +1291,16 @@ mod tests {
         assert_eq!(numeric_options, None);
 
         insert_report(&conn, uuid::Uuid::new_v4());
+    }
+
+    #[test]
+    fn v28_adds_nullable_decoy_formula_column() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        assert_eq!(user_version(&conn), 28);
+
+        conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
+            .expect("new decoy_formula column");
     }
 }

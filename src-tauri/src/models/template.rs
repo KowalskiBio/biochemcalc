@@ -61,6 +61,8 @@ pub struct Template {
     pub significant_digits: Option<u8>,
     #[serde(default)]
     pub force_scientific: bool,
+    #[serde(default)]
+    pub decoy_formula: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -83,6 +85,7 @@ impl Template {
             point_value,
             significant_digits: None,
             force_scientific: false,
+            decoy_formula: None,
             created_at: Utc::now(),
         }
     }

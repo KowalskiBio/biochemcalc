@@ -19,8 +19,8 @@ impl TemplateRepo {
         let tx = conn.unchecked_transaction()?;
 
         tx.execute(
-            "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, topic_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, topic_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 template.id,
                 template.question_text,
@@ -31,6 +31,7 @@ impl TemplateRepo {
                 template.point_value,
                 template.significant_digits,
                 template.force_scientific,
+                template.decoy_formula,
                 Uuid::nil(),
                 template.created_at.to_rfc3339(),
             ],
@@ -78,7 +79,7 @@ impl TemplateRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Template>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, created_at
              FROM templates ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -92,7 +93,8 @@ impl TemplateRepo {
                 point_value: row.get(6)?,
                 significant_digits: row.get(7)?,
                 force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
-                created_at: parse_dt(row.get::<_, String>(9)?),
+                decoy_formula: row.get(9)?,
+                created_at: parse_dt(row.get::<_, String>(10)?),
             })
         })?;
         let mut items = Vec::new();
@@ -108,7 +110,7 @@ impl TemplateRepo {
         equation_text: &str,
     ) -> Result<Option<Template>, DbError> {
         let result = conn.query_row(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, created_at
              FROM templates
              WHERE question_text = ?1 AND equation_text = ?2
              LIMIT 1",
@@ -124,7 +126,8 @@ impl TemplateRepo {
                     point_value: row.get(6)?,
                     significant_digits: row.get(7)?,
                     force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
-                    created_at: parse_dt(row.get::<_, String>(9)?),
+                    decoy_formula: row.get(9)?,
+                    created_at: parse_dt(row.get::<_, String>(10)?),
                 })
             },
         );
@@ -137,7 +140,7 @@ impl TemplateRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Template, DbError> {
         conn.query_row(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, created_at
              FROM templates WHERE id = ?1",
             params![id],
             |row| {
@@ -151,7 +154,8 @@ impl TemplateRepo {
                     point_value: row.get(6)?,
                     significant_digits: row.get(7)?,
                     force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
-                    created_at: parse_dt(row.get::<_, String>(9)?),
+                    decoy_formula: row.get(9)?,
+                    created_at: parse_dt(row.get::<_, String>(10)?),
                 })
             },
         )
@@ -260,7 +264,7 @@ impl TemplateRepo {
     pub fn update(conn: &Connection, template: &Template) -> Result<(), DbError> {
         let affected = conn.execute(
             "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, \
-             point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
+             point_value=?7, significant_digits=?8, force_scientific=?9, decoy_formula=?10, created_at=?11 WHERE id=?1",
             params![
                 template.id,
                 template.question_text,
@@ -271,6 +275,7 @@ impl TemplateRepo {
                 template.point_value,
                 template.significant_digits,
                 template.force_scientific,
+                template.decoy_formula,
                 template.created_at.to_rfc3339(),
             ],
         )?;
@@ -285,7 +290,7 @@ impl TemplateRepo {
         equation_text: &str,
     ) -> Result<Vec<Template>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, created_at
              FROM templates WHERE equation_text = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![equation_text], |row| {
@@ -299,7 +304,8 @@ impl TemplateRepo {
                 point_value: row.get(6)?,
                 significant_digits: row.get(7)?,
                 force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
-                created_at: parse_dt(row.get::<_, String>(9)?),
+                decoy_formula: row.get(9)?,
+                created_at: parse_dt(row.get::<_, String>(10)?),
             })
         })?;
         let mut items = Vec::new();
@@ -487,5 +493,24 @@ mod tests {
         TemplateRepo::insert(&conn, &t, &[], &[], None).expect("insert");
         let rc = TemplateRepo::get_constraint(&conn, &t.id).expect("constraint");
         assert!(rc.is_none());
+    }
+
+    #[test]
+    fn decoy_formula_round_trips_and_defaults_to_none() {
+        let conn = setup_conn();
+
+        let with_decoy = {
+            let mut t = Template::new("Q?".into(), "X * 2".into(), "".into(), None, "g".into(), 2);
+            t.decoy_formula = Some("X * 3".into());
+            t
+        };
+        TemplateRepo::insert(&conn, &with_decoy, &[], &[], None).expect("insert with decoy");
+        let fetched = TemplateRepo::get_by_id(&conn, &with_decoy.id).expect("get");
+        assert_eq!(fetched.decoy_formula, Some("X * 3".into()));
+
+        let without_decoy = Template::new("Q2?".into(), "X".into(), "".into(), None, "g".into(), 2);
+        TemplateRepo::insert(&conn, &without_decoy, &[], &[], None).expect("insert without decoy");
+        let fetched = TemplateRepo::get_by_id(&conn, &without_decoy.id).expect("get");
+        assert_eq!(fetched.decoy_formula, None);
     }
 }
