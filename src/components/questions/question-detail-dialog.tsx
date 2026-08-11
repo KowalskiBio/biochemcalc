@@ -675,6 +675,44 @@ export function QuestionDetailDialog({
     }
   }
 
+  const handleToggleForceScientific = async () => {
+    if (!templateDetails) return
+    const newValue = !forceScientific
+    setForceScientific(newValue)
+    const sigDigits =
+      editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+    const payload: UpdateTemplateWithVariablesPayload = {
+      id: templateId,
+      questionText: editText,
+      formula: normalizeFormulaForEvaluation(editEquationText),
+      equationText: editEquationText ?? "",
+      numericAnswer: templateDetails.template.numericAnswer,
+      resultUnit: editResultUnit,
+      pointValue: templateDetails.template.pointValue,
+      significantDigits: sigDigits,
+      forceScientific: newValue,
+      variableMutations: templateDetails.variables.map((vwp) => ({
+        action: "keep" as const,
+        variableId: vwp.variable.id,
+        placeholder: vwp.placeholder,
+      })),
+      constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
+      constraint: templateDetails.template.constraint,
+    }
+    try {
+      const response = await templatesApi.updateWithVariables(payload)
+      setTemplateDetails(response)
+    } catch (err) {
+      setForceScientific(!newValue)
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({
+        title: cs.questions.saveError,
+        description: message,
+        variant: "destructive",
+      })
+    }
+  }
+
   const handleAddVariable = () => {
     syncVariablesFromText(editText, localVariables)
   }
@@ -1582,7 +1620,7 @@ export function QuestionDetailDialog({
                           type="button"
                           size="sm"
                           variant={forceScientific ? "secondary" : "outline"}
-                          onClick={() => setForceScientific((v) => !v)}
+                          onClick={handleToggleForceScientific}
                         >
                           {forceScientific ? "1.23×10⁴" : "12300"}
                         </Button>
