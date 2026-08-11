@@ -5,6 +5,7 @@ import { ReportQuestionDialog } from "@/components/practice/report-question-dial
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -174,11 +175,19 @@ export function StudentPracticePage() {
 
   if (isLoadingTopics) {
     return (
-      <Card>
-        <CardContent className="py-10 text-center text-muted-foreground">
-          {cs.student.loadingTopics}
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <div>
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-32 mt-1" />
+        </div>
+        <Card>
+          <CardContent className="space-y-4 pt-6">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-32 w-full" />
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
@@ -294,179 +303,179 @@ export function StudentPracticePage() {
       {question && (
         <>
           <Card>
-          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
-            <div>
-              <CardTitle className="text-lg">{cs.student.questionHeading}</CardTitle>
-              <CardDescription>
-                {isClosed ? cs.student.closedHint : cs.student.openHint}
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline">
-                {cs.student.difficultyPoints.replace("{value}", String(question.pointValue))}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsReportDialogOpen(true)}
-                className="h-8 w-8"
-                title={cs.student.report}
-                aria-label={cs.student.report}
-              >
-                <Flag className="size-4" />
-              </Button>
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-6">
-            <QuestionTextRenderer
-              text={question.questionText}
-              variables={question.variables}
-              variant={{
-                assignedValues: question.assignedValues,
-                assignedStrings: question.assignedStrings,
-              }}
-              constants={question.constants}
-            />
-
-            {isClosed ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: optionRowCount }, (_, rowIdx) => {
-                  const label = OPTION_LABELS[rowIdx] ?? String(rowIdx + 1)
-                  const option = rowIdx + 1
-                  const isSelected = selectedOption === option
-                  const isTheAnswer = result?.correctOption === option
-                  const gotItWrong = result != null && isSelected && !result.correct
-
-                  return (
-                    <button
-                      key={label}
-                      type="button"
-                      disabled={result != null || isSubmitting}
-                      onClick={() => setSelectedOption(option)}
-                      className={cn(
-                        "flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors",
-                        !result && isSelected && "border-primary bg-primary/10",
-                        !result && !isSelected && "hover:bg-muted/50",
-                        isTheAnswer && "border-green-500 bg-green-50 dark:bg-green-950/30",
-                        gotItWrong && "border-destructive bg-destructive/10",
-                      )}
-                    >
-                      <span className="font-semibold">{label})</span>
-                      <span>
-                        {question.answerSlots.map((slot, slotIdx) => {
-                          const value = slot.numericOptions?.[rowIdx]
-                          if (value == null) return null
-                          return (
-                            <span key={slot.symbol ?? slotIdx}>
-                              {slotIdx > 0 && ", "}
-                              <FormattedResult
-                                value={value}
-                                unit={slot.unit ?? question.resultUnit}
-                                precision={optionsPrecision[slotIdx]}
-                              />
-                            </span>
-                          )
-                        })}
-                      </span>
-                    </button>
-                  )
-                })}
+            <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+              <div>
+                <CardTitle className="text-lg">{cs.student.questionHeading}</CardTitle>
+                <CardDescription>
+                  {isClosed ? cs.student.closedHint : cs.student.openHint}
+                </CardDescription>
               </div>
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                {question.answerSlots.map((slot, slotIdx) => (
-                  <div key={slot.symbol ?? slotIdx} className="flex items-center gap-2">
-                    <Input
-                      id={`answer-${slotIdx}`}
-                      inputMode="decimal"
-                      autoComplete="off"
-                      placeholder={cs.student.answerPlaceholder}
-                      value={openAnswers[slotIdx] ?? ""}
-                      disabled={result != null || isSubmitting}
-                      className="w-28"
-                      onChange={(e) =>
-                        setOpenAnswers((prev) =>
-                          prev.map((value, idx) => (idx === slotIdx ? e.target.value : value)),
-                        )
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault()
-                          void (result ? loadQuestion() : handleSubmit())
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">
+                  {cs.student.difficultyPoints.replace("{value}", String(question.pointValue))}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsReportDialogOpen(true)}
+                  className="h-8 w-8"
+                  title={cs.student.report}
+                  aria-label={cs.student.report}
+                >
+                  <Flag className="size-4" />
+                </Button>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              <QuestionTextRenderer
+                text={question.questionText}
+                variables={question.variables}
+                variant={{
+                  assignedValues: question.assignedValues,
+                  assignedStrings: question.assignedStrings,
+                }}
+                constants={question.constants}
+              />
+
+              {isClosed ? (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: optionRowCount }, (_, rowIdx) => {
+                    const label = OPTION_LABELS[rowIdx] ?? String(rowIdx + 1)
+                    const option = rowIdx + 1
+                    const isSelected = selectedOption === option
+                    const isTheAnswer = result?.correctOption === option
+                    const gotItWrong = result != null && isSelected && !result.correct
+
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        disabled={result != null || isSubmitting}
+                        onClick={() => setSelectedOption(option)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                          !result && isSelected && "border-primary bg-primary/10",
+                          !result && !isSelected && "hover:bg-muted/50",
+                          isTheAnswer && "border-green-500 bg-green-50 dark:bg-green-950/30",
+                          gotItWrong && "border-destructive bg-destructive/10",
+                        )}
+                      >
+                        <span className="font-semibold">{label})</span>
+                        <span>
+                          {question.answerSlots.map((slot, slotIdx) => {
+                            const value = slot.numericOptions?.[rowIdx]
+                            if (value == null) return null
+                            return (
+                              <span key={slot.symbol ?? slotIdx}>
+                                {slotIdx > 0 && ", "}
+                                <FormattedResult
+                                  value={value}
+                                  unit={slot.unit ?? question.resultUnit}
+                                  precision={optionsPrecision[slotIdx]}
+                                />
+                              </span>
+                            )
+                          })}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  {question.answerSlots.map((slot, slotIdx) => (
+                    <div key={slot.symbol ?? slotIdx} className="flex items-center gap-2">
+                      <Input
+                        id={`answer-${slotIdx}`}
+                        inputMode="decimal"
+                        autoComplete="off"
+                        placeholder={cs.student.answerPlaceholder}
+                        value={openAnswers[slotIdx] ?? ""}
+                        disabled={result != null || isSubmitting}
+                        className="w-28"
+                        onChange={(e) =>
+                          setOpenAnswers((prev) =>
+                            prev.map((value, idx) => (idx === slotIdx ? e.target.value : value)),
+                          )
                         }
-                      }}
-                    />
-                    {(slot.unit ?? question.resultUnit) && (
-                      <span className="text-sm font-medium text-foreground">
-                        {slot.unit ?? question.resultUnit}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            void (result ? loadQuestion() : handleSubmit())
+                          }
+                        }}
+                      />
+                      {(slot.unit ?? question.resultUnit) && (
+                        <span className="text-sm font-medium text-foreground">
+                          {slot.unit ?? question.resultUnit}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {result && (
+                <div
+                  className={cn(
+                    "rounded-md border px-4 py-3 space-y-1",
+                    result.correct
+                      ? "border-green-500 bg-green-50 dark:bg-green-950/30"
+                      : "border-destructive bg-destructive/10",
+                  )}
+                >
+                  <p className="flex items-center gap-2 font-medium">
+                    {result.correct ? (
+                      <Check className="size-4 text-green-600 dark:text-green-400" />
+                    ) : (
+                      <X className="size-4 text-destructive" />
+                    )}
+                    {result.correct ? cs.student.correct : cs.student.incorrect}
+                    {result.correct && (
+                      <span className="text-sm font-normal text-muted-foreground">
+                        {cs.student.pointsEarned.replace("{points}", String(result.pointValue))}
                       </span>
                     )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {result && (
-              <div
-                className={cn(
-                  "rounded-md border px-4 py-3 space-y-1",
-                  result.correct
-                    ? "border-green-500 bg-green-50 dark:bg-green-950/30"
-                    : "border-destructive bg-destructive/10",
-                )}
-              >
-                <p className="flex items-center gap-2 font-medium">
-                  {result.correct ? (
-                    <Check className="size-4 text-green-600 dark:text-green-400" />
-                  ) : (
-                    <X className="size-4 text-destructive" />
-                  )}
-                  {result.correct ? cs.student.correct : cs.student.incorrect}
-                  {result.correct && (
-                    <span className="text-sm font-normal text-muted-foreground">
-                      {cs.student.pointsEarned.replace("{points}", String(result.pointValue))}
-                    </span>
-                  )}
-                </p>
-                {!result.correct && (
-                  <p className="text-sm text-muted-foreground">
-                    {result.correctAnswers.length > 1
-                      ? cs.student.correctAnswersAre
-                      : cs.student.correctAnswerIs}{" "}
-                    {result.correctAnswers.map((answer, idx) => (
-                      <span key={answer.symbol ?? idx}>
-                        {idx > 0 && "; "}
-                        <FormattedResult
-                          value={answer.value}
-                          unit={answer.unit ?? question.resultUnit}
-                        />
-                      </span>
-                    ))}
                   </p>
+                  {!result.correct && (
+                    <p className="text-sm text-muted-foreground">
+                      {result.correctAnswers.length > 1
+                        ? cs.student.correctAnswersAre
+                        : cs.student.correctAnswerIs}{" "}
+                      {result.correctAnswers.map((answer, idx) => (
+                        <span key={answer.symbol ?? idx}>
+                          {idx > 0 && "; "}
+                          <FormattedResult
+                            value={answer.value}
+                            unit={answer.unit ?? question.resultUnit}
+                          />
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {result ? (
+                  <Button onClick={loadQuestion} disabled={isGenerating}>
+                    {isGenerating ? (
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="size-4 mr-2" />
+                    )}
+                    {cs.student.nextQuestion}
+                  </Button>
+                ) : (
+                  <Button onClick={handleSubmit} disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+                    {isSubmitting ? cs.student.checking : cs.student.check}
+                  </Button>
                 )}
               </div>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              {result ? (
-                <Button onClick={loadQuestion} disabled={isGenerating}>
-                  {isGenerating ? (
-                    <Loader2 className="size-4 mr-2 animate-spin" />
-                  ) : (
-                    <RefreshCw className="size-4 mr-2" />
-                  )}
-                  {cs.student.nextQuestion}
-                </Button>
-              ) : (
-                <Button onClick={handleSubmit} disabled={isSubmitting}>
-                  {isSubmitting ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
-                  {isSubmitting ? cs.student.checking : cs.student.check}
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
           <ReportQuestionDialog
             open={isReportDialogOpen}
             onOpenChange={setIsReportDialogOpen}

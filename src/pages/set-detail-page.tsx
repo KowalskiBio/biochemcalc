@@ -1,9 +1,21 @@
-import { ArrowLeft, ArrowRightLeft, Download, FileText, GripVertical, Loader2, Pencil, Plus, RefreshCw, Save, Trash2 } from "lucide-react"
+import {
+  ArrowLeft,
+  ArrowRightLeft,
+  Download,
+  FileText,
+  GripVertical,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+} from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { AddQuestionDialog } from "@/components/topics/add-question-dialog"
 import { MoveQuestionDialog } from "@/components/topics/move-question-dialog"
-import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,6 +30,7 @@ import {
 import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RefreshOverlay } from "@/components/ui/refresh-overlay"
 import {
   Select,
   SelectContent,
@@ -25,6 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -63,8 +77,8 @@ import type {
   TemplateMode,
   TemplateWithDetails,
 } from "@/lib/types"
-import { useGenerationActions, useGenerationBySetId } from "@/stores/generation-store"
 import { useCarryStore } from "@/stores/drag-store"
+import { useGenerationActions, useGenerationBySetId } from "@/stores/generation-store"
 
 export function SetDetailPage() {
   const { setId } = useParams<{ setId: string }>()
@@ -83,6 +97,8 @@ export function SetDetailPage() {
   const [globalConstants, setGlobalConstants] = useState<Record<string, number>>({})
   const [parentTopicId, setParentTopicId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const hasLoadedRef = useRef(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -131,17 +147,19 @@ export function SetDetailPage() {
 
   const loadData = useCallback(async () => {
     if (!setId) return
-    try {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true)
+    } else {
       setIsLoading(true)
+    }
+    try {
       const data = await setsApi.getWithTemplates(setId)
       setSet(data.set)
       setTemplateDetails(data.templates)
       const category = await categoriesApi.get(data.set.categoryId)
       setParentTopicId(category.topicId)
       const allConstants = await constantsApi.list()
-      setGlobalConstants(
-        Object.fromEntries(allConstants.map((c) => [c.symbol, c.value])),
-      )
+      setGlobalConstants(Object.fromEntries(allConstants.map((c) => [c.symbol, c.value])))
       const topicCategories = await categoriesApi.listByTopic(category.topicId)
       const withSets = await Promise.all(
         topicCategories.map(async (cat) => {
@@ -161,7 +179,9 @@ export function SetDetailPage() {
         variant: "destructive",
       })
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }, [setId, toast])
 
@@ -438,11 +458,39 @@ export function SetDetailPage() {
 
   if (isLoading) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center">
-          <p className="text-muted-foreground">Načítám sadu...</p>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/topics">
+              <ArrowLeft className="size-5" />
+            </Link>
+          </Button>
+          <div>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-20 mt-1" />
+          </div>
+        </div>
+        <Card>
+          <CardContent className="flex flex-wrap gap-2 pt-6">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-9 w-32" />
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-4 w-16 mt-1" />
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     )
   }
 
@@ -452,9 +500,7 @@ export function SetDetailPage() {
         <CardContent className="py-8 text-center">
           <p className="text-muted-foreground">Sada nenalezena.</p>
           <Button asChild variant="outline" className="mt-4">
-            <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>
-              Zpět na témata
-            </Link>
+            <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>Zpět na témata</Link>
           </Button>
         </CardContent>
       </Card>
@@ -462,12 +508,8 @@ export function SetDetailPage() {
   }
 
   return (
-    <div
-      className="space-y-6"
-    >
-      <div
-        className="flex items-center gap-4"
-      >
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
         <Button
           variant="ghost"
           size="icon"
@@ -493,7 +535,9 @@ export function SetDetailPage() {
             <h1
               className="text-2xl font-semibold tracking-tight text-foreground cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1"
               onClick={() => {
-                setEditSetName(set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex)))
+                setEditSetName(
+                  set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex)),
+                )
                 setIsEditingSetName(true)
               }}
             >
@@ -507,254 +551,291 @@ export function SetDetailPage() {
         </div>
       </div>
 
-      {/* Mode and actions */}
-      <div
-      >
-        <Card>
-          <CardContent className="flex flex-wrap gap-2 pt-6">
-            <Button onClick={() => setIsAddQuestionOpen(true)}>
-              <Plus className="size-4 mr-2" />
-              {cs.topics.addQuestion}
-            </Button>
-            <Button
-              onClick={() => setShowClosedConfigDialog(true)}
-              disabled={isGenerating || templateDetails.length === 0}
-              variant="secondary"
-            >
-              {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
-              {cs.sets.closedQuestions}
-            </Button>
-            <Button
-              onClick={() => setShowOpenConfigDialog(true)}
-              disabled={isGenerating || templateDetails.length === 0}
-            >
-              {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
-              {cs.sets.openQuestions}
-            </Button>
-            <Button
-              onClick={() => setShowExportDialog(true)}
-              variant="outline"
-              disabled={templateDetails.length === 0 || isGenerating}
-            >
-              <Download className="size-4 mr-2" />
-              {cs.sets.export}
-            </Button>
-            <Button
-              onClick={() => setShowSaveDialog(true)}
-              variant="secondary"
-              disabled={!generated || isGenerating || savingToProjekt === "saving"}
-            >
-              <Save className="size-4 mr-2" />
-              {cs.sets.saveToProjekt}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Templates table */}
-      <div
-      >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">
-              <FileText className="size-5 inline mr-2" />
-              {cs.sets.questions}
-            </CardTitle>
-            <CardDescription>
-              {templateDetails.length}{" "}
-              {templateDetails.length === 1
-                ? "otázka"
-                : templateDetails.length >= 2 && templateDetails.length <= 4
-                  ? "otázky"
-                  : "otázek"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {templateDetails.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-foreground-muted">{cs.sets.noQuestions}</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[30px]"></TableHead>
-                    <TableHead className="w-[50px]">#</TableHead>
-                    <TableHead>Text otázky</TableHead>
-                    <TableHead className="w-[100px]">Body</TableHead>
-                    <TableHead className="w-[120px] text-right">Akce</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {templateDetails.map((t, idx) => (
-                    <TableRow
-                      key={t.template.id}
-                      id={`template-row-${t.template.id}`}
-                      className={`cursor-pointer hover:bg-muted/50 ${isCarrying ? "pointer-events-none" : ""}`}
-                      onClick={(e) => {
-                        if (isCarrying || justCarriedRef.current) {
-                          justCarriedRef.current = false
-                          e.preventDefault()
-                          return
-                        }
-                        setSelectedTemplateId(t.template.id)
-                        setDialogOpen(true)
-                      }}
-                      onMouseDown={(e) => handleQuestionMouseDown(e, t.template)}
-                    >
-                      <TableCell className="w-[30px] text-muted-foreground/50">
-                        <GripVertical className="size-4" />
-                      </TableCell>
-                      <TableCell className="font-medium">{idx + 1}</TableCell>
-                      <TableCell className="min-w-[400px] max-w-2xl">
-                        <QuestionTextRenderer
-                          text={t.template.questionText}
-                          variables={t.variables}
-                          variant={buildPreviewVariant(t.template.id, t.variables)}
-                          constants={Object.fromEntries(
-                            t.constants.map((c) => [c.symbol, c.value]),
-                          )}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{t.template.pointValue}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setMoveTemplate(t.template)
-                              setIsMoveDialogOpen(true)
-                            }}
-                            aria-label={cs.topics.moveQuestion}
-                          >
-                            <ArrowRightLeft className="size-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(event) => openDeleteDialog(t.template, event)}
-                            disabled={isDeleting}
-                            aria-label={cs.common.delete}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Generation error */}
-      {generationError && (
-        <div
-        >
-          <Card className="border-destructive">
-            <CardContent className="pt-6">
-              <p className="text-destructive font-medium">Generování selhalo</p>
-              <p className="text-sm text-destructive/80 mt-1">{generationError}</p>
+      <RefreshOverlay isRefreshing={isRefreshing}>
+        {/* Mode and actions */}
+        <div>
+          <Card>
+            <CardContent className="flex flex-wrap gap-2 pt-6">
+              <Button onClick={() => setIsAddQuestionOpen(true)}>
+                <Plus className="size-4 mr-2" />
+                {cs.topics.addQuestion}
+              </Button>
+              <Button
+                onClick={() => setShowClosedConfigDialog(true)}
+                disabled={isGenerating || templateDetails.length === 0}
+                variant="secondary"
+              >
+                {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+                {cs.sets.closedQuestions}
+              </Button>
+              <Button
+                onClick={() => setShowOpenConfigDialog(true)}
+                disabled={isGenerating || templateDetails.length === 0}
+              >
+                {isGenerating ? <Loader2 className="size-4 mr-2 animate-spin" /> : null}
+                {cs.sets.openQuestions}
+              </Button>
+              <Button
+                onClick={() => setShowExportDialog(true)}
+                variant="outline"
+                disabled={templateDetails.length === 0 || isGenerating}
+              >
+                <Download className="size-4 mr-2" />
+                {cs.sets.export}
+              </Button>
+              <Button
+                onClick={() => setShowSaveDialog(true)}
+                variant="secondary"
+                disabled={!generated || isGenerating || savingToProjekt === "saving"}
+              >
+                <Save className="size-4 mr-2" />
+                {cs.sets.saveToProjekt}
+              </Button>
             </CardContent>
           </Card>
         </div>
-      )}
 
-      {/* Generated results */}
-      {generated && (
-        <div
-          ref={generatedRef}
-          className="space-y-4"
-        >
+        {/* Templates table */}
+        <div>
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">{cs.sets.generated}</CardTitle>
+              <CardTitle className="text-lg">
+                <FileText className="size-5 inline mr-2" />
+                {cs.sets.questions}
+              </CardTitle>
+              <CardDescription>
+                {templateDetails.length}{" "}
+                {templateDetails.length === 1
+                  ? "otázka"
+                  : templateDetails.length >= 2 && templateDetails.length <= 4
+                    ? "otázky"
+                    : "otázek"}
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {generated.map((g, idx) => {
-                const variant = g.variants[0]
-                const details = templateDetailsById.get(g.template.id)
-                // Constants explicitly linked to the template win; anything
-                // else the formula references falls back to the global table,
-                // exactly as the generator resolves it.
-                const constants = {
-                  ...globalConstants,
-                  ...Object.fromEntries(
-                    (details?.constants ?? []).map((c) => [c.symbol, c.value]),
-                  ),
-                }
-                const optionLabels = ["a", "b", "c", "d", "e"]
-                const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
-                const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
-                // Small-magnitude answers can collapse to identical strings at
-                // the default precision, so widen just enough to keep every
-                // option distinct.
-                const optionsPrecision = resolveOptionsPrecision(options)
-                const correctOption = variant?.correctOption
-                const equationText = g.template.equationText?.trim() || g.template.formula
-                const recomputed =
-                  equationText && variant
-                    ? evaluateVariantAnswer(
-                        equationText,
-                        details?.variables ?? [],
-                        variant,
-                        constants,
-                        g.template.questionText,
-                      )
-                    : null
-                const hasMismatch =
-                  recomputed?.ok &&
-                  variant?.correctAnswer != null &&
-                  Math.abs(recomputed.value - variant.correctAnswer) > 1e-9
-
-                return (
-                  <div key={g.template.id} className="rounded-lg border p-4 space-y-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-muted-foreground">{idx + 1}.</p>
-                        <QuestionTextRenderer
-                          text={g.template.questionText}
-                          variables={details?.variables ?? []}
-                          variant={variant}
-                          constants={constants}
-                        />
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleRegenerateVariant(g.template.id)}
-                        disabled={regeneratingMap[g.template.id]}
+            <CardContent>
+              {templateDetails.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-foreground-muted">{cs.sets.noQuestions}</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[30px]"></TableHead>
+                      <TableHead className="w-[50px]">#</TableHead>
+                      <TableHead>Text otázky</TableHead>
+                      <TableHead className="w-[100px]">Body</TableHead>
+                      <TableHead className="w-[120px] text-right">Akce</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {templateDetails.map((t, idx) => (
+                      <TableRow
+                        key={t.template.id}
+                        id={`template-row-${t.template.id}`}
+                        className={`cursor-pointer hover:bg-muted/50 ${isCarrying ? "pointer-events-none" : ""}`}
+                        onClick={(e) => {
+                          if (isCarrying || justCarriedRef.current) {
+                            justCarriedRef.current = false
+                            e.preventDefault()
+                            return
+                          }
+                          setSelectedTemplateId(t.template.id)
+                          setDialogOpen(true)
+                        }}
+                        onMouseDown={(e) => handleQuestionMouseDown(e, t.template)}
                       >
-                        {regeneratingMap[g.template.id] ? (
-                          <Loader2 className="size-4 mr-2 animate-spin" />
-                        ) : (
-                          <RefreshCw className="size-4 mr-2" />
-                        )}
-                        Rekalkulovat
-                      </Button>
-                    </div>
+                        <TableCell className="w-[30px] text-muted-foreground/50">
+                          <GripVertical className="size-4" />
+                        </TableCell>
+                        <TableCell className="font-medium">{idx + 1}</TableCell>
+                        <TableCell className="min-w-[400px] max-w-2xl">
+                          <QuestionTextRenderer
+                            text={t.template.questionText}
+                            variables={t.variables}
+                            variant={buildPreviewVariant(t.template.id, t.variables)}
+                            constants={Object.fromEntries(
+                              t.constants.map((c) => [c.symbol, c.value]),
+                            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{t.template.pointValue}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                setMoveTemplate(t.template)
+                                setIsMoveDialogOpen(true)
+                              }}
+                              aria-label={cs.topics.moveQuestion}
+                            >
+                              <ArrowRightLeft className="size-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(event) => openDeleteDialog(t.template, event)}
+                              disabled={isDeleting}
+                              aria-label={cs.common.delete}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-                    {generatedMode === "closed" &&
-                      (hasMultiAnswers && variant?.answersData ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {(() => {
-                            const answersData = variant.answersData ?? []
-                            // Small-magnitude answers can collapse to identical
-                            // strings at the default precision, so widen per
-                            // slot just enough to keep every option distinct.
-                            const optionsPrecision = answersData.map((a) =>
-                              resolveOptionsPrecision(a.numericOptions ?? []),
-                            )
-                            return answersData[0]?.numericOptions?.map((_, optionIdx) => {
+        {/* Generation error */}
+        {generationError && (
+          <div>
+            <Card className="border-destructive">
+              <CardContent className="pt-6">
+                <p className="text-destructive font-medium">Generování selhalo</p>
+                <p className="text-sm text-destructive/80 mt-1">{generationError}</p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Generated results */}
+        {generated && (
+          <div ref={generatedRef} className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">{cs.sets.generated}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {generated.map((g, idx) => {
+                  const variant = g.variants[0]
+                  const details = templateDetailsById.get(g.template.id)
+                  // Constants explicitly linked to the template win; anything
+                  // else the formula references falls back to the global table,
+                  // exactly as the generator resolves it.
+                  const constants = {
+                    ...globalConstants,
+                    ...Object.fromEntries(
+                      (details?.constants ?? []).map((c) => [c.symbol, c.value]),
+                    ),
+                  }
+                  const optionLabels = ["a", "b", "c", "d", "e"]
+                  const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
+                  const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
+                  // Small-magnitude answers can collapse to identical strings at
+                  // the default precision, so widen just enough to keep every
+                  // option distinct.
+                  const optionsPrecision = resolveOptionsPrecision(options)
+                  const correctOption = variant?.correctOption
+                  const equationText = g.template.equationText?.trim() || g.template.formula
+                  const recomputed =
+                    equationText && variant
+                      ? evaluateVariantAnswer(
+                          equationText,
+                          details?.variables ?? [],
+                          variant,
+                          constants,
+                          g.template.questionText,
+                        )
+                      : null
+                  const hasMismatch =
+                    recomputed?.ok &&
+                    variant?.correctAnswer != null &&
+                    Math.abs(recomputed.value - variant.correctAnswer) > 1e-9
+
+                  return (
+                    <div key={g.template.id} className="rounded-lg border p-4 space-y-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium text-muted-foreground">{idx + 1}.</p>
+                          <QuestionTextRenderer
+                            text={g.template.questionText}
+                            variables={details?.variables ?? []}
+                            variant={variant}
+                            constants={constants}
+                          />
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleRegenerateVariant(g.template.id)}
+                          disabled={regeneratingMap[g.template.id]}
+                        >
+                          {regeneratingMap[g.template.id] ? (
+                            <Loader2 className="size-4 mr-2 animate-spin" />
+                          ) : (
+                            <RefreshCw className="size-4 mr-2" />
+                          )}
+                          Rekalkulovat
+                        </Button>
+                      </div>
+
+                      {generatedMode === "closed" &&
+                        (hasMultiAnswers && variant?.answersData ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {(() => {
+                              const answersData = variant.answersData ?? []
+                              // Small-magnitude answers can collapse to identical
+                              // strings at the default precision, so widen per
+                              // slot just enough to keep every option distinct.
+                              const optionsPrecision = answersData.map((a) =>
+                                resolveOptionsPrecision(a.numericOptions ?? []),
+                              )
+                              return answersData[0]?.numericOptions?.map((_, optionIdx) => {
+                                const label = optionLabels[optionIdx]
+                                const isCorrect =
+                                  optionIdx + 1 === (answersData[0]?.correctOption ?? correctOption)
+                                return (
+                                  <div
+                                    key={label}
+                                    className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                                      isCorrect
+                                        ? "border-green-500 bg-green-50 dark:bg-green-950/30"
+                                        : "bg-muted/30"
+                                    }`}
+                                  >
+                                    <span
+                                      className={`font-semibold ${
+                                        isCorrect ? "text-green-700 dark:text-green-300" : ""
+                                      }`}
+                                    >
+                                      {label})
+                                    </span>
+                                    <span>
+                                      {answersData.map((a, idx) => {
+                                        const value = a.numericOptions?.[optionIdx]
+                                        if (value == null) return null
+                                        return (
+                                          <span key={a.symbol}>
+                                            {idx > 0 && ", "}
+                                            <FormattedResult
+                                              value={value}
+                                              unit={a.unit}
+                                              precision={optionsPrecision[idx]}
+                                            />
+                                          </span>
+                                        )
+                                      })}
+                                    </span>
+                                  </div>
+                                )
+                              })
+                            })()}
+                          </div>
+                        ) : options.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                            {options.map((value, optionIdx) => {
                               const label = optionLabels[optionIdx]
-                              const isCorrect =
-                                optionIdx + 1 === (answersData[0]?.correctOption ?? correctOption)
+                              const isCorrect = optionIdx + 1 === correctOption
                               return (
                                 <div
                                   key={label}
@@ -772,110 +853,69 @@ export function SetDetailPage() {
                                     {label})
                                   </span>
                                   <span>
-                                    {answersData.map((a, idx) => {
-                                      const value = a.numericOptions?.[optionIdx]
-                                      if (value == null) return null
-                                      return (
-                                        <span key={a.symbol}>
-                                          {idx > 0 && ", "}
-                                          <FormattedResult
-                                            value={value}
-                                            unit={a.unit}
-                                            precision={optionsPrecision[idx]}
-                                          />
-                                        </span>
-                                      )
-                                    })}
+                                    <FormattedResult
+                                      value={value}
+                                      unit={g.template.resultUnit}
+                                      precision={optionsPrecision}
+                                    />
                                   </span>
                                 </div>
                               )
-                            })
-                          })()}
-                        </div>
-                      ) : options.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                          {options.map((value, optionIdx) => {
-                            const label = optionLabels[optionIdx]
-                            const isCorrect = optionIdx + 1 === correctOption
-                            return (
-                              <div
-                                key={label}
-                                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-                                  isCorrect
-                                    ? "border-green-500 bg-green-50 dark:bg-green-950/30"
-                                    : "bg-muted/30"
-                                }`}
-                              >
-                                <span
-                                  className={`font-semibold ${
-                                    isCorrect ? "text-green-700 dark:text-green-300" : ""
-                                  }`}
-                                >
-                                  {label})
-                                </span>
-                                <span>
-                                  <FormattedResult
-                                    value={value}
-                                    unit={g.template.resultUnit}
-                                    precision={optionsPrecision}
-                                  />
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-amber-600">
-                          Pro tuto otázku nebyly vygenerovány žádné možnosti.
-                        </div>
-                      ))}
-
-                    {generatedMode === "open" && (
-                      <div className="text-sm text-muted-foreground">
-                        {hasMultiAnswers && variant?.answersData ? (
-                          <>
-                            Správné odpovědi:{" "}
-                            {variant.answersData.map((a, idx) => (
-                              <span key={a.symbol} className="ml-1">
-                                {idx > 0 && "; "}
-                                {a.symbol} = <FormattedResult value={a.value} unit={a.unit} />
-                                {a.intervalLo != null && a.intervalHi != null && (
-                                  <span className="ml-1 text-xs text-muted-foreground">
-                                    (± okolí <FormattedResult value={a.intervalLo} />–
-                                    <FormattedResult value={a.intervalHi} />)
-                                  </span>
-                                )}
-                              </span>
-                            ))}
-                          </>
+                            })}
+                          </div>
                         ) : (
-                          <>
-                            Správná odpověď:{" "}
-                            <FormattedResult
-                              value={recomputed?.ok ? recomputed.value : variant?.correctAnswer}
-                              unit={g.template.resultUnit}
-                            />
-                            {recomputed?.ok && hasMismatch && (
-                              <span className="ml-2 text-xs text-amber-600">
-                                (backend: {formatNumberForText(variant?.correctAnswer)})
-                              </span>
-                            )}
-                            {!recomputed?.ok && recomputed?.error && (
-                              <span className="ml-2 text-xs text-red-600">
-                                ({recomputed.error})
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                          <div className="text-sm text-amber-600">
+                            Pro tuto otázku nebyly vygenerovány žádné možnosti.
+                          </div>
+                        ))}
+
+                      {generatedMode === "open" && (
+                        <div className="text-sm text-muted-foreground">
+                          {hasMultiAnswers && variant?.answersData ? (
+                            <>
+                              Správné odpovědi:{" "}
+                              {variant.answersData.map((a, idx) => (
+                                <span key={a.symbol} className="ml-1">
+                                  {idx > 0 && "; "}
+                                  {a.symbol} = <FormattedResult value={a.value} unit={a.unit} />
+                                  {a.intervalLo != null && a.intervalHi != null && (
+                                    <span className="ml-1 text-xs text-muted-foreground">
+                                      (± okolí <FormattedResult value={a.intervalLo} />–
+                                      <FormattedResult value={a.intervalHi} />)
+                                    </span>
+                                  )}
+                                </span>
+                              ))}
+                            </>
+                          ) : (
+                            <>
+                              Správná odpověď:{" "}
+                              <FormattedResult
+                                value={recomputed?.ok ? recomputed.value : variant?.correctAnswer}
+                                unit={g.template.resultUnit}
+                              />
+                              {recomputed?.ok && hasMismatch && (
+                                <span className="ml-2 text-xs text-amber-600">
+                                  (backend: {formatNumberForText(variant?.correctAnswer)})
+                                </span>
+                              )}
+                              {!recomputed?.ok && recomputed?.error && (
+                                <span className="ml-2 text-xs text-red-600">
+                                  ({recomputed.error})
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </RefreshOverlay>
 
       {/* Save to Projekt Dialog */}
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>

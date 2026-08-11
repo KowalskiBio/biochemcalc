@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -68,9 +69,11 @@ export function StudentLeaderboardPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="py-6 text-center text-muted-foreground">
-              {cs.student.leaderboardLoading}
-            </p>
+            <div className="space-y-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
           ) : error ? (
             <p className="py-6 text-center text-destructive">{error}</p>
           ) : !hasAnyActivity ? (

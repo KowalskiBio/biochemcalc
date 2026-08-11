@@ -1,5 +1,5 @@
 import { Download, FolderOpen, Loader2, MoreVertical, Pencil, Save, Trash2, X } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
@@ -20,7 +20,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RefreshOverlay } from "@/components/ui/refresh-overlay"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -40,6 +42,8 @@ export function ProjektyPage() {
   const { toast } = useToast()
   const [projekty, setProjekty] = useState<Projekt[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const hasLoadedRef = useRef(false)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isExporting, setIsExporting] = useState<string | null>(null)
   const [editingProjekt, setEditingProjekt] = useState<Projekt | null>(null)
@@ -54,8 +58,12 @@ export function ProjektyPage() {
   } | null>(null)
 
   const fetchProjekty = useCallback(async () => {
-    try {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true)
+    } else {
       setIsLoading(true)
+    }
+    try {
       const data = await projektyApi.list()
       setProjekty(data)
     } catch (err) {
@@ -66,7 +74,9 @@ export function ProjektyPage() {
         variant: "destructive",
       })
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }, [toast])
 
@@ -266,9 +276,17 @@ export function ProjektyPage() {
         <div>
           {isLoading ? (
             <Card>
-              <CardContent className="py-8 text-center">
-                <Loader2 className="size-8 animate-spin mx-auto mb-2" />
-                <p className="text-foreground-muted">Načítám projekty...</p>
+              <CardHeader>
+                <CardTitle className="text-lg">
+                  <Skeleton className="h-5 w-32" />
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {[1, 2, 3, 4].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full" />
+                  ))}
+                </div>
               </CardContent>
             </Card>
           ) : projekty.length === 0 ? (
@@ -285,85 +303,87 @@ export function ProjektyPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Seznam projektů</CardTitle>
-                <CardDescription>
-                  {projekty.length} uložen
-                  {projekty.length === 1
-                    ? "ý"
-                    : projekty.length >= 2 && projekty.length <= 4
-                      ? "é"
-                      : "ých"}{" "}
-                  projektů
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Název</TableHead>
-                      <TableHead>Režim</TableHead>
-                      <TableHead>Počet otázek</TableHead>
-                      <TableHead>Téma</TableHead>
-                      <TableHead>Datum</TableHead>
-                      <TableHead className="w-[80px]">Akce</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {projekty.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            <FolderOpen className="size-4 text-primary" />
-                            {p.name}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={p.mode === "closed" ? "secondary" : "default"}>
-                            {modeLabel(p.mode)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{p.questionCount}</TableCell>
-                        <TableCell>{p.topicName || "—"}</TableCell>
-                        <TableCell>{new Date(p.createdAt).toLocaleDateString("cs-CZ")}</TableCell>
-                        <TableCell>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="size-8 p-0">
-                                <span className="sr-only">Akce</span>
-                                <MoreVertical className="size-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEdit(p)}>
-                                <Pencil className="size-4 mr-2" />
-                                Upravit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleExport(p)}
-                                disabled={isExporting === p.id}
-                              >
-                                <Download className="size-4 mr-2" />
-                                Exportovat
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => openDeleteDialog(p)}
-                                disabled={isDeleting === p.id}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Trash2 className="size-4 mr-2" />
-                                Smazat
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
+            <RefreshOverlay isRefreshing={isRefreshing}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Seznam projektů</CardTitle>
+                  <CardDescription>
+                    {projekty.length} uložen
+                    {projekty.length === 1
+                      ? "ý"
+                      : projekty.length >= 2 && projekty.length <= 4
+                        ? "é"
+                        : "ých"}{" "}
+                    projektů
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Název</TableHead>
+                        <TableHead>Režim</TableHead>
+                        <TableHead>Počet otázek</TableHead>
+                        <TableHead>Téma</TableHead>
+                        <TableHead>Datum</TableHead>
+                        <TableHead className="w-[80px]">Akce</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {projekty.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              <FolderOpen className="size-4 text-primary" />
+                              {p.name}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={p.mode === "closed" ? "secondary" : "default"}>
+                              {modeLabel(p.mode)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{p.questionCount}</TableCell>
+                          <TableCell>{p.topicName || "—"}</TableCell>
+                          <TableCell>{new Date(p.createdAt).toLocaleDateString("cs-CZ")}</TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="size-8 p-0">
+                                  <span className="sr-only">Akce</span>
+                                  <MoreVertical className="size-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleEdit(p)}>
+                                  <Pencil className="size-4 mr-2" />
+                                  Upravit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleExport(p)}
+                                  disabled={isExporting === p.id}
+                                >
+                                  <Download className="size-4 mr-2" />
+                                  Exportovat
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => openDeleteDialog(p)}
+                                  disabled={isDeleting === p.id}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  <Trash2 className="size-4 mr-2" />
+                                  Smazat
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </RefreshOverlay>
           )}
         </div>
       </div>
@@ -374,9 +394,16 @@ export function ProjektyPage() {
           </DialogHeader>
 
           {isLoadingContent ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-8 animate-spin" />
-              <span className="ml-2">Načítám obsah projektu...</span>
+            <div className="space-y-4 py-4">
+              {[1, 2, 3].map((i) => (
+                <Card key={i}>
+                  <CardContent className="pt-6 space-y-3">
+                    <Skeleton className="h-5 w-3/4" />
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-1/2" />
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           ) : projektContent ? (
             <div className="space-y-4">

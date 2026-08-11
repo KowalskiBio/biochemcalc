@@ -1,11 +1,13 @@
 import { cva } from "class-variance-authority"
-import { Loader2, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { Trash2 } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { RefreshOverlay } from "@/components/ui/refresh-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -26,21 +28,29 @@ const emptyStateVariants = cva("flex flex-col items-center justify-center py-12 
 export function HistoryPage() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const hasLoadedRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [isClearHistoryDialogOpen, setIsClearHistoryDialogOpen] = useState(false)
   const { toast } = useToast()
 
   const loadHistory = useCallback(async () => {
-    try {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true)
+    } else {
       setIsLoading(true)
-      setError(null)
+    }
+    setError(null)
+    try {
       const data = await historyApi.listAll(50, 0)
       setEntries(data)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err)
       setError(message)
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }, [])
 
@@ -72,12 +82,12 @@ export function HistoryPage() {
   }, [loadHistory])
 
   return (
-    <div
-      className={cn(pageContainerVariants())}
-    >
+    <div className={cn(pageContainerVariants())}>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.history.title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {cs.history.title}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">{cs.history.description}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -107,9 +117,17 @@ export function HistoryPage() {
 
       {isLoading ? (
         <Card>
-          <CardContent className="py-8 text-center">
-            <Loader2 className="size-8 animate-spin mx-auto mb-2" />
-            <p className="text-foreground-muted">Načítám historii...</p>
+          <CardHeader>
+            <CardTitle className="text-lg">
+              <Skeleton className="h-5 w-32" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
           </CardContent>
         </Card>
       ) : entries.length === 0 ? (
@@ -120,46 +138,48 @@ export function HistoryPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">{cs.history.pageTitle}</CardTitle>
-            <CardDescription>{cs.history.pageDescription}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Datum</TableHead>
-                  <TableHead>Šablona ID</TableHead>
-                  <TableHead>Proměnná / Otázka</TableHead>
-                  <TableHead>Pole</TableHead>
-                  <TableHead>Stará hodnota</TableHead>
-                  <TableHead>Nová hodnota</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {entries.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell>{new Date(entry.changedAt).toLocaleString("cs-CZ")}</TableCell>
-                    <TableCell className="font-mono text-sm">{entry.templateId}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {entry.kind === "template" ? "Otázka" : entry.variableId}
-                    </TableCell>
-                    <TableCell>
-                      {entry.fieldName in cs.history.historyFields
-                        ? cs.history.historyFields[
-                            entry.fieldName as keyof typeof cs.history.historyFields
-                          ]
-                        : entry.fieldName}
-                    </TableCell>
-                    <TableCell>{entry.oldValue || "—"}</TableCell>
-                    <TableCell>{entry.newValue || "—"}</TableCell>
+        <RefreshOverlay isRefreshing={isRefreshing}>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">{cs.history.pageTitle}</CardTitle>
+              <CardDescription>{cs.history.pageDescription}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Datum</TableHead>
+                    <TableHead>Šablona ID</TableHead>
+                    <TableHead>Proměnná / Otázka</TableHead>
+                    <TableHead>Pole</TableHead>
+                    <TableHead>Stará hodnota</TableHead>
+                    <TableHead>Nová hodnota</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  {entries.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell>{new Date(entry.changedAt).toLocaleString("cs-CZ")}</TableCell>
+                      <TableCell className="font-mono text-sm">{entry.templateId}</TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {entry.kind === "template" ? "Otázka" : entry.variableId}
+                      </TableCell>
+                      <TableCell>
+                        {entry.fieldName in cs.history.historyFields
+                          ? cs.history.historyFields[
+                              entry.fieldName as keyof typeof cs.history.historyFields
+                            ]
+                          : entry.fieldName}
+                      </TableCell>
+                      <TableCell>{entry.oldValue || "—"}</TableCell>
+                      <TableCell>{entry.newValue || "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </RefreshOverlay>
       )}
       <ConfirmDialog
         open={isClearHistoryDialogOpen}

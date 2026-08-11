@@ -5,6 +5,7 @@ import { type ReactNode, useEffect } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { Toaster } from "@/components/ui/toaster"
+import { PageTransition } from "@/components/ui/page-transition"
 import { cs } from "@/i18n/cs"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
@@ -153,7 +154,9 @@ export function StudentShell({ children }: { children: ReactNode }) {
       </div>
 
       <main className="flex-1 flex flex-col ml-[var(--sidebar-width)]">
-        <div className="flex-1 p-4 sm:p-6 lg:p-8">{children}</div>
+        <div className="flex-1 p-4 sm:p-6 lg:p-8">
+          <PageTransition>{children}</PageTransition>
+        </div>
       </main>
       <Toaster />
     </div>

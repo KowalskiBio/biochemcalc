@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -120,8 +121,10 @@ function InviteCodeCard() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
           </div>
         ) : codes.length === 0 ? (
           <p className="text-center py-8 text-muted-foreground">
@@ -154,7 +157,12 @@ function InviteCodeCard() {
                   <TableCell>
                     {formatDateTime(invite.expiresAt)}
                     <span className="ml-2 text-xs text-muted-foreground">
-                      ({cs.settings.inviteCode.daysLeft.replace("{days}", String(daysUntil(invite.expiresAt)))})
+                      (
+                      {cs.settings.inviteCode.daysLeft.replace(
+                        "{days}",
+                        String(daysUntil(invite.expiresAt)),
+                      )}
+                      )
                     </span>
                   </TableCell>
                   <TableCell className="tabular">{invite.useCount}</TableCell>
@@ -243,8 +251,10 @@ function UsersCard() {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map((i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
           </div>
         ) : users.length === 0 ? (
           <p className="text-center py-8 text-muted-foreground">{cs.settings.users.emptyState}</p>
@@ -369,12 +379,11 @@ export function SettingsPage() {
 
   if (isLoading) {
     return (
-      <div
-        className="space-y-6"
-      >
-        <div
-        >
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.settings.title}</h1>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {cs.settings.title}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">{cs.settings.description}</p>
         </div>
         <p className="text-foreground-muted">{cs.common.loading}...</p>
@@ -383,12 +392,11 @@ export function SettingsPage() {
   }
 
   return (
-    <div
-      className="space-y-6"
-    >
-      <div
-      >
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.settings.title}</h1>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {cs.settings.title}
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">{cs.settings.description}</p>
       </div>
 
@@ -396,8 +404,7 @@ export function SettingsPage() {
         <AccountCard />
       </div>
 
-      <div
-      >
+      <div>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

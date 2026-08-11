@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority"
 
 import { ExternalLink, Eye, Loader2, Pencil, Save, Search, Wand2, X } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { RefreshOverlay } from "@/components/ui/refresh-overlay"
 import { Textarea } from "@/components/ui/textarea"
 import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { useToast } from "@/hooks/use-toast"
@@ -79,6 +80,8 @@ export function FormulasPage() {
   const { toast } = useToast()
   const [templates, setTemplates] = useState<Template[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const hasLoadedRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -97,16 +100,22 @@ export function FormulasPage() {
   const [isAutoAssigning, setIsAutoAssigning] = useState(false)
 
   const loadTemplates = useCallback(async () => {
-    try {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true)
+    } else {
       setIsLoading(true)
-      setError(null)
+    }
+    setError(null)
+    try {
       const allTemplates = await templatesApi.list()
       const templatesWithFormulas = allTemplates.filter((t) => t.formula?.trim() !== "")
       setTemplates(templatesWithFormulas)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nepodařilo se načíst šablony")
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }, [])
 
@@ -384,158 +393,160 @@ export function FormulasPage() {
       </div>
 
       {/* Formulas card */}
-      <div>
-        <Card>
-          <CardHeader className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            <div>
-              <CardTitle>{cs.formulas.pageTitle}</CardTitle>
-              <CardDescription>{cs.formulas.pageDescription}</CardDescription>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                <Input
-                  id="formulas-search"
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={cs.formulas.searchPlaceholder}
-                  className="pl-9 w-[220px]"
-                />
+      <RefreshOverlay isRefreshing={isRefreshing}>
+        <div>
+          <Card>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div>
+                <CardTitle>{cs.formulas.pageTitle}</CardTitle>
+                <CardDescription>{cs.formulas.pageDescription}</CardDescription>
               </div>
-              <Label
-                htmlFor="formulas-sort"
-                className="text-sm text-muted-foreground whitespace-nowrap"
-              >
-                {cs.formulas.sortBy}
-              </Label>
-              <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-                <SelectTrigger id="formulas-sort" className="w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unit">{cs.formulas.sortByUnit}</SelectItem>
-                  <SelectItem value="equation">{cs.formulas.sortByEquation}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAutoAssignUnits}
-                disabled={isAutoAssigning || isLoading}
-              >
-                {isAutoAssigning ? (
-                  <Loader2 className="size-4 mr-2 animate-spin" />
-                ) : (
-                  <Wand2 className="size-4 mr-2" />
-                )}
-                {cs.formulas.autoAssign}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className={cn(formulaCardVariants())}>
-            {sortedKeys.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <p>{cs.sets.noQuestions}</p>
-                <p className="text-sm mt-2">
-                  Žádné šablony s vzorci zatím neexistují. Vzorec přidejte editací otázky.
-                </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    id="formulas-search"
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={cs.formulas.searchPlaceholder}
+                    className="pl-9 w-[220px]"
+                  />
+                </div>
+                <Label
+                  htmlFor="formulas-sort"
+                  className="text-sm text-muted-foreground whitespace-nowrap"
+                >
+                  {cs.formulas.sortBy}
+                </Label>
+                <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+                  <SelectTrigger id="formulas-sort" className="w-[160px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unit">{cs.formulas.sortByUnit}</SelectItem>
+                    <SelectItem value="equation">{cs.formulas.sortByEquation}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAutoAssignUnits}
+                  disabled={isAutoAssigning || isLoading}
+                >
+                  {isAutoAssigning ? (
+                    <Loader2 className="size-4 mr-2 animate-spin" />
+                  ) : (
+                    <Wand2 className="size-4 mr-2" />
+                  )}
+                  {cs.formulas.autoAssign}
+                </Button>
               </div>
-            ) : (
-              sortedKeys.map((key) => {
-                const group = groups.get(key) ?? []
-                const first = group[0]
-                const rawKey = getEquationKey(first)
-                const uniqueQuestionTexts = getUniqueQuestionTexts(group)
-                return (
-                  <div key={key} className={cn(formulaItemVariants())}>
-                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="py-1">
-                          <MathRenderer text={renderEquationAsLatex(rawKey)} />
+            </CardHeader>
+            <CardContent className={cn(formulaCardVariants())}>
+              {sortedKeys.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <p>{cs.sets.noQuestions}</p>
+                  <p className="text-sm mt-2">
+                    Žádné šablony s vzorci zatím neexistují. Vzorec přidejte editací otázky.
+                  </p>
+                </div>
+              ) : (
+                sortedKeys.map((key) => {
+                  const group = groups.get(key) ?? []
+                  const first = group[0]
+                  const rawKey = getEquationKey(first)
+                  const uniqueQuestionTexts = getUniqueQuestionTexts(group)
+                  return (
+                    <div key={key} className={cn(formulaItemVariants())}>
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="py-1">
+                            <MathRenderer text={renderEquationAsLatex(rawKey)} />
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <Badge variant="outline" className="text-xs">
+                              {formatQuestionCount(uniqueQuestionTexts.length)}
+                            </Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              {first.resultUnit?.trim() ? (
+                                <UnitRenderer unit={first.resultUnit} />
+                              ) : (
+                                "bez jednotky"
+                              )}
+                            </Badge>
+                            <span className="text-foreground-muted text-xs">
+                              {cs.formulas.usedInQuestions}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <Badge variant="outline" className="text-xs">
-                            {formatQuestionCount(uniqueQuestionTexts.length)}
-                          </Badge>
-                          <Badge variant="secondary" className="text-xs">
-                            {first.resultUnit?.trim() ? (
-                              <UnitRenderer unit={first.resultUnit} />
-                            ) : (
-                              "bez jednotky"
-                            )}
-                          </Badge>
-                          <span className="text-foreground-muted text-xs">
-                            {cs.formulas.usedInQuestions}
-                          </span>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => handleOpenPreview(key)}>
+                            <Eye className="size-4 mr-2" />
+                            {cs.common.preview}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleOpenDialog(rawKey)}
+                          >
+                            <Pencil className="size-4 mr-2" />
+                            {cs.common.edit}
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button size="sm" variant="ghost" onClick={() => handleOpenPreview(key)}>
-                          <Eye className="size-4 mr-2" />
-                          {cs.common.preview}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleOpenDialog(rawKey)}
-                        >
-                          <Pencil className="size-4 mr-2" />
-                          {cs.common.edit}
-                        </Button>
-                      </div>
-                    </div>
 
-                    <div className="mt-3 pl-3 border-l-2 border-border space-y-2">
-                      {Array.from(
-                        group
-                          .reduce((map, template) => {
-                            const text = template.questionText.trim()
-                            const existing = map.get(text) ?? []
-                            existing.push(template)
-                            map.set(text, existing)
-                            return map
-                          }, new Map<string, Template[]>())
-                          .entries(),
-                      ).map(([text, templates]) => (
-                        <div key={text} className="flex items-start gap-3 group">
-                          <div className="flex-1 min-w-0 break-words text-sm text-muted-foreground">
-                            <QuestionTextRenderer
-                              text={text}
-                              variables={[]}
-                              constants={constants}
-                            />
+                      <div className="mt-3 pl-3 border-l-2 border-border space-y-2">
+                        {Array.from(
+                          group
+                            .reduce((map, template) => {
+                              const text = template.questionText.trim()
+                              const existing = map.get(text) ?? []
+                              existing.push(template)
+                              map.set(text, existing)
+                              return map
+                            }, new Map<string, Template[]>())
+                            .entries(),
+                        ).map(([text, templates]) => (
+                          <div key={text} className="flex items-start gap-3 group">
+                            <div className="flex-1 min-w-0 break-words text-sm text-muted-foreground">
+                              <QuestionTextRenderer
+                                text={text}
+                                variables={[]}
+                                constants={constants}
+                              />
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleOpenDetail(templates[0].id)}
+                              >
+                                <Pencil className="size-4 mr-2" />
+                                {cs.common.edit}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleGoToQuestion(templates)}
+                              >
+                                <ExternalLink className="size-4 mr-2" />
+                                {cs.common.open}
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleOpenDetail(templates[0].id)}
-                            >
-                              <Pencil className="size-4 mr-2" />
-                              {cs.common.edit}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleGoToQuestion(templates)}
-                            >
-                              <ExternalLink className="size-4 mr-2" />
-                              {cs.common.open}
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )
-              })
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  )
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </RefreshOverlay>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-2xl">

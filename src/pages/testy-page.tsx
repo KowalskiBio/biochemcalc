@@ -1,9 +1,11 @@
 import { Download, Eye, FileText, Loader2, Trash2 } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { RefreshOverlay } from "@/components/ui/refresh-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -22,13 +24,19 @@ export function TestyPage() {
   const { toast } = useToast()
   const [files, setFiles] = useState<OutputFile[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const hasLoadedRef = useRef(false)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [viewing, setViewing] = useState<OutputFileContent | null>(null)
   const [isLoadingContent, setIsLoadingContent] = useState(false)
 
   const fetchFiles = useCallback(async () => {
-    try {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true)
+    } else {
       setIsLoading(true)
+    }
+    try {
       const data = await generationApi.listOutputFiles()
       setFiles(data)
     } catch (err) {
@@ -39,7 +47,9 @@ export function TestyPage() {
         variant: "destructive",
       })
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }, [toast])
 
@@ -125,9 +135,7 @@ export function TestyPage() {
   }
 
   return (
-    <div
-      className="space-y-6"
-    >
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.testy.title}</h1>
         <p className="text-muted-foreground text-sm">{cs.testy.description}</p>
@@ -143,8 +151,10 @@ export function TestyPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            <div className="space-y-2">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
             </div>
           ) : files.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
@@ -152,53 +162,59 @@ export function TestyPage() {
               <p className="text-sm">{cs.testy.emptyState.description}</p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{cs.testy.columns.filename}</TableHead>
-                  <TableHead>{cs.testy.columns.createdAt}</TableHead>
-                  <TableHead className="text-right">{cs.testy.columns.actions}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {files.map((file) => (
-                  <TableRow key={file.id}>
-                    <TableCell className="font-medium">{file.filename}</TableCell>
-                    <TableCell>{formatDate(file.createdAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => void handleView(file)}
-                          disabled={isLoadingContent}
-                        >
-                          <Eye className="size-4 mr-1" />
-                          {cs.common.preview}
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => void handleDownload(file)}>
-                          <Download className="size-4 mr-1" />
-                          {cs.common.download}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => void handleDelete(file.id)}
-                          disabled={isDeleting === file.id}
-                        >
-                          {isDeleting === file.id ? (
-                            <Loader2 className="size-4 mr-1 animate-spin" />
-                          ) : (
-                            <Trash2 className="size-4 mr-1" />
-                          )}
-                          {cs.common.delete}
-                        </Button>
-                      </div>
-                    </TableCell>
+            <RefreshOverlay isRefreshing={isRefreshing}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{cs.testy.columns.filename}</TableHead>
+                    <TableHead>{cs.testy.columns.createdAt}</TableHead>
+                    <TableHead className="text-right">{cs.testy.columns.actions}</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {files.map((file) => (
+                    <TableRow key={file.id}>
+                      <TableCell className="font-medium">{file.filename}</TableCell>
+                      <TableCell>{formatDate(file.createdAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void handleView(file)}
+                            disabled={isLoadingContent}
+                          >
+                            <Eye className="size-4 mr-1" />
+                            {cs.common.preview}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void handleDownload(file)}
+                          >
+                            <Download className="size-4 mr-1" />
+                            {cs.common.download}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void handleDelete(file.id)}
+                            disabled={isDeleting === file.id}
+                          >
+                            {isDeleting === file.id ? (
+                              <Loader2 className="size-4 mr-1 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-4 mr-1" />
+                            )}
+                            {cs.common.delete}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </RefreshOverlay>
           )}
         </CardContent>
       </Card>

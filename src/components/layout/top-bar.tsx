@@ -17,18 +17,15 @@ const topBarVariants = cva(
   "sticky top-0 z-30 flex items-center justify-between h-[var(--top-bar-height)] bg-background border-b border-border px-4 lg:px-6",
 )
 
-const breadcrumbVariants = cva(
-  "text-sm hover:text-foreground transition-colors cursor-pointer",
-  {
-    variants: {
-      variant: {
-        first: "font-medium text-foreground",
-        normal: "font-mono text-[11px] uppercase tracking-wider text-muted-foreground",
-        current: "font-medium text-foreground cursor-default",
-      },
+const breadcrumbVariants = cva("text-sm hover:text-foreground transition-colors cursor-pointer", {
+  variants: {
+    variant: {
+      first: "font-medium text-foreground",
+      normal: "font-mono text-[11px] uppercase tracking-wider text-muted-foreground",
+      current: "font-medium text-foreground cursor-default",
     },
   },
-)
+})
 
 const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
   "/": [{ path: "/", label: cs.navigation.home }],
@@ -57,8 +54,6 @@ const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
     { path: "/victor", label: cs.navigation.victor },
   ],
 }
-
-
 
 export function TopBar() {
   const location = useLocation()
@@ -221,7 +216,10 @@ export function TopBar() {
           {breadcrumbs.map((item, index) => {
             const isLast = index === breadcrumbs.length - 1
             return (
-              <div key={`${item.path}-${item.label}`} className="flex items-center gap-2 min-w-0 flex-shrink-0">
+              <div
+                key={`${item.path}-${item.label}`}
+                className="flex items-center gap-2 min-w-0 flex-shrink-0"
+              >
                 <Link
                   to={item.path}
                   className={cn(
@@ -235,7 +233,9 @@ export function TopBar() {
                 >
                   {item.label}
                 </Link>
-                {!isLast && <span className="text-muted-foreground font-mono flex-shrink-0">/</span>}
+                {!isLast && (
+                  <span className="text-muted-foreground font-mono flex-shrink-0">/</span>
+                )}
               </div>
             )
           })}

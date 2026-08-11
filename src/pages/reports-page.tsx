@@ -5,6 +5,7 @@ import { Link } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { FormattedResult } from "@/components/ui/formatted-result"
 import {
@@ -166,9 +167,17 @@ export function ReportsPage() {
 
       {isLoading ? (
         <Card>
-          <CardContent className="py-8 text-center">
-            <Loader2 className="size-8 animate-spin mx-auto mb-2" />
-            <p className="text-muted-foreground">{cs.reports.loading}</p>
+          <CardHeader>
+            <CardTitle className="text-lg">
+              <Skeleton className="h-5 w-32" />
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
           </CardContent>
         </Card>
       ) : summaries.length === 0 ? (

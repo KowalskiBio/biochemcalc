@@ -1,14 +1,15 @@
 import { ArrowLeft, Layers, Pencil, Plus, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
-
+import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { AddQuestionDialog } from "@/components/topics/add-question-dialog"
 import { AddSetDialog } from "@/components/topics/add-set-dialog"
-import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { RefreshOverlay } from "@/components/ui/refresh-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialog"
 
 import { useToast } from "@/hooks/use-toast"
@@ -25,6 +26,8 @@ export function TopicDetailPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [categoriesWithSets, setCategoriesWithSets] = useState<CategoryWithSets[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const hasLoadedRef = useRef(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
@@ -48,8 +51,12 @@ export function TopicDetailPage() {
 
   const loadData = useCallback(async () => {
     if (!topicId) return
-    try {
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true)
+    } else {
       setIsLoading(true)
+    }
+    try {
       const [topicData, catList] = await Promise.all([
         topicsApi.get(topicId),
         categoriesApi.listByTopic(topicId),
@@ -70,7 +77,9 @@ export function TopicDetailPage() {
       const message = err instanceof ApiError ? err.message : String(err)
       toast({ title: "Chyba", description: message, variant: "destructive" })
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
+      setIsRefreshing(false)
     }
   }, [topicId, toast])
 
@@ -117,9 +126,8 @@ export function TopicDetailPage() {
   const handleDropSetOnCategory = useCallback(
     async (targetCategoryId: string) => {
       if (!carriedSet) return
-      const sourceCatId = categoriesWithSets.find((c) =>
-        c.sets.some((s) => s.id === carriedSet.id),
-      )?.category.id
+      const sourceCatId = categoriesWithSets.find((c) => c.sets.some((s) => s.id === carriedSet.id))
+        ?.category.id
       if (sourceCatId === targetCategoryId) {
         endCarry()
         return
@@ -221,11 +229,34 @@ export function TopicDetailPage() {
 
   if (isLoading) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center">
-          <p className="text-muted-foreground">Načítám téma...</p>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/topics">
+              <ArrowLeft className="size-5" />
+            </Link>
+          </Button>
+          <div>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-24 mt-1" />
+          </div>
+        </div>
+        {[1, 2].map((i) => (
+          <Card key={i}>
+            <CardHeader>
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-4 w-20 mt-1" />
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {[1, 2, 3, 4].map((j) => (
+                  <Skeleton key={j} className="h-20 rounded-lg" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     )
   }
 
@@ -300,116 +331,118 @@ export function TopicDetailPage() {
         </div>
       </div>
 
-      <div className="space-y-6">
-        {categoriesWithSets
-          .sort((a, b) => a.category.pointValue - b.category.pointValue)
-          .map(({ category, sets }) => {
-            const isDropTarget = isCarryingSet && hoveredCategory === category.id
-            return (
-              <Card
-                key={category.id}
-                className={`transition-colors ${
-                  isDropTarget
-                    ? "border-primary border-2 ring-2 ring-primary/40 bg-primary/5"
-                    : isCarryingSet
-                      ? "border-dashed"
-                      : ""
-                }`}
-                onMouseEnter={() => {
-                  if (isCarryingSet) setHoveredCategory(category.id)
-                }}
-                onMouseLeave={() => {
-                  if (isCarryingSet) setHoveredCategory(null)
-                }}
-                onMouseUp={() => {
-                  if (isCarryingSet) {
-                    void handleDropSetOnCategory(category.id)
-                  }
-                }}
-              >
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Layers className="size-5 text-primary" />
-                    <span>
-                      {cs.topics.pointValue.replace("{value}", String(category.pointValue))}
-                    </span>
-                  </CardTitle>
-                  <CardDescription>
-                    {sets.length} {cs.topics.sets.toLowerCase()}
-                    {isDropTarget && (
-                      <span className="text-primary font-medium ml-2">— pusťte sem</span>
-                    )}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {sets
-                      .sort((a, b) => a.setIndex - b.setIndex)
-                      .map((set) => {
-                        const setLabel =
-                          set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))
-                        const isBeingCarried = isCarryingSet && carriedSet?.id === set.id
-                        return (
-                          <div
-                            key={set.id}
-                            onMouseDown={(e) => handleSetMouseDown(e, set)}
-                            onMouseUp={() => {
-                              if (isCarryingQuestion) {
-                                void handleDropQuestionOnSet(set.id, category.id)
-                              }
-                            }}
-                          >
-                            {isCarryingQuestion ? (
-                              <Card className="cursor-pointer transition-colors border-primary border-2 border-dashed hover:bg-primary/5">
-                                <CardContent className="p-4">
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-medium text-sm truncate">
-                                      {setLabel}
-                                    </span>
-                                    <Badge variant={modeVariant(set.mode)}>
-                                      {modeLabel(set.mode)}
-                                    </Badge>
-                                  </div>
-                                  <p className="text-xs text-primary mt-2 text-center">
-                                    {cs.topics.dropQuestionHere}
-                                  </p>
-                                </CardContent>
-                              </Card>
-                            ) : (
-                              <Card
-                                className={`cursor-pointer hover:border-primary transition-colors ${
-                                  isBeingCarried ? "opacity-40 border-primary" : ""
-                                } ${isCarryingSet && !isBeingCarried ? "border-dashed" : ""}`}
-                                onClick={() => {
-                                  if (justDraggedRef.current) {
-                                    justDraggedRef.current = false
-                                    return
-                                  }
-                                  if (isCarrying) return
-                                  navigate(`/sets/${set.id}`)
-                                }}
-                              >
-                                <CardContent className="p-4">
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-medium text-sm truncate">
-                                      {setLabel}
-                                    </span>
-                                    <Badge variant={modeVariant(set.mode)}>
-                                      {modeLabel(set.mode)}
-                                    </Badge>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            )}
-                          </div>
-                        )
-                      })}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-      </div>
+      <RefreshOverlay isRefreshing={isRefreshing}>
+        <div className="space-y-6">
+          {categoriesWithSets
+            .sort((a, b) => a.category.pointValue - b.category.pointValue)
+            .map(({ category, sets }) => {
+              const isDropTarget = isCarryingSet && hoveredCategory === category.id
+              return (
+                <Card
+                  key={category.id}
+                  className={`transition-colors ${
+                    isDropTarget
+                      ? "border-primary border-2 ring-2 ring-primary/40 bg-primary/5"
+                      : isCarryingSet
+                        ? "border-dashed"
+                        : ""
+                  }`}
+                  onMouseEnter={() => {
+                    if (isCarryingSet) setHoveredCategory(category.id)
+                  }}
+                  onMouseLeave={() => {
+                    if (isCarryingSet) setHoveredCategory(null)
+                  }}
+                  onMouseUp={() => {
+                    if (isCarryingSet) {
+                      void handleDropSetOnCategory(category.id)
+                    }
+                  }}
+                >
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Layers className="size-5 text-primary" />
+                      <span>
+                        {cs.topics.pointValue.replace("{value}", String(category.pointValue))}
+                      </span>
+                    </CardTitle>
+                    <CardDescription>
+                      {sets.length} {cs.topics.sets.toLowerCase()}
+                      {isDropTarget && (
+                        <span className="text-primary font-medium ml-2">— pusťte sem</span>
+                      )}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {sets
+                        .sort((a, b) => a.setIndex - b.setIndex)
+                        .map((set) => {
+                          const setLabel =
+                            set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))
+                          const isBeingCarried = isCarryingSet && carriedSet?.id === set.id
+                          return (
+                            <div
+                              key={set.id}
+                              onMouseDown={(e) => handleSetMouseDown(e, set)}
+                              onMouseUp={() => {
+                                if (isCarryingQuestion) {
+                                  void handleDropQuestionOnSet(set.id, category.id)
+                                }
+                              }}
+                            >
+                              {isCarryingQuestion ? (
+                                <Card className="cursor-pointer transition-colors border-primary border-2 border-dashed hover:bg-primary/5">
+                                  <CardContent className="p-4">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-medium text-sm truncate">
+                                        {setLabel}
+                                      </span>
+                                      <Badge variant={modeVariant(set.mode)}>
+                                        {modeLabel(set.mode)}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-xs text-primary mt-2 text-center">
+                                      {cs.topics.dropQuestionHere}
+                                    </p>
+                                  </CardContent>
+                                </Card>
+                              ) : (
+                                <Card
+                                  className={`cursor-pointer hover:border-primary transition-colors ${
+                                    isBeingCarried ? "opacity-40 border-primary" : ""
+                                  } ${isCarryingSet && !isBeingCarried ? "border-dashed" : ""}`}
+                                  onClick={() => {
+                                    if (justDraggedRef.current) {
+                                      justDraggedRef.current = false
+                                      return
+                                    }
+                                    if (isCarrying) return
+                                    navigate(`/sets/${set.id}`)
+                                  }}
+                                >
+                                  <CardContent className="p-4">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-medium text-sm truncate">
+                                        {setLabel}
+                                      </span>
+                                      <Badge variant={modeVariant(set.mode)}>
+                                        {modeLabel(set.mode)}
+                                      </Badge>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              )}
+                            </div>
+                          )
+                        })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+        </div>
+      </RefreshOverlay>
 
       {topic && (
         <DeleteConfirmDialog
