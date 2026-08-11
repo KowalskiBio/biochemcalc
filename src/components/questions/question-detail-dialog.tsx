@@ -644,7 +644,7 @@ export function QuestionDetailDialog({
 
       const payload: UpdateTemplateWithVariablesPayload = {
         id: templateId,
-        questionText: templateDetails.template.questionText,
+        questionText: editText,
         formula: normalizeFormulaForEvaluation(editEquationText),
         equationText: editEquationText ?? "",
         numericAnswer: templateDetails.template.numericAnswer,
