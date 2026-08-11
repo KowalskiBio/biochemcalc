@@ -304,9 +304,12 @@ fn display_rounding_unit(value: f64, max_deviation: f64) -> f64 {
     if target < 0.01 {
         let order = target.log10().floor();
         let unit = 10f64.powf(order);
-        // Avoid absurd numbers of decimal places; chemistry results rarely need
-        // sub-nanoscopic precision.
-        unit.clamp(1e-9, 0.001)
+        // The floor must be well below the answer's own magnitude, otherwise
+        // the correct answer (and every distractor near it) rounds to zero and
+        // distractor generation fails with "0 unique distractors". Atomic
+        // masses (~1e-24) and similar chemistry values are legitimate here; the
+        // frontend renders them in scientific notation regardless of this unit.
+        unit.clamp(1e-30, 0.001)
     } else {
         0.01
     }
@@ -345,21 +348,28 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         let reference_magnitude = if correct == 0.0 {
             1.0
         } else {
-            correct.abs().max(f64::EPSILON)
+            correct.abs()
         };
         let delta = reference_magnitude * deviation;
         let candidate = correct + direction * delta;
 
-        if !candidate.is_finite() || (candidate - correct).abs() < f64::EPSILON {
+        // Skip candidates that didn't actually move from the correct answer in
+        // floating-point. Use a relative tolerance so this works for answers
+        // of any magnitude (e.g. atomic masses ~1e-24).
+        if !candidate.is_finite()
+            || (candidate - correct).abs() <= correct.abs() * f64::EPSILON
+        {
             continue;
         }
 
         let rounded = round_to_unit(candidate, rounding_unit);
         // Use a half-unit tolerance so that values that are exactly one rounding
         // grid step away are accepted despite floating-point representation errors
-        // (e.g. 0.24 - 0.23 can be slightly less than 0.01).
+        // (e.g. 0.24 - 0.23 can be slightly less than 0.01). The tolerance must
+        // scale with the rounding unit — an absolute f64::EPSILON would dominate
+        // for sub-unit answers (e.g. atomic masses ~1e-24) and reject everything.
         let far_enough =
-            (rounded - rounded_correct).abs() > rounding_unit * 0.5 + f64::EPSILON;
+            (rounded - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON);
         let unique = !distractors
             .iter()
             .any(|d: &f64| (d - rounded).abs() <= rounding_unit * 0.5);
@@ -952,6 +962,43 @@ mod tests {
         assert!(options.iter().any(|o| (o - 1e-6).abs() < 1e-12));
         assert!(options.iter().all(|o| *o >= 0.0));
         assert!(options.iter().all(|o| *o < 1e-4));
+    }
+
+    #[test]
+    fn generate_closed_options_for_atomic_scale_answer() {
+        let constraint = make_constraint(None, None, None);
+        let correct = 1.674e-24; // mass of one H atom in grams
+        let mut rng = StdRng::seed_from_u64(7);
+        let (options, correct_pos) =
+            generate_numeric_options(correct, &constraint, &mut rng, "medium", 5).unwrap();
+
+        assert_eq!(options.len(), 5);
+        let correct_option = options[correct_pos as usize - 1];
+        // The correct answer is rounded to the display grid (1e-25 here), so
+        // the tolerance must accommodate up to half a rounding unit of error.
+        assert!(
+            (correct_option - correct).abs() < 1e-24,
+            "correct option {correct_option} should be close to {correct}"
+        );
+        let distractors: Vec<f64> = options
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != correct_pos as usize - 1)
+            .map(|(_, v)| *v)
+            .collect();
+        for i in 0..distractors.len() {
+            for j in (i + 1)..distractors.len() {
+                assert_ne!(
+                    distractors[i].to_bits(),
+                    distractors[j].to_bits(),
+                    "distractors must be unique"
+                );
+            }
+        }
+        assert!(
+            distractors.iter().all(|d| *d > 0.0),
+            "distractors should not collapse to zero"
+        );
     }
 
     #[test]
