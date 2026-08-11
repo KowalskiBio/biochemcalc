@@ -123,3 +123,34 @@ export function isAtomPlaceholder(placeholder: string): boolean {
   const lower = placeholder.toLowerCase()
   return ELEMENT_SYNONYMS.has(lower) || ATOM_PLACEHOLDER_REGEX.test(lower)
 }
+
+/**
+ * Trigger a browser download of a text file by creating a temporary Blob
+ * URL and clicking a synthetic `<a>` element. Works in both Tauri (no-op
+ * if the webview has no download handler) and regular browser contexts.
+ */
+export function downloadTextFile(filename: string, content: string): void {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Sanitize a user-provided filename: strip path separators and other
+ * characters that are illegal in filenames on common operating systems.
+ * Does NOT add an extension — the caller decides that.
+ */
+export function sanitizeFilename(name: string): string {
+  return name
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+}

@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Table,
   TableBody,
@@ -30,6 +31,7 @@ import type {
   TemplateWithDetails,
   Variant,
 } from "@/lib/types"
+import { downloadTextFile, sanitizeFilename } from "@/lib/utils"
 
 interface ExportVariantsDialogProps {
   open: boolean
@@ -59,6 +61,7 @@ export function ExportVariantsDialog({
   const [isExporting, setIsExporting] = useState(false)
   const [isLoadingSamples, setIsLoadingSamples] = useState(false)
   const [sampleVariants, setSampleVariants] = useState<Record<string, Variant>>({})
+  const [filename, setFilename] = useState("")
 
   // State for each question row: included status and variant count
   const [rowStates, setRowStates] = useState<Record<string, QuestionRowState>>(() => {
@@ -84,6 +87,9 @@ export function ExportVariantsDialog({
   // Generate one random sample variant per template whenever the dialog opens
   useEffect(() => {
     if (!open || templates.length === 0) return
+
+    const today = new Date().toISOString().slice(0, 10)
+    setFilename(`export-${today}`)
 
     let cancelled = false
     setIsLoadingSamples(true)
@@ -226,10 +232,13 @@ export function ExportVariantsDialog({
       }
 
       // Export to text file
+      const rawName = sanitizeFilename(filename) || `export-${Date.now()}`
       const result = await generationApi.exportToTxt({
-        filename: `export-${Date.now()}`,
+        filename: rawName,
         questions: exportQuestions,
       })
+
+      downloadTextFile(`${rawName}.txt`, result.content)
 
       toast({
         title: cs.sets.exportDialog.successTitle,
@@ -256,6 +265,7 @@ export function ExportVariantsDialog({
     openDifficulty,
     toast,
     onOpenChange,
+    filename,
   ])
 
   return (
@@ -275,6 +285,18 @@ export function ExportVariantsDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="export-filename">{cs.sets.exportDialog.filenameLabel}</Label>
+            <Input
+              id="export-filename"
+              value={filename}
+              onChange={(e) => setFilename(e.target.value)}
+              placeholder={cs.sets.exportDialog.filenamePlaceholder}
+              disabled={isExporting}
+            />
+            <p className="text-xs text-muted-foreground">{cs.sets.exportDialog.filenameHelp}</p>
+          </div>
+
           <Table>
             <TableHeader>
               <TableRow>

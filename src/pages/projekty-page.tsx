@@ -34,6 +34,7 @@ import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialo
 import { useToast } from "@/hooks/use-toast"
 import { ApiError, projektyApi } from "@/lib/api"
 import type { Projekt, ProjektContent, ProjektQuestion, UpdateProjektInput } from "@/lib/types"
+import { downloadTextFile, sanitizeFilename } from "@/lib/utils"
 
 export function ProjektyPage() {
   const { toast } = useToast()
@@ -47,6 +48,10 @@ export function ProjektyPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [projektToDelete, setProjektToDelete] = useState<Projekt | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [exportFilenameDialog, setExportFilenameDialog] = useState<{
+    projekt: Projekt
+    filename: string
+  } | null>(null)
 
   const fetchProjekty = useCallback(async () => {
     try {
@@ -205,41 +210,49 @@ export function ProjektyPage() {
     }
   }, [fetchProjekty, projektToDelete, toast])
 
-  const handleExport = useCallback(
-    async (projektId: string, name: string) => {
-      try {
-        setIsExporting(projektId)
-        const result = await projektyApi.exportToTxt({
-          projektId,
-          filename: `projekt-${name.replace(/\s+/g, "-")}-${Date.now()}`,
-        })
-        toast({
-          title: "Export dokončen",
-          description: `Projekt byl exportován: ${result.filePath}`,
-        })
-      } catch (err) {
-        const message = err instanceof ApiError ? err.message : String(err)
-        toast({
-          title: "Chyba exportu",
-          description: message,
-          variant: "destructive",
-        })
-      } finally {
-        setIsExporting(null)
-      }
-    },
-    [toast],
-  )
+  const handleExport = useCallback(async (projekt: Projekt) => {
+    const today = new Date().toISOString().slice(0, 10)
+    const defaultName = sanitizeFilename(projekt.name) || "projekt"
+    setExportFilenameDialog({
+      projekt,
+      filename: `${defaultName}-${today}`,
+    })
+  }, [])
+
+  const handleExportConfirm = useCallback(async () => {
+    if (!exportFilenameDialog) return
+    const { projekt, filename } = exportFilenameDialog
+    try {
+      setIsExporting(projekt.id)
+      const rawName = sanitizeFilename(filename) || `projekt-${Date.now()}`
+      const result = await projektyApi.exportToTxt({
+        projektId: projekt.id,
+        filename: rawName,
+      })
+      downloadTextFile(`${rawName}.txt`, result.content)
+      toast({
+        title: "Export dokončen",
+        description: `Projekt byl exportován: ${result.filePath}`,
+      })
+      setExportFilenameDialog(null)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({
+        title: "Chyba exportu",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setIsExporting(null)
+    }
+  }, [exportFilenameDialog, toast])
 
   const modeLabel = (m: "closed" | "open") => (m === "closed" ? "Uzavřený" : "Otevřený")
 
   return (
     <>
-      <div
-        className="space-y-6"
-      >
-        <div
-        >
+      <div className="space-y-6">
+        <div>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">Projekty</h1>
@@ -250,8 +263,7 @@ export function ProjektyPage() {
           </div>
         </div>
 
-        <div
-        >
+        <div>
           {isLoading ? (
             <Card>
               <CardContent className="py-8 text-center">
@@ -263,9 +275,7 @@ export function ProjektyPage() {
             <Card>
               <CardContent className="py-12 text-center">
                 <FolderOpen className="size-12 text-foreground-muted mx-auto mb-4" />
-                <p className="text-muted-foreground mb-2">
-                  Zatím jste nevytvořili žádné projekty.
-                </p>
+                <p className="text-muted-foreground mb-2">Zatím jste nevytvořili žádné projekty.</p>
                 <p className="text-muted-foreground text-sm mb-4">
                   Uložte generované úkoly z detailu sady pomocí "Uložit do Projektu"
                 </p>
@@ -331,7 +341,7 @@ export function ProjektyPage() {
                                 Upravit
                               </DropdownMenuItem>
                               <DropdownMenuItem
-                                onClick={() => handleExport(p.id, p.name)}
+                                onClick={() => handleExport(p)}
                                 disabled={isExporting === p.id}
                               >
                                 <Download className="size-4 mr-2" />
@@ -453,9 +463,7 @@ export function ProjektyPage() {
                             ))}
                           </div>
                         ) : (
-                          <p className="text-sm text-muted-foreground">
-                            Žádné číselné proměnné
-                          </p>
+                          <p className="text-sm text-muted-foreground">Žádné číselné proměnné</p>
                         )}
                       </div>
 
@@ -510,8 +518,65 @@ export function ProjektyPage() {
           onOpenChange={setIsDeleteDialogOpen}
           onConfirm={handleConfirmDelete}
           title="Smazat projekt"
-          description={`Opravdu chcete smazat projekt "${projektToDelete.name}"? Tato akce nelze vrátit zpět.`}
+          description={`Opravdu chcete smazat projekt "${projektToDelete.name}"? Tato akce nelze vrátit.`}
         />
+      )}
+
+      {exportFilenameDialog && (
+        <Dialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setExportFilenameDialog(null)
+          }}
+        >
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Exportovat projekt</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              <Label htmlFor="projekt-export-filename">Název souboru</Label>
+              <Input
+                id="projekt-export-filename"
+                value={exportFilenameDialog.filename}
+                onChange={(e) =>
+                  setExportFilenameDialog((prev) =>
+                    prev ? { ...prev, filename: e.target.value } : null,
+                  )
+                }
+                placeholder="např. test-chemie"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    void handleExportConfirm()
+                  }
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Soubor se uloží na server i stáhne do vašeho počítače.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setExportFilenameDialog(null)}
+                disabled={isExporting === exportFilenameDialog.projekt.id}
+              >
+                Zrušit
+              </Button>
+              <Button
+                onClick={handleExportConfirm}
+                disabled={isExporting === exportFilenameDialog.projekt.id}
+              >
+                {isExporting === exportFilenameDialog.projekt.id ? (
+                  <Loader2 className="size-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="size-4 mr-2" />
+                )}
+                Exportovat
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </>
   )
