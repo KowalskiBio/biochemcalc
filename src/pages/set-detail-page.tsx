@@ -1124,6 +1124,7 @@ export function SetDetailPage() {
       {/* Question Detail Dialog */}
       {selectedTemplateId && (
         <QuestionDetailDialog
+          key={selectedTemplateId}
           templateId={selectedTemplateId}
           open={dialogOpen}
           onClose={() => setDialogOpen(false)}
@@ -1132,6 +1133,8 @@ export function SetDetailPage() {
             setDialogOpen(false)
             void loadData()
           }}
+          initialTemplateDetails={templateDetailsById.get(selectedTemplateId)}
+          initialConstants={globalConstants}
         />
       )}
 

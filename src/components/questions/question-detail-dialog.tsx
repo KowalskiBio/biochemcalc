@@ -77,6 +77,8 @@ interface QuestionDetailDialogProps {
    * full page reload.
    */
   onSaved?: () => void
+  initialTemplateDetails?: TemplateWithDetails
+  initialConstants?: Record<string, number>
 }
 
 function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
@@ -278,15 +280,25 @@ export function QuestionDetailDialog({
   onClose,
   onDelete,
   onSaved,
+  initialTemplateDetails,
+  initialConstants,
 }: QuestionDetailDialogProps) {
-  const [templateDetails, setTemplateDetails] = useState<TemplateWithDetails | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const hasDataRef = useRef(false)
+  const [templateDetails, setTemplateDetails] = useState<TemplateWithDetails | null>(
+    initialTemplateDetails ?? null,
+  )
+  const [isLoading, setIsLoading] = useState(!initialTemplateDetails)
+  const hasDataRef = useRef(!!initialTemplateDetails)
   const [error, setError] = useState<string | null>(null)
   const [isEditingText, setIsEditingText] = useState(false)
-  const [editText, setEditText] = useState("")
-  const [localVariables, setLocalVariables] = useState<LocalVariableEdit[]>([])
-  const [originalVariables, setOriginalVariables] = useState<LocalVariableEdit[]>([])
+  const [editText, setEditText] = useState(initialTemplateDetails?.template.questionText ?? "")
+  const [localVariables, setLocalVariables] = useState<LocalVariableEdit[]>(
+    initialTemplateDetails ? initialTemplateDetails.variables.map(toLocalVariableEdit) : [],
+  )
+  const [originalVariables, setOriginalVariables] = useState<LocalVariableEdit[]>(
+    initialTemplateDetails
+      ? initialTemplateDetails.variables.map(toLocalVariableEdit).map((v) => ({ ...v }))
+      : [],
+  )
   const [editingVariableKey, setEditingVariableKey] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<Record<string, Record<string, string>>>(
     {},
@@ -294,19 +306,29 @@ export function QuestionDetailDialog({
   const [isSaving, setIsSaving] = useState(false)
   const [sampleVariant, setSampleVariant] = useState<Variant | null>(null)
   const [isEditingAnswer, setIsEditingAnswer] = useState(false)
-  const [editEquationText, setEditEquationText] = useState("")
-  const [editResultUnit, setEditResultUnit] = useState("")
-  const [editSignificantDigits, setEditSignificantDigits] = useState<string>("")
-  const [forceScientific, setForceScientific] = useState(false)
+  const [editEquationText, setEditEquationText] = useState(
+    initialTemplateDetails?.template.equationText ?? "",
+  )
+  const [editResultUnit, setEditResultUnit] = useState(
+    initialTemplateDetails?.template.resultUnit ?? "",
+  )
+  const [editSignificantDigits, setEditSignificantDigits] = useState<string>(
+    initialTemplateDetails?.template.significantDigits != null
+      ? String(initialTemplateDetails.template.significantDigits)
+      : "",
+  )
+  const [forceScientific, setForceScientific] = useState(
+    initialTemplateDetails?.template.forceScientific ?? false,
+  )
   const [mockSeed, setMockSeed] = useState(0)
   const [sampleSeed, setSampleSeed] = useState(1)
 
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([])
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(!!initialTemplateDetails)
   const [isClearHistoryDialogOpen, setIsClearHistoryDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [constants, setConstants] = useState<Record<string, number>>({})
+  const [constants, setConstants] = useState<Record<string, number>>(initialConstants ?? {})
 
   const { toast } = useToast()
   const databazeEntries = useDatabazeEntries()
@@ -457,12 +479,6 @@ export function QuestionDetailDialog({
       setIsDeleteDialogOpen(false)
     }
   }, [templateId, templateDetails, onDelete, toast])
-
-  useEffect(() => {
-    if (!templateId) return
-    hasDataRef.current = false
-    setTemplateDetails(null)
-  }, [templateId])
 
   useEffect(() => {
     if (open && templateId) {
