@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialog"
 // Sub-components
 import { VariableDialog } from "@/components/variables/variable-dialog"
@@ -158,13 +159,15 @@ export function VariablesPage() {
     fetchVariables()
   }, [fetchVariables])
 
-   return (
+  return (
     <div className={cn(pageContainerVariants())}>
       {/* Page header */}
       <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.variables.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {cs.variables.title}
+            </h1>
             <p className="text-sm text-muted-foreground mt-1">{cs.variables.pageDescription}</p>
           </div>
         </div>
@@ -188,24 +191,25 @@ export function VariablesPage() {
         </Button>
       </div>
 
-       {/* Variables table */}
+      {/* Variables table */}
       <div>
         <Card>
           <CardHeader>
             <CardTitle>{cs.variables.columns.name}</CardTitle>
-             <CardDescription>
-               <span className="font-mono tabular">{filteredVariables.length}</span> {cs.variables.title.toLowerCase()}
-             </CardDescription>
+            <CardDescription>
+              <span className="font-mono tabular">{filteredVariables.length}</span>{" "}
+              {cs.variables.title.toLowerCase()}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {error ? (
               <div className="text-destructive">{error}</div>
-             ) : isLoading ? (
-               <div className="text-muted-foreground">{cs.toasts.info.loading}</div>
-             ) : filteredVariables.length === 0 ? (
-               <div className="flex flex-col items-center justify-center py-8 text-center">
-                 <p className="text-muted-foreground mb-4">{cs.variables.emptyState.title}</p>
-                 <p className="text-muted-foreground text-sm mb-4">
+            ) : isLoading ? (
+              <div className="text-muted-foreground">{cs.toasts.info.loading}</div>
+            ) : filteredVariables.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <p className="text-muted-foreground mb-4">{cs.variables.emptyState.title}</p>
+                <p className="text-muted-foreground text-sm mb-4">
                   {cs.variables.emptyState.description}
                 </p>
                 <Button onClick={() => setIsCreateDialogOpen(true)}>
@@ -230,11 +234,13 @@ export function VariablesPage() {
                       <TableCell>
                         <Badge variant="secondary">{variable.symbol}</Badge>
                       </TableCell>
-                       <TableCell className="font-mono tabular">
-                         {variable.minValue} - {variable.maxValue}
-                         {variable.step && ` (${variable.step})`}
-                       </TableCell>
-                      <TableCell>{variable.unit}</TableCell>
+                      <TableCell className="font-mono tabular">
+                        {variable.minValue} - {variable.maxValue}
+                        {variable.step && ` (${variable.step})`}
+                      </TableCell>
+                      <TableCell>
+                        <UnitRenderer unit={variable.unit} />
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
                           <Button
@@ -259,8 +265,8 @@ export function VariablesPage() {
               </Table>
             )}
           </CardContent>
-         </Card>
-       </div>
+        </Card>
+      </div>
 
       {/* Create Variable Dialog */}
       <VariableDialog

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 // Czech translations
 import { cs } from "@/i18n/cs"
 import { validateConstantInput } from "@/lib/api"
@@ -220,6 +221,13 @@ export function ConstantDialog({
                 <option key={unit} value={unit} />
               ))}
             </datalist>
+            <p className="text-xs text-muted-foreground">{cs.form.unitFormatHint}</p>
+            {formData.unit?.trim() && (
+              <p className="text-xs text-muted-foreground">
+                Náhled:{" "}
+                <UnitRenderer unit={formData.unit} className="font-medium text-foreground" />
+              </p>
+            )}
           </div>
         </form>
 

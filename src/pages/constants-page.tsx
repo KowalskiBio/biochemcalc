@@ -16,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialog"
 // Import hooks
 import { useToast } from "@/hooks/use-toast"
@@ -160,24 +161,21 @@ export function ConstantsPage() {
   }, [fetchConstants])
 
   return (
-    <div
-      className={cn(pageContainerVariants())}
-    >
+    <div className={cn(pageContainerVariants())}>
       {/* Page header */}
-      <div
-      >
+      <div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.constants.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {cs.constants.title}
+            </h1>
             <p className="text-sm text-muted-foreground mt-1">{cs.constants.pageDescription}</p>
           </div>
         </div>
       </div>
 
       {/* Actions bar */}
-      <div
-        className="flex flex-col sm:flex-row gap-4"
-      >
+      <div className="flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-foreground-muted" />
           <Input
@@ -195,8 +193,7 @@ export function ConstantsPage() {
       </div>
 
       {/* Constants table */}
-      <div
-      >
+      <div>
         <Card>
           <CardHeader>
             <CardTitle>{cs.constants.columns.name}</CardTitle>
@@ -245,7 +242,9 @@ export function ConstantsPage() {
                         <Badge variant="secondary">{constant.symbol}</Badge>
                       </TableCell>
                       <TableCell>{constant.value}</TableCell>
-                      <TableCell>{constant.unit}</TableCell>
+                      <TableCell>
+                        <UnitRenderer unit={constant.unit} />
+                      </TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-2">
                           <Button

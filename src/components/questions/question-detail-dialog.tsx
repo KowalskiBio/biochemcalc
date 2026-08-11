@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
@@ -481,10 +482,18 @@ export function QuestionDetailDialog({
     if (editEquationText !== (templateDetails?.template.equationText ?? "")) return true
     if (editResultUnit !== (templateDetails?.template.resultUnit ?? "")) return true
     const currentSigDigits = templateDetails?.template.significantDigits
-    const newSigDigits = editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+    const newSigDigits =
+      editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
     if (newSigDigits !== currentSigDigits) return true
     return dirtyVariableKeys.size > 0
-  }, [editText, editEquationText, editResultUnit, editSignificantDigits, templateDetails, dirtyVariableKeys])
+  }, [
+    editText,
+    editEquationText,
+    editResultUnit,
+    editSignificantDigits,
+    templateDetails,
+    dirtyVariableKeys,
+  ])
 
   const handleSave = async () => {
     if (!templateDetails) return
@@ -563,7 +572,8 @@ export function QuestionDetailDialog({
       }
     }
 
-    const sigDigits = editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+    const sigDigits =
+      editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
 
     const payload: UpdateTemplateWithVariablesPayload = {
       id: templateId,
@@ -629,7 +639,8 @@ export function QuestionDetailDialog({
         placeholder: vwp.placeholder,
       }))
 
-      const sigDigits = editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
+      const sigDigits =
+        editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
 
       const payload: UpdateTemplateWithVariablesPayload = {
         id: templateId,
@@ -784,10 +795,9 @@ export function QuestionDetailDialog({
   const displayTemplateVariables = templateDetails
     ? templateDetails.variables.filter((vwp) => vwp.placeholder !== "ANS")
     : []
-  const displayPrecision = templateDetails?.template.significantDigits ?? Math.max(
-    2,
-    ...displayTemplateVariables.map((v) => v.variable.precision),
-  )
+  const displayPrecision =
+    templateDetails?.template.significantDigits ??
+    Math.max(2, ...displayTemplateVariables.map((v) => v.variable.precision))
 
   const placeholderHelp = displayTemplateVariables.length > 0 && (
     <div className="text-xs text-foreground-secondary">
@@ -795,9 +805,13 @@ export function QuestionDetailDialog({
       {displayTemplateVariables.map((vwp, index) => (
         <span key={vwp.variable.id}>
           <code className="bg-muted px-1 rounded">{`[[${vwp.placeholder}]]`}</code>{" "}
-          {vwp.variable.unit
-            ? `= ${vwp.variable.symbol} (${vwp.variable.unit})`
-            : `= ${vwp.variable.symbol}`}
+          {vwp.variable.unit ? (
+            <>
+              = {vwp.variable.symbol} (<UnitRenderer unit={vwp.variable.unit} />)
+            </>
+          ) : (
+            `= ${vwp.variable.symbol}`
+          )}
           {index < displayTemplateVariables.length - 1 ? ", " : ""}
         </span>
       ))}
@@ -1120,11 +1134,13 @@ export function QuestionDetailDialog({
 
     try {
       const value = evaluateExpression(normalized, {}, constants)
-      const resultPrecision = templateDetails?.template.significantDigits ?? Math.max(
-        2,
-        ...referencedVariables.filter((v) => v.varType === "numeric").map((v) => v.precision),
-        ...referencedFixedPlaceholders.map(() => 2),
-      )
+      const resultPrecision =
+        templateDetails?.template.significantDigits ??
+        Math.max(
+          2,
+          ...referencedVariables.filter((v) => v.varType === "numeric").map((v) => v.precision),
+          ...referencedFixedPlaceholders.map(() => 2),
+        )
       // Multiple semicolon-separated targets (e.g. "c = ...; wDsc = ...")
       // each get their own answer line — evaluateExpression alone only
       // surfaces the last one.
@@ -1246,7 +1262,9 @@ export function QuestionDetailDialog({
                         em: ({ children }) => <>{children}</>,
                       }}
                     >
-                      {formatChemicalText(stripAnswerTargets(templateDetails.template.questionText))}
+                      {formatChemicalText(
+                        stripAnswerTargets(templateDetails.template.questionText),
+                      )}
                     </ReactMarkdown>
                   </div>
                 )}
@@ -1365,6 +1383,16 @@ export function QuestionDetailDialog({
                         placeholder="%"
                         disabled={isSaving}
                       />
+                      <p className="text-xs text-muted-foreground">{cs.form.unitFormatHint}</p>
+                      {editResultUnit.trim() && (
+                        <p className="text-xs text-muted-foreground">
+                          Náhled:{" "}
+                          <UnitRenderer
+                            unit={editResultUnit}
+                            className="font-medium text-foreground"
+                          />
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="significantDigits">{cs.questions.significantDigits}</Label>
@@ -1472,7 +1500,8 @@ export function QuestionDetailDialog({
                                   <code className="text-foreground-secondary">{name}</code>
                                   <span className="font-medium whitespace-nowrap">
                                     {value.toFixed(unit === "g/mol" ? 2 : 4)}
-                                    {unit ? ` ${unit}` : ""}
+                                    {unit ? " " : ""}
+                                    {unit ? <UnitRenderer unit={unit} /> : null}
                                   </span>
                                 </div>
                               ))}
@@ -1531,7 +1560,9 @@ export function QuestionDetailDialog({
                                     <FormattedResult
                                       value={a.value}
                                       precision={displayPrecision}
-                                      significantDigits={templateDetails?.template.significantDigits}
+                                      significantDigits={
+                                        templateDetails?.template.significantDigits
+                                      }
                                       unit={a.unit}
                                     />
                                   </p>
@@ -1632,12 +1663,17 @@ export function QuestionDetailDialog({
                                   {mockResult.answersData ? (
                                     <div className="space-y-1">
                                       {mockResult.answersData.map((a) => (
-                                        <p key={a.symbol} className="text-xl font-bold text-primary">
+                                        <p
+                                          key={a.symbol}
+                                          className="text-xl font-bold text-primary"
+                                        >
                                           {a.symbol} ={" "}
                                           <FormattedResult
                                             value={a.value}
                                             precision={mockResult.resultPrecision}
-                                            significantDigits={templateDetails?.template.significantDigits}
+                                            significantDigits={
+                                              templateDetails?.template.significantDigits
+                                            }
                                             unit={a.unit ?? templateDetails.template.resultUnit}
                                           />
                                         </p>
@@ -1648,7 +1684,9 @@ export function QuestionDetailDialog({
                                       <FormattedResult
                                         value={mockResult.value}
                                         precision={mockResult.resultPrecision}
-                                        significantDigits={templateDetails?.template.significantDigits}
+                                        significantDigits={
+                                          templateDetails?.template.significantDigits
+                                        }
                                         unit={templateDetails.template.resultUnit}
                                       />
                                     </p>

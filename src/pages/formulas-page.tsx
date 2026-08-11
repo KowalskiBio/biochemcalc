@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority"
- 
+
 import { ExternalLink, Eye, Loader2, Pencil, Save, Search, Wand2, X } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -316,10 +316,7 @@ export function FormulasPage() {
   }, [groups, loadTemplates, toast])
 
   const skeletonItems = [1, 2, 3, 4, 5].map((key) => (
-    <div
-      key={key}
-      className={cn(formulaItemVariants())}
-    >
+    <div key={key} className={cn(formulaItemVariants())}>
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
         <div className="flex-1 min-w-0">
           <Skeleton className="h-5 w-3/4" />
@@ -332,19 +329,17 @@ export function FormulasPage() {
 
   if (isLoading) {
     return (
-      <div
-        className={cn(pageContainerVariants())}
-      >
-        <div
-        >
+      <div className={cn(pageContainerVariants())}>
+        <div>
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.formulas.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {cs.formulas.title}
+            </h1>
             <p className="text-muted-foreground">{cs.formulas.description}</p>
           </div>
         </div>
 
-        <div
-        >
+        <div>
           <Card>
             <CardHeader>
               <CardTitle>{cs.formulas.pageTitle}</CardTitle>
@@ -359,20 +354,17 @@ export function FormulasPage() {
 
   if (error) {
     return (
-      <div
-        className={cn(pageContainerVariants())}
-      >
-        <div
-        >
+      <div className={cn(pageContainerVariants())}>
+        <div>
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.formulas.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {cs.formulas.title}
+            </h1>
             <p className="text-muted-foreground">{cs.formulas.description}</p>
           </div>
         </div>
 
-        <div
-          className="text-center py-12 text-destructive"
-        >
+        <div className="text-center py-12 text-destructive">
           <p>{error}</p>
         </div>
       </div>
@@ -380,21 +372,19 @@ export function FormulasPage() {
   }
 
   return (
-    <div
-      className={cn(pageContainerVariants())}
-    >
+    <div className={cn(pageContainerVariants())}>
       {/* Page header */}
-      <div
-      >
+      <div>
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.formulas.title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {cs.formulas.title}
+          </h1>
           <p className="text-muted-foreground">{cs.formulas.description}</p>
         </div>
       </div>
 
       {/* Formulas card */}
-      <div
-      >
+      <div>
         <Card>
           <CardHeader className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
@@ -445,9 +435,7 @@ export function FormulasPage() {
           </CardHeader>
           <CardContent className={cn(formulaCardVariants())}>
             {sortedKeys.length === 0 ? (
-              <div
-                className="text-center py-12 text-muted-foreground"
-              >
+              <div className="text-center py-12 text-muted-foreground">
                 <p>{cs.sets.noQuestions}</p>
                 <p className="text-sm mt-2">
                   Žádné šablony s vzorci zatím neexistují. Vzorec přidejte editací otázky.
@@ -460,10 +448,7 @@ export function FormulasPage() {
                 const rawKey = getEquationKey(first)
                 const uniqueQuestionTexts = getUniqueQuestionTexts(group)
                 return (
-                  <div
-                    key={key}
-                    className={cn(formulaItemVariants())}
-                  >
+                  <div key={key} className={cn(formulaItemVariants())}>
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="py-1">
@@ -592,6 +577,7 @@ export function FormulasPage() {
                 placeholder={cs.formulas.resultUnitPlaceholder}
                 disabled={isSaving}
               />
+              <p className="text-xs text-muted-foreground">{cs.form.unitFormatHint}</p>
               <p className="text-xs text-muted-foreground">
                 {cs.formulas.currentUnit}:{" "}
                 {groups.get(editingKey)?.[0]?.resultUnit?.trim() ? (

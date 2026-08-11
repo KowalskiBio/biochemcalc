@@ -10,6 +10,7 @@ import { MolarMassDialog } from "@/components/databaze/molar-mass-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError, constantsApi } from "@/lib/api"
@@ -282,20 +283,17 @@ export function DatabazePage() {
   )
 
   return (
-    <div
-      className={cn(pageContainerVariants())}
-    >
-      <div
-      >
+    <div className={cn(pageContainerVariants())}>
+      <div>
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{cs.databaze.title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {cs.databaze.title}
+          </h1>
           <p className="text-muted-foreground">{cs.databaze.pageDescription}</p>
         </div>
       </div>
 
-      <div
-        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
-      >
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-2 p-1 bg-muted rounded-lg">
           <Button
             variant={activeTab === "variables" ? "secondary" : "ghost"}
@@ -336,8 +334,7 @@ export function DatabazePage() {
       </div>
 
       {activeTab === "variables" ? (
-        <div
-        >
+        <div>
           <Card>
             <CardHeader>
               <CardTitle>{cs.databaze.pageTitle}</CardTitle>
@@ -358,10 +355,7 @@ export function DatabazePage() {
                 </div>
               ) : (
                 entries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={cn(entryItemVariants())}
-                  >
+                  <div key={entry.id} className={cn(entryItemVariants())}>
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -400,8 +394,7 @@ export function DatabazePage() {
           </Card>
         </div>
       ) : (
-        <div
-        >
+        <div>
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between gap-4">
@@ -466,10 +459,7 @@ export function DatabazePage() {
                 </div>
               ) : (
                 filteredMolarMasses.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={cn(entryItemVariants())}
-                  >
+                  <div key={entry.id} className={cn(entryItemVariants())}>
                     <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -483,11 +473,13 @@ export function DatabazePage() {
                           <span className={cn(codeVariants())}>
                             {formatAtomicWeight(entry.value)}
                           </span>
-                          <span className="text-sm text-muted-foreground">{entry.unit}</span>
+                          <span className="text-sm text-muted-foreground">
+                            <UnitRenderer unit={entry.unit} />
+                          </span>
                         </div>
                         <p className="text-foreground-muted text-sm mt-2">
                           {cs.databaze.atomicWeights.columns.value}:{" "}
-                          {formatAtomicWeight(entry.value)} {entry.unit}
+                          {formatAtomicWeight(entry.value)} <UnitRenderer unit={entry.unit} />
                         </p>
                       </div>
                       <div className="flex gap-2 sm:mt-0">
