@@ -28,30 +28,30 @@ const breadcrumbVariants = cva("text-sm hover:text-foreground transition-colors 
 })
 
 const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
-  "/": [{ path: "/", label: cs.navigation.home }],
-  "/topics": [
-    { path: "/", label: cs.navigation.home },
-    { path: "/topics", label: cs.navigation.topics },
-  ],
+  "/topics": [{ path: "/topics", label: cs.navigation.topics }],
   "/constants": [
-    { path: "/", label: cs.navigation.home },
+    { path: "/topics", label: cs.navigation.topics },
     { path: "/constants", label: cs.navigation.constants },
   ],
   "/history": [
-    { path: "/", label: cs.navigation.home },
+    { path: "/topics", label: cs.navigation.topics },
     { path: "/history", label: cs.navigation.history },
   ],
   "/settings": [
-    { path: "/", label: cs.navigation.home },
+    { path: "/topics", label: cs.navigation.topics },
     { path: "/settings", label: cs.navigation.settings },
   ],
   "/help": [
-    { path: "/", label: cs.navigation.home },
+    { path: "/topics", label: cs.navigation.topics },
     { path: "/help", label: cs.navigation.help },
   ],
   "/victor": [
-    { path: "/", label: cs.navigation.home },
+    { path: "/topics", label: cs.navigation.topics },
     { path: "/victor", label: cs.navigation.victor },
+  ],
+  "/leaderboard": [
+    { path: "/topics", label: cs.navigation.topics },
+    { path: "/leaderboard", label: cs.navigation.leaderboard },
   ],
 }
 
@@ -126,14 +126,13 @@ export function TopBar() {
 
       if (victorMatch) {
         setBreadcrumbs([
-          { path: "/", label: cs.navigation.home },
+          { path: "/topics", label: cs.navigation.topics },
           { path: "/victor", label: cs.navigation.victor },
         ])
       } else if (topicMatch) {
         const topicId = topicMatch[1]
         const topic = await topicsApi.get(topicId)
         setBreadcrumbs([
-          { path: "/", label: cs.navigation.home },
           { path: "/topics", label: cs.navigation.topics },
           { path: `/topics/${topicId}`, label: topic.name },
         ])
@@ -149,7 +148,6 @@ export function TopBar() {
         const category = await categoriesApi.get(set.set.categoryId)
 
         setBreadcrumbs([
-          { path: "/", label: cs.navigation.home },
           { path: "/topics", label: cs.navigation.topics },
           { path: `/topics/${topicId}`, label: topic.name },
           {
@@ -169,7 +167,6 @@ export function TopBar() {
         const topic = await topicsApi.get(category.topicId)
 
         setBreadcrumbs([
-          { path: "/", label: cs.navigation.home },
           { path: "/topics", label: cs.navigation.topics },
           { path: `/topics/${topic.id}`, label: topic.name },
           {
@@ -182,12 +179,14 @@ export function TopBar() {
           },
         ])
       } else {
-        setBreadcrumbs([{ path: "/", label: cs.navigation.home }])
+        setBreadcrumbs([{ path: "/topics", label: cs.navigation.topics }])
       }
     } catch (err) {
       console.error("Failed to load breadcrumb data:", err)
       setBreadcrumbs(
-        staticRouteBreadcrumbs[location.pathname] || [{ path: "/", label: cs.navigation.home }],
+        staticRouteBreadcrumbs[location.pathname] || [
+          { path: "/topics", label: cs.navigation.topics },
+        ],
       )
     }
   }, [location.pathname])
