@@ -1089,28 +1089,49 @@ export function resolveOptionsPrecision(
   return maxPrecision
 }
 
+/** Below this magnitude a fixed-point string has more than one leading zero
+ * after the decimal point — `0.1` is acceptable, `0.01` is not. */
+const SCIENTIFIC_LOWER_THRESHOLD = 0.1
+
 export function formatSignificantDigits(
   value: number | undefined | null,
   sigDigits: number,
+  forceScientific = false,
 ): string {
   if (value == null || !Number.isFinite(value)) return ""
   if (value === 0) return (0).toFixed(Math.max(0, sigDigits - 1))
 
   const abs = Math.abs(value)
+
+  // Scientific notation when the value is too small (more than one leading
+  // zero after the decimal point) or too large, or when explicitly forced.
+  if (forceScientific || abs < SCIENTIFIC_LOWER_THRESHOLD || abs >= SCIENTIFIC_UPPER_THRESHOLD) {
+    const mantissa = value / Math.pow(10, Math.floor(Math.log10(abs)))
+    const mantissaDigits = sigDigits - 1
+    return `${mantissa.toFixed(mantissaDigits)}×10^${Math.floor(Math.log10(abs))}`
+  }
+
   const order = Math.floor(Math.log10(abs))
   const decimalPlaces = Math.max(0, sigDigits - 1 - order)
   return value.toFixed(decimalPlaces)
 }
 
-export function formatNumberMaxDecimals(value: number | undefined | null, maxDecimals = 2): string {
+export function formatNumberMaxDecimals(
+  value: number | undefined | null,
+  maxDecimals = 2,
+  forceScientific = false,
+): string {
   if (value == null || !Number.isFinite(value)) return ""
   const decimals = Math.max(0, maxDecimals)
   const fixed = value.toFixed(decimals)
   const rounded = Number(fixed)
 
-  // Too small to survive rounding at this precision, or too large to write
-  // out in full — either way scientific notation is the readable form.
-  if ((rounded === 0 && value !== 0) || Math.abs(rounded) >= SCIENTIFIC_UPPER_THRESHOLD) {
+  if (
+    forceScientific ||
+    (rounded === 0 && value !== 0) ||
+    Math.abs(rounded) >= SCIENTIFIC_UPPER_THRESHOLD ||
+    (value !== 0 && Math.abs(value) < SCIENTIFIC_LOWER_THRESHOLD)
+  ) {
     return toScientificNotation(value)
   }
   return rounded.toString()

@@ -5,6 +5,7 @@ import rehypeRaw from "rehype-raw"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { FormattedResult } from "@/components/ui/formatted-result"
@@ -32,6 +33,7 @@ import {
   evaluateAllAssignments,
   evaluateExpression,
   extractMolarMassValues,
+  formatNumberForText,
   renderEquationAsLatex,
   resolveMolarMasses,
   substituteRemainingMolarMasses,
@@ -285,6 +287,7 @@ export function QuestionDetailDialog({
   const [editEquationText, setEditEquationText] = useState("")
   const [editResultUnit, setEditResultUnit] = useState("")
   const [editSignificantDigits, setEditSignificantDigits] = useState<string>("")
+  const [forceScientific, setForceScientific] = useState(false)
   const [mockSeed, setMockSeed] = useState(0)
   const [sampleSeed, setSampleSeed] = useState(1)
 
@@ -1180,9 +1183,34 @@ export function QuestionDetailDialog({
         </DialogHeader>
 
         {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-8 animate-spin" />
-            <span className="ml-2">{cs.common.loading}...</span>
+          <div className="space-y-4 py-4">
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-5 w-32" />
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-5 w-40" />
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-5 w-36" />
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-2/3" />
+              </CardContent>
+            </Card>
           </div>
         )}
 
@@ -1480,7 +1508,7 @@ export function QuestionDetailDialog({
                                 >
                                   <code className="text-foreground-secondary">{name}</code>
                                   <span className="font-medium whitespace-nowrap">
-                                    {value.toFixed(unit === "g/mol" ? 2 : 4)}
+                                    {formatNumberForText(value, unit === "g/mol" ? 2 : 4)}
                                     {unit ? " " : ""}
                                     {unit ? <UnitRenderer unit={unit} /> : null}
                                   </span>
@@ -1512,9 +1540,19 @@ export function QuestionDetailDialog({
 
                     {/* Computed answer */}
                     <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4">
-                      <p className="text-sm font-medium text-foreground-secondary mb-1">
-                        {cs.questions.computedAnswerLabel}
-                      </p>
+                      <div className="flex items-center justify-between gap-4 mb-1">
+                        <p className="text-sm font-medium text-foreground-secondary">
+                          {cs.questions.computedAnswerLabel}
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={forceScientific ? "secondary" : "outline"}
+                          onClick={() => setForceScientific((v) => !v)}
+                        >
+                          {forceScientific ? "1.23×10⁴" : "12300"}
+                        </Button>
+                      </div>
                       {templateDetails.template.formula && sampleVariant ? (
                         <div className="space-y-3">
                           {(() => {
@@ -1541,6 +1579,7 @@ export function QuestionDetailDialog({
                                     <FormattedResult
                                       value={a.value}
                                       precision={displayPrecision}
+                                      forceScientific={forceScientific}
                                       significantDigits={
                                         templateDetails?.template.significantDigits
                                       }
@@ -1554,6 +1593,7 @@ export function QuestionDetailDialog({
                                 <FormattedResult
                                   value={sampleVariant.correctAnswer}
                                   precision={displayPrecision}
+                                  forceScientific={forceScientific}
                                   significantDigits={templateDetails?.template.significantDigits}
                                   unit={templateDetails.template.resultUnit}
                                 />
@@ -1575,6 +1615,7 @@ export function QuestionDetailDialog({
                             <FormattedResult
                               value={templateDetails.template.numericAnswer}
                               precision={displayPrecision}
+                              forceScientific={forceScientific}
                               significantDigits={templateDetails?.template.significantDigits}
                               unit={templateDetails.template.resultUnit}
                             />
@@ -1652,6 +1693,7 @@ export function QuestionDetailDialog({
                                           <FormattedResult
                                             value={a.value}
                                             precision={mockResult.resultPrecision}
+                                            forceScientific={forceScientific}
                                             significantDigits={
                                               templateDetails?.template.significantDigits
                                             }
@@ -1665,6 +1707,7 @@ export function QuestionDetailDialog({
                                       <FormattedResult
                                         value={mockResult.value}
                                         precision={mockResult.resultPrecision}
+                                        forceScientific={forceScientific}
                                         significantDigits={
                                           templateDetails?.template.significantDigits
                                         }
@@ -1758,8 +1801,10 @@ export function QuestionDetailDialog({
               </CardHeader>
               <CardContent>
                 {isLoadingHistory ? (
-                  <div className="text-center py-4">
-                    <Loader2 className="size-6 animate-spin mx-auto" />
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-8 w-full" />
+                    ))}
                   </div>
                 ) : historyEntries.length === 0 ? (
                   <p className="text-foreground-secondary text-sm text-center py-4">

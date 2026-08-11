@@ -13,6 +13,7 @@ interface FormattedResultProps {
   value: number | undefined | null
   precision?: number
   significantDigits?: number
+  forceScientific?: boolean
   unit?: string | null
   className?: string
 }
@@ -21,13 +22,14 @@ export function FormattedResult({
   value,
   precision = 2,
   significantDigits,
+  forceScientific = false,
   unit,
   className,
 }: FormattedResultProps) {
   const numeric =
     significantDigits != null
-      ? formatSignificantDigits(value, significantDigits)
-      : formatNumberMaxDecimals(value, precision)
+      ? formatSignificantDigits(value, significantDigits, forceScientific)
+      : formatNumberMaxDecimals(value, precision, forceScientific)
   if (numeric.length === 0) {
     return null
   }

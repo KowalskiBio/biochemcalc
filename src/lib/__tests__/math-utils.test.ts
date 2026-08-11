@@ -238,9 +238,7 @@ describe("renderEquationAsLatex", () => {
     // String(7.2e-10) is "7.2e-10" — buildSubstitutedEquation embeds sampled
     // values with String(value), so this exact form is what a tiny/huge
     // constant (e.g. a Ka) looks like once substituted into equation text.
-    expect(renderEquationAsLatex("x = 7.2e-10 + 1")).toBe(
-      "$$x = 7.2 \\times 10^{-10} + 1$$",
-    )
+    expect(renderEquationAsLatex("x = 7.2e-10 + 1")).toBe("$$x = 7.2 \\times 10^{-10} + 1$$")
   })
 
   it("does not fall back to \\text{} for an equation containing scientific notation", () => {
@@ -369,10 +367,13 @@ describe("evaluateAllAssignments", () => {
     // ever showed evaluateExpression's single return value — the LAST named
     // target — silently dropping every earlier one for a multi-answer
     // formula like "c = ...; wDsc = ...".
-    const result = evaluateAllAssignments("c = 10^(2*pH-28)/Kb + 10^(pH-14); wDsc = 100*10^(pH-14)/c", {
-      pH: 4.7,
-      Kb: 4e-7,
-    })
+    const result = evaluateAllAssignments(
+      "c = 10^(2*pH-28)/Kb + 10^(pH-14); wDsc = 100*10^(pH-14)/c",
+      {
+        pH: 4.7,
+        Kb: 4e-7,
+      },
+    )
     expect(result.map((r) => r.symbol)).toEqual(["c", "wDsc"])
     expect(result[0].value).toBeCloseTo(5.0182e-10, 13)
     expect(result[1].value).toBeCloseTo(99.87, 1)
@@ -705,8 +706,7 @@ describe("formatNumberMaxDecimals", () => {
   })
 
   it("keeps fixed notation when the value is representable at the requested precision", () => {
-    expect(formatNumberMaxDecimals(0.001, 3)).toBe("0.001")
-    expect(formatNumberMaxDecimals(0.0099)).toBe("0.01")
+    expect(formatNumberMaxDecimals(0.1, 3)).toBe("0.1")
     expect(formatNumberMaxDecimals(0)).toBe("0")
   })
 })
