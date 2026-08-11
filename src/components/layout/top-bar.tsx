@@ -1,17 +1,12 @@
 import { cva } from "class-variance-authority"
-import { Bot, Ellipsis, LogOut } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { Bot, LogOut } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cs } from "@/i18n/cs"
 import { categoriesApi, setsApi, topicsApi } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
+import { useCarryStore } from "@/stores/drag-store"
 
 interface BreadcrumbItem {
   path: string
@@ -69,8 +64,37 @@ export function TopBar() {
   const location = useLocation()
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
+  const isCarrying = useCarryStore((s) => s.isCarrying)
   const [currentTime, setCurrentTime] = useState<string>("")
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([])
+  const [hoveredCrumb, setHoveredCrumb] = useState<string | null>(null)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleCrumbMouseEnter = useCallback(
+    (path: string) => {
+      if (!isCarrying) return
+      setHoveredCrumb(path)
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = setTimeout(() => {
+        navigate(path)
+      }, 1500)
+    },
+    [isCarrying, navigate],
+  )
+
+  const handleCrumbMouseLeave = useCallback(() => {
+    setHoveredCrumb(null)
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    }
+  }, [])
 
   const handleLogout = useCallback(async () => {
     await logout()
@@ -177,78 +201,44 @@ export function TopBar() {
     loadDynamicBreadcrumbs()
   }, [loadDynamicBreadcrumbs])
 
+  const crumbHoverProps = (path: string) =>
+    isCarrying
+      ? {
+          onMouseEnter: () => handleCrumbMouseEnter(path),
+          onMouseLeave: handleCrumbMouseLeave,
+        }
+      : {}
+
+  const crumbHighlight = (path: string) =>
+    isCarrying && hoveredCrumb === path
+      ? "bg-primary/15 rounded px-2 py-1 ring-2 ring-primary/40"
+      : ""
+
   return (
     <header className={cn(topBarVariants(), "gap-4")}>
-      <div className="flex items-center gap-4 overflow-hidden">
-        {/* Breadcrumbs */}
-        <div className="hidden md:flex items-center gap-2 overflow-hidden">
-          {breadcrumbs.length > 4 ? (
-            <>
-              <div key={breadcrumbs[0].path} className="flex items-center gap-2">
-                <Link
-                  to={breadcrumbs[0].path}
-                  className={cn(breadcrumbVariants({ variant: "first" }), "max-w-[240px] truncate")}
-                >
-                  {breadcrumbs[0].label}
-                </Link>
-                <span className="text-muted-foreground font-mono">/</span>
-              </div>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                   <button
-                     type="button"
-                     className="p-2 rounded-[4px] hover:bg-muted flex-shrink-0 border border-transparent"
-                     aria-label={cs.common.showMore}
-                   >
-                    <Ellipsis className="size-4" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" sideOffset={4}>
-                  {breadcrumbs.slice(1, breadcrumbs.length - 2).map((item) => (
-                    <DropdownMenuItem key={`${item.path}-${item.label}`} asChild>
-                      <Link to={item.path} className="w-full max-w-[320px] truncate">
-                        {item.label}
-                      </Link>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <span className="text-muted-foreground font-mono">/</span>
-
-              {breadcrumbs.slice(breadcrumbs.length - 2).map((item, index) => (
-                <div key={`${item.path}-${item.label}`} className="flex items-center gap-2">
-                  <Link
-                    to={item.path}
-                    className={cn(
-                      breadcrumbVariants({ variant: index === breadcrumbs.slice(breadcrumbs.length - 2).length - 1 ? "current" : "normal" }),
-                      "max-w-[240px] truncate"
-                    )}
-                  >
-                    {item.label}
-                  </Link>
-                </div>
-              ))}
-            </>
-          ) : (
-            breadcrumbs.map((item, index) => (
-              <div key={`${item.path}-${item.label}`} className="flex items-center gap-2">
+      <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+        <div className="flex items-center gap-2 overflow-hidden min-w-0">
+          {breadcrumbs.map((item, index) => {
+            const isLast = index === breadcrumbs.length - 1
+            return (
+              <div key={`${item.path}-${item.label}`} className="flex items-center gap-2 min-w-0 flex-shrink-0">
                 <Link
                   to={item.path}
                   className={cn(
                     breadcrumbVariants({
-                      variant: index === breadcrumbs.length - 1 ? "current" : index === 0 ? "first" : "normal",
+                      variant: isLast ? "current" : index === 0 ? "first" : "normal",
                     }),
-                    "max-w-[240px] truncate"
+                    "truncate max-w-[140px]",
+                    crumbHighlight(item.path),
                   )}
+                  {...crumbHoverProps(item.path)}
                 >
                   {item.label}
                 </Link>
-                {index < breadcrumbs.length - 1 && <span className="text-muted-foreground font-mono">/</span>}
+                {!isLast && <span className="text-muted-foreground font-mono flex-shrink-0">/</span>}
               </div>
-            ))
-          )}
+            )
+          })}
         </div>
       </div>
 

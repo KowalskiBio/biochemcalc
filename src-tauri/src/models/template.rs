@@ -57,6 +57,8 @@ pub struct Template {
     pub numeric_answer: Option<f64>,
     pub result_unit: String,
     pub point_value: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub significant_digits: Option<u8>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -77,6 +79,7 @@ impl Template {
             numeric_answer,
             result_unit,
             point_value,
+            significant_digits: None,
             created_at: Utc::now(),
         }
     }

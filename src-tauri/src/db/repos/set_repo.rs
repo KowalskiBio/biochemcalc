@@ -6,6 +6,28 @@ use uuid::Uuid;
 pub struct SetRepo;
 
 impl SetRepo {
+    /// Append a new set to a category with the next available set_index.
+    pub fn create(
+        conn: &Connection,
+        category_id: Uuid,
+        mode: TemplateMode,
+    ) -> Result<crate::models::Set, DbError> {
+        let next_index: u8 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(set_index), 0) + 1 FROM sets WHERE category_id = ?1",
+                params![category_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
+        let set = crate::models::Set::new(category_id, next_index, mode);
+        conn.execute(
+            "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![set.id, set.category_id, set.set_index, serde_mode(set.mode), set.name],
+        )?;
+        Ok(set)
+    }
+
     /// Add a template to a set at the end of the ordering.
     pub fn add_template(
         conn: &Connection,
@@ -117,6 +139,58 @@ impl SetRepo {
         }
         Ok(())
     }
+
+    pub fn update_name(
+        conn: &Connection,
+        set_id: &Uuid,
+        name: Option<&str>,
+    ) -> Result<(), DbError> {
+        let affected = conn.execute(
+            "UPDATE sets SET name = ?1 WHERE id = ?2",
+            params![name, set_id],
+        )?;
+        if affected == 0 {
+            return Err(DbError::NotFound(format!("Set {set_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn move_to_category(
+        conn: &Connection,
+        set_id: &Uuid,
+        target_category_id: &Uuid,
+    ) -> Result<u8, DbError> {
+        let tx = conn.unchecked_transaction()?;
+
+        let target_point_value: u8 = tx.query_row(
+            "SELECT point_value FROM categories WHERE id = ?1",
+            params![target_category_id],
+            |row| row.get(0),
+        )?;
+
+        let next_index: u8 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(set_index), 0) + 1 FROM sets WHERE category_id = ?1",
+                params![target_category_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
+
+        tx.execute(
+            "UPDATE sets SET category_id = ?1, set_index = ?2 WHERE id = ?3",
+            params![target_category_id, next_index, set_id],
+        )?;
+
+        tx.execute(
+            "UPDATE templates SET point_value = ?1 WHERE id IN (
+                SELECT st.template_id FROM set_templates st WHERE st.set_id = ?2
+            )",
+            params![target_point_value, set_id],
+        )?;
+
+        tx.commit()?;
+        Ok(next_index)
+    }
 }
 
 fn serde_mode(mode: TemplateMode) -> &'static str {
@@ -224,5 +298,23 @@ mod tests {
         let (_, updated_sets) =
             CategoryRepo::get_with_sets(&conn, &sets[0].category_id).expect("get");
         assert_eq!(updated_sets[0].mode, TemplateMode::Open);
+    }
+
+    #[test]
+    fn create_appends_set_with_next_index_beyond_four() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+        assert_eq!(sets.len(), 4);
+
+        let fifth = SetRepo::create(&conn, cat.id, TemplateMode::Closed).expect("create 5th set");
+        assert_eq!(fifth.set_index, 5);
+
+        let sixth = SetRepo::create(&conn, cat.id, TemplateMode::Open).expect("create 6th set");
+        assert_eq!(sixth.set_index, 6);
+        assert_eq!(sixth.mode, TemplateMode::Open);
+
+        let (_, all_sets) = CategoryRepo::get_with_sets(&conn, &cat.id).expect("get");
+        assert_eq!(all_sets.len(), 6);
     }
 }

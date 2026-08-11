@@ -32,6 +32,8 @@ pub struct Set {
     pub category_id: Uuid,
     pub set_index: u8,
     pub mode: TemplateMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Set {
@@ -41,6 +43,7 @@ impl Set {
             category_id,
             set_index,
             mode,
+            name: None,
         }
     }
 }

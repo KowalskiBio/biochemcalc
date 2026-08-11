@@ -1,13 +1,18 @@
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
-import { formatNumberMaxDecimals, scientificNotationToHtml } from "@/lib/math-utils"
+import {
+  formatNumberMaxDecimals,
+  formatSignificantDigits,
+  scientificNotationToHtml,
+} from "@/lib/math-utils"
 import { formatChemicalText } from "@/lib/render-question-text"
 import { cn } from "@/lib/utils"
 
 interface FormattedResultProps {
   value: number | undefined | null
   precision?: number
+  significantDigits?: number
   unit?: string | null
   className?: string
 }
@@ -15,10 +20,14 @@ interface FormattedResultProps {
 export function FormattedResult({
   value,
   precision = 2,
+  significantDigits,
   unit,
   className,
 }: FormattedResultProps) {
-  const numeric = formatNumberMaxDecimals(value, precision)
+  const numeric =
+    significantDigits != null
+      ? formatSignificantDigits(value, significantDigits)
+      : formatNumberMaxDecimals(value, precision)
   if (numeric.length === 0) {
     return null
   }

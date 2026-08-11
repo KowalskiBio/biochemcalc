@@ -43,6 +43,14 @@ export default defineConfig(async () => ({
           port: 1421,
         }
       : undefined,
+    // Forward /api/* to the Rust HTTP server so relative URLs work in dev
+    // (in production the server serves both the frontend and /api on one origin).
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

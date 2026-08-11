@@ -32,26 +32,26 @@ describe("formatChemicalText", () => {
     expect(formatChemicalText("SO_4^2-")).toBe("SO<sub>4</sub><sup>2-</sup>")
   })
 
-  it("converts multiplication asterisks to a multiplication sign", () => {
-    expect(formatChemicalText("g*cm^-3")).toBe("g×cm<sup>-3</sup>")
-    expect(formatChemicalText("2*3")).toBe("2×3")
+  it("converts multiplication asterisks to a dot", () => {
+    expect(formatChemicalText("g*cm^-3")).toBe("g.cm<sup>-3</sup>")
+    expect(formatChemicalText("2*3")).toBe("2.3")
   })
 
-  it("converts multiplication middle dots to a multiplication sign", () => {
-    expect(formatChemicalText("g·cm^-3")).toBe("g×cm<sup>-3</sup>")
+  it("converts multiplication middle dots to a dot", () => {
+    expect(formatChemicalText("g·cm^-3")).toBe("g.cm<sup>-3</sup>")
   })
 
-  it("converts hydrate dots and stars to a multiplication sign", () => {
-    expect(formatChemicalText("FeSO4*7H2O")).toBe("FeSO4×7H2O")
-    expect(formatChemicalText("FeSO4.7H2O")).toBe("FeSO4×7H2O")
-    expect(formatChemicalText("FeSO4.7H_2O")).toBe("FeSO4×7H<sub>2</sub>O")
-    expect(formatChemicalText("FeSO4.H2O")).toBe("FeSO4×H2O")
-    expect(formatChemicalText("CO2.5H2O")).toBe("CO2×5H2O")
+  it("converts hydrate dots and stars to a dot", () => {
+    expect(formatChemicalText("FeSO4*7H2O")).toBe("FeSO4.7H2O")
+    expect(formatChemicalText("FeSO4.7H2O")).toBe("FeSO4.7H2O")
+    expect(formatChemicalText("FeSO4.7H_2O")).toBe("FeSO4.7H<sub>2</sub>O")
+    expect(formatChemicalText("FeSO4.H2O")).toBe("FeSO4.H2O")
+    expect(formatChemicalText("CO2.5H2O")).toBe("CO2.5H2O")
   })
 
   it("preserves decimal points in numbers", () => {
     expect(formatChemicalText("58.44 g")).toBe("58.44 g")
-    expect(formatChemicalText("Hustota 1.5 g*cm^-3")).toBe("Hustota 1.5 g×cm<sup>-3</sup>")
+    expect(formatChemicalText("Hustota 1.5 g*cm^-3")).toBe("Hustota 1.5 g.cm<sup>-3</sup>")
   })
 
   it("does not convert asterisks used for markdown emphasis", () => {
@@ -254,10 +254,10 @@ describe("renderQuestionTextWithVariant", () => {
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}))
     expect(result).toContain(">1.1296<")
     expect(result).not.toContain("[[rho_r=1.1296]]")
-    expect(result).toContain("g×cm<sup>-3</sup>")
+    expect(result).toContain("g.cm<sup>-3</sup>")
   })
 
-  it("converts dots in hydrates to multiplication dots without touching decimals in placeholders", () => {
+  it("preserves dots in hydrates without touching decimals in placeholders", () => {
     const text = "[[ns]] molu FeSO4.7H2O v [[nv]] molech vody? [wperc]"
     const result = renderQuestionTextWithVariant(
       text,
@@ -297,8 +297,8 @@ describe("renderQuestionTextWithVariant", () => {
       ],
       makeVariant({ ns: 5, nv: 3 }),
     )
-    expect(result).toContain("FeSO4×7H2O")
-    expect(result).not.toContain("FeSO4.7H2O")
+    expect(result).toContain("FeSO4.7H2O")
+    expect(result).not.toContain("FeSO4×7H2O")
     expect(result).toContain(">5<")
     expect(result).toContain(">3<")
   })

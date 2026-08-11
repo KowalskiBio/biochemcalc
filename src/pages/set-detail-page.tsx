@@ -1,6 +1,8 @@
-import { ArrowLeft, Download, FileText, Loader2, RefreshCw, Save, Trash2 } from "lucide-react"
+import { ArrowLeft, ArrowRightLeft, Download, FileText, GripVertical, Loader2, Pencil, Plus, RefreshCw, Save, Trash2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useParams, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { AddQuestionDialog } from "@/components/topics/add-question-dialog"
+import { MoveQuestionDialog } from "@/components/topics/move-question-dialog"
 import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -52,6 +54,7 @@ import {
 } from "@/lib/math-utils"
 import { buildPreviewVariant, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
+  CategoryWithSets,
   ProjektQuestion,
   QuestionDifficulty,
   SaveProjektInput,
@@ -61,6 +64,7 @@ import type {
   TemplateWithDetails,
 } from "@/lib/types"
 import { useGenerationActions, useGenerationBySetId } from "@/stores/generation-store"
+import { useCarryStore } from "@/stores/drag-store"
 
 export function SetDetailPage() {
   const { setId } = useParams<{ setId: string }>()
@@ -92,7 +96,19 @@ export function SetDetailPage() {
   const [showClosedConfigDialog, setShowClosedConfigDialog] = useState(false)
   const [showOpenConfigDialog, setShowOpenConfigDialog] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
+  const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
+  const [moveTemplate, setMoveTemplate] = useState<Template | null>(null)
+  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false)
+  const [categoriesWithSets, setCategoriesWithSets] = useState<CategoryWithSets[]>([])
+  const [isEditingSetName, setIsEditingSetName] = useState(false)
+  const [editSetName, setEditSetName] = useState("")
+  const [savingSetName, setSavingSetName] = useState(false)
   const generatedRef = useRef<HTMLDivElement>(null)
+
+  const navigate = useNavigate()
+  const isCarrying = useCarryStore((s) => s.isCarrying)
+  const startQuestionCarry = useCarryStore((s) => s.startQuestionCarry)
+  const justCarriedRef = useRef(false)
 
   const generation = useGenerationBySetId(setId)
   const { setGeneration, updateGeneration } = useGenerationActions()
@@ -126,6 +142,17 @@ export function SetDetailPage() {
       setGlobalConstants(
         Object.fromEntries(allConstants.map((c) => [c.symbol, c.value])),
       )
+      const topicCategories = await categoriesApi.listByTopic(category.topicId)
+      const withSets = await Promise.all(
+        topicCategories.map(async (cat) => {
+          try {
+            return await categoriesApi.getWithSets(cat.id)
+          } catch {
+            return { category: cat, sets: [] }
+          }
+        }),
+      )
+      setCategoriesWithSets(withSets)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err)
       toast({
@@ -141,6 +168,56 @@ export function SetDetailPage() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  const handleQuestionMouseDown = useCallback(
+    (e: React.MouseEvent, template: Template) => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      const startX = e.clientX
+      const startY = e.clientY
+
+      const handleMove = (ev: MouseEvent) => {
+        const dx = ev.clientX - startX
+        const dy = ev.clientY - startY
+        if (Math.sqrt(dx * dx + dy * dy) > 5) {
+          cleanup()
+          justCarriedRef.current = true
+          startQuestionCarry(template, setId ?? "")
+        }
+      }
+      const handleUp = () => {
+        cleanup()
+      }
+      const cleanup = () => {
+        document.removeEventListener("mousemove", handleMove)
+        document.removeEventListener("mouseup", handleUp)
+      }
+      document.addEventListener("mousemove", handleMove)
+      document.addEventListener("mouseup", handleUp)
+    },
+    [setId, startQuestionCarry],
+  )
+
+  const handleSaveSetName = useCallback(async () => {
+    if (!set) return
+    const trimmed = editSetName.trim()
+    if (!trimmed) {
+      setIsEditingSetName(false)
+      return
+    }
+    try {
+      setSavingSetName(true)
+      await setsApi.updateName(set.id, trimmed || null)
+      toast({ title: cs.topics.renameSuccess })
+      await loadData()
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: cs.topics.renameError, description: message, variant: "destructive" })
+    } finally {
+      setSavingSetName(false)
+      setIsEditingSetName(false)
+    }
+  }, [set, editSetName, toast, loadData])
 
   useEffect(() => {
     const templateId = searchParams.get("templateId")
@@ -320,7 +397,7 @@ export function SetDetailPage() {
           assignedValues: variant?.assignedValues || {},
           assignedStrings: variant?.assignedStrings || {},
           variablePrecisions: {},
-          resultPrecision: 2,
+          resultPrecision: g.template.significantDigits ?? 2,
           numericOptions: variant?.numericOptions,
           correctOption: variant?.correctOption,
           intervalLo: variant?.intervalLo,
@@ -391,15 +468,39 @@ export function SetDetailPage() {
       <div
         className="flex items-center gap-4"
       >
-        <Button variant="ghost" size="icon" asChild>
-          <Link to={parentTopicId ? `/topics/${parentTopicId}` : "/topics"}>
-            <ArrowLeft className="size-5" />
-          </Link>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate(parentTopicId ? `/topics/${parentTopicId}` : "/topics")}
+        >
+          <ArrowLeft className="size-5" />
         </Button>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {cs.topics.setIndex.replace("{index}", String(set.setIndex))}
-          </h1>
+          {isEditingSetName ? (
+            <Input
+              value={editSetName}
+              onChange={(e) => setEditSetName(e.target.value)}
+              onBlur={handleSaveSetName}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveSetName()
+                if (e.key === "Escape") setIsEditingSetName(false)
+              }}
+              disabled={savingSetName}
+              autoFocus
+              className="text-2xl font-semibold h-auto py-0 max-w-xs"
+            />
+          ) : (
+            <h1
+              className="text-2xl font-semibold tracking-tight text-foreground cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1"
+              onClick={() => {
+                setEditSetName(set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex)))
+                setIsEditingSetName(true)
+              }}
+            >
+              {set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))}
+              <Pencil className="size-3 inline ml-2 text-muted-foreground" />
+            </h1>
+          )}
           <p className="text-muted-foreground text-sm">
             {templateDetails.length} {cs.sets.questions.toLowerCase()}
           </p>
@@ -411,6 +512,10 @@ export function SetDetailPage() {
       >
         <Card>
           <CardContent className="flex flex-wrap gap-2 pt-6">
+            <Button onClick={() => setIsAddQuestionOpen(true)}>
+              <Plus className="size-4 mr-2" />
+              {cs.topics.addQuestion}
+            </Button>
             <Button
               onClick={() => setShowClosedConfigDialog(true)}
               disabled={isGenerating || templateDetails.length === 0}
@@ -473,10 +578,11 @@ export function SetDetailPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[30px]"></TableHead>
                     <TableHead className="w-[50px]">#</TableHead>
                     <TableHead>Text otázky</TableHead>
                     <TableHead className="w-[100px]">Body</TableHead>
-                    <TableHead className="w-[80px] text-right">Akce</TableHead>
+                    <TableHead className="w-[120px] text-right">Akce</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -484,12 +590,21 @@ export function SetDetailPage() {
                     <TableRow
                       key={t.template.id}
                       id={`template-row-${t.template.id}`}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => {
+                      className={`cursor-pointer hover:bg-muted/50 ${isCarrying ? "pointer-events-none" : ""}`}
+                      onClick={(e) => {
+                        if (isCarrying || justCarriedRef.current) {
+                          justCarriedRef.current = false
+                          e.preventDefault()
+                          return
+                        }
                         setSelectedTemplateId(t.template.id)
                         setDialogOpen(true)
                       }}
+                      onMouseDown={(e) => handleQuestionMouseDown(e, t.template)}
                     >
+                      <TableCell className="w-[30px] text-muted-foreground/50">
+                        <GripVertical className="size-4" />
+                      </TableCell>
                       <TableCell className="font-medium">{idx + 1}</TableCell>
                       <TableCell className="min-w-[400px] max-w-2xl">
                         <QuestionTextRenderer
@@ -505,15 +620,29 @@ export function SetDetailPage() {
                         <Badge variant="outline">{t.template.pointValue}</Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(event) => openDeleteDialog(t.template, event)}
-                          disabled={isDeleting}
-                          aria-label={cs.common.delete}
-                        >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setMoveTemplate(t.template)
+                              setIsMoveDialogOpen(true)
+                            }}
+                            aria-label={cs.topics.moveQuestion}
+                          >
+                            <ArrowRightLeft className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(event) => openDeleteDialog(t.template, event)}
+                            disabled={isDeleting}
+                            aria-label={cs.common.delete}
+                          >
+                            <Trash2 className="size-4 text-destructive" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -952,6 +1081,37 @@ export function SetDetailPage() {
           closedDifficulty={closedDifficulty}
           closedOptionCount={closedOptionCount}
           openDifficulty={openDifficulty}
+        />
+      )}
+
+      {/* Add Question Dialog — preselects the current set */}
+      {set && (
+        <AddQuestionDialog
+          open={isAddQuestionOpen}
+          onOpenChange={setIsAddQuestionOpen}
+          categoriesWithSets={categoriesWithSets}
+          preselectedCategoryId={set.categoryId}
+          preselectedSetId={set.id}
+          onCreated={(templateId) => {
+            setSelectedTemplateId(templateId)
+            setDialogOpen(true)
+            void loadData()
+          }}
+        />
+      )}
+
+      {/* Move Question Dialog */}
+      {moveTemplate && set && (
+        <MoveQuestionDialog
+          open={isMoveDialogOpen}
+          onOpenChange={setIsMoveDialogOpen}
+          template={moveTemplate}
+          currentSetId={set.id}
+          categoriesWithSets={categoriesWithSets}
+          onMoved={() => {
+            setMoveTemplate(null)
+            void loadData()
+          }}
         />
       )}
     </div>

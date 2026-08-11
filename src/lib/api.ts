@@ -25,6 +25,7 @@ import type {
   TemplateHistoryEntry,
   TemplateInput,
   TemplateLocation,
+  TemplateMode,
   TemplateVariantResult,
   TemplateWithDetails,
   Topic,
@@ -253,6 +254,15 @@ export const categoriesApi = {
 // ============================================================================
 
 export const setsApi = {
+  create: (categoryId: string, mode: TemplateMode): Promise<SetModel> =>
+    apiFetch<SetModel>("create_set", { categoryId, mode }),
+
+  updateName: (setId: string, name: string | null): Promise<void> =>
+    apiFetch<void>("update_set_name", { setId, name }),
+
+  moveToCategory: (setId: string, targetCategoryId: string): Promise<number> =>
+    apiFetch<number>("move_set", { setId, targetCategoryId }),
+
   addTemplate: (setId: string, templateId: string): Promise<void> =>
     apiFetch<void>("add_template_to_set", { setId, templateId }),
 

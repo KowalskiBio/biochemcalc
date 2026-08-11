@@ -45,8 +45,8 @@ impl CategoryRepo {
             let set_index = (i + 1) as u8;
             let set = Set::new(category_id, set_index, mode);
             tx.execute(
-                "INSERT INTO sets (id, category_id, set_index, mode) VALUES (?1, ?2, ?3, ?4)",
-                params![set.id, set.category_id, set.set_index, serde_mode(set.mode)],
+                "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![set.id, set.category_id, set.set_index, serde_mode(set.mode), set.name],
             )?;
             sets.push(set);
         }
@@ -125,7 +125,7 @@ impl CategoryRepo {
         category_id: &Uuid,
     ) -> Result<Vec<Set>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, category_id, set_index, mode
+            "SELECT id, category_id, set_index, mode, name
              FROM sets WHERE category_id = ?1 ORDER BY set_index ASC",
         )?;
         let rows = stmt.query_map(params![category_id], |row| {
@@ -134,6 +134,7 @@ impl CategoryRepo {
                 category_id: row.get(1)?,
                 set_index: row.get(2)?,
                 mode: parse_mode(&row.get::<_, String>(3)?),
+                name: row.get(4)?,
             })
         })?;
         let mut items = Vec::new();

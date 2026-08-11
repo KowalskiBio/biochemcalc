@@ -1089,6 +1089,19 @@ export function resolveOptionsPrecision(
   return maxPrecision
 }
 
+export function formatSignificantDigits(
+  value: number | undefined | null,
+  sigDigits: number,
+): string {
+  if (value == null || !Number.isFinite(value)) return ""
+  if (value === 0) return (0).toFixed(Math.max(0, sigDigits - 1))
+
+  const abs = Math.abs(value)
+  const order = Math.floor(Math.log10(abs))
+  const decimalPlaces = Math.max(0, sigDigits - 1 - order)
+  return value.toFixed(decimalPlaces)
+}
+
 export function formatNumberMaxDecimals(value: number | undefined | null, maxDecimals = 2): string {
   if (value == null || !Number.isFinite(value)) return ""
   const decimals = Math.max(0, maxDecimals)
