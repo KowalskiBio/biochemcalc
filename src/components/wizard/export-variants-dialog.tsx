@@ -363,7 +363,7 @@ export function ExportVariantsDialog({
                             handleVariantCountChange(templateDetails.template.id, e.target.value)
                           }
                           onClick={(e) => e.stopPropagation()}
-                          className="w-20 text-right"
+                          className="w-20 text-right no-spinner"
                           disabled={!isIncluded}
                           aria-label={cs.sets.exportDialog.variantCount}
                         />
