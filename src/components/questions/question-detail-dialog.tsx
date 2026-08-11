@@ -345,6 +345,7 @@ export function QuestionDetailDialog({
           ? String(details.template.significantDigits)
           : "",
       )
+      setForceScientific(details.template.forceScientific ?? false)
       setIsEditingAnswer(false)
       setEditingVariableKey(null)
       setValidationErrors({})
@@ -476,12 +477,14 @@ export function QuestionDetailDialog({
     const newSigDigits =
       editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
     if (newSigDigits !== currentSigDigits) return true
+    if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
     return dirtyVariableKeys.size > 0
   }, [
     editText,
     editEquationText,
     editResultUnit,
     editSignificantDigits,
+    forceScientific,
     templateDetails,
     dirtyVariableKeys,
   ])
@@ -575,6 +578,7 @@ export function QuestionDetailDialog({
       resultUnit: editResultUnit,
       pointValue: templateDetails.template.pointValue,
       significantDigits: sigDigits,
+      forceScientific,
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
       constraint: templateDetails.template.constraint,
@@ -612,6 +616,7 @@ export function QuestionDetailDialog({
         ? String(templateDetails.template.significantDigits)
         : "",
     )
+    setForceScientific(templateDetails?.template.forceScientific ?? false)
     setIsEditingAnswer(false)
     setLocalVariables(originalVariables.map((v) => ({ ...v })))
     setIsEditingText(false)
@@ -642,6 +647,7 @@ export function QuestionDetailDialog({
         resultUnit: editResultUnit,
         pointValue: templateDetails.template.pointValue,
         significantDigits: sigDigits,
+      forceScientific,
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: templateDetails.template.constraint,

@@ -19,8 +19,8 @@ impl TemplateRepo {
         let tx = conn.unchecked_transaction()?;
 
         tx.execute(
-            "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, topic_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, topic_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 template.id,
                 template.question_text,
@@ -30,6 +30,7 @@ impl TemplateRepo {
                 template.result_unit,
                 template.point_value,
                 template.significant_digits,
+                template.force_scientific,
                 Uuid::nil(),
                 template.created_at.to_rfc3339(),
             ],
@@ -77,7 +78,7 @@ impl TemplateRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Template>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
              FROM templates ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -90,7 +91,8 @@ impl TemplateRepo {
                 result_unit: row.get(5)?,
                 point_value: row.get(6)?,
                 significant_digits: row.get(7)?,
-                created_at: parse_dt(row.get::<_, String>(8)?),
+                force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
+                created_at: parse_dt(row.get::<_, String>(9)?),
             })
         })?;
         let mut items = Vec::new();
@@ -106,7 +108,7 @@ impl TemplateRepo {
         equation_text: &str,
     ) -> Result<Option<Template>, DbError> {
         let result = conn.query_row(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
              FROM templates
              WHERE question_text = ?1 AND equation_text = ?2
              LIMIT 1",
@@ -121,7 +123,8 @@ impl TemplateRepo {
                     result_unit: row.get(5)?,
                     point_value: row.get(6)?,
                     significant_digits: row.get(7)?,
-                    created_at: parse_dt(row.get::<_, String>(8)?),
+                    force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
+                    created_at: parse_dt(row.get::<_, String>(9)?),
                 })
             },
         );
@@ -134,7 +137,7 @@ impl TemplateRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Template, DbError> {
         conn.query_row(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
              FROM templates WHERE id = ?1",
             params![id],
             |row| {
@@ -147,7 +150,8 @@ impl TemplateRepo {
                     result_unit: row.get(5)?,
                     point_value: row.get(6)?,
                     significant_digits: row.get(7)?,
-                    created_at: parse_dt(row.get::<_, String>(8)?),
+                    force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
+                    created_at: parse_dt(row.get::<_, String>(9)?),
                 })
             },
         )
@@ -256,7 +260,7 @@ impl TemplateRepo {
     pub fn update(conn: &Connection, template: &Template) -> Result<(), DbError> {
         let affected = conn.execute(
             "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, \
-             point_value=?7, significant_digits=?8, created_at=?9 WHERE id=?1",
+             point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
             params![
                 template.id,
                 template.question_text,
@@ -266,6 +270,7 @@ impl TemplateRepo {
                 template.result_unit,
                 template.point_value,
                 template.significant_digits,
+                template.force_scientific,
                 template.created_at.to_rfc3339(),
             ],
         )?;
@@ -280,7 +285,7 @@ impl TemplateRepo {
         equation_text: &str,
     ) -> Result<Vec<Template>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, created_at
              FROM templates WHERE equation_text = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![equation_text], |row| {
@@ -293,7 +298,8 @@ impl TemplateRepo {
                 result_unit: row.get(5)?,
                 point_value: row.get(6)?,
                 significant_digits: row.get(7)?,
-                created_at: parse_dt(row.get::<_, String>(8)?),
+                force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
+                created_at: parse_dt(row.get::<_, String>(9)?),
             })
         })?;
         let mut items = Vec::new();

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 25;
+const CURRENT_USER_VERSION: u32 = 27;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -136,6 +136,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 26 {
         apply_migration_v26(conn)?;
         conn.pragma_update(None, "user_version", "26")?;
+    }
+
+    if user_version < 27 {
+        apply_migration_v27(conn)?;
+        conn.pragma_update(None, "user_version", "27")?;
     }
 
     Ok(())
@@ -986,6 +991,11 @@ fn apply_migration_v26(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+fn apply_migration_v27(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE templates ADD COLUMN force_scientific INTEGER NOT NULL DEFAULT 0;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1163,7 +1173,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 26);
+        assert_eq!(user_version(&conn), 27);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1253,7 +1263,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 26);
+        assert_eq!(user_version(&conn), 27);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,

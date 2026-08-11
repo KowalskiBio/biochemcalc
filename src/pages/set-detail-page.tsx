@@ -419,6 +419,7 @@ export function SetDetailPage() {
           variablePrecisions: {},
           resultPrecision: 2,
           significantDigits: g.template.significantDigits,
+          forceScientific: g.template.forceScientific ?? false,
           numericOptions: variant?.numericOptions,
           correctOption: variant?.correctOption,
           intervalLo: variant?.intervalLo,
@@ -733,7 +734,7 @@ export function SetDetailPage() {
                   const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
                   const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
                   const sigDigits = g.template.significantDigits
-                  const forceSci = sigDigits != null
+                  const forceSci = g.template.forceScientific ?? false
                   // Small-magnitude answers can collapse to identical strings at
                   // the default precision, so widen just enough to keep every
                   // option distinct.

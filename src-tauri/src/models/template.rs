@@ -59,6 +59,8 @@ pub struct Template {
     pub point_value: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub force_scientific: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -80,6 +82,7 @@ impl Template {
             result_unit,
             point_value,
             significant_digits: None,
+            force_scientific: false,
             created_at: Utc::now(),
         }
     }

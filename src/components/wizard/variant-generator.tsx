@@ -126,6 +126,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
           variablePrecisions: variablePrecisions,
           resultPrecision: 2,
           resultSignificantDigits: result.template.significantDigits,
+          forceScientific: result.template.forceScientific ?? false,
           mode: "closed",
         })
       }

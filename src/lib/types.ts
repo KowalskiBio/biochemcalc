@@ -138,6 +138,7 @@ export interface Template {
   resultUnit: string
   pointValue: number
   significantDigits?: number
+  forceScientific?: boolean
   createdAt: string
   // Extended with related data
   variables?: TemplateVariableInput[]
@@ -187,6 +188,7 @@ export interface UpdateTemplateWithVariablesPayload {
   resultUnit: string
   pointValue: number
   significantDigits?: number
+  forceScientific?: boolean
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -226,6 +228,7 @@ export interface TemplateInput {
   resultUnit: string
   pointValue: number
   significantDigits?: number
+  forceScientific?: boolean
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -329,6 +332,7 @@ export interface ExportQuestion {
   variableSignificantDigits?: Record<string, number>
   resultPrecision: number
   resultSignificantDigits?: number
+  forceScientific?: boolean
   mode: TemplateMode
 }
 
@@ -528,6 +532,7 @@ export interface ProjektQuestion {
   variableSignificantDigits?: Record<string, number>
   resultPrecision: number
   significantDigits?: number
+  forceScientific?: boolean
   numericOptions?: number[]
   correctOption?: number
   intervalLo?: number

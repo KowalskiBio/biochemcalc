@@ -113,6 +113,8 @@ pub struct ExportQuestionInput {
     pub result_precision: u8,
     #[serde(default)]
     pub result_significant_digits: Option<u8>,
+    #[serde(default)]
+    pub force_scientific: bool,
     pub mode: TemplateMode,
 }
 
@@ -153,6 +155,7 @@ pub fn do_export_to_txt(
             variable_significant_digits: input.variable_significant_digits.clone(),
             result_precision: input.result_precision,
             result_significant_digits: input.result_significant_digits,
+            force_scientific: input.force_scientific,
             mode: input.mode,
         })
         .collect();
@@ -504,6 +507,7 @@ pub fn do_export_projekt_to_txt(
             result_unit: pq.result_unit.clone(),
             point_value: pq.point_value,
             significant_digits: pq.significant_digits,
+            force_scientific: pq.force_scientific,
             created_at: Utc::now(),
         });
 
@@ -537,6 +541,7 @@ pub fn do_export_projekt_to_txt(
             variable_significant_digits: pq.variable_significant_digits.clone(),
             result_precision: pq.result_precision,
             result_significant_digits: pq.significant_digits,
+            force_scientific: pq.force_scientific,
             mode: pq.mode,
         })
         .collect();
@@ -747,6 +752,7 @@ mod tests {
             result_unit: "".into(),
             point_value: 2,
             significant_digits: None,
+            force_scientific: false,
             created_at: Utc::now(),
         };
         TemplateRepo::insert(&conn, &template, &[], &[], None).expect("insert template");

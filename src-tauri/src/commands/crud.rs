@@ -549,6 +549,8 @@ pub struct UpdateTemplateWithVariablesPayload {
     pub result_unit: String,
     pub point_value: u8,
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub force_scientific: bool,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -564,6 +566,8 @@ pub struct CreateTemplatePayload {
     pub result_unit: String,
     pub point_value: u8,
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub force_scientific: bool,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -667,6 +671,7 @@ pub(crate) fn do_create_template(
         payload.point_value,
     );
     template.significant_digits = payload.significant_digits;
+    template.force_scientific = payload.force_scientific;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
@@ -798,6 +803,8 @@ pub struct UpdateTemplatePayload {
     pub result_unit: String,
     pub point_value: u8,
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub force_scientific: bool,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -837,12 +844,13 @@ pub(crate) fn do_update_template(
         result_unit: payload.result_unit,
         point_value: payload.point_value,
         significant_digits: payload.significant_digits,
+        force_scientific: payload.force_scientific,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, created_at=?9 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -852,6 +860,7 @@ pub(crate) fn do_update_template(
             template.result_unit,
             template.point_value,
             template.significant_digits,
+            template.force_scientific,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1009,11 +1018,12 @@ pub fn apply_template_variable_mutations(
         result_unit: payload.result_unit.clone(),
         point_value: payload.point_value,
         significant_digits: payload.significant_digits,
+        force_scientific: payload.force_scientific,
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, created_at=?9 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1023,6 +1033,7 @@ pub fn apply_template_variable_mutations(
             template.result_unit,
             template.point_value,
             template.significant_digits,
+            template.force_scientific,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1631,6 +1642,7 @@ mod tests {
             result_unit: "g".into(),
             point_value: 2,
             significant_digits: None,
+            force_scientific: false,
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,

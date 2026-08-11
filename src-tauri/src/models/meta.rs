@@ -152,6 +152,8 @@ pub struct ProjektQuestion {
     pub result_precision: u8,
     #[serde(default)]
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub force_scientific: bool,
     pub numeric_options: Option<Vec<f64>>,
     pub correct_option: Option<u8>,
     pub interval_lo: Option<f64>,
