@@ -1,5 +1,5 @@
 import { Loader2, Pencil, Plus, Save, Trash2, X } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import rehypeRaw from "rehype-raw"
 
@@ -280,7 +280,8 @@ export function QuestionDetailDialog({
   onSaved,
 }: QuestionDetailDialogProps) {
   const [templateDetails, setTemplateDetails] = useState<TemplateWithDetails | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const hasDataRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [isEditingText, setIsEditingText] = useState(false)
   const [editText, setEditText] = useState("")
@@ -338,9 +339,10 @@ export function QuestionDetailDialog({
     if (!templateId) return
 
     try {
-      setIsLoading(true)
+      setIsLoading(!hasDataRef.current)
       setError(null)
       const details = await templatesApi.getWithDetails(templateId)
+      hasDataRef.current = true
       setTemplateDetails(details)
       const locals = details.variables.map(toLocalVariableEdit)
       setLocalVariables(locals)
@@ -455,6 +457,12 @@ export function QuestionDetailDialog({
       setIsDeleteDialogOpen(false)
     }
   }, [templateId, templateDetails, onDelete, toast])
+
+  useEffect(() => {
+    if (!templateId) return
+    hasDataRef.current = false
+    setTemplateDetails(null)
+  }, [templateId])
 
   useEffect(() => {
     if (open && templateId) {
@@ -1883,7 +1891,7 @@ export function QuestionDetailDialog({
                 </Button>
               </CardHeader>
               <CardContent>
-                {isLoadingHistory ? (
+                {isLoadingHistory && historyEntries.length === 0 ? (
                   <div className="space-y-2">
                     {[1, 2, 3].map((i) => (
                       <Skeleton key={i} className="h-8 w-full" />
