@@ -417,7 +417,8 @@ export function SetDetailPage() {
           assignedValues: variant?.assignedValues || {},
           assignedStrings: variant?.assignedStrings || {},
           variablePrecisions: {},
-          resultPrecision: g.template.significantDigits ?? 2,
+          resultPrecision: 2,
+          significantDigits: g.template.significantDigits,
           numericOptions: variant?.numericOptions,
           correctOption: variant?.correctOption,
           intervalLo: variant?.intervalLo,
@@ -731,6 +732,8 @@ export function SetDetailPage() {
                   const optionLabels = ["a", "b", "c", "d", "e"]
                   const hasMultiAnswers = (variant?.answersData?.length ?? 0) > 1
                   const options = generatedMode === "closed" ? (variant?.numericOptions ?? []) : []
+                  const sigDigits = g.template.significantDigits
+                  const forceSci = sigDigits != null
                   // Small-magnitude answers can collapse to identical strings at
                   // the default precision, so widen just enough to keep every
                   // option distinct.
@@ -821,6 +824,8 @@ export function SetDetailPage() {
                                               value={value}
                                               unit={a.unit}
                                               precision={optionsPrecision[idx]}
+                                              significantDigits={sigDigits}
+                                              forceScientific={forceSci}
                                             />
                                           </span>
                                         )
@@ -857,6 +862,8 @@ export function SetDetailPage() {
                                       value={value}
                                       unit={g.template.resultUnit}
                                       precision={optionsPrecision}
+                                      significantDigits={sigDigits}
+                                      forceScientific={forceSci}
                                     />
                                   </span>
                                 </div>
@@ -877,11 +884,28 @@ export function SetDetailPage() {
                               {variant.answersData.map((a, idx) => (
                                 <span key={a.symbol} className="ml-1">
                                   {idx > 0 && "; "}
-                                  {a.symbol} = <FormattedResult value={a.value} unit={a.unit} />
+                                  {a.symbol} ={" "}
+                                  <FormattedResult
+                                    value={a.value}
+                                    unit={a.unit}
+                                    significantDigits={sigDigits}
+                                    forceScientific={forceSci}
+                                  />
                                   {a.intervalLo != null && a.intervalHi != null && (
                                     <span className="ml-1 text-xs text-muted-foreground">
-                                      (± okolí <FormattedResult value={a.intervalLo} />–
-                                      <FormattedResult value={a.intervalHi} />)
+                                      (± okolí{" "}
+                                      <FormattedResult
+                                        value={a.intervalLo}
+                                        significantDigits={sigDigits}
+                                        forceScientific={forceSci}
+                                      />
+                                      –
+                                      <FormattedResult
+                                        value={a.intervalHi}
+                                        significantDigits={sigDigits}
+                                        forceScientific={forceSci}
+                                      />
+                                      )
                                     </span>
                                   )}
                                 </span>
@@ -893,6 +917,8 @@ export function SetDetailPage() {
                               <FormattedResult
                                 value={recomputed?.ok ? recomputed.value : variant?.correctAnswer}
                                 unit={g.template.resultUnit}
+                                significantDigits={sigDigits}
+                                forceScientific={forceSci}
                               />
                               {recomputed?.ok && hasMismatch && (
                                 <span className="ml-2 text-xs text-amber-600">

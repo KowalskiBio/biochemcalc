@@ -7,6 +7,7 @@ import {
   evaluateVariantAnswer,
   formatNumberForText,
   formatNumberMaxDecimals,
+  formatSignificantDigits,
   pickMockValues,
   renderEquationAsLatex,
   resolveMolarMasses,
@@ -708,6 +709,41 @@ describe("formatNumberMaxDecimals", () => {
   it("keeps fixed notation when the value is representable at the requested precision", () => {
     expect(formatNumberMaxDecimals(0.1, 3)).toBe("0.1")
     expect(formatNumberMaxDecimals(0)).toBe("0")
+  })
+})
+
+describe("formatSignificantDigits", () => {
+  it("rounds to the requested number of significant digits in plain notation", () => {
+    expect(formatSignificantDigits(0.246806, 6)).toBe("0.246806")
+    expect(formatSignificantDigits(0.18, 6)).toBe("0.180000")
+    expect(formatSignificantDigits(123.456, 4)).toBe("123.5")
+  })
+
+  it("uses scientific notation for very small values", () => {
+    expect(formatSignificantDigits(0.05, 6)).toBe("5.00000×10^-2")
+    expect(formatSignificantDigits(0.00123, 3)).toBe("1.23×10^-3")
+  })
+
+  it("uses scientific notation for very large values", () => {
+    expect(formatSignificantDigits(1.524e25, 3)).toBe("1.52×10^25")
+  })
+
+  it("forces scientific notation for ALL values when forceScientific is true", () => {
+    expect(formatSignificantDigits(0.18, 6, true)).toBe("1.80000×10^-1")
+    expect(formatSignificantDigits(0.05, 6, true)).toBe("5.00000×10^-2")
+    expect(formatSignificantDigits(722, 6, true)).toBe("7.22000×10^2")
+    expect(formatSignificantDigits(123.456, 4, true)).toBe("1.235×10^2")
+  })
+
+  it("handles zero", () => {
+    expect(formatSignificantDigits(0, 6)).toBe("0.00000")
+    expect(formatSignificantDigits(0, 3)).toBe("0.00")
+  })
+
+  it("handles null and non-finite values", () => {
+    expect(formatSignificantDigits(null, 3)).toBe("")
+    expect(formatSignificantDigits(undefined, 3)).toBe("")
+    expect(formatSignificantDigits(Number.NaN, 3)).toBe("")
   })
 })
 
