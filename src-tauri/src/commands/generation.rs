@@ -111,6 +111,8 @@ pub struct ExportQuestionInput {
     #[serde(default)]
     pub variable_significant_digits: HashMap<String, u8>,
     pub result_precision: u8,
+    #[serde(default)]
+    pub result_significant_digits: Option<u8>,
     pub mode: TemplateMode,
 }
 
@@ -150,6 +152,7 @@ pub fn do_export_to_txt(
             variable_precisions: input.variable_precisions.clone(),
             variable_significant_digits: input.variable_significant_digits.clone(),
             result_precision: input.result_precision,
+            result_significant_digits: input.result_significant_digits,
             mode: input.mode,
         })
         .collect();
@@ -500,7 +503,7 @@ pub fn do_export_projekt_to_txt(
             numeric_answer: None,
             result_unit: pq.result_unit.clone(),
             point_value: pq.point_value,
-            significant_digits: None,
+            significant_digits: pq.significant_digits,
             created_at: Utc::now(),
         });
 
@@ -533,6 +536,7 @@ pub fn do_export_projekt_to_txt(
             variable_precisions: pq.variable_precisions.clone(),
             variable_significant_digits: pq.variable_significant_digits.clone(),
             result_precision: pq.result_precision,
+            result_significant_digits: pq.significant_digits,
             mode: pq.mode,
         })
         .collect();

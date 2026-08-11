@@ -150,6 +150,8 @@ pub struct ProjektQuestion {
     #[serde(default)]
     pub variable_significant_digits: std::collections::HashMap<String, u8>,
     pub result_precision: u8,
+    #[serde(default)]
+    pub significant_digits: Option<u8>,
     pub numeric_options: Option<Vec<f64>>,
     pub correct_option: Option<u8>,
     pub interval_lo: Option<f64>,

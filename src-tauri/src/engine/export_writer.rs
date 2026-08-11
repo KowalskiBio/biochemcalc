@@ -182,6 +182,7 @@ fn render_multi_closed_options(
     out: &mut String,
     answers: &[crate::models::AnswerField],
     precision: u8,
+    sig_digits: Option<u8>,
     point_value: u8,
 ) {
     let option_count = answers[0]
@@ -199,9 +200,9 @@ fn render_multi_closed_options(
                 let value = a.numeric_options.as_ref().unwrap()[idx];
                 let unit = a.unit.as_deref().unwrap_or("");
                 if unit.is_empty() {
-                    fmt_value_cz(value, precision)
+                    fmt_variable_value(value, precision, sig_digits)
                 } else {
-                    format!("{} {}", fmt_value_cz(value, precision), unit)
+                    format!("{} {}", fmt_variable_value(value, precision, sig_digits), unit)
                 }
             })
             .collect();
@@ -229,27 +230,28 @@ fn render_multi_open_intervals(
     answers: &[crate::models::AnswerField],
     point_value: u8,
     result_precision: u8,
+    result_sig_digits: Option<u8>,
 ) {
     let parts: Vec<String> = answers
         .iter()
         .map(|a| {
             let lo = a.interval_lo.expect("open answer field has lower bound");
             let hi = a.interval_hi.expect("open answer field has upper bound");
-            let precision = interval_precision(lo, hi, result_precision);
             let unit = a.unit.as_deref().unwrap_or("");
+            let (lo_str, hi_str) = match result_sig_digits {
+                Some(n) => (
+                    fmt_variable_value(lo, 0, Some(n)),
+                    fmt_variable_value(hi, 0, Some(n)),
+                ),
+                None => {
+                    let precision = interval_precision(lo, hi, result_precision);
+                    (fmt_value_cz(lo, precision), fmt_value_cz(hi, precision))
+                }
+            };
             if unit.is_empty() {
-                format!(
-                    "\"{}..{}\"",
-                    fmt_value_cz(lo, precision),
-                    fmt_value_cz(hi, precision)
-                )
+                format!("\"{}..{}\"", lo_str, hi_str)
             } else {
-                format!(
-                    "\"{}..{}\" {}",
-                    fmt_value_cz(lo, precision),
-                    fmt_value_cz(hi, precision),
-                    unit
-                )
+                format!("\"{}..{}\" {}", lo_str, hi_str, unit)
             }
         })
         .collect();
@@ -264,6 +266,7 @@ pub struct ExportQuestion<'a> {
     pub variable_precisions: HashMap<String, u8>,
     pub variable_significant_digits: HashMap<String, u8>,
     pub result_precision: u8,
+    pub result_significant_digits: Option<u8>,
     pub mode: TemplateMode,
 }
 
@@ -292,6 +295,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         &mut out,
                         answers,
                         q.result_precision,
+                        q.result_significant_digits,
                         q.template.point_value,
                     );
                 } else {
@@ -305,7 +309,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_value_cz(*value, q.result_precision),
+                            fmt_variable_value(*value, q.result_precision, q.result_significant_digits),
                             q.template.result_unit
                         ));
                     }
@@ -323,6 +327,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         answers,
                         q.template.point_value,
                         q.result_precision,
+                        q.result_significant_digits,
                     );
                 } else {
                     let lo = q
@@ -333,12 +338,21 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         .variant
                         .interval_hi
                         .expect("open variant has interval upper bound");
-                    let precision = interval_precision(lo, hi, q.result_precision);
+                    let (lo_str, hi_str) = match q.result_significant_digits {
+                        Some(n) => (
+                            fmt_variable_value(lo, 0, Some(n)),
+                            fmt_variable_value(hi, 0, Some(n)),
+                        ),
+                        None => {
+                            let precision = interval_precision(lo, hi, q.result_precision);
+                            (fmt_value_cz(lo, precision), fmt_value_cz(hi, precision))
+                        }
+                    };
                     out.push_str(" :n\n");
                     out.push_str(&format!(
                         ":n=\"{}..{}\" {} ok\n",
-                        fmt_value_cz(lo, precision),
-                        fmt_value_cz(hi, precision),
+                        lo_str,
+                        hi_str,
                         q.template.point_value
                     ));
                 }
@@ -395,6 +409,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -418,6 +433,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -450,6 +466,7 @@ mod tests {
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -514,6 +531,7 @@ mod tests {
             variable_precisions: [("X".to_string(), 0)].into(),
             variable_significant_digits: HashMap::new(),
             result_precision: 2,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -547,6 +565,7 @@ mod tests {
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
             result_precision: 2,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -575,6 +594,7 @@ mod tests {
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
             result_precision: 2,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -605,6 +625,7 @@ mod tests {
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
             result_precision: 2,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -639,6 +660,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -663,6 +685,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -691,6 +714,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -713,6 +737,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -737,6 +762,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -776,6 +802,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -814,6 +841,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Open,
         }]);
 
@@ -831,6 +859,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -849,6 +878,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -867,6 +897,7 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
@@ -885,10 +916,109 @@ mod tests {
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
             result_precision: 1,
+            result_significant_digits: None,
             mode: TemplateMode::Closed,
         }]);
 
         assert!(output.contains("g.cm<sup>-3</sup>"));
         assert!(output.contains("1.5"));
+    }
+
+    fn make_template_with_sig(text: &str, sig: u8) -> Template {
+        Template {
+            id: Uuid::new_v4(),
+            question_text: text.to_string(),
+            formula: "X * 2".to_string(),
+            equation_text: String::new(),
+            numeric_answer: None,
+            result_unit: "g".to_string(),
+            point_value: 3,
+            significant_digits: Some(sig),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn closed_options_use_significant_digits_when_set() {
+        let template = make_template_with_sig("Vypočítejte hmotnost z [[X]] g.", 3);
+        let variant = Variant {
+            numeric_options: Some(vec![12.345, 67.891, 1.524493429448685e25]),
+            correct_option: Some(2),
+            ..make_closed_variant()
+        };
+        let precisions = [("X".to_string(), 1)].into();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(3),
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains(" :r1 12,3 g"),
+            "expected 3 sig digits (12,3) for option 1, got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r2 67,9 g"),
+            "expected 3 sig digits (67,9) for option 2, got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r3 1,52×10<sup>25</sup> g"),
+            "expected 3 sig digits in scientific for option 3, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn open_interval_uses_significant_digits_when_set() {
+        let template = make_template_with_sig("Vypočítejte koncentraci.", 3);
+        let variant = Variant {
+            interval_lo: Some(0.0796),
+            interval_hi: Some(0.1478),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(3),
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            output.contains(":n=\"0,0796..0,148\""),
+            "expected 3 sig digits interval bounds, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn result_falls_back_to_precision_when_no_sig_digits() {
+        let template = make_template("Vypočítejte hmotnost z [[X]] g.");
+        let variant = Variant {
+            numeric_options: Some(vec![12.345, 67.891]),
+            correct_option: Some(1),
+            ..make_closed_variant()
+        };
+        let precisions = [("X".to_string(), 1)].into();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: None,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains(" :r1 12,35 g"),
+            "expected 2 max decimals (12,35) for option 1, got:\n{output}"
+        );
     }
 }
