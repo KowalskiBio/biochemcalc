@@ -1106,7 +1106,7 @@ export function formatSignificantDigits(
   // Scientific notation when the value is too small (more than one leading
   // zero after the decimal point) or too large, or when explicitly forced.
   if (forceScientific || abs < SCIENTIFIC_LOWER_THRESHOLD || abs >= SCIENTIFIC_UPPER_THRESHOLD) {
-    const mantissa = value / Math.pow(10, Math.floor(Math.log10(abs)))
+    const mantissa = value / 10 ** Math.floor(Math.log10(abs))
     const mantissaDigits = sigDigits - 1
     return `${mantissa.toFixed(mantissaDigits)}×10^${Math.floor(Math.log10(abs))}`
   }
@@ -1178,6 +1178,17 @@ export function buildSubstitutedEquation(
     .filter((vwp) => vwp.variable.varType === "string" && vwp.placeholder !== "ANS")
     .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
 
+  const varFormat = new Map<string, { significantDigits?: number; precision?: number }>()
+  for (const vwp of variables) {
+    if (vwp.placeholder === "ANS") continue
+    const fmt = {
+      significantDigits: vwp.variable.significantDigits,
+      precision: vwp.variable.precision,
+    }
+    varFormat.set(vwp.placeholder, fmt)
+    varFormat.set(vwp.variable.symbol, fmt)
+  }
+
   const fixedMap = new Map<string, number>()
   if (questionText) {
     for (const { symbol, value } of extractPlaceholderValues(questionText)) {
@@ -1210,9 +1221,10 @@ export function buildSubstitutedEquation(
   for (const v of allNumericSources) {
     const value = assignedValues[v.placeholder] ?? assignedValues[v.symbol]
     if (value === undefined) continue
+    const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
     substituted = substituted.replace(
       new RegExp(`\\[\\[${escapeRegexLiteral(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
-      String(value),
+      formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision),
     )
   }
   for (const v of stringSources) {
@@ -1234,12 +1246,17 @@ export function buildSubstitutedEquation(
       assignedStrings[v.placeholder] ??
       assignedStrings[v.symbol]
     if (value === undefined) continue
+    const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
+    const formatted =
+      typeof value === "number"
+        ? formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision)
+        : value
     substituted = substituted.replace(
       new RegExp(
         `(?<![A-Za-z0-9_${GREEK_START}-${GREEK_END}])${escapeRegexLiteral(v.symbol)}(?![A-Za-z0-9_${GREEK_START}-${GREEK_END}])`,
         "g",
       ),
-      String(value),
+      formatted,
     )
   }
 
@@ -1248,6 +1265,37 @@ export function buildSubstitutedEquation(
   substituted = substituteRemainingMolarMasses(substituted)
 
   return substituted
+}
+
+/**
+ * Returns a plain number string the equation evaluator can parse — NOT
+ * `×10^n` HTML. Uses e-notation for very large/small values so the LaTeX
+ * renderer converts it to `\times 10^{n}` for display.
+ */
+export function formatValueForSubstitution(
+  value: number,
+  significantDigits?: number,
+  _precision?: number,
+): string {
+  if (!Number.isFinite(value)) return String(value)
+  if (value === 0) {
+    if (significantDigits != null && significantDigits > 0) {
+      return (0).toFixed(Math.max(0, significantDigits - 1))
+    }
+    return "0"
+  }
+  if (significantDigits != null && significantDigits > 0) {
+    const abs = Math.abs(value)
+    const order = Math.floor(Math.log10(abs))
+    if (order >= 6 || order <= -2) {
+      const mantissa = value / 10 ** order
+      const mantissaDigits = significantDigits - 1
+      return `${mantissa.toFixed(mantissaDigits)}e${order}`
+    }
+    const decimalPlaces = Math.max(0, significantDigits - 1 - order)
+    return value.toFixed(decimalPlaces)
+  }
+  return String(value)
 }
 
 export function evaluateVariantAnswer(

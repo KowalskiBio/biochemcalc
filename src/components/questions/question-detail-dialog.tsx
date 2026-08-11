@@ -5,13 +5,13 @@ import rehypeRaw from "rehype-raw"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { MathRenderer } from "@/components/ui/math-renderer"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -34,6 +34,7 @@ import {
   evaluateExpression,
   extractMolarMassValues,
   formatNumberForText,
+  formatValueForSubstitution,
   renderEquationAsLatex,
   resolveMolarMasses,
   substituteRemainingMolarMasses,
@@ -903,6 +904,17 @@ export function QuestionDetailDialog({
       const stringSources = displayTemplateVariables
         .filter((vwp) => vwp.variable.varType === "string")
         .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
+
+      const varFormat = new Map<string, { significantDigits?: number; precision?: number }>()
+      for (const vwp of displayTemplateVariables) {
+        if (vwp.placeholder === "ANS") continue
+        const fmt = {
+          significantDigits: vwp.variable.significantDigits,
+          precision: vwp.variable.precision,
+        }
+        varFormat.set(vwp.placeholder, fmt)
+        varFormat.set(vwp.variable.symbol, fmt)
+      }
       const fixedSources = Array.from(fixedPlaceholderValues.keys()).map((placeholder) => ({
         placeholder,
         symbol: placeholder,
@@ -923,9 +935,10 @@ export function QuestionDetailDialog({
       for (const v of allNumericSources) {
         const value = assignedValues[v.placeholder]
         if (value === undefined) continue
+        const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
         substituted = substituted.replace(
           new RegExp(`\\[\\[${escapeRegex(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
-          String(value),
+          formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision),
         )
       }
       for (const v of stringSources) {
@@ -943,12 +956,17 @@ export function QuestionDetailDialog({
       for (const v of symbolsByLength) {
         const value = assignedValues[v.placeholder] ?? assignedStrings[v.placeholder]
         if (value === undefined) continue
+        const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
+        const formatted =
+          typeof value === "number"
+            ? formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision)
+            : value
         substituted = substituted.replace(
           new RegExp(
             `(?<![A-Za-z0-9_\u03B1-\u03C9])${escapeRegex(v.symbol)}(?![A-Za-z0-9_\u03B1-\u03C9])`,
             "g",
           ),
-          String(value),
+          formatted,
         )
       }
 
@@ -1083,13 +1101,22 @@ export function QuestionDetailDialog({
       ...pairedConstantSources,
     ]
 
+    const mockVarFormat = new Map<string, { significantDigits?: number; precision?: number }>()
+    for (const v of visibleVariables) {
+      if (v.placeholder === "ANS") continue
+      const fmt = { significantDigits: v.significantDigits, precision: v.precision }
+      mockVarFormat.set(v.placeholder, fmt)
+      mockVarFormat.set(v.symbol, fmt)
+    }
+
     let substituted = text
     for (const v of allNumericSources) {
       const value = mockValues[v.placeholder]
       if (value === undefined) continue
+      const fmt = mockVarFormat.get(v.placeholder) ?? mockVarFormat.get(v.symbol)
       substituted = substituted.replace(
         new RegExp(`\\[\\[${escapeRegex(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
-        String(value),
+        formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision),
       )
     }
 
@@ -1097,12 +1124,13 @@ export function QuestionDetailDialog({
     for (const v of symbolsByLength) {
       const value = mockValues[v.placeholder]
       if (value === undefined) continue
+      const fmt = mockVarFormat.get(v.placeholder) ?? mockVarFormat.get(v.symbol)
       substituted = substituted.replace(
         new RegExp(
           `(?<![A-Za-z0-9_\u03B1-\u03C9])${escapeRegex(v.symbol)}(?![A-Za-z0-9_\u03B1-\u03C9])`,
           "g",
         ),
-        String(value),
+        formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision),
       )
     }
 
