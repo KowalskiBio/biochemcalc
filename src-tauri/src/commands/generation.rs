@@ -84,6 +84,7 @@ pub fn do_generate_for_templates(
             payload.option_count,
             &fixed_values,
             &targets,
+            template.decoy_formula.as_deref(),
         )
         .map_err(generation_to_db_error)?;
 
@@ -248,6 +249,7 @@ pub(crate) fn do_regenerate_variant(
         payload.option_count,
         &fixed_values,
         &targets,
+        template.decoy_formula.as_deref(),
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -257,8 +259,12 @@ pub(crate) fn do_regenerate_variant(
         match payload.mode {
             TemplateMode::Closed => {
                 let mut rng = StdRng::seed_from_u64(payload.seed.wrapping_add(1));
+                // A manual answer override is the teacher directly picking the
+                // correct value; the decoy is left out of scope here rather
+                // than evaluated against a correct answer the teacher chose.
                 let (options, position) = generate_numeric_options(
                     manual_answer,
+                    None,
                     &constraint,
                     &mut rng,
                     &payload.difficulty,
@@ -508,6 +514,7 @@ pub fn do_export_projekt_to_txt(
             point_value: pq.point_value,
             significant_digits: pq.significant_digits,
             force_scientific: pq.force_scientific,
+            decoy_formula: None,
             created_at: Utc::now(),
         });
 
@@ -753,6 +760,7 @@ mod tests {
             point_value: 2,
             significant_digits: None,
             force_scientific: false,
+            decoy_formula: None,
             created_at: Utc::now(),
         };
         TemplateRepo::insert(&conn, &template, &[], &[], None).expect("insert template");
@@ -851,5 +859,95 @@ mod tests {
             "correct answer positions should vary across templates, got {:?}",
             positions
         );
+    }
+
+    fn insert_template_with_decoy(
+        conn: &rusqlite::Connection,
+        decoy_formula: Option<&str>,
+    ) -> Uuid {
+        let var = Variable::new("X".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
+        VariableRepo::insert_raw(conn, &var).expect("insert variable");
+
+        let mut template = Template::new(
+            "Question [[X]]".into(),
+            "X * 2".into(),
+            "X × 2".into(),
+            None,
+            "g".into(),
+            2,
+        );
+        template.decoy_formula = decoy_formula.map(str::to_string);
+        let constraint = ResultConstraint::new(
+            template.id,
+            Some(0.0),
+            Some(1000.0),
+            None,
+            ConstraintType::Range,
+        );
+        let tv = TemplateVariable {
+            template_id: template.id,
+            variable_id: var.id,
+            placeholder: "X".into(),
+            greater_than_variable_id: None,
+            less_than_variable_id: None,
+        };
+        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint))
+            .expect("insert template");
+        template.id
+    }
+
+    #[test]
+    fn generate_for_templates_injects_decoy_value_into_closed_options() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, Some("X * 3"));
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 1,
+            base_seed: 12345,
+            mode: TemplateMode::Closed,
+            difficulty: "medium".into(),
+            option_count: 5,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        assert_eq!(results.len(), 1);
+        let variant = &results[0].variants[0];
+        let x = variant.assigned_values["X"];
+        let decoy_value = x * 3.0;
+        let options = variant.numeric_options.as_ref().unwrap();
+        assert!(
+            options.iter().any(|o| (o - decoy_value).abs() < 1e-6),
+            "expected decoy value {decoy_value} among options {options:?}"
+        );
+        assert_eq!(
+            options
+                .iter()
+                .filter(|o| (**o - variant.correct_answer).abs() < 1e-6)
+                .count(),
+            1,
+            "correct answer must appear exactly once"
+        );
+    }
+
+    #[test]
+    fn generate_for_templates_without_decoy_is_unaffected() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 1,
+            base_seed: 12345,
+            mode: TemplateMode::Closed,
+            difficulty: "medium".into(),
+            option_count: 5,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let variant = &results[0].variants[0];
+        assert_eq!(variant.numeric_options.as_ref().unwrap().len(), 5);
     }
 }

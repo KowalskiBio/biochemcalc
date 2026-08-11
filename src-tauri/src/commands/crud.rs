@@ -551,6 +551,8 @@ pub struct UpdateTemplateWithVariablesPayload {
     pub significant_digits: Option<u8>,
     #[serde(default)]
     pub force_scientific: bool,
+    #[serde(default)]
+    pub decoy_formula: Option<String>,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -568,6 +570,8 @@ pub struct CreateTemplatePayload {
     pub significant_digits: Option<u8>,
     #[serde(default)]
     pub force_scientific: bool,
+    #[serde(default)]
+    pub decoy_formula: Option<String>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -672,6 +676,7 @@ pub(crate) fn do_create_template(
     );
     template.significant_digits = payload.significant_digits;
     template.force_scientific = payload.force_scientific;
+    template.decoy_formula = payload.decoy_formula;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
@@ -805,6 +810,8 @@ pub struct UpdateTemplatePayload {
     pub significant_digits: Option<u8>,
     #[serde(default)]
     pub force_scientific: bool,
+    #[serde(default)]
+    pub decoy_formula: Option<String>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -845,12 +852,13 @@ pub(crate) fn do_update_template(
         point_value: payload.point_value,
         significant_digits: payload.significant_digits,
         force_scientific: payload.force_scientific,
+        decoy_formula: payload.decoy_formula,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, decoy_formula=?10, created_at=?11 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -861,6 +869,7 @@ pub(crate) fn do_update_template(
             template.point_value,
             template.significant_digits,
             template.force_scientific,
+            template.decoy_formula,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1019,11 +1028,12 @@ pub fn apply_template_variable_mutations(
         point_value: payload.point_value,
         significant_digits: payload.significant_digits,
         force_scientific: payload.force_scientific,
+        decoy_formula: payload.decoy_formula.clone(),
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, decoy_formula=?10, created_at=?11 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1034,6 +1044,7 @@ pub fn apply_template_variable_mutations(
             template.point_value,
             template.significant_digits,
             template.force_scientific,
+            template.decoy_formula,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1643,6 +1654,7 @@ mod tests {
             point_value: 2,
             significant_digits: None,
             force_scientific: false,
+            decoy_formula: None,
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,

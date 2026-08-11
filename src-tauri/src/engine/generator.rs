@@ -324,6 +324,7 @@ fn round_to_unit(value: f64, unit: f64) -> f64 {
 
 pub(crate) fn generate_numeric_options<R: Rng>(
     correct: f64,
+    decoy: Option<f64>,
     constraint: &ResultConstraint,
     rng: &mut R,
     difficulty: &str,
@@ -332,12 +333,30 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     let count = clamp_option_count(option_count);
     let max_deviation = max_deviation_for_difficulty(difficulty);
 
-    let mut distractors = Vec::new();
-    let mut attempts = 0;
     let rounding_unit = display_rounding_unit(correct, max_deviation);
     let rounded_correct = round_to_unit(correct, rounding_unit);
 
-    while distractors.len() < count - 1 && attempts < 500 {
+    // A teacher-supplied decoy is only used if it survives the same sanity
+    // checks a random distractor would: finite, within the constraint, and
+    // far enough from the correct answer once rounded. Anything else falls
+    // back to a normal random distractor so generation never fails because
+    // of a bad decoy.
+    let rounded_decoy = decoy
+        .filter(|d| d.is_finite())
+        .map(|d| round_to_unit(d, rounding_unit))
+        .filter(|d| validate_result(*d, constraint).is_ok())
+        .filter(|d| (d - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON));
+
+    let needed_random = if rounded_decoy.is_some() {
+        count - 2
+    } else {
+        count - 1
+    };
+
+    let mut distractors = Vec::new();
+    let mut attempts = 0;
+
+    while distractors.len() < needed_random && attempts < 500 {
         attempts += 1;
 
         let deviation = rng.random_range(MIN_DISTRACTOR_DEVIATION..=max_deviation);
@@ -372,13 +391,14 @@ pub(crate) fn generate_numeric_options<R: Rng>(
             (rounded - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON);
         let unique = !distractors
             .iter()
-            .any(|d: &f64| (d - rounded).abs() <= rounding_unit * 0.5);
+            .any(|d: &f64| (d - rounded).abs() <= rounding_unit * 0.5)
+            && rounded_decoy.is_none_or(|rd| (rd - rounded).abs() > rounding_unit * 0.5);
         if validate_result(rounded, constraint).is_ok() && far_enough && unique {
             distractors.push(rounded);
         }
     }
 
-    if distractors.len() < count - 1 {
+    if distractors.len() < needed_random {
         return Err(GenerationError::Distractor(format!(
             "only generated {} unique distractors for correct answer {} (constraint: {:?})",
             distractors.len(),
@@ -390,13 +410,21 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     let correct_position_zero_based: usize = rng.random_range(0..count);
     let correct_position_one_based = correct_position_zero_based as u8 + 1;
 
+    let mut pool = distractors;
+    if let Some(d) = rounded_decoy {
+        pool.push(d);
+        let last = pool.len() - 1;
+        let swap_idx = rng.random_range(0..pool.len());
+        pool.swap(last, swap_idx);
+    }
+
     let mut numeric_options = Vec::with_capacity(count);
-    let mut distractor_iter = distractors.into_iter();
+    let mut pool_iter = pool.into_iter();
     for position in 0..count {
         if position == correct_position_zero_based {
             numeric_options.push(rounded_correct);
         } else {
-            numeric_options.push(distractor_iter.next().expect("distractors available"));
+            numeric_options.push(pool_iter.next().expect("distractors available"));
         }
     }
 
@@ -427,6 +455,7 @@ pub fn generate_variant(
         option_count,
         fixed_values,
         &[],
+        None,
     )
 }
 
@@ -442,6 +471,7 @@ pub fn generate_variant_with_targets(
     option_count: u8,
     fixed_values: &HashMap<String, f64>,
     targets: &[AnswerTarget],
+    decoy_formula: Option<&str>,
 ) -> Result<Variant, GenerationError> {
     let multi_answer = !targets.is_empty();
     let has_assignments = multi_answer || formula.contains(';');
@@ -476,6 +506,7 @@ pub fn generate_variant_with_targets(
                 base_seed,
                 difficulty,
                 option_count,
+                decoy_formula,
             ) {
                 Ok(Some(variant)) => return Ok(variant),
                 Ok(None) => {
@@ -493,9 +524,13 @@ pub fn generate_variant_with_targets(
         }
         let (numeric_options, correct_option, interval_lo, interval_hi) = match mode {
             TemplateMode::Closed => {
+                let decoy = decoy_formula.and_then(|df| {
+                    evaluate_with_strings(df, &assigned_numeric, constants, &assigned_strings).ok()
+                });
                 let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
                 let (options, position) = generate_numeric_options(
                     correct,
+                    decoy,
                     constraint,
                     &mut rng,
                     difficulty,
@@ -540,10 +575,25 @@ fn generate_multi_answer_variant(
     base_seed: u64,
     difficulty: &str,
     option_count: u8,
+    decoy_formula: Option<&str>,
 ) -> Result<Option<Variant>, GenerationError> {
     let answer_values =
         evaluate_assignments(assignments, assigned_numeric, constants, assigned_strings)
             .map_err(GenerationError::Formula)?;
+
+    // The decoy may deliberately reference an intermediate assignment target
+    // (e.g. `n` in `n = V / M; m = n * M2`), so it's evaluated with the same
+    // answer values available to the assignments themselves.
+    let decoy = decoy_formula.and_then(|df| {
+        crate::engine::formula::evaluate_with_answers(
+            df,
+            assigned_numeric,
+            constants,
+            assigned_strings,
+            &answer_values,
+        )
+        .ok()
+    });
 
     let options_seed = base_seed.wrapping_add(1);
 
@@ -576,8 +626,11 @@ fn generate_multi_answer_variant(
         let (numeric_options, correct_option, interval_lo, interval_hi) = match mode {
             TemplateMode::Closed => {
                 let mut rng = StdRng::seed_from_u64(options_seed);
+                // Decoy applies to the primary answer only (see the block
+                // below), not to each per-target option set here.
                 let (options, position) = generate_numeric_options(
                     correct,
+                    None,
                     constraint,
                     &mut rng,
                     difficulty,
@@ -607,6 +660,7 @@ fn generate_multi_answer_variant(
             let mut rng = StdRng::seed_from_u64(options_seed);
             let (options, position) = generate_numeric_options(
                 primary_correct,
+                decoy,
                 constraint,
                 &mut rng,
                 difficulty,
@@ -662,6 +716,7 @@ pub fn generate_variants(
         option_count,
         fixed_values,
         &[],
+        None,
     )
 }
 
@@ -678,6 +733,7 @@ pub fn generate_variants_with_targets(
     option_count: u8,
     fixed_values: &HashMap<String, f64>,
     targets: &[AnswerTarget],
+    decoy_formula: Option<&str>,
 ) -> Result<Vec<Variant>, GenerationError> {
     let mut variants = Vec::with_capacity(count);
     for i in 0..count {
@@ -694,6 +750,7 @@ pub fn generate_variants_with_targets(
             option_count,
             fixed_values,
             targets,
+            decoy_formula,
         )?;
         variants.push(variant);
     }
@@ -956,7 +1013,7 @@ mod tests {
         let correct = 1e-6;
         let mut rng = StdRng::seed_from_u64(42);
         let (options, _correct_pos) =
-            generate_numeric_options(correct, &constraint, &mut rng, "medium", 5).unwrap();
+            generate_numeric_options(correct, None, &constraint, &mut rng, "medium", 5).unwrap();
 
         assert_eq!(options.len(), 5);
         assert!(options.iter().any(|o| (o - 1e-6).abs() < 1e-12));
@@ -970,7 +1027,7 @@ mod tests {
         let correct = 1.674e-24; // mass of one H atom in grams
         let mut rng = StdRng::seed_from_u64(7);
         let (options, correct_pos) =
-            generate_numeric_options(correct, &constraint, &mut rng, "medium", 5).unwrap();
+            generate_numeric_options(correct, None, &constraint, &mut rng, "medium", 5).unwrap();
 
         assert_eq!(options.len(), 5);
         let correct_option = options[correct_pos as usize - 1];
@@ -1028,6 +1085,7 @@ mod tests {
             5,
             &HashMap::new(),
             &targets,
+            None,
         )
         .unwrap();
 
@@ -1067,6 +1125,7 @@ mod tests {
             5,
             &HashMap::new(),
             &targets,
+            None,
         )
         .unwrap();
 
@@ -1082,7 +1141,7 @@ mod tests {
         let correct = 0.01;
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos) =
-            generate_numeric_options(correct, &constraint, &mut rng, "hard", 5).unwrap();
+            generate_numeric_options(correct, None, &constraint, &mut rng, "hard", 5).unwrap();
 
         assert_eq!(options.len(), 5, "expected 5 options for correct answer {correct}");
         assert!(options.iter().any(|o| (o - correct).abs() < 1e-12));
@@ -1098,6 +1157,7 @@ mod tests {
                 let mut rng = StdRng::seed_from_u64(seed);
                 let (options, _pos) = generate_numeric_options(
                     correct,
+                    None,
                     &constraint,
                     &mut rng,
                     "hard",
@@ -1142,6 +1202,7 @@ mod tests {
             5,
             &HashMap::new(),
             &[],
+            None,
         )
         .unwrap();
 
@@ -1187,5 +1248,192 @@ mod tests {
         let (lo, hi) = open_interval(100.0, &constraint, "easy");
         assert!((lo - 97.5).abs() < 1e-9, "unexpected lower bound {lo}");
         assert!((hi - 102.5).abs() < 1e-9, "unexpected upper bound {hi}");
+    }
+
+    #[test]
+    fn decoy_value_is_injected_as_one_of_the_options() {
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let correct = 20.0;
+        let decoy = 60.0; // far from correct and from any ±30% "medium" distractor
+        let mut rng = StdRng::seed_from_u64(1);
+        let (options, correct_pos) =
+            generate_numeric_options(correct, Some(decoy), &constraint, &mut rng, "medium", 5)
+                .unwrap();
+
+        assert_eq!(options.len(), 5);
+        assert!(options.iter().any(|o| (o - decoy).abs() < 1e-9));
+        assert_eq!(
+            options.iter().filter(|o| (**o - correct).abs() < 1e-9).count(),
+            1,
+            "correct answer must appear exactly once"
+        );
+        let correct_option = options[correct_pos as usize - 1];
+        assert!((correct_option - correct).abs() < 1e-9);
+    }
+
+    #[test]
+    fn decoy_equal_to_correct_falls_back_to_a_random_distractor() {
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let correct = 20.0;
+        let mut rng = StdRng::seed_from_u64(1);
+        let (options, _pos) =
+            generate_numeric_options(correct, Some(correct), &constraint, &mut rng, "medium", 5)
+                .unwrap();
+
+        assert_eq!(options.len(), 5);
+        assert_eq!(
+            options.iter().filter(|o| (**o - correct).abs() < 1e-9).count(),
+            1,
+            "decoy colliding with the correct answer must not create a duplicate"
+        );
+    }
+
+    #[test]
+    fn decoy_never_collides_with_a_random_distractor_across_many_seeds() {
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let correct = 20.0;
+        let decoy = 25.0;
+        for seed in 0..50 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, _pos) =
+                generate_numeric_options(correct, Some(decoy), &constraint, &mut rng, "medium", 5)
+                    .unwrap();
+            let mut sorted = options.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            for i in 1..sorted.len() {
+                assert!(
+                    (sorted[i] - sorted[i - 1]).abs() > 1e-9,
+                    "duplicate options for seed={seed}: {options:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decoy_formula_is_evaluated_and_injected_into_a_simple_variant() {
+        let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "X * 2",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &[],
+            Some("X * 3"),
+        )
+        .unwrap();
+
+        let x = variant.assigned_values["X"];
+        let decoy_value = x * 3.0;
+        let options = variant.numeric_options.as_ref().unwrap();
+        assert!(
+            options.iter().any(|o| (o - decoy_value).abs() < 1e-6),
+            "expected decoy value {decoy_value} among options {options:?}"
+        );
+    }
+
+    #[test]
+    fn decoy_formula_can_chain_off_an_intermediate_assignment() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![crate::engine::answer_targets::AnswerTarget {
+            symbol: "m".to_string(),
+            unit: Some("g".to_string()),
+        }];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "n = V / 10; m = n * 5",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &targets,
+            Some("n * 2"),
+        )
+        .unwrap();
+
+        let v = variant.assigned_values["V"];
+        let n = v / 10.0;
+        let decoy_value = n * 2.0;
+        let options = variant.numeric_options.as_ref().unwrap();
+        assert!(
+            options.iter().any(|o| (o - decoy_value).abs() < 1e-6),
+            "expected decoy value {decoy_value} (from intermediate n) among options {options:?}"
+        );
+    }
+
+    #[test]
+    fn invalid_decoy_formula_falls_back_gracefully_without_failing_generation() {
+        let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "X * 2",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &[],
+            Some("this is not a valid formula ((("),
+        )
+        .unwrap();
+
+        let options = variant.numeric_options.as_ref().unwrap();
+        assert_eq!(options.len(), 5);
+        let mut sorted = options.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for i in 1..sorted.len() {
+            assert!(
+                (sorted[i] - sorted[i - 1]).abs() > 1e-9,
+                "options must stay unique even when the decoy formula is invalid: {options:?}"
+            );
+        }
+    }
+
+    /// With no decoy configured, generation must be byte-identical to the
+    /// pre-decoy behavior for a fixed seed — the backward-compatibility
+    /// guarantee for the vast majority of existing templates.
+    #[test]
+    fn no_decoy_produces_identical_options_for_a_fixed_seed() {
+        let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(100.0), None);
+        let variant = generate_variant(
+            Uuid::new_v4(),
+            "X * 2",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        let options = variant.numeric_options.as_ref().unwrap();
+        assert_eq!(
+            options,
+            &vec![5.2700000000000005, 7.7, 5.47, 7.4, 5.72],
+            "no-decoy option generation must remain byte-identical after the decoy feature was added"
+        );
     }
 }

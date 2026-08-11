@@ -406,6 +406,7 @@ mod tests {
             point_value: 3,
             significant_digits: None,
             force_scientific: false,
+            decoy_formula: None,
             created_at: Utc::now(),
         }
     }
@@ -979,6 +980,7 @@ mod tests {
             point_value: 3,
             significant_digits: Some(sig),
             force_scientific: false,
+            decoy_formula: None,
             created_at: Utc::now(),
         }
     }

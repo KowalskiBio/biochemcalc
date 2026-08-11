@@ -263,6 +263,7 @@ fn build_question(
         PRACTICE_OPTION_COUNT,
         &fixed_values,
         &targets,
+        template.decoy_formula.as_deref(),
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
