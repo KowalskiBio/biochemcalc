@@ -339,7 +339,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     // A teacher-supplied decoy is only used if it survives the same sanity
     // checks a random distractor would: finite, within the constraint, and
     // far enough from the correct answer once rounded. Anything else falls
-    // back to a normal random distractor so generation never fails because
+    // back to normal random distractors so generation never fails because
     // of a bad decoy.
     let rounded_decoy = decoy
         .filter(|d| d.is_finite())
@@ -347,61 +347,91 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         .filter(|d| validate_result(*d, constraint).is_ok())
         .filter(|d| (d - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON));
 
-    let needed_random = if rounded_decoy.is_some() {
-        count - 2
-    } else {
-        count - 1
-    };
+    // With a valid decoy, about half the wrong options (rounded down) are
+    // anchored on it instead of the correct answer — 3 options → 1 decoyed,
+    // 4 → 2, 5 → 2, 6 → 3 — so a filled-in decoy dominates the "wrong" side
+    // of the option set rather than appearing only once.
+    let decoy_slot_count = if rounded_decoy.is_some() { count / 2 } else { 0 };
+    let correct_slot_count = count - 1 - decoy_slot_count;
 
-    let mut distractors = Vec::new();
-    let mut attempts = 0;
+    let mut pool: Vec<f64> = Vec::with_capacity(count - 1);
+    if let Some(d) = rounded_decoy {
+        pool.push(d);
+    }
 
-    while distractors.len() < needed_random && attempts < 500 {
-        attempts += 1;
+    // Fills `pool` with up to `needed` more values deviated around `anchor`
+    // (the same random-deviation logic distractors have always used), each
+    // unique against the correct answer, the decoy, and every value already
+    // in `pool`. Returns whether it reached the target count within budget.
+    let generate_around = |anchor: f64, needed: usize, pool: &mut Vec<f64>, rng: &mut R| -> bool {
+        let start_len = pool.len();
+        let mut attempts = 0;
 
-        let deviation = rng.random_range(MIN_DISTRACTOR_DEVIATION..=max_deviation);
-        let direction = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
+        while pool.len() < start_len + needed && attempts < 500 {
+            attempts += 1;
 
-        // Use the correct answer's magnitude so tiny answers get tiny distractors
-        // and don't collapse to nonsensical values like 0.27 or -0.16.
-        let reference_magnitude = if correct == 0.0 {
-            1.0
-        } else {
-            correct.abs()
-        };
-        let delta = reference_magnitude * deviation;
-        let candidate = correct + direction * delta;
+            let deviation = rng.random_range(MIN_DISTRACTOR_DEVIATION..=max_deviation);
+            let direction = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
 
-        // Skip candidates that didn't actually move from the correct answer in
-        // floating-point. Use a relative tolerance so this works for answers
-        // of any magnitude (e.g. atomic masses ~1e-24).
-        if !candidate.is_finite()
-            || (candidate - correct).abs() <= correct.abs() * f64::EPSILON
-        {
-            continue;
+            // Use the anchor's own magnitude so tiny answers get tiny
+            // distractors and don't collapse to nonsensical values like
+            // 0.27 or -0.16.
+            let reference_magnitude = if anchor == 0.0 { 1.0 } else { anchor.abs() };
+            let delta = reference_magnitude * deviation;
+            let candidate = anchor + direction * delta;
+
+            // Skip candidates that didn't actually move from the anchor in
+            // floating-point. Use a relative tolerance so this works for
+            // answers of any magnitude (e.g. atomic masses ~1e-24).
+            if !candidate.is_finite() || (candidate - anchor).abs() <= anchor.abs() * f64::EPSILON
+            {
+                continue;
+            }
+
+            let rounded = round_to_unit(candidate, rounding_unit);
+            // Use a half-unit tolerance so that values that are exactly one
+            // rounding grid step away are accepted despite floating-point
+            // representation errors (e.g. 0.24 - 0.23 can be slightly less
+            // than 0.01). The tolerance must scale with the rounding unit —
+            // an absolute f64::EPSILON would dominate for sub-unit answers
+            // (e.g. atomic masses ~1e-24) and reject everything.
+            let far_enough_from_correct =
+                (rounded - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON);
+            let far_enough_from_decoy = rounded_decoy.is_none_or(|rd| {
+                (rounded - rd).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON)
+            });
+            let unique = !pool
+                .iter()
+                .any(|p: &f64| (p - rounded).abs() <= rounding_unit * 0.5);
+
+            if validate_result(rounded, constraint).is_ok()
+                && far_enough_from_correct
+                && far_enough_from_decoy
+                && unique
+            {
+                pool.push(rounded);
+            }
         }
 
-        let rounded = round_to_unit(candidate, rounding_unit);
-        // Use a half-unit tolerance so that values that are exactly one rounding
-        // grid step away are accepted despite floating-point representation errors
-        // (e.g. 0.24 - 0.23 can be slightly less than 0.01). The tolerance must
-        // scale with the rounding unit — an absolute f64::EPSILON would dominate
-        // for sub-unit answers (e.g. atomic masses ~1e-24) and reject everything.
-        let far_enough =
-            (rounded - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON);
-        let unique = !distractors
-            .iter()
-            .any(|d: &f64| (d - rounded).abs() <= rounding_unit * 0.5)
-            && rounded_decoy.is_none_or(|rd| (rd - rounded).abs() > rounding_unit * 0.5);
-        if validate_result(rounded, constraint).is_ok() && far_enough && unique {
-            distractors.push(rounded);
+        pool.len() >= start_len + needed
+    };
+
+    if let Some(d) = rounded_decoy {
+        // The literal decoy value already fills one slot; only generate
+        // more if the option count calls for a bigger decoy cluster.
+        if decoy_slot_count > 1 && !generate_around(d, decoy_slot_count - 1, &mut pool, rng) {
+            return Err(GenerationError::Distractor(format!(
+                "only generated {} unique decoy-anchored distractors (needed {}) for decoy {d}",
+                pool.len().saturating_sub(1),
+                decoy_slot_count - 1,
+            )));
         }
     }
 
-    if distractors.len() < needed_random {
+    if correct_slot_count > 0 && !generate_around(correct, correct_slot_count, &mut pool, rng) {
         return Err(GenerationError::Distractor(format!(
             "only generated {} unique distractors for correct answer {} (constraint: {:?})",
-            distractors.len(),
+            pool.len(),
             rounded_correct,
             constraint
         )));
@@ -410,12 +440,14 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     let correct_position_zero_based: usize = rng.random_range(0..count);
     let correct_position_one_based = correct_position_zero_based as u8 + 1;
 
-    let mut pool = distractors;
-    if let Some(d) = rounded_decoy {
-        pool.push(d);
-        let last = pool.len() - 1;
-        let swap_idx = rng.random_range(0..pool.len());
-        pool.swap(last, swap_idx);
+    if rounded_decoy.is_some() {
+        // Shuffle so decoy-anchored options don't always land at the lowest
+        // non-correct indices. Only done when a decoy is present — the
+        // no-decoy path must stay RNG-identical to before this feature.
+        for i in (1..pool.len()).rev() {
+            let j = rng.random_range(0..=i);
+            pool.swap(i, j);
+        }
     }
 
     let mut numeric_options = Vec::with_capacity(count);
@@ -1435,5 +1467,47 @@ mod tests {
             &vec![5.2700000000000005, 7.7, 5.47, 7.4, 5.72],
             "no-decoy option generation must remain byte-identical after the decoy feature was added"
         );
+    }
+
+    /// A filled-in decoy should dominate roughly the lower half of the wrong
+    /// options as the option count grows, not just appear once:
+    /// 3 options -> 1 decoyed, 4 -> 2, 5 -> 2, 6 (if ever allowed) -> 3.
+    #[test]
+    fn decoy_slot_count_scales_as_floor_of_half_the_options() {
+        let constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
+        let correct = 10.0;
+        // Far enough from `correct` that "medium" (±30%) deviation ranges
+        // around each anchor never overlap, so every decoy-anchored value
+        // can be unambiguously distinguished from a correct-anchored one.
+        let decoy = 1000.0;
+        let decoy_lo = decoy * 0.7;
+        let decoy_hi = decoy * 1.3;
+
+        for (option_count, expected_decoy_slots) in [(2u8, 1usize), (3, 1), (4, 2), (5, 2)] {
+            let mut rng = StdRng::seed_from_u64(99);
+            let (options, _pos) = generate_numeric_options(
+                correct,
+                Some(decoy),
+                &constraint,
+                &mut rng,
+                "medium",
+                option_count,
+            )
+            .unwrap();
+
+            let decoy_anchored = options
+                .iter()
+                .filter(|o| **o >= decoy_lo && **o <= decoy_hi)
+                .count();
+            assert_eq!(
+                decoy_anchored, expected_decoy_slots,
+                "option_count={option_count}: expected {expected_decoy_slots} decoy-anchored \
+                 options, got {decoy_anchored} in {options:?}"
+            );
+            assert!(
+                options.iter().any(|o| (o - decoy).abs() < 1e-9),
+                "the literal decoy value itself must still be among the options"
+            );
+        }
     }
 }
