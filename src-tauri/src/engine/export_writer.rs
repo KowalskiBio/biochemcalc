@@ -22,18 +22,31 @@ const SCIENTIFIC_MANTISSA_DECIMALS: u8 = 2;
 /// the exported test and the on-screen preview agree.
 const SCIENTIFIC_UPPER_THRESHOLD: f64 = 1e6;
 
+/// Below this magnitude a fixed-point string has more than one leading zero
+/// after the decimal point — `0,1` is acceptable, `0,01` is not. Mirrors
+/// `SCIENTIFIC_LOWER_THRESHOLD` in `src/lib/math-utils.ts`; without this,
+/// atomic-mass-scale answers (~1e-22) print as a wall of decimal zeros
+/// instead of scientific notation, even though the on-screen preview
+/// already switches to scientific for the same value via that JS constant.
+const SCIENTIFIC_LOWER_THRESHOLD: f64 = 0.1;
+
 /// Czech-formatted scientific notation with an HTML superscript exponent, the
 /// same shape the UI renders and the same markup the exported question text
 /// already uses for formulae (`H<sub>2</sub>O`, `cm<sup>-3</sup>`).
-fn fmt_scientific_cz(value: f64) -> String {
+///
+/// `mantissa_decimals` mirrors the UI: `SCIENTIFIC_MANTISSA_DECIMALS` (2) by
+/// default, but `sigDigits - 1` when significant digits are configured, so
+/// e.g. 4 significant digits shows a 3-decimal mantissa here exactly as it
+/// does in `formatSignificantDigits` in `src/lib/math-utils.ts`.
+fn fmt_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
     if value == 0.0 || !value.is_finite() {
-        return fmt_cz(value, SCIENTIFIC_MANTISSA_DECIMALS);
+        return fmt_cz(value, mantissa_decimals);
     }
 
     let mut exponent = value.abs().log10().floor() as i32;
     // Rounding the mantissa can carry it up to 10,00 (e.g. 9,999×10^5), which
     // belongs in the next decade instead.
-    let mantissa_rounded: f64 = fmt_cz(value / 10f64.powi(exponent), SCIENTIFIC_MANTISSA_DECIMALS)
+    let mantissa_rounded: f64 = fmt_cz(value / 10f64.powi(exponent), mantissa_decimals)
         .replace(',', ".")
         .parse()
         .unwrap_or(0.0);
@@ -44,19 +57,26 @@ fn fmt_scientific_cz(value: f64) -> String {
     let mantissa = value / 10f64.powi(exponent);
     format!(
         "{}×10<sup>{}</sup>",
-        fmt_cz(mantissa, SCIENTIFIC_MANTISSA_DECIMALS),
+        fmt_cz(mantissa, mantissa_decimals),
         exponent
     )
 }
 
 /// A number as a student should see it in the exported test: plain Czech
 /// decimal when that reads naturally, scientific notation when it does not.
+///
+/// Deliberately has no lower-magnitude threshold — unlike `fmt_option_value`,
+/// this is shared with open-answer interval bounds, which already have their
+/// own joint "both bounds must stay distinguishable" logic in
+/// `interval_precision` and intentionally keep small-but-ordinary values
+/// (e.g. `0,08..0,15`) as plain decimals rather than switching only the
+/// smaller bound to scientific notation.
 fn fmt_value_cz(value: f64, precision: u8) -> String {
     let plain = fmt_cz(value, precision);
     let rounded: f64 = plain.replace(',', ".").parse().unwrap_or(value);
     // Too small to survive rounding, or too large to write out in full.
     if (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD {
-        return fmt_scientific_cz(value);
+        return fmt_scientific_cz(value, SCIENTIFIC_MANTISSA_DECIMALS);
     }
     plain
 }
@@ -119,20 +139,47 @@ fn fmt_variable_value(
     sig_digits: Option<u8>,
     force_scientific: bool,
 ) -> String {
+    // Mirrors formatSignificantDigits/formatNumberMaxDecimals in
+    // src/lib/math-utils.ts: the mantissa gets as many decimals as the
+    // configured significant digits allow (sigDigits - 1), or the fixed
+    // default when no significant digits are set.
+    let mantissa_decimals = sig_digits
+        .map(|n| n.saturating_sub(1))
+        .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
     if force_scientific && value != 0.0 && value.is_finite() {
-        return fmt_scientific_cz(value);
+        return fmt_scientific_cz(value, mantissa_decimals);
     }
     match sig_digits {
         Some(n) => {
             let formatted = fmt_significant_cz(value, n);
             let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
             if (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD {
-                return fmt_scientific_cz(value);
+                return fmt_scientific_cz(value, mantissa_decimals);
             }
             formatted
         }
         None => fmt_value_cz(value, precision),
     }
+}
+
+/// Format one multiple-choice option: same as `fmt_variable_value`, but also
+/// switches to scientific notation for small-but-nonzero values below
+/// `SCIENTIFIC_LOWER_THRESHOLD` that wouldn't otherwise round to exactly
+/// zero. An atomic mass (~1e-22) formatted with, say, 4 significant digits
+/// never rounds to "0" at any precision `fmt_variable_value` would try, so
+/// its existing zero-collapse fallback never fires and it would otherwise
+/// print as a wall of decimal zeros. Scoped to options only — not reused for
+/// open-answer interval bounds, which already have their own joint "both
+/// bounds must stay distinguishable" precision logic and intentionally keep
+/// small-but-ordinary values (e.g. `0,08..0,15`) as plain decimals.
+fn fmt_option_value(value: f64, precision: u8, sig_digits: Option<u8>, force_scientific: bool) -> String {
+    if !force_scientific && value != 0.0 && value.is_finite() && value.abs() < SCIENTIFIC_LOWER_THRESHOLD {
+        let mantissa_decimals = sig_digits
+            .map(|n| n.saturating_sub(1))
+            .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
+        return fmt_scientific_cz(value, mantissa_decimals);
+    }
+    fmt_variable_value(value, precision, sig_digits, force_scientific)
 }
 
 fn render_question(
@@ -210,9 +257,9 @@ fn render_multi_closed_options(
                 let value = a.numeric_options.as_ref().unwrap()[idx];
                 let unit = a.unit.as_deref().unwrap_or("");
                 if unit.is_empty() {
-                    fmt_variable_value(value, precision, sig_digits, force_scientific)
+                    fmt_option_value(value, precision, sig_digits, force_scientific)
                 } else {
-                    format!("{} {}", fmt_variable_value(value, precision, sig_digits, force_scientific), unit)
+                    format!("{} {}", fmt_option_value(value, precision, sig_digits, force_scientific), unit)
                 }
             })
             .collect();
@@ -249,10 +296,13 @@ fn render_multi_open_intervals(
             let lo = a.interval_lo.expect("open answer field has lower bound");
             let hi = a.interval_hi.expect("open answer field has upper bound");
             let unit = a.unit.as_deref().unwrap_or("");
+            let mantissa_decimals = result_sig_digits
+                .map(|n| n.saturating_sub(1))
+                .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
             let (lo_str, hi_str) = if force_scientific && lo != 0.0 && hi != 0.0 {
                 (
-                    fmt_scientific_cz(lo),
-                    fmt_scientific_cz(hi),
+                    fmt_scientific_cz(lo, mantissa_decimals),
+                    fmt_scientific_cz(hi, mantissa_decimals),
                 )
             } else {
                 match result_sig_digits {
@@ -329,7 +379,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_variable_value(*value, q.result_precision, q.result_significant_digits, q.force_scientific),
+                            fmt_option_value(*value, q.result_precision, q.result_significant_digits, q.force_scientific),
                             q.template.result_unit
                         ));
                     }
@@ -359,8 +409,15 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         .variant
                         .interval_hi
                         .expect("open variant has interval upper bound");
+                    let mantissa_decimals = q
+                        .result_significant_digits
+                        .map(|n| n.saturating_sub(1))
+                        .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
                     let (lo_str, hi_str) = if q.force_scientific && lo != 0.0 && hi != 0.0 {
-                        (fmt_scientific_cz(lo), fmt_scientific_cz(hi))
+                        (
+                            fmt_scientific_cz(lo, mantissa_decimals),
+                            fmt_scientific_cz(hi, mantissa_decimals),
+                        )
                     } else {
                         match q.result_significant_digits {
                             Some(n) => (
@@ -577,6 +634,77 @@ mod tests {
         assert!(
             !output.to_lowercase().contains("e+"),
             "raw exponential syntax leaked into the export:\n{output}"
+        );
+    }
+
+    /// The reported defect: an atomic-mass-scale option (~1e-22) formatted
+    /// with significant digits never rounds to exactly zero at any
+    /// precision, so the old zero-collapse-only fallback never switched it
+    /// to scientific notation — it printed as ~22 leading decimal zeros
+    /// instead. Also checks the mantissa gets `sigDigits - 1` decimals,
+    /// matching the on-screen preview (`formatSignificantDigits` in
+    /// `src/lib/math-utils.ts`).
+    #[test]
+    fn closed_options_use_scientific_notation_for_atomic_scale_masses() {
+        let template = make_template("Vypočítejte hmotnost jednoho atomu Pb.");
+        let variant = Variant {
+            numeric_options: Some(vec![3.44e-22, 2.0e-22]),
+            correct_option: Some(1),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(4),
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains(" :r1 3,440×10<sup>-22</sup>"),
+            "expected 4-sig-digit HTML scientific notation, got:\n{output}"
+        );
+        assert!(
+            !output.contains("00000000000000000000"),
+            "raw decimal expansion leaked into the export:\n{output}"
+        );
+    }
+
+    /// Each closed option is its own line, so — unlike interval bounds,
+    /// which must stay jointly readable on one `lo..hi` line — one option
+    /// crossing the lower threshold and a sibling option not crossing it is
+    /// fine: each is formatted independently, matching how `FormattedResult`
+    /// (`src/components/ui/formatted-result.tsx`) renders each option in the
+    /// on-screen preview.
+    #[test]
+    fn closed_options_below_the_lower_threshold_use_scientific_notation_independently() {
+        let template = make_template("Vypočítejte koncentraci.");
+        let variant = Variant {
+            numeric_options: Some(vec![0.0796, 0.1478]),
+            correct_option: Some(1),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains(" :r1 7,96×10<sup>-2</sup>"),
+            "expected the below-threshold option in scientific notation, got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r2 0,15 "),
+            "expected the at-or-above-threshold option as a plain decimal, got:\n{output}"
         );
     }
 
