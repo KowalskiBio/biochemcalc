@@ -32,6 +32,14 @@ pub struct GenerateForTemplatesPayload {
     pub mode: TemplateMode,
     pub difficulty: String,
     pub option_count: u8,
+    /// Optional per-call custom deviation, as a raw percent (e.g. `42.0` for
+    /// ±42%). Applies to every template_id in this call, same as
+    /// `difficulty`/`option_count` do today — the export dialog always calls
+    /// this with a single-element `template_ids`, so that's equivalent to a
+    /// true per-question override. Absent/non-finite/`<= 0` falls back to
+    /// the `difficulty` preset.
+    #[serde(default)]
+    pub custom_spread_percent: Option<f64>,
 }
 
 /// A template together with its generated variants.
@@ -58,6 +66,16 @@ pub fn do_generate_for_templates(
     payload: &GenerateForTemplatesPayload,
 ) -> Result<Vec<GeneratedTemplate>, DbError> {
     let mut output = Vec::with_capacity(payload.template_ids.len());
+
+    // Sanitized once here: a stray non-finite/non-positive percent from a
+    // malformed caller is treated as "no override" rather than erroring,
+    // and an absurdly large one is capped, matching this codebase's
+    // philosophy of falling back silently on bad teacher-supplied input
+    // (see decoy formula handling in generator.rs).
+    let spread_override = payload
+        .custom_spread_percent
+        .filter(|p| p.is_finite() && *p > 0.0)
+        .map(|p| (p / 100.0).min(10.0));
 
     for (template_index, template_id) in payload.template_ids.iter().enumerate() {
         let template = TemplateRepo::get_by_id(conn, template_id)?;
@@ -90,6 +108,7 @@ pub fn do_generate_for_templates(
             &targets,
             &decoys,
             true,
+            spread_override,
         )
         .map_err(generation_to_db_error)?;
 
@@ -259,6 +278,7 @@ pub(crate) fn do_regenerate_variant(
         &targets,
         &decoys,
         true,
+        None,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -279,13 +299,14 @@ pub(crate) fn do_regenerate_variant(
                     &payload.difficulty,
                     payload.option_count,
                     true,
+                    None,
                 )
                 .map_err(|e| DbError::Validation(e.to_string()))?;
                 variant.numeric_options = Some(options);
                 variant.correct_option = Some(position);
             }
             TemplateMode::Open => {
-                let (lo, hi) = open_interval(manual_answer, &constraint, &payload.difficulty);
+                let (lo, hi) = open_interval(manual_answer, &constraint, &payload.difficulty, None);
                 variant.interval_lo = Some(lo);
                 variant.interval_hi = Some(hi);
             }
@@ -841,6 +862,7 @@ mod tests {
             mode: TemplateMode::Closed,
             difficulty: "medium".into(),
             option_count: 5,
+            custom_spread_percent: None,
         };
 
         let results = do_generate_for_templates(&conn, &payload).expect("generate");
@@ -937,6 +959,7 @@ mod tests {
             mode: TemplateMode::Closed,
             difficulty: "medium".into(),
             option_count: 5,
+            custom_spread_percent: None,
         };
 
         let results = do_generate_for_templates(&conn, &payload).expect("generate");
@@ -972,10 +995,61 @@ mod tests {
             mode: TemplateMode::Closed,
             difficulty: "medium".into(),
             option_count: 5,
+            custom_spread_percent: None,
         };
 
         let results = do_generate_for_templates(&conn, &payload).expect("generate");
         let variant = &results[0].variants[0];
         assert_eq!(variant.numeric_options.as_ref().unwrap().len(), 5);
+    }
+
+    /// The export dialog's per-row "Odchylka (%)" override, end to end:
+    /// a custom percent must produce a measurably wider option spread than
+    /// the same seed/difficulty without it.
+    #[test]
+    fn custom_spread_percent_overrides_difficulty_for_the_whole_call() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+
+        let base_payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 10,
+            base_seed: 777,
+            mode: TemplateMode::Closed,
+            difficulty: "medium".into(),
+            option_count: 5,
+            custom_spread_percent: None,
+        };
+
+        let max_relative_deviation = |results: &[GeneratedTemplate]| -> f64 {
+            results[0]
+                .variants
+                .iter()
+                .flat_map(|v| v.numeric_options.as_ref().unwrap().iter())
+                .zip(results[0].variants.iter().flat_map(|v| {
+                    std::iter::repeat(v.correct_answer).take(v.numeric_options.as_ref().unwrap().len())
+                }))
+                .map(|(&option, correct)| (option - correct).abs() / correct)
+                .fold(0.0_f64, f64::max)
+        };
+
+        let without_override = do_generate_for_templates(&conn, &base_payload).expect("generate");
+        let without_override_max = max_relative_deviation(&without_override);
+        assert!(
+            without_override_max <= 0.51,
+            "medium preset should never exceed ~50% deviation, got {without_override_max}"
+        );
+
+        let with_override_payload = GenerateForTemplatesPayload {
+            custom_spread_percent: Some(90.0),
+            ..base_payload
+        };
+        let with_override = do_generate_for_templates(&conn, &with_override_payload).expect("generate");
+        let with_override_max = max_relative_deviation(&with_override);
+        assert!(
+            with_override_max > 0.55,
+            "a 90% custom_spread_percent should exceed the medium preset's 50% ceiling, got {with_override_max}"
+        );
     }
 }

@@ -603,6 +603,7 @@ export const cs = {
       description: "Vyberte otázky a počet variant pro export. Celkem {count} otázek.",
       questionText: "Text otázky",
       variantCount: "Počet variant",
+      spreadPercent: "Odchylka (%)",
       totalVariants: "Celkem variant",
       includeQuestion: "Zahrnout otázku",
       excludeQuestion: "Vyloučit otázku",

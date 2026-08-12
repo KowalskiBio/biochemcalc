@@ -46,6 +46,19 @@ interface ExportVariantsDialogProps {
 interface QuestionRowState {
   included: boolean
   variantCount: number
+  /** Raw percent (e.g. 42 for ±42%); undefined = use the batch preset. */
+  customSpreadPercent?: number
+}
+
+// Mirrors src-tauri/src/engine/generator.rs's max_deviation_for_difficulty
+// (closed) and sd_fraction_for_difficulty (open) tables — kept here only for
+// this dialog's placeholder text. Purely cosmetic: never sent to the
+// backend, which is always the source of truth for the actual value used.
+const CLOSED_SPREAD_PERCENT: Record<QuestionDifficulty, number> = { easy: 70, medium: 50, hard: 30 }
+const OPEN_SPREAD_PERCENT: Record<QuestionDifficulty, number> = { easy: 50, medium: 30, hard: 10 }
+
+function defaultSpreadPercentFor(mode: TemplateMode, difficulty: QuestionDifficulty): number {
+  return mode === "closed" ? CLOSED_SPREAD_PERCENT[difficulty] : OPEN_SPREAD_PERCENT[difficulty]
 }
 
 export function ExportVariantsDialog({
@@ -164,6 +177,21 @@ export function ExportVariantsDialog({
     }))
   }, [])
 
+  const handleSpreadPercentChange = useCallback((templateId: string, value: string) => {
+    // Blank, non-finite, zero, or negative all mean "no override" — falls
+    // back to the batch preset, matching the backend's own fallback logic.
+    const num = parseFloat(value)
+    const validated =
+      value.trim() !== "" && Number.isFinite(num) && num > 0 ? Math.min(999, num) : undefined
+    setRowStates((prev) => ({
+      ...prev,
+      [templateId]: {
+        ...prev[templateId],
+        customSpreadPercent: validated,
+      },
+    }))
+  }, [])
+
   const handleExport = useCallback(async () => {
     if (includedTemplates.length === 0) {
       toast({
@@ -196,6 +224,7 @@ export function ExportVariantsDialog({
           mode,
           difficulty: mode === "closed" ? closedDifficulty : openDifficulty,
           optionCount: mode === "closed" ? closedOptionCount : 5,
+          customSpreadPercent: rowStates[templateDetails.template.id]?.customSpreadPercent,
         })
 
         const templateResult = result[0]
@@ -308,6 +337,9 @@ export function ExportVariantsDialog({
                 <TableHead className="w-[120px] text-right">
                   {cs.sets.exportDialog.variantCount}
                 </TableHead>
+                <TableHead className="w-[130px] text-right">
+                  {cs.sets.exportDialog.spreadPercent}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -369,6 +401,31 @@ export function ExportVariantsDialog({
                           disabled={!isIncluded}
                           aria-label={cs.sets.exportDialog.variantCount}
                         />
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={999}
+                          step="any"
+                          value={state.customSpreadPercent ?? ""}
+                          onChange={(e) =>
+                            handleSpreadPercentChange(templateDetails.template.id, e.target.value)
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-20 text-right no-spinner"
+                          disabled={!isIncluded}
+                          placeholder={String(
+                            defaultSpreadPercentFor(
+                              mode,
+                              mode === "closed" ? closedDifficulty : openDifficulty,
+                            ),
+                          )}
+                          aria-label={cs.sets.exportDialog.spreadPercent}
+                        />
+                        <span className="text-sm text-muted-foreground">%</span>
                       </div>
                     </TableCell>
                   </TableRow>

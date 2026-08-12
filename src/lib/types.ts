@@ -412,6 +412,12 @@ export interface GenerateInput {
   mode: TemplateMode
   difficulty: QuestionDifficulty
   optionCount: number
+  /**
+   * Optional per-call custom deviation, as a raw percent (e.g. 42 for ±42%).
+   * Overrides the difficulty preset for the whole call. Not persisted —
+   * only ExportVariantsDialog's per-row export flow sets this.
+   */
+  customSpreadPercent?: number
 }
 
 // Pagination types (for future use)

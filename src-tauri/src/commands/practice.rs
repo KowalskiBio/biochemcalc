@@ -269,6 +269,7 @@ fn build_question(
         &targets,
         &decoys,
         false,
+        None,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 

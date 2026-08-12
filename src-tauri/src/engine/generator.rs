@@ -254,16 +254,25 @@ fn sd_fraction_for_difficulty(difficulty: &str) -> f64 {
 }
 
 /// Compute the lower and upper bounds for an open answer.
-/// The half-width is driven by difficulty unless the teacher provided an explicit SD.
+/// The half-width is driven by difficulty unless the teacher provided an
+/// explicit SD, which always wins. `spread_override` — a per-export custom
+/// deviation fraction, e.g. from the export dialog's per-question "Odchylka
+/// (%)" field — sits between those two: it beats the difficulty preset but
+/// never an explicit SD. Sanitized here too (not just at the call boundary)
+/// so a stray non-finite/non-positive value can never produce a nonsensical
+/// interval, regardless of caller.
 pub(crate) fn open_interval(
     correct: f64,
     constraint: &ResultConstraint,
     difficulty: &str,
+    spread_override: Option<f64>,
 ) -> (f64, f64) {
-    let half_width = constraint
-        .sd_allowed
-        .map(|sd| sd.abs())
-        .unwrap_or_else(|| (correct.abs() * sd_fraction_for_difficulty(difficulty)).max(0.01));
+    let half_width = constraint.sd_allowed.map(|sd| sd.abs()).unwrap_or_else(|| {
+        let fraction = spread_override
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or_else(|| sd_fraction_for_difficulty(difficulty));
+        (correct.abs() * fraction).max(0.01)
+    });
     (correct - half_width, correct + half_width)
 }
 
@@ -373,9 +382,16 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     difficulty: &str,
     option_count: u8,
     force_correct_first: bool,
+    spread_override: Option<f64>,
 ) -> Result<(Vec<f64>, u8), GenerationError> {
     let count = clamp_option_count(option_count);
-    let max_deviation = max_deviation_for_difficulty(difficulty);
+    // A per-export custom deviation (e.g. the export dialog's per-question
+    // "Odchylka (%)" field) overrides the difficulty preset when present and
+    // sane; sanitized here (not only at the call boundary) so a stray
+    // non-finite/non-positive value can never break distractor generation.
+    let max_deviation = spread_override
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
 
     let rounding_unit = display_rounding_unit(correct, max_deviation);
     let rounded_correct = round_to_unit(correct, rounding_unit);
@@ -559,6 +575,7 @@ pub fn generate_variant(
         &[],
         &[],
         false,
+        None,
     )
 }
 
@@ -576,6 +593,7 @@ pub fn generate_variant_with_targets(
     targets: &[AnswerTarget],
     decoys: &[TemplateDecoy],
     force_correct_first: bool,
+    spread_override: Option<f64>,
 ) -> Result<Variant, GenerationError> {
     let multi_answer = !targets.is_empty();
     let has_assignments = multi_answer || formula.contains(';');
@@ -612,6 +630,7 @@ pub fn generate_variant_with_targets(
                 option_count,
                 decoys,
                 force_correct_first,
+                spread_override,
             ) {
                 Ok(Some(variant)) => return Ok(variant),
                 Ok(None) => {
@@ -649,11 +668,12 @@ pub fn generate_variant_with_targets(
                     difficulty,
                     option_count,
                     force_correct_first,
+                    spread_override,
                 )?;
                 (Some(options), Some(position), None, None)
             }
             TemplateMode::Open => {
-                let (lo, hi) = open_interval(correct, constraint, difficulty);
+                let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
                 (None, None, Some(lo), Some(hi))
             }
         };
@@ -691,6 +711,7 @@ fn generate_multi_answer_variant(
     option_count: u8,
     decoys: &[TemplateDecoy],
     force_correct_first: bool,
+    spread_override: Option<f64>,
 ) -> Result<Option<Variant>, GenerationError> {
     let answer_values =
         evaluate_assignments(assignments, assigned_numeric, constants, assigned_strings)
@@ -758,11 +779,12 @@ fn generate_multi_answer_variant(
                     difficulty,
                     option_count,
                     force_correct_first,
+                    spread_override,
                 )?;
                 (Some(options), Some(position), None, None)
             }
             TemplateMode::Open => {
-                let (lo, hi) = open_interval(correct, constraint, difficulty);
+                let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
                 (None, None, Some(lo), Some(hi))
             }
         };
@@ -789,11 +811,12 @@ fn generate_multi_answer_variant(
                 difficulty,
                 option_count,
                 force_correct_first,
+                spread_override,
             )?;
             (Some(options), Some(position), None, None)
         }
         TemplateMode::Open => {
-            let (lo, hi) = open_interval(primary_correct, constraint, difficulty);
+            let (lo, hi) = open_interval(primary_correct, constraint, difficulty, spread_override);
             (None, None, Some(lo), Some(hi))
         }
     };
@@ -842,6 +865,7 @@ pub fn generate_variants(
         &[],
         &[],
         false,
+        None,
     )
 }
 
@@ -860,6 +884,7 @@ pub fn generate_variants_with_targets(
     targets: &[AnswerTarget],
     decoys: &[TemplateDecoy],
     force_correct_first: bool,
+    spread_override: Option<f64>,
 ) -> Result<Vec<Variant>, GenerationError> {
     let mut variants = Vec::with_capacity(count);
     for i in 0..count {
@@ -878,6 +903,7 @@ pub fn generate_variants_with_targets(
             targets,
             decoys,
             force_correct_first,
+            spread_override,
         )?;
         variants.push(variant);
     }
@@ -1150,7 +1176,8 @@ mod tests {
         let correct = 1e-6;
         let mut rng = StdRng::seed_from_u64(42);
         let (options, _correct_pos) =
-            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false).unwrap();
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None)
+                .unwrap();
 
         assert_eq!(options.len(), 5);
         assert!(options.iter().any(|o| (o - 1e-6).abs() < 1e-12));
@@ -1164,7 +1191,8 @@ mod tests {
         let correct = 1.674e-24; // mass of one H atom in grams
         let mut rng = StdRng::seed_from_u64(7);
         let (options, correct_pos) =
-            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false).unwrap();
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None)
+                .unwrap();
 
         assert_eq!(options.len(), 5);
         let correct_option = options[correct_pos as usize - 1];
@@ -1224,6 +1252,7 @@ mod tests {
             &targets,
             &[],
             false,
+            None,
         )
         .unwrap();
 
@@ -1265,6 +1294,7 @@ mod tests {
             &targets,
             &[],
             false,
+            None,
         )
         .unwrap();
 
@@ -1280,7 +1310,8 @@ mod tests {
         let correct = 0.01;
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos) =
-            generate_numeric_options(correct, &[], &constraint, &mut rng, "hard", 5, false).unwrap();
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "hard", 5, false, None)
+                .unwrap();
 
         assert_eq!(options.len(), 5, "expected 5 options for correct answer {correct}");
         assert!(options.iter().any(|o| (o - correct).abs() < 1e-12));
@@ -1302,6 +1333,7 @@ mod tests {
                     "hard",
                     5,
                     false,
+                    None,
                 )
                 .expect(&format!(
                     "failed to generate distractors for correct={correct}, seed={seed}"
@@ -1344,6 +1376,7 @@ mod tests {
             &[],
             &[],
             false,
+            None,
         )
         .unwrap();
 
@@ -1363,7 +1396,7 @@ mod tests {
         let correct = 100.0;
 
         for (difficulty, expected_half_width) in [("easy", 50.0), ("medium", 30.0), ("hard", 10.0)] {
-            let (lo, hi) = open_interval(correct, &constraint, difficulty);
+            let (lo, hi) = open_interval(correct, &constraint, difficulty, None);
             assert!(
                 (lo - (correct - expected_half_width)).abs() < 1e-9,
                 "{difficulty}: unexpected lower bound {lo}"
@@ -1386,7 +1419,7 @@ mod tests {
             Some(2.5),
             ConstraintType::Sd,
         );
-        let (lo, hi) = open_interval(100.0, &constraint, "easy");
+        let (lo, hi) = open_interval(100.0, &constraint, "easy", None);
         assert!((lo - 97.5).abs() < 1e-9, "unexpected lower bound {lo}");
         assert!((hi - 102.5).abs() < 1e-9, "unexpected upper bound {hi}");
     }
@@ -1402,7 +1435,7 @@ mod tests {
             requested_count: 2,
         }];
         let (options, correct_pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1426,7 +1459,7 @@ mod tests {
             requested_count: 2,
         }];
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1449,7 +1482,7 @@ mod tests {
         for seed in 0..50 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (options, _pos) = generate_numeric_options(
-                correct, &decoys, &constraint, &mut rng, "medium", 5, false,
+                correct, &decoys, &constraint, &mut rng, "medium", 5, false, None,
             )
             .unwrap();
             let mut sorted = options.clone();
@@ -1482,6 +1515,7 @@ mod tests {
             &[],
             &[make_decoy("X * 3", 2)],
             false,
+            None,
         )
         .unwrap();
 
@@ -1517,6 +1551,7 @@ mod tests {
             &targets,
             &[make_decoy("n * 2", 2)],
             false,
+            None,
         )
         .unwrap();
 
@@ -1549,6 +1584,7 @@ mod tests {
             &[],
             &[make_decoy("this is not a valid formula (((", 2)],
             false,
+            None,
         )
         .unwrap();
 
@@ -1639,7 +1675,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1689,7 +1725,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(11);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 4, false)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 4, false, None)
                 .unwrap();
 
         assert_eq!(options.len(), 4);
@@ -1728,7 +1764,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(3);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1764,7 +1800,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(5);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1785,12 +1821,112 @@ mod tests {
         for seed in 0..20 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (_options, position) =
-                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, true)
+                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, true, None)
                     .unwrap();
             assert_eq!(
                 position, 1,
                 "force_correct_first must always place the correct answer at position 1, seed={seed}"
             );
+        }
+    }
+
+    /// Without an override, "medium" caps relative deviation at 50% — no
+    /// distractor can ever land further than that from the correct answer.
+    /// A 90% override must be able to exceed that ceiling.
+    #[test]
+    fn spread_override_widens_beyond_the_difficulty_preset_for_closed_options() {
+        let constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
+        let correct = 100.0;
+
+        let mut max_relative_deviation_without_override = 0.0_f64;
+        for seed in 0..30 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, _pos) =
+                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None)
+                    .unwrap();
+            for o in &options {
+                let rel = (o - correct).abs() / correct;
+                max_relative_deviation_without_override = max_relative_deviation_without_override.max(rel);
+            }
+        }
+        assert!(
+            max_relative_deviation_without_override <= 0.51,
+            "medium preset should never exceed ~50% deviation, got {max_relative_deviation_without_override}"
+        );
+
+        let mut max_relative_deviation_with_override = 0.0_f64;
+        for seed in 0..30 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, _pos) = generate_numeric_options(
+                correct, &[], &constraint, &mut rng, "medium", 5, false, Some(0.9),
+            )
+            .unwrap();
+            for o in &options {
+                let rel = (o - correct).abs() / correct;
+                max_relative_deviation_with_override = max_relative_deviation_with_override.max(rel);
+            }
+        }
+        assert!(
+            max_relative_deviation_with_override > 0.55,
+            "a 90% override should be able to exceed the medium preset's 50% ceiling, got {max_relative_deviation_with_override}"
+        );
+    }
+
+    #[test]
+    fn spread_override_widens_open_interval_beyond_the_difficulty_preset() {
+        let constraint = make_constraint(None, None, None);
+        let (lo, hi) = open_interval(100.0, &constraint, "medium", Some(0.9));
+        assert!((lo - 10.0).abs() < 1e-9, "expected lower bound 10.0, got {lo}");
+        assert!((hi - 190.0).abs() < 1e-9, "expected upper bound 190.0, got {hi}");
+    }
+
+    #[test]
+    fn spread_override_loses_to_explicit_sd_allowed() {
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
+        let (lo, hi) = open_interval(100.0, &constraint, "easy", Some(0.9));
+        assert!(
+            (lo - 97.5).abs() < 1e-9,
+            "sd_allowed must win over spread_override: unexpected lower bound {lo}"
+        );
+        assert!(
+            (hi - 102.5).abs() < 1e-9,
+            "sd_allowed must win over spread_override: unexpected upper bound {hi}"
+        );
+    }
+
+    #[test]
+    fn invalid_spread_override_values_fall_back_to_preset() {
+        let constraint = make_constraint(None, None, None);
+        for bad in [Some(0.0), Some(-0.5), Some(f64::NAN), Some(f64::INFINITY)] {
+            let (lo, hi) = open_interval(100.0, &constraint, "medium", bad);
+            assert!(
+                (lo - 70.0).abs() < 1e-9,
+                "bad override {bad:?} should fall back to preset, got lo={lo}"
+            );
+            assert!(
+                (hi - 130.0).abs() < 1e-9,
+                "bad override {bad:?} should fall back to preset, got hi={hi}"
+            );
+        }
+
+        // Same guard inside generate_numeric_options: a bad override must
+        // not change the closed-option deviation range from the preset.
+        let correct = 100.0;
+        let closed_constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
+        for bad in [Some(0.0), Some(-0.5), Some(f64::NAN)] {
+            let mut rng = StdRng::seed_from_u64(1);
+            let (options, _pos) = generate_numeric_options(
+                correct, &[], &closed_constraint, &mut rng, "medium", 5, false, bad,
+            )
+            .unwrap();
+            for o in &options {
+                let rel = (o - correct).abs() / correct;
+                assert!(
+                    rel <= 0.51,
+                    "bad override {bad:?} should fall back to the medium preset's ~50% ceiling, got {rel}"
+                );
+            }
         }
     }
 }
