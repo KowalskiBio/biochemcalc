@@ -574,9 +574,9 @@ export const cs = {
     configureClosed: "Nastavení uzavřených otázek",
     configureClosedDescription:
       "Obtížnost určuje, jak blízko správné odpovědi leží nesprávné možnosti.",
-    closedSpreadEasy: "Lehká (± 50 %)",
-    closedSpreadMedium: "Střední (± 30 %)",
-    closedSpreadHard: "Těžká (± 10 %)",
+    closedSpreadEasy: "Lehká (± 70 %)",
+    closedSpreadMedium: "Střední (± 50 %)",
+    closedSpreadHard: "Těžká (± 30 %)",
     configureOpen: "Nastavení otevřených otázek",
     configureOpenDescription: "Obtížnost určuje, jak širokou toleranci má uznávaná odpověď.",
     openToleranceEasy: "Lehká (± 50 %)",

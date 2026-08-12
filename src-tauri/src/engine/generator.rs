@@ -271,10 +271,10 @@ const MIN_DISTRACTOR_DEVIATION: f64 = 0.02;
 
 fn max_deviation_for_difficulty(difficulty: &str) -> f64 {
     match difficulty {
-        "easy" => 0.50,
-        "medium" => 0.30,
-        "hard" => 0.10,
-        _ => 0.30,
+        "easy" => 0.70,
+        "medium" => 0.50,
+        "hard" => 0.30,
+        _ => 0.50,
     }
 }
 
@@ -1564,9 +1564,12 @@ mod tests {
         }
     }
 
-    /// With no decoy configured, generation must be byte-identical to the
-    /// pre-decoy behavior for a fixed seed — the backward-compatibility
-    /// guarantee for the vast majority of existing templates.
+    /// With no decoy configured, generation for a fixed seed must stay
+    /// stable — this pins the exact output so a future change to the
+    /// decoy/force-first machinery can't silently perturb the no-decoy path.
+    /// (The literal below was recomputed after widening the "medium"
+    /// difficulty spread from ±30% to ±50%; it isn't meant to survive a
+    /// deliberate difficulty-percentage change like that one.)
     #[test]
     fn no_decoy_produces_identical_options_for_a_fixed_seed() {
         let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
@@ -1589,8 +1592,8 @@ mod tests {
         let options = variant.numeric_options.as_ref().unwrap();
         assert_eq!(
             options,
-            &vec![5.2700000000000005, 7.7, 5.47, 7.4, 5.72],
-            "no-decoy option generation must remain byte-identical after the decoy feature was added"
+            &vec![3.85, 7.82, 4.19, 7.4, 4.63],
+            "no-decoy option generation for a fixed seed changed unexpectedly"
         );
     }
 
