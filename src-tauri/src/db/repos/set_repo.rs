@@ -223,7 +223,7 @@ mod tests {
 
     fn create_template(conn: &Connection, text: &str) -> Template {
         let t = Template::new(text.into(), "X".into(), "".into(), None, "g".into(), 2);
-        crate::db::repos::TemplateRepo::insert(conn, &t, &[], &[], None).expect("insert tpl");
+        crate::db::repos::TemplateRepo::insert(conn, &t, &[], &[], None, &[]).expect("insert tpl");
         t
     }
 

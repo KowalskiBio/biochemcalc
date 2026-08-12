@@ -110,6 +110,29 @@ pub struct TemplateConstant {
     pub constant_id: Uuid,
 }
 
+/// One decoy equation attached to a template, with the teacher-requested
+/// number of option slots it should claim ("počet"). Actual slots granted at
+/// generation time may be lower if requests across all decoys exceed the
+/// available budget — see `apportion_largest_remainder` in `engine::generator`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateDecoy {
+    pub id: Uuid,
+    pub template_id: Uuid,
+    pub formula: String,
+    pub option_count: u8,
+    pub position: i32,
+}
+
+/// A decoy as submitted by the teacher, before persistence assigns it an id
+/// and a position (its index in the submitted list).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateDecoyInput {
+    pub formula: String,
+    pub option_count: u8,
+}
+
 /// Constraints placed on the computed result of a template.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

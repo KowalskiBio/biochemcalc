@@ -166,6 +166,7 @@ export function TopicDetailPage() {
             numericAnswer: details.template.numericAnswer,
             resultUnit: details.template.resultUnit,
             pointValue: targetPointValue,
+            decoys: details.decoys.map((d) => ({ formula: d.formula, optionCount: d.optionCount })),
             variableMutations: details.variables.map((vwp) => ({
               action: "keep" as const,
               variableId: vwp.variable.id,

@@ -3,7 +3,8 @@ use crate::engine::formula::{
     evaluate_assignments, evaluate_with_strings, parse_formula_assignments, FormulaError,
 };
 use crate::models::{
-    AnswerField, ConstraintType, ResultConstraint, TemplateMode, Variable, VariableType, Variant,
+    AnswerField, ConstraintType, ResultConstraint, TemplateDecoy, TemplateMode, Variable,
+    VariableType, Variant,
 };
 use rand::{rngs::StdRng, Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
@@ -322,47 +323,113 @@ fn round_to_unit(value: f64, unit: f64) -> f64 {
     (value / unit).round() * unit
 }
 
+/// One decoy's already-evaluated value plus how many option slots it asked
+/// for ("počet"), before apportionment scales it down to fit the budget.
+pub(crate) struct DecoyAnchor {
+    pub value: f64,
+    pub requested_count: u8,
+}
+
+/// Hamilton / largest-remainder apportionment: scale `requested` counts down
+/// to fit exactly within `budget`, preferring earlier list entries when
+/// remainders tie (deterministic, matches decoy list `position` order).
+/// Never assigns more than an entry's own request. If `budget` already
+/// covers the full request, every entry keeps its full request untouched.
+fn apportion_largest_remainder(requested: &[usize], budget: usize) -> Vec<usize> {
+    let total: usize = requested.iter().sum();
+    if total <= budget {
+        return requested.to_vec();
+    }
+
+    let scale = budget as f64 / total as f64;
+    let mut floors: Vec<usize> = requested
+        .iter()
+        .map(|&r| ((r as f64) * scale).floor() as usize)
+        .collect();
+    let assigned: usize = floors.iter().sum();
+    let leftover = budget - assigned;
+
+    let mut remainders: Vec<(usize, f64)> = requested
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| (i, (r as f64) * scale - floors[i] as f64))
+        .collect();
+    remainders.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0)) // tie-break: earlier position wins
+    });
+    for (i, _) in remainders.into_iter().take(leftover) {
+        floors[i] += 1;
+    }
+    floors
+}
+
 pub(crate) fn generate_numeric_options<R: Rng>(
     correct: f64,
-    decoy: Option<f64>,
+    decoys: &[DecoyAnchor],
     constraint: &ResultConstraint,
     rng: &mut R,
     difficulty: &str,
     option_count: u8,
+    force_correct_first: bool,
 ) -> Result<(Vec<f64>, u8), GenerationError> {
     let count = clamp_option_count(option_count);
     let max_deviation = max_deviation_for_difficulty(difficulty);
 
     let rounding_unit = display_rounding_unit(correct, max_deviation);
     let rounded_correct = round_to_unit(correct, rounding_unit);
+    let close = |a: f64, b: f64| (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON);
 
-    // A teacher-supplied decoy is only used if it survives the same sanity
-    // checks a random distractor would: finite, within the constraint, and
-    // far enough from the correct answer once rounded. Anything else falls
-    // back to normal random distractors so generation never fails because
-    // of a bad decoy.
-    let rounded_decoy = decoy
-        .filter(|d| d.is_finite())
-        .map(|d| round_to_unit(d, rounding_unit))
-        .filter(|d| validate_result(*d, constraint).is_ok())
-        .filter(|d| (d - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON));
-
-    // With a valid decoy, about half the wrong options (rounded down) are
-    // anchored on it instead of the correct answer — 3 options → 1 decoyed,
-    // 4 → 2, 5 → 2, 6 → 3 — so a filled-in decoy dominates the "wrong" side
-    // of the option set rather than appearing only once.
-    let decoy_slot_count = if rounded_decoy.is_some() { count / 2 } else { 0 };
-    let correct_slot_count = count - 1 - decoy_slot_count;
-
-    let mut pool: Vec<f64> = Vec::with_capacity(count - 1);
-    if let Some(d) = rounded_decoy {
-        pool.push(d);
+    struct ValidDecoy {
+        rounded: f64,
+        requested: usize,
     }
 
+    // A teacher-supplied decoy is only used if it survives the same sanity
+    // checks a random distractor would: finite, within the constraint, far
+    // enough from the correct answer once rounded, and far enough from every
+    // earlier already-accepted decoy (a later formula that rounds to the
+    // same value is silently dropped). Anything else falls back to normal
+    // random distractors so generation never fails because of a bad decoy.
+    let mut valid_decoys: Vec<ValidDecoy> = Vec::new();
+    for d in decoys {
+        if d.requested_count == 0 || !d.value.is_finite() {
+            continue;
+        }
+        let rounded = round_to_unit(d.value, rounding_unit);
+        if validate_result(rounded, constraint).is_err() {
+            continue;
+        }
+        if close(rounded, rounded_correct) {
+            continue;
+        }
+        if valid_decoys.iter().any(|vd| close(rounded, vd.rounded)) {
+            continue;
+        }
+        valid_decoys.push(ValidDecoy {
+            rounded,
+            requested: d.requested_count as usize,
+        });
+    }
+
+    // Correct always keeps at least one slot (its own exact value); decoys
+    // share whatever's left of the "wrong" slots, scaled down via
+    // largest-remainder apportionment if they ask for more than fits.
+    let decoy_budget = count - 1;
+    let requested: Vec<usize> = valid_decoys.iter().map(|vd| vd.requested).collect();
+    let decoy_counts = apportion_largest_remainder(&requested, decoy_budget);
+    let correct_cluster_size = count - decoy_counts.iter().sum::<usize>();
+
+    let mut pool: Vec<f64> = Vec::with_capacity(count - 1);
+
     // Fills `pool` with up to `needed` more values deviated around `anchor`
-    // (the same random-deviation logic distractors have always used), each
-    // unique against the correct answer, the decoy, and every value already
-    // in `pool`. Returns whether it reached the target count within budget.
+    // (the same random-deviation logic distractors have always used), unique
+    // against the correct answer and against every value already in `pool`
+    // — which, by construction, already holds every earlier-committed
+    // decoy's exact and perturbed values by the time a later decoy or the
+    // correct-answer cluster runs. Returns whether it reached the target
+    // count within budget.
     let generate_around = |anchor: f64, needed: usize, pool: &mut Vec<f64>, rng: &mut R| -> bool {
         let start_len = pool.len();
         let mut attempts = 0;
@@ -395,20 +462,12 @@ pub(crate) fn generate_numeric_options<R: Rng>(
             // than 0.01). The tolerance must scale with the rounding unit —
             // an absolute f64::EPSILON would dominate for sub-unit answers
             // (e.g. atomic masses ~1e-24) and reject everything.
-            let far_enough_from_correct =
-                (rounded - rounded_correct).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON);
-            let far_enough_from_decoy = rounded_decoy.is_none_or(|rd| {
-                (rounded - rd).abs() > rounding_unit * 0.5 * (1.0 + f64::EPSILON)
-            });
+            let far_enough_from_correct = !close(rounded, rounded_correct);
             let unique = !pool
                 .iter()
                 .any(|p: &f64| (p - rounded).abs() <= rounding_unit * 0.5);
 
-            if validate_result(rounded, constraint).is_ok()
-                && far_enough_from_correct
-                && far_enough_from_decoy
-                && unique
-            {
+            if validate_result(rounded, constraint).is_ok() && far_enough_from_correct && unique {
                 pool.push(rounded);
             }
         }
@@ -416,19 +475,26 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         pool.len() >= start_len + needed
     };
 
-    if let Some(d) = rounded_decoy {
-        // The literal decoy value already fills one slot; only generate
-        // more if the option count calls for a bigger decoy cluster.
-        if decoy_slot_count > 1 && !generate_around(d, decoy_slot_count - 1, &mut pool, rng) {
+    for (vd, &n) in valid_decoys.iter().zip(decoy_counts.iter()) {
+        if n == 0 {
+            continue;
+        }
+        // The literal decoy value fills one slot; only generate more if its
+        // apportioned cluster size calls for extra perturbed values.
+        pool.push(vd.rounded);
+        if n > 1 && !generate_around(vd.rounded, n - 1, &mut pool, rng) {
             return Err(GenerationError::Distractor(format!(
-                "only generated {} unique decoy-anchored distractors (needed {}) for decoy {d}",
+                "only generated {} unique decoy-anchored distractors (needed {}) for decoy {}",
                 pool.len().saturating_sub(1),
-                decoy_slot_count - 1,
+                n - 1,
+                vd.rounded,
             )));
         }
     }
 
-    if correct_slot_count > 0 && !generate_around(correct, correct_slot_count, &mut pool, rng) {
+    if correct_cluster_size > 1
+        && !generate_around(correct, correct_cluster_size - 1, &mut pool, rng)
+    {
         return Err(GenerationError::Distractor(format!(
             "only generated {} unique distractors for correct answer {} (constraint: {:?})",
             pool.len(),
@@ -437,10 +503,14 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         )));
     }
 
-    let correct_position_zero_based: usize = rng.random_range(0..count);
+    let correct_position_zero_based: usize = if force_correct_first {
+        0
+    } else {
+        rng.random_range(0..count)
+    };
     let correct_position_one_based = correct_position_zero_based as u8 + 1;
 
-    if rounded_decoy.is_some() {
+    if !valid_decoys.is_empty() {
         // Shuffle so decoy-anchored options don't always land at the lowest
         // non-correct indices. Only done when a decoy is present — the
         // no-decoy path must stay RNG-identical to before this feature.
@@ -487,7 +557,8 @@ pub fn generate_variant(
         option_count,
         fixed_values,
         &[],
-        None,
+        &[],
+        false,
     )
 }
 
@@ -503,7 +574,8 @@ pub fn generate_variant_with_targets(
     option_count: u8,
     fixed_values: &HashMap<String, f64>,
     targets: &[AnswerTarget],
-    decoy_formula: Option<&str>,
+    decoys: &[TemplateDecoy],
+    force_correct_first: bool,
 ) -> Result<Variant, GenerationError> {
     let multi_answer = !targets.is_empty();
     let has_assignments = multi_answer || formula.contains(';');
@@ -538,7 +610,8 @@ pub fn generate_variant_with_targets(
                 base_seed,
                 difficulty,
                 option_count,
-                decoy_formula,
+                decoys,
+                force_correct_first,
             ) {
                 Ok(Some(variant)) => return Ok(variant),
                 Ok(None) => {
@@ -556,17 +629,26 @@ pub fn generate_variant_with_targets(
         }
         let (numeric_options, correct_option, interval_lo, interval_hi) = match mode {
             TemplateMode::Closed => {
-                let decoy = decoy_formula.and_then(|df| {
-                    evaluate_with_strings(df, &assigned_numeric, constants, &assigned_strings).ok()
-                });
+                let decoy_anchors: Vec<DecoyAnchor> = decoys
+                    .iter()
+                    .filter_map(|d| {
+                        evaluate_with_strings(&d.formula, &assigned_numeric, constants, &assigned_strings)
+                            .ok()
+                            .map(|value| DecoyAnchor {
+                                value,
+                                requested_count: d.option_count,
+                            })
+                    })
+                    .collect();
                 let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
                 let (options, position) = generate_numeric_options(
                     correct,
-                    decoy,
+                    &decoy_anchors,
                     constraint,
                     &mut rng,
                     difficulty,
                     option_count,
+                    force_correct_first,
                 )?;
                 (Some(options), Some(position), None, None)
             }
@@ -607,25 +689,33 @@ fn generate_multi_answer_variant(
     base_seed: u64,
     difficulty: &str,
     option_count: u8,
-    decoy_formula: Option<&str>,
+    decoys: &[TemplateDecoy],
+    force_correct_first: bool,
 ) -> Result<Option<Variant>, GenerationError> {
     let answer_values =
         evaluate_assignments(assignments, assigned_numeric, constants, assigned_strings)
             .map_err(GenerationError::Formula)?;
 
-    // The decoy may deliberately reference an intermediate assignment target
-    // (e.g. `n` in `n = V / M; m = n * M2`), so it's evaluated with the same
-    // answer values available to the assignments themselves.
-    let decoy = decoy_formula.and_then(|df| {
-        crate::engine::formula::evaluate_with_answers(
-            df,
-            assigned_numeric,
-            constants,
-            assigned_strings,
-            &answer_values,
-        )
-        .ok()
-    });
+    // Decoys may deliberately reference an intermediate assignment target
+    // (e.g. `n` in `n = V / M; m = n * M2`), so they're evaluated with the
+    // same answer values available to the assignments themselves.
+    let decoy_anchors: Vec<DecoyAnchor> = decoys
+        .iter()
+        .filter_map(|d| {
+            crate::engine::formula::evaluate_with_answers(
+                &d.formula,
+                assigned_numeric,
+                constants,
+                assigned_strings,
+                &answer_values,
+            )
+            .ok()
+            .map(|value| DecoyAnchor {
+                value,
+                requested_count: d.option_count,
+            })
+        })
+        .collect();
 
     let options_seed = base_seed.wrapping_add(1);
 
@@ -658,15 +748,16 @@ fn generate_multi_answer_variant(
         let (numeric_options, correct_option, interval_lo, interval_hi) = match mode {
             TemplateMode::Closed => {
                 let mut rng = StdRng::seed_from_u64(options_seed);
-                // Decoy applies to the primary answer only (see the block
+                // Decoys apply to the primary answer only (see the block
                 // below), not to each per-target option set here.
                 let (options, position) = generate_numeric_options(
                     correct,
-                    None,
+                    &[],
                     constraint,
                     &mut rng,
                     difficulty,
                     option_count,
+                    force_correct_first,
                 )?;
                 (Some(options), Some(position), None, None)
             }
@@ -692,11 +783,12 @@ fn generate_multi_answer_variant(
             let mut rng = StdRng::seed_from_u64(options_seed);
             let (options, position) = generate_numeric_options(
                 primary_correct,
-                decoy,
+                &decoy_anchors,
                 constraint,
                 &mut rng,
                 difficulty,
                 option_count,
+                force_correct_first,
             )?;
             (Some(options), Some(position), None, None)
         }
@@ -748,7 +840,8 @@ pub fn generate_variants(
         option_count,
         fixed_values,
         &[],
-        None,
+        &[],
+        false,
     )
 }
 
@@ -765,7 +858,8 @@ pub fn generate_variants_with_targets(
     option_count: u8,
     fixed_values: &HashMap<String, f64>,
     targets: &[AnswerTarget],
-    decoy_formula: Option<&str>,
+    decoys: &[TemplateDecoy],
+    force_correct_first: bool,
 ) -> Result<Vec<Variant>, GenerationError> {
     let mut variants = Vec::with_capacity(count);
     for i in 0..count {
@@ -782,7 +876,8 @@ pub fn generate_variants_with_targets(
             option_count,
             fixed_values,
             targets,
-            decoy_formula,
+            decoys,
+            force_correct_first,
         )?;
         variants.push(variant);
     }
@@ -815,6 +910,16 @@ mod tests {
 
     fn make_constraint(min: Option<f64>, max: Option<f64>, sd: Option<f64>) -> ResultConstraint {
         make_constraint_typed(min, max, sd, ConstraintType::Range)
+    }
+
+    fn make_decoy(formula: &str, option_count: u8) -> TemplateDecoy {
+        TemplateDecoy {
+            id: Uuid::new_v4(),
+            template_id: Uuid::new_v4(),
+            formula: formula.to_string(),
+            option_count,
+            position: 0,
+        }
     }
 
     fn make_constraint_typed(
@@ -1045,7 +1150,7 @@ mod tests {
         let correct = 1e-6;
         let mut rng = StdRng::seed_from_u64(42);
         let (options, _correct_pos) =
-            generate_numeric_options(correct, None, &constraint, &mut rng, "medium", 5).unwrap();
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false).unwrap();
 
         assert_eq!(options.len(), 5);
         assert!(options.iter().any(|o| (o - 1e-6).abs() < 1e-12));
@@ -1059,7 +1164,7 @@ mod tests {
         let correct = 1.674e-24; // mass of one H atom in grams
         let mut rng = StdRng::seed_from_u64(7);
         let (options, correct_pos) =
-            generate_numeric_options(correct, None, &constraint, &mut rng, "medium", 5).unwrap();
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false).unwrap();
 
         assert_eq!(options.len(), 5);
         let correct_option = options[correct_pos as usize - 1];
@@ -1117,7 +1222,8 @@ mod tests {
             5,
             &HashMap::new(),
             &targets,
-            None,
+            &[],
+            false,
         )
         .unwrap();
 
@@ -1157,7 +1263,8 @@ mod tests {
             5,
             &HashMap::new(),
             &targets,
-            None,
+            &[],
+            false,
         )
         .unwrap();
 
@@ -1173,7 +1280,7 @@ mod tests {
         let correct = 0.01;
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos) =
-            generate_numeric_options(correct, None, &constraint, &mut rng, "hard", 5).unwrap();
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "hard", 5, false).unwrap();
 
         assert_eq!(options.len(), 5, "expected 5 options for correct answer {correct}");
         assert!(options.iter().any(|o| (o - correct).abs() < 1e-12));
@@ -1189,11 +1296,12 @@ mod tests {
                 let mut rng = StdRng::seed_from_u64(seed);
                 let (options, _pos) = generate_numeric_options(
                     correct,
-                    None,
+                    &[],
                     &constraint,
                     &mut rng,
                     "hard",
                     5,
+                    false,
                 )
                 .expect(&format!(
                     "failed to generate distractors for correct={correct}, seed={seed}"
@@ -1234,7 +1342,8 @@ mod tests {
             5,
             &HashMap::new(),
             &[],
-            None,
+            &[],
+            false,
         )
         .unwrap();
 
@@ -1288,8 +1397,12 @@ mod tests {
         let correct = 20.0;
         let decoy = 60.0; // far from correct and from any ±30% "medium" distractor
         let mut rng = StdRng::seed_from_u64(1);
+        let decoys = [DecoyAnchor {
+            value: decoy,
+            requested_count: 2,
+        }];
         let (options, correct_pos) =
-            generate_numeric_options(correct, Some(decoy), &constraint, &mut rng, "medium", 5)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1308,8 +1421,12 @@ mod tests {
         let constraint = make_constraint(Some(0.0), Some(1000.0), None);
         let correct = 20.0;
         let mut rng = StdRng::seed_from_u64(1);
+        let decoys = [DecoyAnchor {
+            value: correct,
+            requested_count: 2,
+        }];
         let (options, _pos) =
-            generate_numeric_options(correct, Some(correct), &constraint, &mut rng, "medium", 5)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1325,11 +1442,16 @@ mod tests {
         let constraint = make_constraint(Some(0.0), Some(1000.0), None);
         let correct = 20.0;
         let decoy = 25.0;
+        let decoys = [DecoyAnchor {
+            value: decoy,
+            requested_count: 2,
+        }];
         for seed in 0..50 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos) =
-                generate_numeric_options(correct, Some(decoy), &constraint, &mut rng, "medium", 5)
-                    .unwrap();
+            let (options, _pos) = generate_numeric_options(
+                correct, &decoys, &constraint, &mut rng, "medium", 5, false,
+            )
+            .unwrap();
             let mut sorted = options.clone();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
             for i in 1..sorted.len() {
@@ -1358,7 +1480,8 @@ mod tests {
             5,
             &HashMap::new(),
             &[],
-            Some("X * 3"),
+            &[make_decoy("X * 3", 2)],
+            false,
         )
         .unwrap();
 
@@ -1392,7 +1515,8 @@ mod tests {
             5,
             &HashMap::new(),
             &targets,
-            Some("n * 2"),
+            &[make_decoy("n * 2", 2)],
+            false,
         )
         .unwrap();
 
@@ -1423,7 +1547,8 @@ mod tests {
             5,
             &HashMap::new(),
             &[],
-            Some("this is not a valid formula ((("),
+            &[make_decoy("this is not a valid formula (((", 2)],
+            false,
         )
         .unwrap();
 
@@ -1469,44 +1594,199 @@ mod tests {
         );
     }
 
-    /// A filled-in decoy should dominate roughly the lower half of the wrong
-    /// options as the option count grows, not just appear once:
-    /// 3 options -> 1 decoyed, 4 -> 2, 5 -> 2, 6 (if ever allowed) -> 3.
     #[test]
-    fn decoy_slot_count_scales_as_floor_of_half_the_options() {
-        let constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
+    fn apportion_largest_remainder_scales_down_when_oversubscribed() {
+        // The user's own worked example: two decoys each requesting 2,
+        // budget 3 — the first-listed decoy wins the tie-broken extra slot.
+        assert_eq!(apportion_largest_remainder(&[2, 2], 3), vec![2, 1]);
+        // Exact fit: nothing needs to be scaled.
+        assert_eq!(apportion_largest_remainder(&[1, 2], 3), vec![1, 2]);
+        // Tie-break prefers the earlier entry.
+        assert_eq!(apportion_largest_remainder(&[1, 1, 1], 2), vec![1, 1, 0]);
+        // Nothing requested, nothing assigned.
+        assert_eq!(apportion_largest_remainder(&[0, 0], 3), vec![0, 0]);
+    }
+
+    /// Each decoy's cluster is one exact value plus (počet - 1) perturbed
+    /// distractors around it; with no oversubscription every decoy keeps its
+    /// full requested count and the correct answer gets whatever's left.
+    #[test]
+    fn multi_decoy_clusters_each_get_one_exact_value_plus_requested_perturbations() {
+        let constraint = make_constraint(Some(0.0), Some(10_000_000.0), None);
         let correct = 10.0;
-        // Far enough from `correct` that "medium" (±30%) deviation ranges
-        // around each anchor never overlap, so every decoy-anchored value
-        // can be unambiguously distinguished from a correct-anchored one.
-        let decoy = 1000.0;
-        let decoy_lo = decoy * 0.7;
-        let decoy_hi = decoy * 1.3;
+        // Each anchor sits far enough from the others that "medium" (±30%)
+        // deviation ranges around one anchor never overlap another anchor's
+        // band, so cluster membership is unambiguous.
+        let decoy_a = 1_000.0;
+        let decoy_b = 100_000.0;
+        let band = |anchor: f64| (anchor * 0.7, anchor * 1.3);
+        let (correct_lo, correct_hi) = band(correct);
+        let (a_lo, a_hi) = band(decoy_a);
+        let (b_lo, b_hi) = band(decoy_b);
 
-        for (option_count, expected_decoy_slots) in [(2u8, 1usize), (3, 1), (4, 2), (5, 2)] {
-            let mut rng = StdRng::seed_from_u64(99);
-            let (options, _pos) = generate_numeric_options(
-                correct,
-                Some(decoy),
-                &constraint,
-                &mut rng,
-                "medium",
-                option_count,
-            )
-            .unwrap();
+        let decoys = [
+            DecoyAnchor {
+                value: decoy_a,
+                requested_count: 1,
+            },
+            DecoyAnchor {
+                value: decoy_b,
+                requested_count: 1,
+            },
+        ];
+        let mut rng = StdRng::seed_from_u64(7);
+        let (options, _pos) =
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+                .unwrap();
 
-            let decoy_anchored = options
-                .iter()
-                .filter(|o| **o >= decoy_lo && **o <= decoy_hi)
-                .count();
+        assert_eq!(options.len(), 5);
+        let in_band = |lo: f64, hi: f64| options.iter().filter(|o| **o >= lo && **o <= hi).count();
+        assert_eq!(
+            in_band(a_lo, a_hi),
+            1,
+            "decoy A (počet=1) should contribute exactly its own value: {options:?}"
+        );
+        assert_eq!(
+            in_band(b_lo, b_hi),
+            1,
+            "decoy B (počet=1) should contribute exactly its own value: {options:?}"
+        );
+        assert_eq!(
+            in_band(correct_lo, correct_hi),
+            3,
+            "correct cluster should get the remaining 3 slots (5 - 1 - 1): {options:?}"
+        );
+    }
+
+    /// The user's own worked example: option_count=4, two decoys each
+    /// requesting počet=2 (sum=4, which would leave 0 for the correct
+    /// answer) — apportionment must still reserve exactly 1 slot for the
+    /// correct answer and scale the decoys down to share the remaining 3
+    /// (2/1, first-listed decoy keeps its full request).
+    #[test]
+    fn multi_decoy_apportionment_reproduces_worked_example() {
+        let constraint = make_constraint(Some(0.0), Some(10_000_000.0), None);
+        let correct = 10.0;
+        let decoy_a = 1_000.0;
+        let decoy_b = 100_000.0;
+        let band = |anchor: f64| (anchor * 0.7, anchor * 1.3);
+        let (correct_lo, correct_hi) = band(correct);
+        let (a_lo, a_hi) = band(decoy_a);
+        let (b_lo, b_hi) = band(decoy_b);
+
+        let decoys = [
+            DecoyAnchor {
+                value: decoy_a,
+                requested_count: 2,
+            },
+            DecoyAnchor {
+                value: decoy_b,
+                requested_count: 2,
+            },
+        ];
+        let mut rng = StdRng::seed_from_u64(11);
+        let (options, _pos) =
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 4, false)
+                .unwrap();
+
+        assert_eq!(options.len(), 4);
+        let in_band = |lo: f64, hi: f64| options.iter().filter(|o| **o >= lo && **o <= hi).count();
+        assert_eq!(
+            in_band(correct_lo, correct_hi),
+            1,
+            "correct must always keep exactly 1 slot: {options:?}"
+        );
+        assert_eq!(
+            in_band(a_lo, a_hi),
+            2,
+            "first-listed decoy keeps its full počet=2 request: {options:?}"
+        );
+        assert_eq!(
+            in_band(b_lo, b_hi),
+            1,
+            "second decoy is scaled down to 1: {options:?}"
+        );
+    }
+
+    #[test]
+    fn invalid_decoy_is_excluded_and_its_slots_flow_to_the_correct_answer() {
+        let constraint = make_constraint(Some(0.0), Some(10_000_000.0), None);
+        let correct = 10.0;
+        let valid_decoy = 1_000.0;
+        let decoys = [
+            DecoyAnchor {
+                value: f64::NAN,
+                requested_count: 2,
+            },
+            DecoyAnchor {
+                value: valid_decoy,
+                requested_count: 1,
+            },
+        ];
+        let mut rng = StdRng::seed_from_u64(3);
+        let (options, _pos) =
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+                .unwrap();
+
+        assert_eq!(options.len(), 5);
+        let band = |anchor: f64| (anchor * 0.7, anchor * 1.3);
+        let (v_lo, v_hi) = band(valid_decoy);
+        let (c_lo, c_hi) = band(correct);
+        let valid_decoy_slots = options.iter().filter(|o| **o >= v_lo && **o <= v_hi).count();
+        let correct_slots = options.iter().filter(|o| **o >= c_lo && **o <= c_hi).count();
+        assert_eq!(
+            valid_decoy_slots, 1,
+            "the valid decoy keeps exactly its own requested count: {options:?}"
+        );
+        assert_eq!(
+            correct_slots, 4,
+            "the invalid decoy's 2 requested slots flow to the correct answer (1 exact + 3 perturbed): {options:?}"
+        );
+    }
+
+    #[test]
+    fn two_decoys_colliding_with_each_other_after_rounding_keep_only_the_earlier_one() {
+        let constraint = make_constraint(Some(0.0), Some(10_000_000.0), None);
+        let correct = 10.0;
+        let decoy_value = 1_000.0;
+        let decoys = [
+            DecoyAnchor {
+                value: decoy_value,
+                requested_count: 2,
+            },
+            DecoyAnchor {
+                value: decoy_value,
+                requested_count: 2,
+            },
+        ];
+        let mut rng = StdRng::seed_from_u64(5);
+        let (options, _pos) =
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false)
+                .unwrap();
+
+        assert_eq!(options.len(), 5);
+        let band = |anchor: f64| (anchor * 0.7, anchor * 1.3);
+        let (d_lo, d_hi) = band(decoy_value);
+        let decoy_slots = options.iter().filter(|o| **o >= d_lo && **o <= d_hi).count();
+        assert_eq!(
+            decoy_slots, 2,
+            "only the earlier-listed decoy survives, keeping its full počet=2: {options:?}"
+        );
+        assert!(options.iter().any(|o| (o - decoy_value).abs() < 1e-9));
+    }
+
+    #[test]
+    fn force_correct_first_places_answer_at_index_zero() {
+        let constraint = make_constraint(Some(0.0), Some(100.0), None);
+        let correct = 20.0;
+        for seed in 0..20 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (_options, position) =
+                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, true)
+                    .unwrap();
             assert_eq!(
-                decoy_anchored, expected_decoy_slots,
-                "option_count={option_count}: expected {expected_decoy_slots} decoy-anchored \
-                 options, got {decoy_anchored} in {options:?}"
-            );
-            assert!(
-                options.iter().any(|o| (o - decoy).abs() < 1e-9),
-                "the literal decoy value itself must still be among the options"
+                position, 1,
+                "force_correct_first must always place the correct answer at position 1, seed={seed}"
             );
         }
     }

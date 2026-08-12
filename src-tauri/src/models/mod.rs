@@ -18,7 +18,8 @@ pub use meta::{
     WizardSession, WizardSessionSet,
 };
 pub use template::{
-    ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateMode, TemplateVariable,
+    ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateDecoy,
+    TemplateDecoyInput, TemplateMode, TemplateVariable,
 };
 pub use topic::Topic;
 pub use user::{InviteCode, Role, User};

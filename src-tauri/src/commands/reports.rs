@@ -395,7 +395,7 @@ mod tests {
             greater_than_variable_id: None,
             less_than_variable_id: None,
         };
-        TR::insert(conn, &template, &[tv], &[], Some(&constraint))
+        TR::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
             .expect("insert template");
         SetRepo::add_template(conn, &sets[0].id, &template.id).expect("add template to set");
 

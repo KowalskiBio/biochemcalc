@@ -139,6 +139,7 @@ export interface Template {
   pointValue: number
   significantDigits?: number
   forceScientific?: boolean
+  /** @deprecated Superseded by the per-template `decoys` list; kept only so a legacy value still round-trips on read. */
   decoyFormula?: string
   createdAt: string
   // Extended with related data
@@ -147,11 +148,35 @@ export interface Template {
   constraint?: ConstraintInput
 }
 
+/**
+ * One decoy equation attached to a template, with the teacher-requested
+ * number of option slots it should claim ("počet"). Actual slots granted at
+ * generation time may be lower if requests across all decoys exceed the
+ * available budget.
+ */
+export interface TemplateDecoy {
+  id: string
+  templateId: string
+  formula: string
+  optionCount: number
+  position: number
+}
+
+/**
+ * A decoy as submitted by the teacher, before persistence assigns it an id
+ * and a position (its index in the submitted list).
+ */
+export interface TemplateDecoyInput {
+  formula: string
+  optionCount: number
+}
+
 export interface TemplateWithDetails {
   template: Template
   variables: VariableWithPlaceholder[]
   constants: Constant[]
   constraint?: ConstraintInput
+  decoys: TemplateDecoy[]
 }
 
 export interface TemplateLocation {
@@ -190,7 +215,7 @@ export interface UpdateTemplateWithVariablesPayload {
   pointValue: number
   significantDigits?: number
   forceScientific?: boolean
-  decoyFormula?: string
+  decoys: TemplateDecoyInput[]
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -231,7 +256,7 @@ export interface TemplateInput {
   pointValue: number
   significantDigits?: number
   forceScientific?: boolean
-  decoyFormula?: string
+  decoys?: TemplateDecoyInput[]
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput

@@ -14,7 +14,8 @@
 
 use crate::commands::generation::load_template_dependencies;
 use crate::db::repos::{
-    ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, TemplateRepo,
+    ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, TemplateDecoyRepo,
+    TemplateRepo,
 };
 use crate::db::DbError;
 use crate::engine::answer_targets::extract_target_symbols;
@@ -250,7 +251,10 @@ fn build_question(
     let (variables, constants, constraint, fixed_values) =
         load_template_dependencies(conn, &template)?;
     let targets = extract_target_symbols(&template.question_text);
+    let decoys = TemplateDecoyRepo::list_by_template(conn, &template.id)?;
 
+    // Interactive student practice keeps the correct answer's position
+    // random — only teacher-facing generation forces it to R1/A.
     let variant = generate_variant_with_targets(
         template.id,
         &template.formula,
@@ -263,7 +267,8 @@ fn build_question(
         PRACTICE_OPTION_COUNT,
         &fixed_values,
         &targets,
-        template.decoy_formula.as_deref(),
+        &decoys,
+        false,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -572,7 +577,7 @@ mod tests {
             greater_than_variable_id: None,
             less_than_variable_id: None,
         };
-        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint))
+        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
             .expect("insert template");
         SetRepo::add_template(conn, &sets[0].id, &template.id).expect("add template to set");
 
@@ -632,6 +637,53 @@ mod tests {
                 assert!(question.answer_slots[0].numeric_options.is_none());
             }
         }
+    }
+
+    /// Guards against accidentally flipping `force_correct_first` to `true`
+    /// for student practice: unlike teacher-mode generation (which always
+    /// places the correct answer at position 1), interactive practice must
+    /// keep the position randomized across questions.
+    #[test]
+    fn practice_questions_keep_random_correct_option_position() {
+        let conn = setup_conn();
+        let topic_id = seed_topic(&conn, "Roztoky", 3);
+        let student = insert_student(&conn, "student");
+
+        for _ in 0..40 {
+            let _ = do_next_question(
+                &conn,
+                &student,
+                &NextQuestionPayload {
+                    topic_id,
+                    point_value: 3,
+                },
+            );
+        }
+
+        let positions: Vec<i64> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT correct_option FROM practice_attempts \
+                     WHERE user_id = ?1 AND mode = 'closed' AND correct_option IS NOT NULL",
+                )
+                .expect("prepare");
+            stmt.query_map(rusqlite::params![student], |row| row.get(0))
+                .expect("query")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
+        };
+
+        assert!(
+            positions.len() > 5,
+            "expected multiple closed-mode attempts among 40 requests, got {}",
+            positions.len()
+        );
+        let unique: std::collections::HashSet<i64> = positions.iter().cloned().collect();
+        assert!(
+            unique.len() > 1,
+            "student practice must keep the correct answer's position random, got {:?}",
+            positions
+        );
     }
 
     /// The full loop a student goes through, on a question whose answer is

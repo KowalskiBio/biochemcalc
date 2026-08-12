@@ -1,4 +1,4 @@
-use crate::db::repos::{ConstantRepo, OutputFileRepo, ProjektRepo, TemplateRepo};
+use crate::db::repos::{ConstantRepo, OutputFileRepo, ProjektRepo, TemplateDecoyRepo, TemplateRepo};
 use crate::db::{AppState, DbError};
 use crate::engine::answer_targets::extract_target_symbols;
 use crate::engine::export_writer::{write_txt, ExportQuestion};
@@ -64,6 +64,7 @@ pub fn do_generate_for_templates(
         let (variables, constants, constraint, fixed_values) =
             load_template_dependencies(conn, &template)?;
         let targets = extract_target_symbols(&template.question_text);
+        let decoys = TemplateDecoyRepo::list_by_template(conn, &template.id)?;
 
         // Give each template its own non-overlapping seed block so the correct
         // answer position is independent across templates in the same batch.
@@ -71,6 +72,9 @@ pub fn do_generate_for_templates(
             .base_seed
             .wrapping_add((template_index as u64).wrapping_mul(payload.count as u64));
 
+        // Teacher-facing generation (this preview/export path) always places
+        // the correct answer at position 1 (R1/A) so the teacher doesn't have
+        // to hunt for it; only interactive student practice keeps it random.
         let variants = generate_variants_with_targets(
             template.id,
             &template.formula,
@@ -84,7 +88,8 @@ pub fn do_generate_for_templates(
             payload.option_count,
             &fixed_values,
             &targets,
-            template.decoy_formula.as_deref(),
+            &decoys,
+            true,
         )
         .map_err(generation_to_db_error)?;
 
@@ -236,7 +241,10 @@ pub(crate) fn do_regenerate_variant(
     let (variables, constants, constraint, fixed_values) =
         load_template_dependencies(conn, &template)?;
     let targets = extract_target_symbols(&template.question_text);
+    let decoys = TemplateDecoyRepo::list_by_template(conn, &template.id)?;
 
+    // Teacher-facing regeneration always places the correct answer at
+    // position 1 (R1/A) — see do_generate_for_templates for the same policy.
     let mut variant = generate_variant_with_targets(
         template.id,
         &template.formula,
@@ -249,7 +257,8 @@ pub(crate) fn do_regenerate_variant(
         payload.option_count,
         &fixed_values,
         &targets,
-        template.decoy_formula.as_deref(),
+        &decoys,
+        true,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -264,11 +273,12 @@ pub(crate) fn do_regenerate_variant(
                 // than evaluated against a correct answer the teacher chose.
                 let (options, position) = generate_numeric_options(
                     manual_answer,
-                    None,
+                    &[],
                     &constraint,
                     &mut rng,
                     &payload.difficulty,
                     payload.option_count,
+                    true,
                 )
                 .map_err(|e| DbError::Validation(e.to_string()))?;
                 variant.numeric_options = Some(options);
@@ -720,7 +730,7 @@ mod tests {
     use super::*;
     use crate::db::repos::{ConstantRepo, TemplateRepo, VariableRepo};
     use crate::db::AppState;
-    use crate::models::{Constant, TemplateVariable, Variable};
+    use crate::models::{Constant, TemplateDecoyInput, TemplateVariable, Variable};
     use chrono::Utc;
 
     fn setup() -> AppState {
@@ -763,7 +773,7 @@ mod tests {
             decoy_formula: None,
             created_at: Utc::now(),
         };
-        TemplateRepo::insert(&conn, &template, &[], &[], None).expect("insert template");
+        TemplateRepo::insert(&conn, &template, &[], &[], None, &[]).expect("insert template");
 
         let (_, constants, _, _) = load_template_dependencies(&conn, &template).expect("load");
 
@@ -819,7 +829,7 @@ mod tests {
                 greater_than_variable_id: None,
                 less_than_variable_id: None,
             };
-            TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint))
+            TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint), &[])
                 .expect("insert template");
             template_ids.push(template.id);
         }
@@ -845,6 +855,9 @@ mod tests {
             seeds
         );
 
+        // Teacher-facing generation always forces the correct answer to
+        // position 1 (R1/A) — independent-seed generation still varies the
+        // distractor values, but never the correct answer's position here.
         let positions: Vec<u8> = results
             .iter()
             .map(|r| {
@@ -853,10 +866,9 @@ mod tests {
                     .expect("closed variant has position")
             })
             .collect();
-        let unique_positions: std::collections::HashSet<u8> = positions.iter().cloned().collect();
         assert!(
-            unique_positions.len() > 1,
-            "correct answer positions should vary across templates, got {:?}",
+            positions.iter().all(|&p| p == 1),
+            "teacher-mode generation must always place the correct answer at position 1, got {:?}",
             positions
         );
     }
@@ -865,10 +877,20 @@ mod tests {
         conn: &rusqlite::Connection,
         decoy_formula: Option<&str>,
     ) -> Uuid {
+        insert_template_with_decoys(
+            conn,
+            decoy_formula
+                .map(|f| vec![(f, 2)])
+                .unwrap_or_default()
+                .as_slice(),
+        )
+    }
+
+    fn insert_template_with_decoys(conn: &rusqlite::Connection, decoys: &[(&str, u8)]) -> Uuid {
         let var = Variable::new("X".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
         VariableRepo::insert_raw(conn, &var).expect("insert variable");
 
-        let mut template = Template::new(
+        let template = Template::new(
             "Question [[X]]".into(),
             "X * 2".into(),
             "X × 2".into(),
@@ -876,7 +898,6 @@ mod tests {
             "g".into(),
             2,
         );
-        template.decoy_formula = decoy_formula.map(str::to_string);
         let constraint = ResultConstraint::new(
             template.id,
             Some(0.0),
@@ -891,7 +912,14 @@ mod tests {
             greater_than_variable_id: None,
             less_than_variable_id: None,
         };
-        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint))
+        let decoy_inputs: Vec<TemplateDecoyInput> = decoys
+            .iter()
+            .map(|(formula, option_count)| TemplateDecoyInput {
+                formula: formula.to_string(),
+                option_count: *option_count,
+            })
+            .collect();
+        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &decoy_inputs)
             .expect("insert template");
         template.id
     }

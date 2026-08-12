@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 28;
+const CURRENT_USER_VERSION: u32 = 29;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -146,6 +146,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 28 {
         apply_migration_v28(conn)?;
         conn.pragma_update(None, "user_version", "28")?;
+    }
+
+    if user_version < 29 {
+        apply_migration_v29(conn)?;
+        conn.pragma_update(None, "user_version", "29")?;
     }
 
     Ok(())
@@ -1006,6 +1011,35 @@ fn apply_migration_v28(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Multiple decoy equations per template, each with its own requested
+/// option-slot count ("počet"). Supersedes the single `templates.decoy_formula`
+/// column, which is left in place (unused going forward) rather than dropped —
+/// existing rows are backfilled into one `template_decoys` row each so no
+/// teacher-authored decoy is lost.
+fn apply_migration_v29(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS template_decoys (
+            id BLOB PRIMARY KEY NOT NULL,
+            template_id BLOB NOT NULL,
+            formula TEXT NOT NULL,
+            option_count INTEGER NOT NULL DEFAULT 2,
+            position INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_template_decoys_template
+        ON template_decoys(template_id);
+
+        INSERT INTO template_decoys (id, template_id, formula, option_count, position)
+        SELECT randomblob(16), id, decoy_formula, 2, 0
+        FROM templates
+        WHERE decoy_formula IS NOT NULL AND trim(decoy_formula) <> '';
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1183,7 +1217,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 28);
+        assert_eq!(user_version(&conn), 29);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1273,7 +1307,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 28);
+        assert_eq!(user_version(&conn), 29);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1298,9 +1332,114 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 28);
+        assert_eq!(user_version(&conn), 29);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");
+    }
+
+    /// Reproduces a template that already had a single `decoy_formula` set
+    /// under the pre-v29 schema — that value must survive as one row in the
+    /// new `template_decoys` table rather than being silently dropped.
+    #[test]
+    fn v29_creates_template_decoys_table_and_migrates_existing_decoy_formula() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+
+        let migrations: [MigrationFn; 28] = [
+            apply_migration_v1,
+            apply_migration_v2,
+            apply_migration_v3,
+            apply_migration_v4,
+            apply_migration_v5,
+            apply_migration_v6,
+            apply_migration_v7,
+            apply_migration_v8,
+            apply_migration_v9,
+            apply_migration_v10,
+            apply_migration_v11,
+            apply_migration_v12,
+            apply_migration_v13,
+            apply_migration_v14,
+            apply_migration_v15,
+            apply_migration_v16,
+            apply_migration_v17,
+            apply_migration_v18,
+            apply_migration_v19,
+            apply_migration_v20,
+            apply_migration_v21,
+            apply_migration_v22,
+            apply_migration_v23,
+            apply_migration_v24,
+            apply_migration_v25,
+            apply_migration_v26,
+            apply_migration_v27,
+            apply_migration_v28,
+        ];
+        for (index, apply) in migrations.iter().enumerate() {
+            apply(&conn).unwrap_or_else(|e| panic!("v{}: {e}", index + 1));
+            conn.pragma_update(None, "user_version", format!("{}", index + 1))
+                .expect("set version");
+        }
+        // v1's own migration batch turns foreign_keys back ON; this test only
+        // cares about the templates/template_decoys shape, not a full
+        // template/topic graph, so drop enforcement like the v18 test does.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+
+        let template_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO templates (id, question_text, formula, result_unit, point_value, topic_id, created_at, decoy_formula)
+             VALUES (?1, 'q', 'X * 2', 'g', 2, randomblob(16), '2026-01-01T00:00:00Z', 'X * 3')",
+            rusqlite::params![template_id],
+        )
+        .expect("seed pre-v29 template with a decoy_formula");
+
+        let other_template_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO templates (id, question_text, formula, result_unit, point_value, topic_id, created_at, decoy_formula)
+             VALUES (?1, 'q2', 'Y * 2', 'g', 2, randomblob(16), '2026-01-01T00:00:00Z', NULL)",
+            rusqlite::params![other_template_id],
+        )
+        .expect("seed pre-v29 template without a decoy_formula");
+
+        apply_migration_v29(&conn).expect("v29");
+
+        let rows: Vec<(String, i64)> = {
+            let mut stmt = conn
+                .prepare("SELECT formula, option_count FROM template_decoys WHERE template_id = ?1")
+                .expect("prepare");
+            stmt.query_map(rusqlite::params![template_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("collect")
+        };
+
+        assert_eq!(rows, vec![("X * 3".to_string(), 2)]);
+    }
+
+    #[test]
+    fn v29_leaves_templates_without_decoy_formula_untouched() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+
+        let template_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO templates (id, question_text, formula, result_unit, point_value, topic_id, created_at)
+             VALUES (?1, 'q', 'X * 2', 'g', 2, randomblob(16), '2026-01-01T00:00:00Z')",
+            rusqlite::params![template_id],
+        )
+        .expect("seed template without a decoy_formula");
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM template_decoys WHERE template_id = ?1",
+                rusqlite::params![template_id],
+                |row| row.get(0),
+            )
+            .expect("count template_decoys rows");
+
+        assert_eq!(count, 0);
     }
 }

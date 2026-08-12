@@ -8,6 +8,7 @@ pub mod question_report_repo;
 pub mod session_repo;
 pub mod set_repo;
 pub mod settings_repo;
+pub mod template_decoy_repo;
 pub mod template_history_repo;
 pub mod template_repo;
 pub mod topic_repo;
@@ -25,6 +26,7 @@ pub use question_report_repo::{QuestionReportRecord, QuestionReportRepo, Questio
 pub use session_repo::SessionRepo;
 pub use set_repo::SetRepo;
 pub use settings_repo::AppSettingsRepo;
+pub use template_decoy_repo::TemplateDecoyRepo;
 pub use template_history_repo::TemplateHistoryRepo;
 pub use template_repo::TemplateRepo;
 pub use topic_repo::TopicRepo;

@@ -726,6 +726,7 @@ export const cs = {
     addDecoy: "Přidat návnadu",
     removeDecoy: "Odebrat návnadu",
     decoyEquationLabel: "Návnada – rovnice (špatný výsledek)",
+    decoyOptionCountLabel: "Počet možností z této návnady",
     selectEquation: "Vybrat rovnici",
     computedAnswerLabel: "Výsledek",
     computingAnswer: "Probíhá výpočet...",

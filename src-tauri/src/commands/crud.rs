@@ -1,11 +1,11 @@
 use crate::db::repos::{
-    CategoryRepo, ConstantRepo, SetRepo, TemplateHistoryRepo, TemplateRepo, TopicRepo,
-    VariableHistoryRepo, VariableRepo,
+    CategoryRepo, ConstantRepo, SetRepo, TemplateDecoyRepo, TemplateHistoryRepo, TemplateRepo,
+    TopicRepo, VariableHistoryRepo, VariableRepo,
 };
 use crate::db::{AppState, DbError};
 use crate::models::{
-    Constant, ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateMode,
-    TemplateVariable, Topic, Variable, VariableType,
+    Constant, ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateDecoy,
+    TemplateDecoyInput, TemplateMode, TemplateVariable, Topic, Variable, VariableType,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -552,7 +552,7 @@ pub struct UpdateTemplateWithVariablesPayload {
     #[serde(default)]
     pub force_scientific: bool,
     #[serde(default)]
-    pub decoy_formula: Option<String>,
+    pub decoys: Vec<TemplateDecoyInput>,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -571,7 +571,7 @@ pub struct CreateTemplatePayload {
     #[serde(default)]
     pub force_scientific: bool,
     #[serde(default)]
-    pub decoy_formula: Option<String>,
+    pub decoys: Vec<TemplateDecoyInput>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -676,11 +676,17 @@ pub(crate) fn do_create_template(
     );
     template.significant_digits = payload.significant_digits;
     template.force_scientific = payload.force_scientific;
-    template.decoy_formula = payload.decoy_formula;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
-    TemplateRepo::insert(conn, &template, &variables, &constants, constraint.as_ref())?;
+    TemplateRepo::insert(
+        conn,
+        &template,
+        &variables,
+        &constants,
+        constraint.as_ref(),
+        &payload.decoys,
+    )?;
     Ok(template)
 }
 
@@ -703,6 +709,7 @@ pub struct TemplateWithDetails {
     pub variables: Vec<VariableWithPlaceholder>,
     pub constants: Vec<Constant>,
     pub constraint: Option<ResultConstraint>,
+    pub decoys: Vec<TemplateDecoy>,
 }
 
 #[derive(Serialize)]
@@ -725,6 +732,7 @@ pub(crate) fn load_template_with_details(
     let template_variables = TemplateRepo::get_variables(conn, id)?;
     let template_constants = TemplateRepo::get_constants(conn, id)?;
     let constraint = TemplateRepo::get_constraint(conn, id)?;
+    let decoys = TemplateDecoyRepo::list_by_template(conn, id)?;
 
     let variables = template_variables
         .into_iter()
@@ -751,6 +759,7 @@ pub(crate) fn load_template_with_details(
         variables,
         constants,
         constraint,
+        decoys,
     })
 }
 
@@ -811,7 +820,7 @@ pub struct UpdateTemplatePayload {
     #[serde(default)]
     pub force_scientific: bool,
     #[serde(default)]
-    pub decoy_formula: Option<String>,
+    pub decoys: Vec<TemplateDecoyInput>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -852,13 +861,13 @@ pub(crate) fn do_update_template(
         point_value: payload.point_value,
         significant_digits: payload.significant_digits,
         force_scientific: payload.force_scientific,
-        decoy_formula: payload.decoy_formula,
+        decoy_formula: None,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, decoy_formula=?10, created_at=?11 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -869,10 +878,11 @@ pub(crate) fn do_update_template(
             template.point_value,
             template.significant_digits,
             template.force_scientific,
-            template.decoy_formula,
             template.created_at.to_rfc3339(),
         ],
     )?;
+
+    TemplateDecoyRepo::replace_for_template(&tx, &template.id, &payload.decoys)?;
 
     tx.execute(
         "DELETE FROM template_variables WHERE template_id = ?1",
@@ -1028,12 +1038,12 @@ pub fn apply_template_variable_mutations(
         point_value: payload.point_value,
         significant_digits: payload.significant_digits,
         force_scientific: payload.force_scientific,
-        decoy_formula: payload.decoy_formula.clone(),
+        decoy_formula: None,
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, decoy_formula=?10, created_at=?11 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1044,10 +1054,11 @@ pub fn apply_template_variable_mutations(
             template.point_value,
             template.significant_digits,
             template.force_scientific,
-            template.decoy_formula,
             template.created_at.to_rfc3339(),
         ],
     )?;
+
+    TemplateDecoyRepo::replace_for_template(&tx, &payload.id, &payload.decoys)?;
 
     let old_links = TemplateRepo::get_variables(&tx, &payload.id)?;
     let mut new_links: Vec<TemplateVariable> = Vec::new();
@@ -1654,7 +1665,7 @@ mod tests {
             point_value: 2,
             significant_digits: None,
             force_scientific: false,
-            decoy_formula: None,
+            decoys: Vec::new(),
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,

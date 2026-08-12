@@ -173,7 +173,7 @@ fn import_bulk_question(
     // absolute SD here would override that for every imported question and
     // scale terribly — ±0.1 is ±0.03 % of a 351 g answer but ±20 % of a 0.5
     // one. Set an SD deliberately per template when a question needs one.
-    TemplateRepo::insert(conn, &template, &tvs, &[], None)?;
+    TemplateRepo::insert(conn, &template, &tvs, &[], None, &[])?;
     SetRepo::add_template(conn, &set.id, &template.id)?;
 
     Ok(())

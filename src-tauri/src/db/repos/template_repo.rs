@@ -1,6 +1,7 @@
 use crate::db::DbError;
 use crate::models::{
-    ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateVariable,
+    ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateDecoyInput,
+    TemplateVariable,
 };
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -8,13 +9,14 @@ use uuid::Uuid;
 pub struct TemplateRepo;
 
 impl TemplateRepo {
-    /// Insert a template along with its linked variables, constants, and constraint.
+    /// Insert a template along with its linked variables, constants, constraint, and decoys.
     pub fn insert(
         conn: &Connection,
         template: &Template,
         variables: &[TemplateVariable],
         constants: &[TemplateConstant],
         constraint: Option<&ResultConstraint>,
+        decoys: &[TemplateDecoyInput],
     ) -> Result<(), DbError> {
         let tx = conn.unchecked_transaction()?;
 
@@ -36,6 +38,20 @@ impl TemplateRepo {
                 template.created_at.to_rfc3339(),
             ],
         )?;
+
+        for (position, decoy) in decoys.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO template_decoys (id, template_id, formula, option_count, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    Uuid::new_v4(),
+                    template.id,
+                    decoy.formula,
+                    decoy.option_count,
+                    position as i32,
+                ],
+            )?;
+        }
 
         for tv in variables {
             tx.execute(
@@ -447,7 +463,7 @@ mod tests {
         }];
         let rc = ResultConstraint::new(t.id, Some(0.0), Some(200.0), None, ConstraintType::Range);
 
-        TemplateRepo::insert(&conn, &t, &tvs, &tcs, Some(&rc)).expect("insert");
+        TemplateRepo::insert(&conn, &t, &tvs, &tcs, Some(&rc), &[]).expect("insert");
 
         let fetched = TemplateRepo::get_by_id(&conn, &t.id).expect("get");
         assert_eq!(fetched.point_value, 2);
@@ -466,7 +482,7 @@ mod tests {
     fn update_modifies_template_fields() {
         let conn = setup_conn();
         let t = Template::new("Q?".into(), "X".into(), "".into(), None, "g".into(), 3);
-        TemplateRepo::insert(&conn, &t, &[], &[], None).expect("insert");
+        TemplateRepo::insert(&conn, &t, &[], &[], None, &[]).expect("insert");
 
         let mut updated = t.clone();
         updated.question_text = "Better Q?".into();
@@ -480,7 +496,7 @@ mod tests {
     fn delete_removes_template() {
         let conn = setup_conn();
         let t = Template::new("Q?".into(), "X".into(), "".into(), None, "g".into(), 2);
-        TemplateRepo::insert(&conn, &t, &[], &[], None).expect("insert");
+        TemplateRepo::insert(&conn, &t, &[], &[], None, &[]).expect("insert");
         TemplateRepo::delete(&conn, &t.id).expect("delete");
         let result = TemplateRepo::get_by_id(&conn, &t.id);
         assert!(result.is_err());
@@ -490,27 +506,45 @@ mod tests {
     fn constraint_is_none_when_not_set() {
         let conn = setup_conn();
         let t = Template::new("Q?".into(), "X".into(), "".into(), None, "g".into(), 2);
-        TemplateRepo::insert(&conn, &t, &[], &[], None).expect("insert");
+        TemplateRepo::insert(&conn, &t, &[], &[], None, &[]).expect("insert");
         let rc = TemplateRepo::get_constraint(&conn, &t.id).expect("constraint");
         assert!(rc.is_none());
     }
 
     #[test]
-    fn decoy_formula_round_trips_and_defaults_to_none() {
+    fn legacy_decoy_formula_column_defaults_to_none_and_is_no_longer_populated_by_insert() {
         let conn = setup_conn();
 
-        let with_decoy = {
-            let mut t = Template::new("Q?".into(), "X * 2".into(), "".into(), None, "g".into(), 2);
-            t.decoy_formula = Some("X * 3".into());
-            t
-        };
-        TemplateRepo::insert(&conn, &with_decoy, &[], &[], None).expect("insert with decoy");
-        let fetched = TemplateRepo::get_by_id(&conn, &with_decoy.id).expect("get");
-        assert_eq!(fetched.decoy_formula, Some("X * 3".into()));
-
-        let without_decoy = Template::new("Q2?".into(), "X".into(), "".into(), None, "g".into(), 2);
-        TemplateRepo::insert(&conn, &without_decoy, &[], &[], None).expect("insert without decoy");
-        let fetched = TemplateRepo::get_by_id(&conn, &without_decoy.id).expect("get");
+        let t = Template::new("Q?".into(), "X * 2".into(), "".into(), None, "g".into(), 2);
+        TemplateRepo::insert(&conn, &t, &[], &[], None, &[]).expect("insert");
+        let fetched = TemplateRepo::get_by_id(&conn, &t.id).expect("get");
         assert_eq!(fetched.decoy_formula, None);
+    }
+
+    #[test]
+    fn insert_persists_multiple_decoys_with_option_counts_in_position_order() {
+        use crate::db::repos::TemplateDecoyRepo;
+        use crate::models::TemplateDecoyInput;
+
+        let conn = setup_conn();
+        let t = Template::new("Q?".into(), "X * 2".into(), "".into(), None, "g".into(), 2);
+        let decoys = vec![
+            TemplateDecoyInput {
+                formula: "X * 3".into(),
+                option_count: 2,
+            },
+            TemplateDecoyInput {
+                formula: "X * 4".into(),
+                option_count: 1,
+            },
+        ];
+        TemplateRepo::insert(&conn, &t, &[], &[], None, &decoys).expect("insert with decoys");
+
+        let fetched = TemplateDecoyRepo::list_by_template(&conn, &t.id).expect("list decoys");
+        assert_eq!(fetched.len(), 2);
+        assert_eq!(fetched[0].formula, "X * 3");
+        assert_eq!(fetched[0].option_count, 2);
+        assert_eq!(fetched[1].formula, "X * 4");
+        assert_eq!(fetched[1].option_count, 1);
     }
 }

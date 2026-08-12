@@ -46,6 +46,8 @@ import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-
 import type {
   HistoryEntry,
   LocalVariableEdit,
+  TemplateDecoy,
+  TemplateDecoyInput,
   TemplateWithDetails,
   UpdateTemplateWithVariablesPayload,
   VariableInput,
@@ -274,6 +276,32 @@ function variableChanged(
   )
 }
 
+interface DecoyRow {
+  key: string
+  formula: string
+  optionCount: number
+}
+
+function toDecoyRow(d: TemplateDecoy): DecoyRow {
+  return { key: d.id, formula: d.formula, optionCount: d.optionCount }
+}
+
+function decoyRowsChanged(current: DecoyRow[], original: TemplateDecoy[]): boolean {
+  if (current.length !== original.length) return true
+  return current.some(
+    (row, i) => row.formula !== original[i].formula || row.optionCount !== original[i].optionCount,
+  )
+}
+
+function buildDecoyInputs(rows: DecoyRow[]): TemplateDecoyInput[] {
+  return rows
+    .filter((r) => r.formula.trim() !== "")
+    .map((r) => ({
+      formula: normalizeFormulaForEvaluation(r.formula),
+      optionCount: r.optionCount,
+    }))
+}
+
 export function QuestionDetailDialog({
   templateId,
   open,
@@ -320,9 +348,8 @@ export function QuestionDetailDialog({
   const [forceScientific, setForceScientific] = useState(
     initialTemplateDetails?.template.forceScientific ?? false,
   )
-  const [showDecoy, setShowDecoy] = useState(!!initialTemplateDetails?.template.decoyFormula)
-  const [editDecoyText, setEditDecoyText] = useState(
-    initialTemplateDetails?.template.decoyFormula ?? "",
+  const [decoyRows, setDecoyRows] = useState<DecoyRow[]>(
+    (initialTemplateDetails?.decoys ?? []).map(toDecoyRow),
   )
   const [mockSeed, setMockSeed] = useState(0)
   const [sampleSeed, setSampleSeed] = useState(1)
@@ -382,8 +409,7 @@ export function QuestionDetailDialog({
           : "",
       )
       setForceScientific(details.template.forceScientific ?? false)
-      setShowDecoy(!!details.template.decoyFormula)
-      setEditDecoyText(details.template.decoyFormula ?? "")
+      setDecoyRows(details.decoys.map(toDecoyRow))
       setIsEditingAnswer(false)
       setEditingVariableKey(null)
       setValidationErrors({})
@@ -516,7 +542,7 @@ export function QuestionDetailDialog({
       editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
     if (newSigDigits !== currentSigDigits) return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
-    if (editDecoyText !== (templateDetails?.template.decoyFormula ?? "")) return true
+    if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
     return dirtyVariableKeys.size > 0
   }, [
     editText,
@@ -524,7 +550,7 @@ export function QuestionDetailDialog({
     editResultUnit,
     editSignificantDigits,
     forceScientific,
-    editDecoyText,
+    decoyRows,
     templateDetails,
     dirtyVariableKeys,
   ])
@@ -619,7 +645,7 @@ export function QuestionDetailDialog({
       pointValue: templateDetails.template.pointValue,
       significantDigits: sigDigits,
       forceScientific,
-      decoyFormula: editDecoyText.trim() === "" ? undefined : normalizeFormulaForEvaluation(editDecoyText),
+      decoys: buildDecoyInputs(decoyRows),
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
       constraint: templateDetails.template.constraint,
@@ -659,8 +685,7 @@ export function QuestionDetailDialog({
         : "",
     )
     setForceScientific(templateDetails?.template.forceScientific ?? false)
-    setShowDecoy(!!templateDetails?.template.decoyFormula)
-    setEditDecoyText(templateDetails?.template.decoyFormula ?? "")
+    setDecoyRows((templateDetails?.decoys ?? []).map(toDecoyRow))
     setIsEditingAnswer(false)
     setLocalVariables(originalVariables.map((v) => ({ ...v })))
     setIsEditingText(false)
@@ -692,7 +717,7 @@ export function QuestionDetailDialog({
         pointValue: templateDetails.template.pointValue,
         significantDigits: sigDigits,
         forceScientific,
-        decoyFormula: editDecoyText.trim() === "" ? undefined : normalizeFormulaForEvaluation(editDecoyText),
+        decoys: buildDecoyInputs(decoyRows),
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: templateDetails.template.constraint,
@@ -737,7 +762,7 @@ export function QuestionDetailDialog({
       pointValue: templateDetails.template.pointValue,
       significantDigits: sigDigits,
       forceScientific: newValue,
-      decoyFormula: editDecoyText.trim() === "" ? undefined : normalizeFormulaForEvaluation(editDecoyText),
+      decoys: buildDecoyInputs(decoyRows),
       variableMutations: templateDetails.variables.map((vwp) => ({
         action: "keep" as const,
         variableId: vwp.variable.id,
@@ -943,10 +968,17 @@ export function QuestionDetailDialog({
     [activeEquationText, equationValidationVariables, constants],
   )
 
-  const decoyMissingReferences = useMemo(
-    () => validateEquationReferences(editDecoyText, equationValidationVariables, constants),
-    [editDecoyText, equationValidationVariables, constants],
-  )
+  const decoyMissingReferences = useMemo(() => {
+    const byRow: Record<string, string[]> = {}
+    for (const row of decoyRows) {
+      byRow[row.key] = validateEquationReferences(
+        row.formula,
+        equationValidationVariables,
+        constants,
+      )
+    }
+    return byRow
+  }, [decoyRows, equationValidationVariables, constants])
 
   const usedConstants = useMemo(() => {
     if (!templateDetails || activeEquationText.trim().length === 0) return []
@@ -1571,71 +1603,115 @@ export function QuestionDetailDialog({
                         )}
                       </div>
                     )}
-                    <div className="space-y-2">
-                      {showDecoy ? (
-                        <>
-                          <div className="flex items-center justify-between">
-                            <Label htmlFor="decoyFormula">{cs.questions.decoyEquationLabel}</Label>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setShowDecoy(false)
-                                setEditDecoyText("")
-                              }}
-                              disabled={isSaving}
-                            >
-                              <X className="size-4 mr-2" />
-                              {cs.questions.removeDecoy}
-                            </Button>
-                          </div>
-                          <Input
-                            id="decoyFormula"
-                            value={editDecoyText}
-                            onChange={(e) => setEditDecoyText(e.target.value)}
-                            placeholder="X * 3"
-                            disabled={isSaving}
-                          />
-                          {editDecoyText.trim().length > 0 && (
-                            <div className="rounded-lg bg-muted/50 p-4 space-y-2">
-                              <p className="text-sm font-medium text-foreground-secondary">
-                                {cs.questions.equationPreview}
-                              </p>
-                              <MathRenderer text={renderEquationAsLatex(editDecoyText)} />
-                              {decoyMissingReferences.length > 0 && (
-                                <div className="rounded-md bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3 text-sm text-yellow-800 dark:text-yellow-200">
-                                  <p className="font-medium">{cs.questions.missingVariables}</p>
-                                  <p className="text-xs opacity-90 mb-1">
-                                    {cs.questions.missingVariablesDescription}
-                                  </p>
-                                  <div className="flex flex-wrap gap-1">
-                                    {decoyMissingReferences.map((name) => (
-                                      <code
-                                        key={name}
-                                        className="bg-yellow-100 dark:bg-yellow-900/40 px-1 rounded"
-                                      >
-                                        [[{name}]]
-                                      </code>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                    <div className="space-y-4">
+                      {decoyRows.map((row, index) => {
+                        const rowMissingReferences = decoyMissingReferences[row.key] ?? []
+                        return (
+                          <div key={row.key} className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label htmlFor={`decoyFormula-${row.key}`}>
+                                {cs.questions.decoyEquationLabel}
+                                {decoyRows.length > 1 ? ` #${index + 1}` : ""}
+                              </Label>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  setDecoyRows((rows) => rows.filter((r) => r.key !== row.key))
+                                }
+                                disabled={isSaving}
+                              >
+                                <X className="size-4 mr-2" />
+                                {cs.questions.removeDecoy}
+                              </Button>
                             </div>
-                          )}
-                        </>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setShowDecoy(true)}
-                          disabled={isSaving}
-                        >
-                          <Plus className="size-4 mr-2" />
-                          {cs.questions.addDecoy}
-                        </Button>
-                      )}
+                            <div className="flex items-start gap-3">
+                              <Input
+                                id={`decoyFormula-${row.key}`}
+                                value={row.formula}
+                                onChange={(e) =>
+                                  setDecoyRows((rows) =>
+                                    rows.map((r) =>
+                                      r.key === row.key ? { ...r, formula: e.target.value } : r,
+                                    ),
+                                  )
+                                }
+                                placeholder="X * 3"
+                                disabled={isSaving}
+                                className="flex-1"
+                              />
+                              <div className="flex items-center gap-2">
+                                <Label
+                                  htmlFor={`decoyOptionCount-${row.key}`}
+                                  className="text-xs text-muted-foreground whitespace-nowrap"
+                                >
+                                  {cs.questions.decoyOptionCountLabel}
+                                </Label>
+                                <Input
+                                  id={`decoyOptionCount-${row.key}`}
+                                  type="number"
+                                  min={1}
+                                  value={row.optionCount}
+                                  onChange={(e) => {
+                                    const parsed = Number.parseInt(e.target.value, 10)
+                                    const optionCount =
+                                      Number.isFinite(parsed) && parsed >= 1 ? parsed : 1
+                                    setDecoyRows((rows) =>
+                                      rows.map((r) =>
+                                        r.key === row.key ? { ...r, optionCount } : r,
+                                      ),
+                                    )
+                                  }}
+                                  disabled={isSaving}
+                                  className="w-20"
+                                />
+                              </div>
+                            </div>
+                            {row.formula.trim().length > 0 && (
+                              <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+                                <p className="text-sm font-medium text-foreground-secondary">
+                                  {cs.questions.equationPreview}
+                                </p>
+                                <MathRenderer text={renderEquationAsLatex(row.formula)} />
+                                {rowMissingReferences.length > 0 && (
+                                  <div className="rounded-md bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3 text-sm text-yellow-800 dark:text-yellow-200">
+                                    <p className="font-medium">{cs.questions.missingVariables}</p>
+                                    <p className="text-xs opacity-90 mb-1">
+                                      {cs.questions.missingVariablesDescription}
+                                    </p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {rowMissingReferences.map((name) => (
+                                        <code
+                                          key={name}
+                                          className="bg-yellow-100 dark:bg-yellow-900/40 px-1 rounded"
+                                        >
+                                          [[{name}]]
+                                        </code>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setDecoyRows((rows) => [
+                            ...rows,
+                            { key: crypto.randomUUID(), formula: "", optionCount: 1 },
+                          ])
+                        }
+                        disabled={isSaving}
+                      >
+                        <Plus className="size-4 mr-2" />
+                        {cs.questions.addDecoy}
+                      </Button>
                     </div>
                     <div className="flex justify-end gap-2">
                       <Button
@@ -1643,8 +1719,7 @@ export function QuestionDetailDialog({
                         variant="outline"
                         onClick={() => {
                           setEditEquationText(templateDetails.template.equationText ?? "")
-                          setShowDecoy(!!templateDetails.template.decoyFormula)
-                          setEditDecoyText(templateDetails.template.decoyFormula ?? "")
+                          setDecoyRows(templateDetails.decoys.map(toDecoyRow))
                           setIsEditingAnswer(false)
                         }}
                         disabled={isSaving}
