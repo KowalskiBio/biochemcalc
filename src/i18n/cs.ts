@@ -677,6 +677,8 @@ export const cs = {
     questionText: "Text otázky",
     formulaDetails: "Vzorec a jednotky",
     resultUnit: "Jednotka výsledku",
+    multiTargetUnitHint:
+      "Otázka má více hledaných veličin — zadejte jednotku pro každou z nich odděleně středníkem, v pořadí [x][y]…, např. mol;g.",
     pointValue: "Bodová hodnota",
     variables: "Proměnné",
     variablesDescription: "Seznam proměnných v otázce",

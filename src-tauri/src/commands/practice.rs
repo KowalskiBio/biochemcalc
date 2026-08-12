@@ -18,7 +18,7 @@ use crate::db::repos::{
     TemplateRepo,
 };
 use crate::db::DbError;
-use crate::engine::answer_targets::extract_target_symbols;
+use crate::engine::answer_targets::{apply_result_units, extract_target_symbols};
 use crate::engine::generator::generate_variant_with_targets;
 use crate::models::{AnswerField, TemplateMode, Variant};
 use rand::rngs::StdRng;
@@ -250,7 +250,8 @@ fn build_question(
     let template = TemplateRepo::get_by_id(conn, template_id)?;
     let (variables, constants, constraint, fixed_values) =
         load_template_dependencies(conn, &template)?;
-    let targets = extract_target_symbols(&template.question_text);
+    let mut targets = extract_target_symbols(&template.question_text);
+    apply_result_units(&mut targets, &template.result_unit);
     let decoys = TemplateDecoyRepo::list_by_template(conn, &template.id)?;
 
     // Interactive student practice keeps the correct answer's position

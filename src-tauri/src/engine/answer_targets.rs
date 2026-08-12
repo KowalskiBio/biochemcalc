@@ -66,6 +66,34 @@ pub fn strip_answer_targets(text: &str) -> &str {
     trimmed[..block_start].trim_end()
 }
 
+/// Overlay per-target units parsed from the template's "Jednotka výsledku"
+/// field onto `targets`, for questions with multiple `[symbol]` answer-target
+/// markers. This is the primary way a teacher sets units for a multi-target
+/// question: `;`-separated, one per target in order (`"mol;g"` -> the first
+/// target gets "mol", the second "g"). A single unit with no `;` broadcasts
+/// to every target. Targets beyond however many units were provided keep
+/// whatever unit they already had (e.g. from an inline `[symbol unit]`
+/// marker), so this only ever fills in — never blanks out — a unit.
+pub fn apply_result_units(targets: &mut [AnswerTarget], result_unit: &str) {
+    let parts: Vec<&str> = result_unit
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return;
+    }
+    if parts.len() == 1 {
+        for target in targets.iter_mut() {
+            target.unit = Some(parts[0].to_string());
+        }
+        return;
+    }
+    for (target, &part) in targets.iter_mut().zip(parts.iter()) {
+        target.unit = Some(part.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +164,53 @@ mod tests {
             strip_answer_targets("Vypočítejte [pozor] hmotnost [m]"),
             "Vypočítejte [pozor] hmotnost"
         );
+    }
+
+    #[test]
+    fn apply_result_units_zips_semicolon_separated_units_by_position() {
+        let mut targets = extract_target_symbols("Vypočítejte [n][m]");
+        apply_result_units(&mut targets, "mol;g");
+        assert_eq!(targets[0].unit.as_deref(), Some("mol"));
+        assert_eq!(targets[1].unit.as_deref(), Some("g"));
+    }
+
+    #[test]
+    fn apply_result_units_trims_whitespace_around_semicolons() {
+        let mut targets = extract_target_symbols("Vypočítejte [n][m]");
+        apply_result_units(&mut targets, " mol ; g ");
+        assert_eq!(targets[0].unit.as_deref(), Some("mol"));
+        assert_eq!(targets[1].unit.as_deref(), Some("g"));
+    }
+
+    #[test]
+    fn apply_result_units_broadcasts_a_single_unit_to_every_target() {
+        let mut targets = extract_target_symbols("Vypočítejte [n][m]");
+        apply_result_units(&mut targets, "mol");
+        assert_eq!(targets[0].unit.as_deref(), Some("mol"));
+        assert_eq!(targets[1].unit.as_deref(), Some("mol"));
+    }
+
+    #[test]
+    fn apply_result_units_leaves_targets_beyond_the_provided_units_untouched() {
+        let mut targets = vec![
+            AnswerTarget { symbol: "a".into(), unit: None },
+            AnswerTarget { symbol: "b".into(), unit: None },
+            AnswerTarget {
+                symbol: "c".into(),
+                unit: Some("existing".into()),
+            },
+        ];
+        apply_result_units(&mut targets, "mol;g");
+        assert_eq!(targets[0].unit.as_deref(), Some("mol"));
+        assert_eq!(targets[1].unit.as_deref(), Some("g"));
+        assert_eq!(targets[2].unit.as_deref(), Some("existing"));
+    }
+
+    #[test]
+    fn apply_result_units_is_a_noop_for_empty_result_unit() {
+        let mut targets = extract_target_symbols("Vypočítejte [n]");
+        apply_result_units(&mut targets, "");
+        assert_eq!(targets[0].unit, None);
     }
 
     /// Stripping and extraction must always agree about what counts as a

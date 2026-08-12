@@ -27,7 +27,7 @@ import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError, constantsApi, generationApi, historyApi, templatesApi } from "@/lib/api"
 import { normalizeFormulaForEvaluation } from "@/lib/bulk-import-parser"
-import { extractTargets } from "@/lib/formula-checker"
+import { applyResultUnits, extractTargets } from "@/lib/formula-checker"
 import {
   createRandom,
   evaluateAllAssignments,
@@ -968,6 +968,8 @@ export function QuestionDetailDialog({
     [activeEquationText, equationValidationVariables, constants],
   )
 
+  const questionTargetCount = useMemo(() => extractTargets(editText).length, [editText])
+
   const decoyMissingReferences = useMemo(() => {
     const byRow: Record<string, string[]> = {}
     for (const row of decoyRows) {
@@ -1287,7 +1289,7 @@ export function QuestionDetailDialog({
       // surfaces the last one.
       const allTargets = evaluateAllAssignments(normalized, {}, constants)
       const targetUnits = templateDetails
-        ? extractTargets(templateDetails.template.questionText)
+        ? applyResultUnits(extractTargets(templateDetails.template.questionText), editResultUnit)
         : []
       const answersData =
         allTargets.length > 1
@@ -1321,6 +1323,7 @@ export function QuestionDetailDialog({
     constants,
     fixedPlaceholderValues,
     templateDetails,
+    editResultUnit,
   ])
 
   return (
@@ -1550,6 +1553,11 @@ export function QuestionDetailDialog({
                         disabled={isSaving}
                       />
                       <p className="text-xs text-muted-foreground">{cs.form.unitFormatHint}</p>
+                      {questionTargetCount > 1 && (
+                        <p className="text-xs text-muted-foreground">
+                          {cs.questions.multiTargetUnitHint}
+                        </p>
+                      )}
                       {editResultUnit.trim() && (
                         <p className="text-xs text-muted-foreground">
                           Náhled:{" "}

@@ -1,6 +1,6 @@
 use crate::db::repos::{ConstantRepo, OutputFileRepo, ProjektRepo, TemplateDecoyRepo, TemplateRepo};
 use crate::db::{AppState, DbError};
-use crate::engine::answer_targets::extract_target_symbols;
+use crate::engine::answer_targets::{apply_result_units, extract_target_symbols};
 use crate::engine::export_writer::{write_txt, ExportQuestion};
 use crate::engine::extract_fixed_placeholders;
 use crate::engine::extract_molar_mass_constants;
@@ -81,7 +81,8 @@ pub fn do_generate_for_templates(
         let template = TemplateRepo::get_by_id(conn, template_id)?;
         let (variables, constants, constraint, fixed_values) =
             load_template_dependencies(conn, &template)?;
-        let targets = extract_target_symbols(&template.question_text);
+        let mut targets = extract_target_symbols(&template.question_text);
+        apply_result_units(&mut targets, &template.result_unit);
         let decoys = TemplateDecoyRepo::list_by_template(conn, &template.id)?;
 
         // Give each template its own non-overlapping seed block so the correct
@@ -259,7 +260,8 @@ pub(crate) fn do_regenerate_variant(
     let template = TemplateRepo::get_by_id(conn, &payload.template_id)?;
     let (variables, constants, constraint, fixed_values) =
         load_template_dependencies(conn, &template)?;
-    let targets = extract_target_symbols(&template.question_text);
+    let mut targets = extract_target_symbols(&template.question_text);
+    apply_result_units(&mut targets, &template.result_unit);
     let decoys = TemplateDecoyRepo::list_by_template(conn, &template.id)?;
 
     // Teacher-facing regeneration always places the correct answer at
@@ -1051,5 +1053,61 @@ mod tests {
             with_override_max > 0.55,
             "a 90% custom_spread_percent should exceed the medium preset's 50% ceiling, got {with_override_max}"
         );
+    }
+
+    /// The reported defect: a multi-target question (two semicolon-separated
+    /// equations, e.g. "calculate both mol and g") showed no unit at all for
+    /// either result. "Jednotka výsledku" now accepts a `;`-separated unit
+    /// per `[symbol]` answer-target marker, in order.
+    #[test]
+    fn multi_target_question_gets_units_from_semicolon_separated_result_unit() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+
+        let var = Variable::new("V".into(), "V".into(), 10.0, 100.0, 1.0, "cm3".into(), 0);
+        VariableRepo::insert_raw(&conn, &var).expect("insert variable");
+
+        let template = Template::new(
+            "Vyjádřete [[V]] cm3 vody v mol a g. [n][m]".into(),
+            "n = V / 10; m = n * 5".into(),
+            "n = V / 10; m = n × 5".into(),
+            None,
+            "mol;g".into(),
+            2,
+        );
+        let constraint = ResultConstraint::new(
+            template.id,
+            Some(0.0),
+            Some(10000.0),
+            None,
+            ConstraintType::Range,
+        );
+        let tv = TemplateVariable {
+            template_id: template.id,
+            variable_id: var.id,
+            placeholder: "V".into(),
+            greater_than_variable_id: None,
+            less_than_variable_id: None,
+        };
+        TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint), &[])
+            .expect("insert template");
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template.id],
+            count: 1,
+            base_seed: 42,
+            mode: TemplateMode::Closed,
+            difficulty: "medium".into(),
+            option_count: 5,
+            custom_spread_percent: None,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let answers = results[0].variants[0].answers_data.as_ref().unwrap();
+        assert_eq!(answers.len(), 2);
+        assert_eq!(answers[0].symbol, "n");
+        assert_eq!(answers[0].unit.as_deref(), Some("mol"));
+        assert_eq!(answers[1].symbol, "m");
+        assert_eq!(answers[1].unit.as_deref(), Some("g"));
     }
 }

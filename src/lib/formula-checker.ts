@@ -60,6 +60,30 @@ export function extractTargets(text: string): AnswerTarget[] {
 }
 
 /**
+ * Overlay per-target units parsed from the "Jednotka výsledku" field onto
+ * `targets`, mirroring `apply_result_units` in
+ * `src-tauri/src/engine/answer_targets.rs` so the live client-side preview
+ * matches what the backend will actually generate. `;`-separated, one unit
+ * per target in order (`"mol;g"` -> first target gets "mol", second "g"); a
+ * single unit with no `;` broadcasts to every target. Targets beyond however
+ * many units were provided keep whatever unit they already had (e.g. from an
+ * inline `[symbol unit]` marker) — this only ever fills in, never blanks out.
+ */
+export function applyResultUnits(targets: AnswerTarget[], resultUnit: string): AnswerTarget[] {
+  const parts = resultUnit
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s !== "")
+  if (parts.length === 0) {
+    return targets
+  }
+  if (parts.length === 1) {
+    return targets.map((t) => ({ ...t, unit: parts[0] }))
+  }
+  return targets.map((t, i) => (i < parts.length ? { ...t, unit: parts[i] } : t))
+}
+
+/**
  * The question text with known answers removed from its target markers:
  * `... [pH = 5.383]` -> `... [pH]`. The value is an import-time check, and the
  * backend would otherwise store `= 5.383` as the answer's unit.

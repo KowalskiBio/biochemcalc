@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { extractFormulaVariables, extractTargets, matchVariables } from "@/lib/formula-checker"
+import {
+  applyResultUnits,
+  extractFormulaVariables,
+  extractTargets,
+  matchVariables,
+} from "@/lib/formula-checker"
 
 function targets(symbols: string[]) {
   return symbols.map((symbol) => ({ symbol }))
@@ -51,6 +56,48 @@ describe("extractTargets", () => {
       { symbol: "n", unit: "mol" },
       { symbol: "m", unit: "g" },
     ])
+  })
+})
+
+describe("applyResultUnits", () => {
+  it("zips semicolon-separated units onto targets by position", () => {
+    const result = applyResultUnits(targets(["n", "m"]), "mol;g")
+    expect(result).toEqual([
+      { symbol: "n", unit: "mol" },
+      { symbol: "m", unit: "g" },
+    ])
+  })
+
+  it("trims whitespace around semicolons", () => {
+    const result = applyResultUnits(targets(["n", "m"]), " mol ; g ")
+    expect(result).toEqual([
+      { symbol: "n", unit: "mol" },
+      { symbol: "m", unit: "g" },
+    ])
+  })
+
+  it("broadcasts a single unit to every target", () => {
+    const result = applyResultUnits(targets(["n", "m"]), "mol")
+    expect(result).toEqual([
+      { symbol: "n", unit: "mol" },
+      { symbol: "m", unit: "mol" },
+    ])
+  })
+
+  it("leaves targets beyond the provided units untouched", () => {
+    const result = applyResultUnits(
+      [{ symbol: "a" }, { symbol: "b" }, { symbol: "c", unit: "existing" }],
+      "mol;g",
+    )
+    expect(result).toEqual([
+      { symbol: "a", unit: "mol" },
+      { symbol: "b", unit: "g" },
+      { symbol: "c", unit: "existing" },
+    ])
+  })
+
+  it("is a no-op for an empty result unit", () => {
+    expect(applyResultUnits(targets(["n"]), "")).toEqual([{ symbol: "n" }])
   })
 })
 
