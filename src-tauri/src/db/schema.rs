@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 29;
+const CURRENT_USER_VERSION: u32 = 30;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -151,6 +151,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 29 {
         apply_migration_v29(conn)?;
         conn.pragma_update(None, "user_version", "29")?;
+    }
+
+    if user_version < 30 {
+        apply_migration_v30(conn)?;
+        conn.pragma_update(None, "user_version", "30")?;
     }
 
     Ok(())
@@ -1040,6 +1045,35 @@ fn apply_migration_v29(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Topic groups ("Skupiny") — a teacher-defined way to organize topics on
+/// the topics list page (e.g. by year/semester). Deliberately unrelated to
+/// `categories` ("Kategorie"), which remains the fixed 2/3/4-point-value
+/// bucket nested under a topic. A topic belongs to at most one group (or
+/// none — "unsorted"), so membership lives directly on `topics` rather than
+/// a join table. No backfill needed: existing topics default to
+/// `group_id = NULL, position = 0`, and `TopicRepo::list_all`'s new
+/// `ORDER BY position ASC, created_at DESC` reproduces today's exact order
+/// (an all-zero position ties every row, falling through to `created_at
+/// DESC`, today's only sort key) until a teacher actually uses grouping.
+fn apply_migration_v30(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS topic_groups (
+            id BLOB PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        ALTER TABLE topics ADD COLUMN group_id BLOB REFERENCES topic_groups(id) ON DELETE SET NULL;
+        ALTER TABLE topics ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+
+        CREATE INDEX IF NOT EXISTS idx_topics_group ON topics(group_id);
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1217,7 +1251,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 29);
+        assert_eq!(user_version(&conn), 30);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1307,7 +1341,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 29);
+        assert_eq!(user_version(&conn), 30);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1332,7 +1366,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 29);
+        assert_eq!(user_version(&conn), 30);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");
@@ -1441,5 +1475,105 @@ mod tests {
             .expect("count template_decoys rows");
 
         assert_eq!(count, 0);
+    }
+
+    /// A topic created before v30 must survive with `group_id = NULL,
+    /// position = 0` — "unsorted", not lost or defaulted into some group.
+    #[test]
+    fn v30_creates_topic_groups_table_and_adds_topic_group_columns() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+
+        let migrations: [MigrationFn; 29] = [
+            apply_migration_v1,
+            apply_migration_v2,
+            apply_migration_v3,
+            apply_migration_v4,
+            apply_migration_v5,
+            apply_migration_v6,
+            apply_migration_v7,
+            apply_migration_v8,
+            apply_migration_v9,
+            apply_migration_v10,
+            apply_migration_v11,
+            apply_migration_v12,
+            apply_migration_v13,
+            apply_migration_v14,
+            apply_migration_v15,
+            apply_migration_v16,
+            apply_migration_v17,
+            apply_migration_v18,
+            apply_migration_v19,
+            apply_migration_v20,
+            apply_migration_v21,
+            apply_migration_v22,
+            apply_migration_v23,
+            apply_migration_v24,
+            apply_migration_v25,
+            apply_migration_v26,
+            apply_migration_v27,
+            apply_migration_v28,
+            apply_migration_v29,
+        ];
+        for (index, apply) in migrations.iter().enumerate() {
+            apply(&conn).unwrap_or_else(|e| panic!("v{}: {e}", index + 1));
+            conn.pragma_update(None, "user_version", format!("{}", index + 1))
+                .expect("set version");
+        }
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+
+        let topic_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO topics (id, name, created_at) VALUES (?1, 'Pre-v30 Topic', '2026-01-01T00:00:00Z')",
+            rusqlite::params![topic_id],
+        )
+        .expect("seed pre-v30 topic");
+
+        apply_migration_v30(&conn).expect("v30");
+
+        conn.execute_batch("SELECT id, name, position FROM topic_groups LIMIT 1;")
+            .expect("new topic_groups table");
+
+        let (group_id, position): (Option<uuid::Uuid>, i64) = conn
+            .query_row(
+                "SELECT group_id, position FROM topics WHERE id = ?1",
+                rusqlite::params![topic_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated topic");
+        assert_eq!(group_id, None);
+        assert_eq!(position, 0);
+    }
+
+    #[test]
+    fn v30_group_id_is_nulled_when_its_group_is_deleted() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+
+        let group_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO topic_groups (id, name, created_at) VALUES (?1, 'Group', '2026-01-01T00:00:00Z')",
+            rusqlite::params![group_id],
+        )
+        .expect("insert group");
+
+        let topic_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO topics (id, name, created_at, group_id) VALUES (?1, 'Topic', '2026-01-01T00:00:00Z', ?2)",
+            rusqlite::params![topic_id, group_id],
+        )
+        .expect("insert topic in group");
+
+        conn.execute("DELETE FROM topic_groups WHERE id = ?1", rusqlite::params![group_id])
+            .expect("delete group");
+
+        let remaining_group_id: Option<uuid::Uuid> = conn
+            .query_row(
+                "SELECT group_id FROM topics WHERE id = ?1",
+                rusqlite::params![topic_id],
+                |row| row.get(0),
+            )
+            .expect("read topic after group delete");
+        assert_eq!(remaining_group_id, None, "deleting a group must ungroup its topics, not cascade-delete them");
     }
 }

@@ -28,6 +28,33 @@ impl SetRepo {
         Ok(set)
     }
 
+    /// Raw single-row insert with an explicit `set_index`/`mode`/`name` —
+    /// unlike `create` (which always auto-computes the next index). Used by
+    /// topic duplication to replicate the source topic's exact set list.
+    pub fn insert(conn: &Connection, set: &crate::models::Set) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![set.id, set.category_id, set.set_index, serde_mode(set.mode), set.name],
+        )?;
+        Ok(())
+    }
+
+    /// Raw `set_templates` insert with an explicit `sort_order` — unlike
+    /// `add_template` (which always auto-appends at `MAX+1`). Used by topic
+    /// duplication to preserve the source set's exact template ordering.
+    pub fn insert_link(
+        conn: &Connection,
+        set_id: &Uuid,
+        template_id: &Uuid,
+        sort_order: u32,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO set_templates (set_id, template_id, sort_order) VALUES (?1, ?2, ?3)",
+            params![set_id, template_id, sort_order],
+        )?;
+        Ok(())
+    }
+
     /// Add a template to a set at the end of the ordering.
     pub fn add_template(
         conn: &Connection,

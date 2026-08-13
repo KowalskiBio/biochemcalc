@@ -29,6 +29,7 @@ import type {
   TemplateVariantResult,
   TemplateWithDetails,
   Topic,
+  TopicGroup,
   TopicInput,
   UpdateProjektInput,
   UpdateTemplateWithVariablesPayload,
@@ -79,6 +80,38 @@ export const topicsApi = {
    */
   importBulk: (data: BulkImportData): Promise<Topic> =>
     apiFetch<Topic>("import_bulk_templates", data),
+
+  /**
+   * Duplicate a topic and everything under it (categories, sets, templates,
+   * variables) as a fully independent copy, landing in the same group as
+   * the source, appended at the end.
+   */
+  duplicate: (id: string): Promise<Topic> => apiFetch<Topic>("duplicate_topic", { id }),
+
+  moveToGroup: (topicId: string, groupId: string | null): Promise<void> =>
+    apiFetch<void>("move_topic_to_group", { topicId, groupId }),
+
+  reorderInGroup: (topicIds: string[]): Promise<void> =>
+    apiFetch<void>("reorder_topics_in_group", { topicIds }),
+}
+
+// ============================================================================
+// Topic groups API ("Skupiny")
+// ============================================================================
+
+export const topicGroupsApi = {
+  create: (name: string): Promise<TopicGroup> =>
+    apiFetch<TopicGroup>("create_topic_group", { name }),
+
+  list: (): Promise<TopicGroup[]> => apiFetch<TopicGroup[]>("list_topic_groups"),
+
+  rename: (id: string, name: string): Promise<void> =>
+    apiFetch<void>("rename_topic_group", { id, name }),
+
+  delete: (id: string): Promise<void> => apiFetch<void>("delete_topic_group", { id }),
+
+  reorder: (groupIds: string[]): Promise<void> =>
+    apiFetch<void>("reorder_topic_groups", { groupIds }),
 }
 
 // ============================================================================

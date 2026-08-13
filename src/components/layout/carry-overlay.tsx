@@ -5,18 +5,22 @@ export function CarryOverlay() {
   const kind = useCarryStore((s) => s.kind)
   const template = useCarryStore((s) => s.template)
   const set = useCarryStore((s) => s.set)
+  const topic = useCarryStore((s) => s.topic)
   const mouseX = useCarryStore((s) => s.mouseX)
   const mouseY = useCarryStore((s) => s.mouseY)
 
   if (!isCarrying || kind === null) return null
 
-  const label = kind === "question" ? "↕ Nesená otázka" : "↕ Nesená sada"
+  const label =
+    kind === "question" ? "↕ Nesená otázka" : kind === "set" ? "↕ Nesená sada" : "↕ Nesené téma"
   const content =
     kind === "question"
       ? template?.questionText.slice(0, 120)
-      : set
-        ? `Sada ${set.setIndex}${set.name ? ` — ${set.name}` : ""}`
-        : ""
+      : kind === "set"
+        ? set
+          ? `Sada ${set.setIndex}${set.name ? ` — ${set.name}` : ""}`
+          : ""
+        : (topic?.name ?? "")
 
   return (
     <div

@@ -15,25 +15,27 @@ use crate::commands::reports::{
 };
 use crate::commands::{
     self, BulkImportTemplatesPayload, ClearTemplateHistoryPayload, CreateCategoryPayload,
-    CreateConstantPayload, CreateSetPayload, CreateTemplatePayload, CreateTopicPayload,
-    CreateVariablePayload, DeleteProjektPayload, ExportPayload, ExportProjektToTxtPayload,
-    ExportResult, GenerateForTemplatesPayload, GeneratedTemplate, LoadProjektPayload,
-    MoveSetPayload, OutputFileContent, RegenerateVariantPayload, ReorderTemplatesPayload,
-    SaveProjektPayload, SetTemplatePayload, TemplateLocation, TemplateWithDetails,
-    UpdateConstantPayload, UpdateProjektPayload, UpdateSetNamePayload, UpdateSetModePayload,
-    UpdateTemplatePayload, UpdateTemplateWithVariablesPayload, UpdateTemplatesByEquationPayload,
-    UpdateTopicPayload, UpdateVariablePayload, VictorChatPayload, VictorResponse,
-    VictorSettings, VictorSettingsPayload,
+    CreateConstantPayload, CreateSetPayload, CreateTemplatePayload, CreateTopicGroupPayload,
+    CreateTopicPayload, CreateVariablePayload, DeleteProjektPayload, ExportPayload,
+    ExportProjektToTxtPayload, ExportResult, GenerateForTemplatesPayload, GeneratedTemplate,
+    LoadProjektPayload, MoveSetPayload, MoveTopicToGroupPayload, OutputFileContent,
+    RegenerateVariantPayload, RenameTopicGroupPayload, ReorderTemplatesPayload,
+    ReorderTopicGroupsPayload, ReorderTopicsInGroupPayload, SaveProjektPayload,
+    SetTemplatePayload, TemplateLocation, TemplateWithDetails, UpdateConstantPayload,
+    UpdateProjektPayload, UpdateSetNamePayload, UpdateSetModePayload, UpdateTemplatePayload,
+    UpdateTemplateWithVariablesPayload, UpdateTemplatesByEquationPayload, UpdateTopicPayload,
+    UpdateVariablePayload, VictorChatPayload, VictorResponse, VictorSettings,
+    VictorSettingsPayload,
 };
 use crate::db::repos::{
     CategoryRepo, ConstantRepo, OutputFileRepo, ProjektRepo, SetRepo, TemplateHistoryRepo,
-    TemplateRepo, TopicRepo, VariableHistoryRepo, VariableRepo,
+    TemplateRepo, TopicGroupRepo, TopicRepo, VariableHistoryRepo, VariableRepo,
 };
 use crate::db::AppState;
 use crate::http::error::HttpError;
 use crate::models::{
     Category, Constant, Projekt, ProjektContent, Set, SetTemplate, Template,
-    TemplateHistoryEntry, Topic, Variable, VariableHistoryEntry, Variant,
+    TemplateHistoryEntry, Topic, TopicGroup, Variable, VariableHistoryEntry, Variant,
 };
 use crate::models::OutputFile;
 use axum::extract::State;
@@ -119,11 +121,17 @@ async fn update_topic(
     Json(payload): Json<UpdateTopicPayload>,
 ) -> Result<Json<Topic>, HttpError> {
     let conn = conn!(state);
+    // group_id/position are preserved from the existing row — TopicRepo::update
+    // never touches them, so the response must reflect their actual persisted
+    // values rather than defaulting to "unsorted".
+    let existing = TopicRepo::get_by_id(&conn, &payload.id)?;
     let topic = Topic {
         id: payload.id,
         name: payload.name,
         created_at: chrono::Utc::now(),
         for_students: payload.for_students,
+        group_id: existing.group_id,
+        position: existing.position,
     };
     TopicRepo::update(&conn, &topic)?;
     Ok(Json(topic))
@@ -135,6 +143,78 @@ async fn delete_topic(
 ) -> Result<(), HttpError> {
     let conn = conn!(state);
     TopicRepo::delete(&conn, &body.id)?;
+    Ok(())
+}
+
+async fn duplicate_topic(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<IdBody>,
+) -> Result<Json<Topic>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(commands::do_duplicate_topic(&conn, &body.id)?))
+}
+
+// ---------------------------------------------------------------------------
+// Topic groups ("Skupiny")
+// ---------------------------------------------------------------------------
+
+async fn create_topic_group(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateTopicGroupPayload>,
+) -> Result<Json<TopicGroup>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(commands::do_create_topic_group(&conn, payload)?))
+}
+
+async fn list_topic_groups(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<TopicGroup>>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(TopicGroupRepo::list_all(&conn)?))
+}
+
+async fn rename_topic_group(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RenameTopicGroupPayload>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    TopicGroupRepo::rename(&conn, &payload.id, &payload.name)?;
+    Ok(())
+}
+
+async fn delete_topic_group(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<IdBody>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    TopicGroupRepo::delete(&conn, &body.id)?;
+    Ok(())
+}
+
+async fn reorder_topic_groups(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ReorderTopicGroupsPayload>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    TopicGroupRepo::reorder(&conn, &payload.group_ids)?;
+    Ok(())
+}
+
+async fn move_topic_to_group(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<MoveTopicToGroupPayload>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    TopicRepo::move_to_group(&conn, &payload.topic_id, payload.group_id)?;
+    Ok(())
+}
+
+async fn reorder_topics_in_group(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ReorderTopicsInGroupPayload>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    TopicRepo::reorder_within_group(&conn, &payload.topic_ids)?;
     Ok(())
 }
 
@@ -758,6 +838,14 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/get_topic", post(get_topic))
         .route("/update_topic", post(update_topic))
         .route("/delete_topic", post(delete_topic))
+        .route("/duplicate_topic", post(duplicate_topic))
+        .route("/create_topic_group", post(create_topic_group))
+        .route("/list_topic_groups", post(list_topic_groups))
+        .route("/rename_topic_group", post(rename_topic_group))
+        .route("/delete_topic_group", post(delete_topic_group))
+        .route("/reorder_topic_groups", post(reorder_topic_groups))
+        .route("/move_topic_to_group", post(move_topic_to_group))
+        .route("/reorder_topics_in_group", post(reorder_topics_in_group))
         .route("/create_variable", post(create_variable))
         .route("/list_variables", post(list_variables))
         .route("/get_variable", post(get_variable))

@@ -19,7 +19,23 @@ impl TemplateRepo {
         decoys: &[TemplateDecoyInput],
     ) -> Result<(), DbError> {
         let tx = conn.unchecked_transaction()?;
+        Self::insert_in_tx(&tx, template, variables, constants, constraint, decoys)?;
+        tx.commit()?;
+        Ok(())
+    }
 
+    /// Same as `insert`, but executes directly on an already-open
+    /// connection/transaction instead of opening its own — for callers (like
+    /// topic duplication) that need to insert a template as one step inside
+    /// a larger surrounding transaction, where a nested `BEGIN` would fail.
+    pub fn insert_in_tx(
+        tx: &Connection,
+        template: &Template,
+        variables: &[TemplateVariable],
+        constants: &[TemplateConstant],
+        constraint: Option<&ResultConstraint>,
+        decoys: &[TemplateDecoyInput],
+    ) -> Result<(), DbError> {
         tx.execute(
             "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, topic_id, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
@@ -89,7 +105,6 @@ impl TemplateRepo {
             )?;
         }
 
-        tx.commit()?;
         Ok(())
     }
 

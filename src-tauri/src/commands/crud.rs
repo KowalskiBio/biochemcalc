@@ -1,16 +1,17 @@
 use crate::db::repos::{
     CategoryRepo, ConstantRepo, SetRepo, TemplateDecoyRepo, TemplateHistoryRepo, TemplateRepo,
-    TopicRepo, VariableHistoryRepo, VariableRepo,
+    TopicGroupRepo, TopicRepo, VariableHistoryRepo, VariableRepo,
 };
 use crate::db::{AppState, DbError};
 use crate::models::{
-    Constant, ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateDecoy,
-    TemplateDecoyInput, TemplateMode, TemplateVariable, Topic, Variable, VariableType,
+    Category, Constant, ConstraintType, ResultConstraint, Set, Template, TemplateConstant,
+    TemplateDecoy, TemplateDecoyInput, TemplateMode, TemplateVariable, Topic, TopicGroup,
+    Variable, VariableType,
 };
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tauri::State;
 use uuid::Uuid;
 
@@ -232,11 +233,17 @@ pub fn update_topic(
     payload: UpdateTopicPayload,
 ) -> Result<Topic, DbError> {
     let conn = crate::util::lock_db(&state.db);
+    // group_id/position are preserved from the existing row — TopicRepo::update
+    // never touches them, so the response must reflect their actual persisted
+    // values rather than defaulting to "unsorted".
+    let existing = TopicRepo::get_by_id(&conn, &payload.id)?;
     let topic = Topic {
         id: payload.id,
         name: payload.name,
         created_at: Utc::now(),
         for_students: payload.for_students,
+        group_id: existing.group_id,
+        position: existing.position,
     };
     TopicRepo::update(&conn, &topic)?;
     Ok(topic)
@@ -246,6 +253,322 @@ pub fn update_topic(
 pub fn delete_topic(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
     let conn = crate::util::lock_db(&state.db);
     TopicRepo::delete(&conn, &id)
+}
+
+/// Deep-copy an entire topic — every category, set, template, and each
+/// template's own variables, constants links, constraint, and decoys —
+/// into a brand new topic. The copy is fully independent: editing it (e.g.
+/// narrowing a variable's range) can never change the source topic's
+/// behavior, because every variable the source used gets its own new row
+/// (never shared with the original — see `clone_variable_if_needed`).
+///
+/// `templates.topic_id` is NOT used to find the source topic's templates —
+/// `TemplateRepo::insert` always writes `Uuid::nil()` there (a pre-existing,
+/// unrelated quirk), so the only reliable way to enumerate "which templates
+/// belong to this topic" is the same traversal the rest of the app uses:
+/// categories (topic_id) -> sets (category_id) -> set_templates -> templates.
+#[tauri::command]
+pub fn duplicate_topic(state: State<'_, AppState>, id: Uuid) -> Result<Topic, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_duplicate_topic(&conn, &id)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_duplicate_topic(
+    conn: &rusqlite::Connection,
+    source_topic_id: &Uuid,
+) -> Result<Topic, DbError> {
+    let tx = conn.unchecked_transaction()?;
+
+    let source_topic = TopicRepo::get_by_id(&tx, source_topic_id)?;
+    let mut new_topic = Topic::new(format!("{} (kopie)", source_topic.name));
+    new_topic.for_students = source_topic.for_students;
+    new_topic.group_id = source_topic.group_id;
+    new_topic.position = tx
+        .query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM topics WHERE group_id IS ?1",
+            rusqlite::params![new_topic.group_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    TopicRepo::insert(&tx, &new_topic)?;
+
+    // Categories + sets: raw structural copy, preserving the source's exact
+    // set list (which may exceed the default 4 sets per category).
+    let mut set_id_map: HashMap<Uuid, Uuid> = HashMap::new();
+    for src_cat in CategoryRepo::list_by_topic(&tx, source_topic_id)? {
+        let new_cat = Category::new(new_topic.id, src_cat.point_value);
+        CategoryRepo::insert(&tx, &new_cat)?;
+        for src_set in CategoryRepo::get_sets_for_category(&tx, &src_cat.id)? {
+            let mut new_set = Set::new(new_cat.id, src_set.set_index, src_set.mode);
+            new_set.name = src_set.name.clone();
+            SetRepo::insert(&tx, &new_set)?;
+            set_id_map.insert(src_set.id, new_set.id);
+        }
+    }
+
+    // Templates: traverse via set_templates (the only reliable way to
+    // enumerate this topic's templates, see doc comment above). Memoize per
+    // template/variable so anything referenced from multiple sets/templates
+    // within this topic is only cloned once.
+    let mut template_id_map: HashMap<Uuid, Uuid> = HashMap::new();
+    let mut variable_id_map: HashMap<Uuid, Uuid> = HashMap::new();
+
+    for (&old_set_id, &new_set_id) in &set_id_map {
+        for link in SetRepo::list_templates(&tx, &old_set_id)? {
+            let new_template_id = match template_id_map.get(&link.template_id) {
+                Some(id) => *id,
+                None => {
+                    let new_id = clone_template(&tx, &link.template_id, &mut variable_id_map)?;
+                    template_id_map.insert(link.template_id, new_id);
+                    new_id
+                }
+            };
+            SetRepo::insert_link(&tx, &new_set_id, &new_template_id, link.sort_order)?;
+        }
+    }
+
+    tx.commit()?;
+    Ok(new_topic)
+}
+
+/// Deep-clones one template: its own row, an independent copy of every
+/// variable it uses (memoized in `variable_id_map` across the whole
+/// duplicate-topic operation — variables shared between templates in the
+/// source topic stay shared in the copy, just never shared with the
+/// originals), the SAME constant links (constants are global reference
+/// data, not per-topic), its result constraint, and its decoys. Returns the
+/// new template's id.
+fn clone_template(
+    tx: &rusqlite::Transaction,
+    old_template_id: &Uuid,
+    variable_id_map: &mut HashMap<Uuid, Uuid>,
+) -> Result<Uuid, DbError> {
+    let src = TemplateRepo::get_by_id(tx, old_template_id)?;
+    let mut new_template = Template::new(
+        unique_question_text(tx, &src.question_text)?,
+        src.formula.clone(),
+        src.equation_text.clone(),
+        src.numeric_answer,
+        src.result_unit.clone(),
+        src.point_value,
+    );
+    new_template.significant_digits = src.significant_digits;
+    new_template.force_scientific = src.force_scientific;
+    new_template.decoy_formula = src.decoy_formula.clone();
+
+    let old_links = TemplateRepo::get_variables(tx, old_template_id)?;
+    for link in &old_links {
+        clone_variable_if_needed(tx, &link.variable_id, variable_id_map)?;
+        if let Some(gid) = link.greater_than_variable_id {
+            clone_variable_if_needed(tx, &gid, variable_id_map)?;
+        }
+        if let Some(lid) = link.less_than_variable_id {
+            clone_variable_if_needed(tx, &lid, variable_id_map)?;
+        }
+    }
+    let new_links: Vec<TemplateVariable> = old_links
+        .iter()
+        .map(|l| TemplateVariable {
+            template_id: new_template.id,
+            variable_id: variable_id_map[&l.variable_id],
+            placeholder: l.placeholder.clone(),
+            greater_than_variable_id: l.greater_than_variable_id.map(|g| variable_id_map[&g]),
+            less_than_variable_id: l.less_than_variable_id.map(|le| variable_id_map[&le]),
+        })
+        .collect();
+
+    let new_constants: Vec<TemplateConstant> = TemplateRepo::get_constants(tx, old_template_id)?
+        .into_iter()
+        .map(|c| TemplateConstant {
+            template_id: new_template.id,
+            constant_id: c.constant_id,
+        })
+        .collect();
+
+    let new_constraint = TemplateRepo::get_constraint(tx, old_template_id)?.map(|c| {
+        ResultConstraint::new(
+            new_template.id,
+            c.min_result,
+            c.max_result,
+            c.sd_allowed,
+            c.constraint_type,
+        )
+    });
+
+    let decoy_inputs: Vec<TemplateDecoyInput> =
+        TemplateDecoyRepo::list_by_template(tx, old_template_id)?
+            .into_iter()
+            .map(|d| TemplateDecoyInput {
+                formula: d.formula,
+                option_count: d.option_count,
+            })
+            .collect();
+
+    TemplateRepo::insert_in_tx(
+        tx,
+        &new_template,
+        &new_links,
+        &new_constants,
+        new_constraint.as_ref(),
+        &decoy_inputs,
+    )?;
+    Ok(new_template.id)
+}
+
+/// `templates.question_text` is globally unique (trimmed) across the whole
+/// app (`idx_templates_unique_question_text`) — cloning a template verbatim
+/// would collide with its own source row. Appends " (kopie)", then
+/// " (kopie 2)", " (kopie 3)", ... until a free question text is found.
+fn unique_question_text(tx: &rusqlite::Transaction, base: &str) -> Result<String, DbError> {
+    let trimmed = base.trim();
+    let mut candidate = format!("{trimmed} (kopie)");
+    let mut suffix = 2;
+    loop {
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM templates WHERE TRIM(question_text) = ?1)",
+            rusqlite::params![candidate.trim()],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Ok(candidate);
+        }
+        candidate = format!("{trimmed} (kopie {suffix})");
+        suffix += 1;
+    }
+}
+
+/// Clones a variable the first time it's seen in a duplicate-topic
+/// operation; a repeat request for the same `old_id` is a no-op (the
+/// mapping is already there), so templates that shared one variable in the
+/// source topic still share one (new) variable in the copy.
+fn clone_variable_if_needed(
+    tx: &rusqlite::Transaction,
+    old_id: &Uuid,
+    variable_id_map: &mut HashMap<Uuid, Uuid>,
+) -> Result<(), DbError> {
+    if variable_id_map.contains_key(old_id) {
+        return Ok(());
+    }
+    let mut new_var = VariableRepo::get_by_id(tx, old_id)?;
+    new_var.id = Uuid::new_v4();
+    new_var.created_at = Utc::now();
+    VariableRepo::insert_raw(tx, &new_var)?;
+    variable_id_map.insert(*old_id, new_var.id);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Topic groups ("Skupiny") — organize topics on the topics list page.
+// Deliberately unrelated to Category ("Kategorie"), the fixed 2/3/4-point
+// bucket nested under a topic.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTopicGroupPayload {
+    pub name: String,
+}
+
+#[tauri::command]
+pub fn create_topic_group(
+    state: State<'_, AppState>,
+    payload: CreateTopicGroupPayload,
+) -> Result<TopicGroup, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_create_topic_group(&conn, payload)
+}
+
+/// Shared by the Tauri command above and the HTTP handler in `src/http`.
+pub(crate) fn do_create_topic_group(
+    conn: &rusqlite::Connection,
+    payload: CreateTopicGroupPayload,
+) -> Result<TopicGroup, DbError> {
+    let next_position: i32 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM topic_groups",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let mut group = TopicGroup::new(payload.name);
+    group.position = next_position;
+    TopicGroupRepo::insert(conn, &group)?;
+    Ok(group)
+}
+
+#[tauri::command]
+pub fn list_topic_groups(state: State<'_, AppState>) -> Result<Vec<TopicGroup>, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    TopicGroupRepo::list_all(&conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameTopicGroupPayload {
+    pub id: Uuid,
+    pub name: String,
+}
+
+#[tauri::command]
+pub fn rename_topic_group(
+    state: State<'_, AppState>,
+    payload: RenameTopicGroupPayload,
+) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    TopicGroupRepo::rename(&conn, &payload.id, &payload.name)
+}
+
+#[tauri::command]
+pub fn delete_topic_group(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    TopicGroupRepo::delete(&conn, &id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderTopicGroupsPayload {
+    pub group_ids: Vec<Uuid>,
+}
+
+#[tauri::command]
+pub fn reorder_topic_groups(
+    state: State<'_, AppState>,
+    payload: ReorderTopicGroupsPayload,
+) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    TopicGroupRepo::reorder(&conn, &payload.group_ids)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveTopicToGroupPayload {
+    pub topic_id: Uuid,
+    pub group_id: Option<Uuid>,
+}
+
+#[tauri::command]
+pub fn move_topic_to_group(
+    state: State<'_, AppState>,
+    payload: MoveTopicToGroupPayload,
+) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    TopicRepo::move_to_group(&conn, &payload.topic_id, payload.group_id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderTopicsInGroupPayload {
+    pub topic_ids: Vec<Uuid>,
+}
+
+#[tauri::command]
+pub fn reorder_topics_in_group(
+    state: State<'_, AppState>,
+    payload: ReorderTopicsInGroupPayload,
+) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    TopicRepo::reorder_within_group(&conn, &payload.topic_ids)
 }
 
 // ---------------------------------------------------------------------------
@@ -2164,5 +2487,169 @@ mod tests {
             .expect("list template history");
         assert!(variable_entries.is_empty());
         assert!(template_entries.is_empty());
+    }
+
+    /// End-to-end deep copy: a topic with one category (4 auto-created
+    /// sets), two templates in two different sets sharing one variable, a
+    /// constant, a constraint, and a decoy — everything must be duplicated
+    /// as independent rows, except the constant (global reference data,
+    /// stays shared) and the internal variable-sharing topology (preserved
+    /// within the copy, never shared with the original).
+    #[test]
+    fn duplicate_topic_deep_copies_categories_sets_templates_and_variables() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+
+        let mut topic = Topic::new("Roztoky".into());
+        topic.for_students = true;
+        TopicRepo::insert(&conn, &topic).expect("insert topic");
+
+        let (category, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create category");
+        assert_eq!(sets.len(), 4);
+
+        let shared_var = create_variable(&conn, "X");
+        let constant = crate::models::Constant::new(
+            "Molar mass".into(),
+            "M".into(),
+            18.02,
+            "g/mol".into(),
+            false,
+        );
+        crate::db::repos::ConstantRepo::insert(&conn, &constant).expect("insert constant");
+
+        let template1 = Template::new(
+            "Kolik je [[X]] * 2?".into(),
+            "X * 2".into(),
+            "X × 2".into(),
+            None,
+            "g".into(),
+            2,
+        );
+        let tv1 = TemplateVariable {
+            template_id: template1.id,
+            variable_id: shared_var.id,
+            placeholder: "X".into(),
+            greater_than_variable_id: None,
+            less_than_variable_id: None,
+        };
+        let tc1 = TemplateConstant {
+            template_id: template1.id,
+            constant_id: constant.id,
+        };
+        let constraint1 =
+            ResultConstraint::new(template1.id, Some(0.0), Some(100.0), None, ConstraintType::Range);
+        let decoys1 = vec![TemplateDecoyInput {
+            formula: "X * 3".into(),
+            option_count: 2,
+        }];
+        TemplateRepo::insert(&conn, &template1, &[tv1], &[tc1], Some(&constraint1), &decoys1)
+            .expect("insert template1");
+        SetRepo::add_template(&conn, &sets[0].id, &template1.id).expect("add template1 to set");
+
+        let template2 = Template::new(
+            "Kolik je [[X]] * 3?".into(),
+            "X * 3".into(),
+            "X × 3".into(),
+            None,
+            "g".into(),
+            2,
+        );
+        let tv2 = TemplateVariable {
+            template_id: template2.id,
+            variable_id: shared_var.id,
+            placeholder: "X".into(),
+            greater_than_variable_id: None,
+            less_than_variable_id: None,
+        };
+        TemplateRepo::insert(&conn, &template2, &[tv2], &[], None, &[]).expect("insert template2");
+        SetRepo::add_template(&conn, &sets[1].id, &template2.id).expect("add template2 to set");
+
+        let new_topic = do_duplicate_topic(&conn, &topic.id).expect("duplicate topic");
+
+        assert_ne!(new_topic.id, topic.id);
+        assert_eq!(new_topic.name, "Roztoky (kopie)");
+        assert!(new_topic.for_students);
+
+        let new_categories = CategoryRepo::list_by_topic(&conn, &new_topic.id).expect("list cats");
+        assert_eq!(new_categories.len(), 1);
+        assert_ne!(new_categories[0].id, category.id);
+        assert_eq!(new_categories[0].point_value, 2);
+
+        let new_sets =
+            CategoryRepo::get_sets_for_category(&conn, &new_categories[0].id).expect("list sets");
+        assert_eq!(new_sets.len(), 4, "duplicate must preserve the exact set count");
+
+        let new_links1 = SetRepo::list_templates(&conn, &new_sets[0].id).expect("list links 1");
+        let new_links2 = SetRepo::list_templates(&conn, &new_sets[1].id).expect("list links 2");
+        assert_eq!(new_links1.len(), 1);
+        assert_eq!(new_links2.len(), 1);
+        let new_template1_id = new_links1[0].template_id;
+        let new_template2_id = new_links2[0].template_id;
+        assert_ne!(new_template1_id, template1.id);
+        assert_ne!(new_template2_id, template2.id);
+
+        // The two duplicated templates must share ONE new variable (the
+        // source topology preserved) that is NOT the original shared_var.
+        let new_var1 = &TemplateRepo::get_variables(&conn, &new_template1_id).expect("vars1")[0];
+        let new_var2 = &TemplateRepo::get_variables(&conn, &new_template2_id).expect("vars2")[0];
+        assert_eq!(
+            new_var1.variable_id, new_var2.variable_id,
+            "templates sharing a variable in the source must still share one (new) variable in the copy"
+        );
+        assert_ne!(
+            new_var1.variable_id, shared_var.id,
+            "the copy must never share a variable row with the original"
+        );
+
+        // Editing the duplicated variable must not affect the original.
+        let mut duplicated_var =
+            crate::db::repos::VariableRepo::get_by_id(&conn, &new_var1.variable_id).expect("get dup var");
+        duplicated_var.max_value = 5.0;
+        crate::db::repos::VariableRepo::update(&conn, &duplicated_var).expect("update dup var");
+        let original_var_after =
+            crate::db::repos::VariableRepo::get_by_id(&conn, &shared_var.id).expect("get original var");
+        assert_eq!(
+            original_var_after.max_value, shared_var.max_value,
+            "editing the duplicate's variable must not change the original's"
+        );
+
+        // Constant stays linked to the SAME row (global reference data).
+        let new_constants1 = TemplateRepo::get_constants(&conn, &new_template1_id).expect("consts1");
+        assert_eq!(new_constants1.len(), 1);
+        assert_eq!(new_constants1[0].constant_id, constant.id);
+
+        // Constraint and decoy are deep-copied onto the new template.
+        let new_constraint1 = TemplateRepo::get_constraint(&conn, &new_template1_id)
+            .expect("constraint1")
+            .expect("constraint1 present");
+        assert_eq!(new_constraint1.min_result, Some(0.0));
+        assert_eq!(new_constraint1.max_result, Some(100.0));
+
+        let new_decoys1 =
+            TemplateDecoyRepo::list_by_template(&conn, &new_template1_id).expect("decoys1");
+        assert_eq!(new_decoys1.len(), 1);
+        assert_eq!(new_decoys1[0].formula, "X * 3");
+        assert_eq!(new_decoys1[0].option_count, 2);
+
+        // The source topic must be completely untouched.
+        let original_categories = CategoryRepo::list_by_topic(&conn, &topic.id).expect("orig cats");
+        assert_eq!(original_categories.len(), 1);
+        assert_eq!(original_categories[0].id, category.id);
+    }
+
+    #[test]
+    fn duplicate_topic_lands_in_the_same_group_as_the_source() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+
+        let group = TopicGroup::new("2026/2027".into());
+        TopicGroupRepo::insert(&conn, &group).expect("insert group");
+
+        let topic = Topic::new("Topic".into());
+        TopicRepo::insert(&conn, &topic).expect("insert topic");
+        TopicRepo::move_to_group(&conn, &topic.id, Some(group.id)).expect("move to group");
+
+        let new_topic = do_duplicate_topic(&conn, &topic.id).expect("duplicate");
+        assert_eq!(new_topic.group_id, Some(group.id));
     }
 }

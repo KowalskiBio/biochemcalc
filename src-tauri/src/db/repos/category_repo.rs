@@ -53,6 +53,23 @@ impl CategoryRepo {
         Ok(sets)
     }
 
+    /// Raw single-row insert — no auto-created sets. Used by topic
+    /// duplication, which replicates the source topic's *actual* set list
+    /// (which may exceed the default 4 sets per category) rather than
+    /// regenerating a fresh default set.
+    pub fn insert(conn: &Connection, category: &Category) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO categories (id, topic_id, point_value, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                category.id,
+                category.topic_id,
+                category.point_value,
+                category.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn list_all(conn: &Connection) -> Result<Vec<Category>, DbError> {
         let mut stmt = conn.prepare(
             "SELECT id, topic_id, point_value, created_at FROM categories ORDER BY point_value ASC",

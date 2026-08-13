@@ -4,6 +4,7 @@ pub mod constant;
 pub mod meta;
 pub mod template;
 pub mod topic;
+pub mod topic_group;
 pub mod user;
 pub mod variable;
 pub mod variant;
@@ -22,6 +23,7 @@ pub use template::{
     TemplateDecoyInput, TemplateMode, TemplateVariable,
 };
 pub use topic::Topic;
+pub use topic_group::TopicGroup;
 pub use user::{InviteCode, Role, User};
 pub use variable::{Variable, VariableType};
 pub use variant::{AnswerField, Variant};

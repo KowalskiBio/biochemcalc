@@ -10,6 +10,8 @@ export interface Topic {
   name: string
   createdAt: string
   forStudents: boolean
+  groupId: string | null
+  position: number
 }
 
 /**
@@ -18,6 +20,19 @@ export interface Topic {
 export interface TopicInput {
   name: string
   forStudents?: boolean
+}
+
+/**
+ * TopicGroup model - a teacher-defined bucket ("Skupina") for organizing
+ * topics on the topics list page (e.g. by year/semester). Deliberately
+ * unrelated to Category ("Kategorie"), the fixed 2/3/4-point bucket nested
+ * under a topic.
+ */
+export interface TopicGroup {
+  id: string
+  name: string
+  position: number
+  createdAt: string
 }
 
 // Variable model - represents a configurable variable for biochemistry calculations
