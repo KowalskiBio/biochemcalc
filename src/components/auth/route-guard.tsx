@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { Navigate, useLocation } from "react-router-dom"
-import { useAuthStore } from "@/stores/auth-store"
 import type { Role } from "@/lib/types"
+import { useAuthStore } from "@/stores/auth-store"
 
 /**
  * Gate on "is anyone logged in". `useAuthStore`'s `status` starts as

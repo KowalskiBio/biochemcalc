@@ -93,10 +93,7 @@ export function TopicsPage() {
     return topics.filter((t) => t.name.toLowerCase().includes(term))
   }, [topics, searchTerm])
 
-  const groupsSorted = useMemo(
-    () => [...groups].sort((a, b) => a.position - b.position),
-    [groups],
-  )
+  const groupsSorted = useMemo(() => [...groups].sort((a, b) => a.position - b.position), [groups])
 
   const topicsByGroup = useMemo(() => {
     const map = new Map<string, Topic[]>()
@@ -113,10 +110,7 @@ export function TopicsPage() {
   }, [filteredTopics])
 
   const unsortedTopics = useMemo(
-    () =>
-      filteredTopics
-        .filter((t) => !t.groupId)
-        .sort((a, b) => a.position - b.position),
+    () => filteredTopics.filter((t) => !t.groupId).sort((a, b) => a.position - b.position),
     [filteredTopics],
   )
 
@@ -413,6 +407,7 @@ export function TopicsPage() {
       const isEditing = editingGroupId === group.id
 
       return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: drop target for mouse drag-and-drop; keyboard DnD parity is a follow-up
         <div
           key={group.id}
           className={`rounded-xl border-2 p-4 transition-colors ${
@@ -608,6 +603,7 @@ export function TopicsPage() {
             <div className="space-y-6">
               {groupsSorted.map((group, index) => renderGroupBox(group, index))}
 
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: drop target for mouse drag-and-drop; keyboard DnD parity is a follow-up */}
               <div
                 className={`rounded-xl border-2 p-4 transition-colors ${
                   isCarryingTopic && hoveredGroup === "unsorted"
@@ -666,9 +662,7 @@ export function TopicsPage() {
         onConfirm={() => void handleConfirmDeleteGroup()}
         title={cs.topics.deleteGroup}
         description={
-          deletingGroup
-            ? cs.topics.deleteGroupConfirm.replace("{name}", deletingGroup.name)
-            : ""
+          deletingGroup ? cs.topics.deleteGroupConfirm.replace("{name}", deletingGroup.name) : ""
         }
       />
     </div>

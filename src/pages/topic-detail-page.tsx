@@ -15,7 +15,7 @@ import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialo
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError, categoriesApi, setsApi, templatesApi, topicsApi } from "@/lib/api"
-import type { Category, CategoryWithSets, Set, Topic } from "@/lib/types"
+import type { Category, CategoryWithSets, Set as QuestionSet, Topic } from "@/lib/types"
 import { useCarryStore } from "@/stores/drag-store"
 
 export function TopicDetailPage() {
@@ -193,7 +193,7 @@ export function TopicDetailPage() {
   )
 
   const handleSetMouseDown = useCallback(
-    (e: React.MouseEvent, setObj: Set) => {
+    (e: React.MouseEvent, setObj: QuestionSet) => {
       if (e.button !== 0 || isCarrying) return
       e.preventDefault()
       const startX = e.clientX
@@ -297,15 +297,18 @@ export function TopicDetailPage() {
               className="text-2xl font-semibold h-auto py-0"
             />
           ) : (
-            <h1
-              className="text-2xl font-semibold tracking-tight text-foreground cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1"
-              onClick={() => {
-                setEditName(topic.name)
-                setIsEditingName(true)
-              }}
-            >
-              {topic.name}
-              <Pencil className="size-3 inline ml-2 text-muted-foreground opacity-0 hover:opacity-100" />
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              <button
+                type="button"
+                className="cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1 text-left"
+                onClick={() => {
+                  setEditName(topic.name)
+                  setIsEditingName(true)
+                }}
+              >
+                {topic.name}
+                <Pencil className="size-3 inline ml-2 text-muted-foreground opacity-0 hover:opacity-100" />
+              </button>
             </h1>
           )}
           <p className="text-muted-foreground text-sm">
@@ -383,6 +386,7 @@ export function TopicDetailPage() {
                             set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))
                           const isBeingCarried = isCarryingSet && carriedSet?.id === set.id
                           return (
+                            // biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop card; keyboard DnD parity is a follow-up
                             <div
                               key={set.id}
                               onMouseDown={(e) => handleSetMouseDown(e, set)}

@@ -241,7 +241,7 @@ export function parsePairedConstantsText(text: string): Array<Record<string, num
       for (const match of line.matchAll(PAIRED_CONSTANT_REGEX)) {
         const key = match[1]
         const val = parseFloat(match[2].replace(",", "."))
-        if (!isNaN(val)) record[key] = val
+        if (!Number.isNaN(val)) record[key] = val
       }
       return record
     })

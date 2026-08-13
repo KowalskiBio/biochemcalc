@@ -1,19 +1,19 @@
 import { create } from "zustand"
-import type { Template, Set, Topic } from "@/lib/types"
+import type { Set as QuestionSet, Template, Topic } from "@/lib/types"
 
 type CarryKind = "question" | "set" | "topic" | null
 
 interface CarryState {
   kind: CarryKind
   template: Template | null
-  set: Set | null
+  set: QuestionSet | null
   topic: Topic | null
   sourceSetId: string | null
   isCarrying: boolean
   mouseX: number
   mouseY: number
   startQuestionCarry: (template: Template, sourceSetId: string) => void
-  startSetCarry: (set: Set) => void
+  startSetCarry: (set: QuestionSet) => void
   startTopicCarry: (topic: Topic) => void
   updateMouse: (x: number, y: number) => void
   endCarry: () => void

@@ -1,5 +1,5 @@
 import { useEffect } from "react"
-import { Route, Routes, Navigate } from "react-router-dom"
+import { Navigate, Route, Routes } from "react-router-dom"
 
 import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"

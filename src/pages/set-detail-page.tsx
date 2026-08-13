@@ -547,17 +547,20 @@ export function SetDetailPage() {
               className="text-2xl font-semibold h-auto py-0 max-w-xs"
             />
           ) : (
-            <h1
-              className="text-2xl font-semibold tracking-tight text-foreground cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1"
-              onClick={() => {
-                setEditSetName(
-                  set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex)),
-                )
-                setIsEditingSetName(true)
-              }}
-            >
-              {set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))}
-              <Pencil className="size-3 inline ml-2 text-muted-foreground" />
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              <button
+                type="button"
+                className="cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1 text-left"
+                onClick={() => {
+                  setEditSetName(
+                    set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex)),
+                  )
+                  setIsEditingSetName(true)
+                }}
+              >
+                {set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))}
+                <Pencil className="size-3 inline ml-2 text-muted-foreground" />
+              </button>
             </h1>
           )}
           <p className="text-muted-foreground text-sm">

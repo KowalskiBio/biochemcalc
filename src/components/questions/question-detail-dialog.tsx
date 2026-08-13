@@ -1168,7 +1168,7 @@ export function QuestionDetailDialog({
       )
       const values = entry?.values ?? variable.stringValues
       const idx = values && values.length > 0 ? Math.floor(rng() * values.length) : -1
-      mockStrings[variable.placeholder] = idx >= 0 ? values![idx] : variable.placeholder
+      mockStrings[variable.placeholder] = idx >= 0 && values ? values[idx] : variable.placeholder
       // Inject paired constants for the sampled value index
       const pc = variable.pairedConstants?.[idx]
       if (pc) {

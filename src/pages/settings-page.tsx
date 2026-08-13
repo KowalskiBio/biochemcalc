@@ -16,8 +16,8 @@ import {
 } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { authApi } from "@/lib/auth-api"
 import { extractErrorMessage, victorApi } from "@/lib/api"
+import { authApi } from "@/lib/auth-api"
 import type { InviteCode, Role, User } from "@/lib/types"
 import { useAuthStore } from "@/stores/auth-store"
 

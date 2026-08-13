@@ -5,8 +5,10 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct SessionRecord {
+    #[allow(dead_code)] // mirrors the sessions table; no reader yet
     pub token: String,
     pub user_id: Uuid,
+    #[allow(dead_code)] // mirrors the sessions table; no reader yet
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }

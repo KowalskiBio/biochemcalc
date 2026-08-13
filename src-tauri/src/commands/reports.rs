@@ -6,13 +6,13 @@
 
 use crate::commands::generation::load_template_dependencies;
 use crate::commands::practice::{
-    answer_slots, correct_answers, constants_for_rendering, PracticeAnswerSlot, PracticeCorrectAnswer,
-    PracticeVariable, PracticeQuestion,
+    correct_answers, constants_for_rendering, PracticeAnswerSlot, PracticeCorrectAnswer,
+    PracticeVariable,
 };
 use crate::commands::crud::TemplateLocation;
 use crate::db::repos::{
-    ConstantRepo, PracticeAttemptRecord, PracticeRepo, QuestionReportRecord, QuestionReportRepo,
-    QuestionReportSummaryRow, TemplateRepo, TopicRepo, UserRepo,
+    PracticeAttemptRecord, PracticeRepo, QuestionReportRecord, QuestionReportRepo, TemplateRepo,
+    TopicRepo, UserRepo,
 };
 use crate::db::DbError;
 use crate::models::TemplateMode;
@@ -325,6 +325,7 @@ mod crud {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::practice::PracticeQuestion;
     use crate::db::repos::{
         CategoryRepo, SetRepo, UserRecord, UserRepo,
         topic_repo::TopicRepo as TPR, 

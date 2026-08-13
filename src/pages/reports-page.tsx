@@ -5,9 +5,9 @@ import { Link } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { FormattedResult } from "@/components/ui/formatted-result"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,

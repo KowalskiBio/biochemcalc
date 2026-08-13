@@ -3,9 +3,8 @@ import { FlaskConical, LogOut, Moon, Settings, Sun, Target, Trophy } from "lucid
 import type React from "react"
 import { type ReactNode, useEffect } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-
-import { Toaster } from "@/components/ui/toaster"
 import { PageTransition } from "@/components/ui/page-transition"
+import { Toaster } from "@/components/ui/toaster"
 import { cs } from "@/i18n/cs"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"

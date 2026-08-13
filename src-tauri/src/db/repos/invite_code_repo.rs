@@ -130,6 +130,7 @@ mod tests {
         conn
     }
 
+    #[allow(dead_code)] // test helper: seeds a user row for FK-referencing fixtures
     fn insert_user(conn: &Connection) -> Uuid {
         use crate::db::repos::user_repo::{UserRecord, UserRepo};
         let user = UserRecord {

@@ -23,7 +23,7 @@ pub use invite_code_repo::InviteCodeRepo;
 pub use output_file_repo::OutputFileRepo;
 pub use practice_repo::{LeaderboardRow, PracticeAttemptRecord, PracticeRepo};
 pub use projekt_repo::ProjektRepo;
-pub use question_report_repo::{QuestionReportRecord, QuestionReportRepo, QuestionReportSummaryRow};
+pub use question_report_repo::{QuestionReportRecord, QuestionReportRepo};
 pub use session_repo::SessionRepo;
 pub use set_repo::SetRepo;
 pub use settings_repo::AppSettingsRepo;

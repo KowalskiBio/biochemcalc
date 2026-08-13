@@ -14,7 +14,7 @@ import {
   scientificNotationToHtml,
   validateEquationReferences,
 } from "@/lib/math-utils"
-import type { LocalVariableEdit, Variable, Variant, VariableWithPlaceholder } from "@/lib/types"
+import type { LocalVariableEdit, Variable, VariableWithPlaceholder, Variant } from "@/lib/types"
 
 describe("renderEquationAsLatex", () => {
   it("renders a simple fraction", () => {
