@@ -12,6 +12,41 @@ export function required<T>(value: T | undefined, name: string): T {
   return value
 }
 
+/**
+ * Generate a UUID for purely client-side use (React keys, local store ids).
+ *
+ * `crypto.randomUUID()` is gated behind secure contexts, so it is `undefined`
+ * when the app is served over plain HTTP (the headless-VM deployment) — and
+ * calling it mid-render crashes the whole tree because there is no error
+ * boundary. `crypto.getRandomValues()` works on insecure origins too, so fall
+ * back to an RFC 4122 v4 UUID built from it, then to Math.random() as a last
+ * resort for very old webviews. None of these ids need cryptographic strength.
+ */
+export function generateId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10xx
+
+  const hex: string[] = []
+  for (let i = 0; i < bytes.length; i++) {
+    hex.push(bytes[i].toString(16).padStart(2, "0"))
+  }
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex
+    .slice(6, 8)
+    .join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10, 16).join("")}`
+}
+
 export interface PlaceholderMatch {
   symbol: string
   value?: string

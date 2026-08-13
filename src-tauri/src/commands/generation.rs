@@ -110,6 +110,7 @@ pub fn do_generate_for_templates(
             &decoys,
             true,
             spread_override,
+            template.significant_digits,
         )
         .map_err(generation_to_db_error)?;
 
@@ -281,6 +282,7 @@ pub(crate) fn do_regenerate_variant(
         &decoys,
         true,
         None,
+        template.significant_digits,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -302,6 +304,7 @@ pub(crate) fn do_regenerate_variant(
                     payload.option_count,
                     true,
                     None,
+                    template.significant_digits,
                 )
                 .map_err(|e| DbError::Validation(e.to_string()))?;
                 variant.numeric_options = Some(options);

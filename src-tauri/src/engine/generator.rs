@@ -325,6 +325,33 @@ fn display_rounding_unit(value: f64, max_deviation: f64) -> f64 {
     }
 }
 
+/// Display rounding grid for the generated options.
+///
+/// When the teacher configured significant digits, the grid must be fine
+/// enough to keep them all: the `0.01`-based default would quantize e.g.
+/// 23.4759 to 23.47, and the significant-digit formatter both the generate
+/// preview and the export apply afterwards can only pad the stump back to
+/// "23.470" instead of the correct "23.476". Round to the last significant
+/// place instead (5 sig digits at ~23.47 → 0.001 unit). A finer grid is
+/// strictly safer for the distractor logic below — `close()`, decoy dedup
+/// and the fallback spread all scale with the unit — and it mirrors exactly
+/// what `formatSignificantDigits` (JS) / `fmt_significant_cz` (Rust) render,
+/// so every view rounds the same server value the same way.
+fn display_grid(value: f64, max_deviation: f64, sig_digits: Option<u8>) -> f64 {
+    if let Some(n) = sig_digits.filter(|&n| n >= 1) {
+        if value.is_finite() && value != 0.0 {
+            let order = value.abs().log10().floor() as i32;
+            let unit = 10f64.powi(order - (n as i32 - 1));
+            // Guard both extremes: degenerate tiny magnitudes (overflowing
+            // powi towards zero) and astronomically large values.
+            if unit.is_finite() && unit > 0.0 {
+                return unit.max(1e-30);
+            }
+        }
+    }
+    display_rounding_unit(value, max_deviation)
+}
+
 fn round_to_unit(value: f64, unit: f64) -> f64 {
     if !value.is_finite() || unit == 0.0 {
         return value;
@@ -383,6 +410,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     option_count: u8,
     force_correct_first: bool,
     spread_override: Option<f64>,
+    result_significant_digits: Option<u8>,
 ) -> Result<(Vec<f64>, u8), GenerationError> {
     let count = clamp_option_count(option_count);
     // A per-export custom deviation (e.g. the export dialog's per-question
@@ -393,7 +421,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
 
-    let rounding_unit = display_rounding_unit(correct, max_deviation);
+    let rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
     let rounded_correct = round_to_unit(correct, rounding_unit);
     let close = |a: f64, b: f64| (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON);
 
@@ -560,6 +588,7 @@ pub fn generate_variant(
     difficulty: &str,
     option_count: u8,
     fixed_values: &HashMap<String, f64>,
+    result_significant_digits: Option<u8>,
 ) -> Result<Variant, GenerationError> {
     generate_variant_with_targets(
         template_id,
@@ -576,6 +605,7 @@ pub fn generate_variant(
         &[],
         false,
         None,
+        result_significant_digits,
     )
 }
 
@@ -594,6 +624,7 @@ pub fn generate_variant_with_targets(
     decoys: &[TemplateDecoy],
     force_correct_first: bool,
     spread_override: Option<f64>,
+    result_significant_digits: Option<u8>,
 ) -> Result<Variant, GenerationError> {
     let multi_answer = !targets.is_empty();
     let has_assignments = multi_answer || formula.contains(';');
@@ -631,6 +662,7 @@ pub fn generate_variant_with_targets(
                 decoys,
                 force_correct_first,
                 spread_override,
+                result_significant_digits,
             ) {
                 Ok(Some(variant)) => return Ok(variant),
                 Ok(None) => {
@@ -669,6 +701,7 @@ pub fn generate_variant_with_targets(
                     option_count,
                     force_correct_first,
                     spread_override,
+                    result_significant_digits,
                 )?;
                 (Some(options), Some(position), None, None)
             }
@@ -712,6 +745,7 @@ fn generate_multi_answer_variant(
     decoys: &[TemplateDecoy],
     force_correct_first: bool,
     spread_override: Option<f64>,
+    result_significant_digits: Option<u8>,
 ) -> Result<Option<Variant>, GenerationError> {
     let answer_values =
         evaluate_assignments(assignments, assigned_numeric, constants, assigned_strings)
@@ -780,6 +814,7 @@ fn generate_multi_answer_variant(
                     option_count,
                     force_correct_first,
                     spread_override,
+                    result_significant_digits,
                 )?;
                 (Some(options), Some(position), None, None)
             }
@@ -812,6 +847,7 @@ fn generate_multi_answer_variant(
                 option_count,
                 force_correct_first,
                 spread_override,
+                result_significant_digits,
             )?;
             (Some(options), Some(position), None, None)
         }
@@ -849,6 +885,7 @@ pub fn generate_variants(
     difficulty: &str,
     option_count: u8,
     fixed_values: &HashMap<String, f64>,
+    result_significant_digits: Option<u8>,
 ) -> Result<Vec<Variant>, GenerationError> {
     generate_variants_with_targets(
         template_id,
@@ -866,6 +903,7 @@ pub fn generate_variants(
         &[],
         false,
         None,
+        result_significant_digits,
     )
 }
 
@@ -885,6 +923,7 @@ pub fn generate_variants_with_targets(
     decoys: &[TemplateDecoy],
     force_correct_first: bool,
     spread_override: Option<f64>,
+    result_significant_digits: Option<u8>,
 ) -> Result<Vec<Variant>, GenerationError> {
     let mut variants = Vec::with_capacity(count);
     for i in 0..count {
@@ -904,6 +943,7 @@ pub fn generate_variants_with_targets(
             decoys,
             force_correct_first,
             spread_override,
+            result_significant_digits,
         )?;
         variants.push(variant);
     }
@@ -999,6 +1039,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1028,6 +1069,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1054,6 +1096,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1084,6 +1127,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1110,6 +1154,7 @@ mod tests {
             "medium",
             5,
             &fixed_values,
+            None,
         )
         .unwrap();
 
@@ -1134,6 +1179,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1158,6 +1204,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1176,7 +1223,7 @@ mod tests {
         let correct = 1e-6;
         let mut rng = StdRng::seed_from_u64(42);
         let (options, _correct_pos) =
-            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1191,7 +1238,7 @@ mod tests {
         let correct = 1.674e-24; // mass of one H atom in grams
         let mut rng = StdRng::seed_from_u64(7);
         let (options, correct_pos) =
-            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1253,6 +1300,7 @@ mod tests {
             &[],
             false,
             None,
+            None,
         )
         .unwrap();
 
@@ -1295,6 +1343,7 @@ mod tests {
             &[],
             false,
             None,
+            None,
         )
         .unwrap();
 
@@ -1310,7 +1359,7 @@ mod tests {
         let correct = 0.01;
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos) =
-            generate_numeric_options(correct, &[], &constraint, &mut rng, "hard", 5, false, None)
+            generate_numeric_options(correct, &[], &constraint, &mut rng, "hard", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5, "expected 5 options for correct answer {correct}");
@@ -1333,6 +1382,7 @@ mod tests {
                     "hard",
                     5,
                     false,
+                    None,
                     None,
                 )
                 .expect(&format!(
@@ -1376,6 +1426,7 @@ mod tests {
             &[],
             &[],
             false,
+            None,
             None,
         )
         .unwrap();
@@ -1435,7 +1486,7 @@ mod tests {
             requested_count: 2,
         }];
         let (options, correct_pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1459,7 +1510,7 @@ mod tests {
             requested_count: 2,
         }];
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1482,7 +1533,7 @@ mod tests {
         for seed in 0..50 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (options, _pos) = generate_numeric_options(
-                correct, &decoys, &constraint, &mut rng, "medium", 5, false, None,
+                correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, None,
             )
             .unwrap();
             let mut sorted = options.clone();
@@ -1515,6 +1566,7 @@ mod tests {
             &[],
             &[make_decoy("X * 3", 2)],
             false,
+            None,
             None,
         )
         .unwrap();
@@ -1552,6 +1604,7 @@ mod tests {
             &[make_decoy("n * 2", 2)],
             false,
             None,
+            None,
         )
         .unwrap();
 
@@ -1584,6 +1637,7 @@ mod tests {
             &[],
             &[make_decoy("this is not a valid formula (((", 2)],
             false,
+            None,
             None,
         )
         .unwrap();
@@ -1622,6 +1676,7 @@ mod tests {
             "medium",
             5,
             &HashMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1675,7 +1730,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1725,7 +1780,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(11);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 4, false, None)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 4, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 4);
@@ -1764,7 +1819,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(3);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1800,7 +1855,7 @@ mod tests {
         ];
         let mut rng = StdRng::seed_from_u64(5);
         let (options, _pos) =
-            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None)
+            generate_numeric_options(correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, None)
                 .unwrap();
 
         assert_eq!(options.len(), 5);
@@ -1821,13 +1876,95 @@ mod tests {
         for seed in 0..20 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (_options, position) =
-                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, true, None)
+                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, true, None, None)
                     .unwrap();
             assert_eq!(
                 position, 1,
                 "force_correct_first must always place the correct answer at position 1, seed={seed}"
             );
         }
+    }
+
+    /// The display grid must never be coarser than the configured significant
+    /// digits — otherwise the correct option is pre-rounded (e.g. 23.4759
+    /// onto the 0.01 grid) and the significant-digit formatter used by both
+    /// the generate preview and the export can only pad the stump back,
+    /// showing "23.470" instead of the expected "23.476".
+    #[test]
+    fn display_grid_keeps_all_significant_digits() {
+        // 5 significant digits at ~23.47 → a 0.001 grid, not the default 0.01.
+        assert!((display_grid(23.4759, 0.5, Some(5)) - 0.001).abs() < 1e-12);
+        // 2 significant digits at ~111554 → a 10^4 grid (formats as 110000).
+        assert!((display_grid(111554.0, 0.5, Some(2)) - 1e4).abs() < 1e-9);
+        // Without significant digits the deviation-driven grid is unchanged.
+        assert!((display_grid(23.4759, 0.5, None) - 0.01).abs() < 1e-12);
+        // Degenerate inputs fall back to the default grid: a zero value or
+        // a zero significant-digit count.
+        assert!((display_grid(0.0, 0.5, Some(5)) - 0.01).abs() < 1e-12);
+        assert!((display_grid(23.4759, 0.5, Some(0)) - 0.01).abs() < 1e-12);
+        // Tiny magnitudes stay protected by the 1e-30 floor.
+        assert!((display_grid(1.67e-27, 0.5, Some(4)) - 1e-30).abs() < 1e-42);
+    }
+
+    /// End-to-end for the reported bug: with 5 significant digits configured,
+    /// the stored correct option must keep all of them (23.476), so every
+    /// view that formats it with significant digits agrees with the
+    /// per-question popup.
+    #[test]
+    fn significant_digits_grid_preserves_the_correct_option() {
+        let constraint = make_constraint(Some(0.0), Some(100.0), None);
+        let correct = 23.4759;
+        for seed in 0..20 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, position) = generate_numeric_options(
+                correct, &[], &constraint, &mut rng, "medium", 5, true, None, Some(5),
+            )
+            .unwrap();
+            let stored_correct = options[(position - 1) as usize];
+            assert!(
+                (stored_correct - 23.476).abs() < 1e-9,
+                "correct option must round to the last significant place, got {stored_correct}"
+            );
+            let unique: std::collections::HashSet<_> = options
+                .iter()
+                .map(|o| (o * 1000.0).round() as i64)
+                .collect();
+            assert_eq!(
+                unique.len(),
+                options.len(),
+                "options must stay distinct on the 0.001 grid: {options:?}"
+            );
+        }
+    }
+
+    /// Decoy acceptance semantics must survive the finer grid: a decoy
+    /// differing in the last significant place is kept, while one that
+    /// rounds onto the correct answer is dropped.
+    #[test]
+    fn decoy_keeps_slots_on_the_significant_digits_grid() {
+        let constraint = make_constraint(Some(0.0), Some(100.0), None);
+        let correct = 23.4759;
+        let decoys = [
+            DecoyAnchor {
+                value: 23.4694, // rounds to 23.469 — kept
+                requested_count: 1,
+            },
+            DecoyAnchor {
+                value: 23.4757, // rounds to 23.476 — collides, dropped
+                requested_count: 3,
+            },
+        ];
+        let mut rng = StdRng::seed_from_u64(7);
+        let (options, _pos) = generate_numeric_options(
+            correct, &decoys, &constraint, &mut rng, "medium", 5, false, None, Some(5),
+        )
+        .unwrap();
+        assert!(options.iter().any(|o| (o - 23.469).abs() < 1e-9));
+        assert_eq!(
+            options.iter().filter(|o| (**o - 23.476).abs() < 1e-9).count(),
+            1,
+            "the decoy rounding onto the correct answer must be dropped: {options:?}"
+        );
     }
 
     /// Without an override, "medium" caps relative deviation at 50% — no
@@ -1842,7 +1979,7 @@ mod tests {
         for seed in 0..30 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (options, _pos) =
-                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None)
+                generate_numeric_options(correct, &[], &constraint, &mut rng, "medium", 5, false, None, None)
                     .unwrap();
             for o in &options {
                 let rel = (o - correct).abs() / correct;
@@ -1858,7 +1995,7 @@ mod tests {
         for seed in 0..30 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (options, _pos) = generate_numeric_options(
-                correct, &[], &constraint, &mut rng, "medium", 5, false, Some(0.9),
+                correct, &[], &constraint, &mut rng, "medium", 5, false, Some(0.9), None,
             )
             .unwrap();
             for o in &options {
@@ -1917,7 +2054,7 @@ mod tests {
         for bad in [Some(0.0), Some(-0.5), Some(f64::NAN)] {
             let mut rng = StdRng::seed_from_u64(1);
             let (options, _pos) = generate_numeric_options(
-                correct, &[], &closed_constraint, &mut rng, "medium", 5, false, bad,
+                correct, &[], &closed_constraint, &mut rng, "medium", 5, false, bad, None,
             )
             .unwrap();
             for o in &options {

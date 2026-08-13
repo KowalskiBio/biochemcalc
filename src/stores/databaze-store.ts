@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { DatabazeEntry } from "@/lib/types"
+import { generateId } from "@/lib/utils"
 
 interface DatabazeState {
   entries: DatabazeEntry[]
@@ -78,7 +79,7 @@ export const useDatabazeStore = create<DatabazeState>()(
           entries: [
             ...state.entries,
             {
-              id: crypto.randomUUID(),
+              id: generateId(),
               code: entry.code,
               values: entry.values,
               createdAt: new Date().toISOString(),

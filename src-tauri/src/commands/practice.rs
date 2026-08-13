@@ -271,6 +271,7 @@ fn build_question(
         &decoys,
         false,
         None,
+        template.significant_digits,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 

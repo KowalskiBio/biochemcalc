@@ -58,6 +58,7 @@ import type {
 import {
   extractPlaceholders,
   extractPlaceholderValues,
+  generateId,
   isAtomPlaceholder,
   parseCzechNumber,
   replacePlaceholder,
@@ -1712,7 +1713,7 @@ export function QuestionDetailDialog({
                         onClick={() =>
                           setDecoyRows((rows) => [
                             ...rows,
-                            { key: crypto.randomUUID(), formula: "", optionCount: 1 },
+                            { key: generateId(), formula: "", optionCount: 1 },
                           ])
                         }
                         disabled={isSaving}

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   extractPlaceholders,
   extractPlaceholderValues,
+  generateId,
   isAtomPlaceholder,
   replacePlaceholder,
   stripAnswerTargets,
@@ -82,6 +83,36 @@ describe("replacePlaceholder", () => {
 
   it("renames a fixed-value placeholder keeping the value", () => {
     expect(replacePlaceholder("[[v%=56 %]]", "v%", "x")).toBe("[[x=56 %]]")
+  })
+})
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+describe("generateId", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("returns a valid RFC 4122 v4 UUID", () => {
+    expect(generateId()).toMatch(UUID_V4_REGEX)
+  })
+
+  it("returns unique ids across calls", () => {
+    const ids = new Set(Array.from({ length: 1000 }, () => generateId()))
+    expect(ids.size).toBe(1000)
+  })
+
+  it("falls back to getRandomValues when randomUUID is unavailable (plain-HTTP origins)", () => {
+    const originalCrypto = globalThis.crypto
+    vi.stubGlobal("crypto", {
+      getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
+    })
+    expect(generateId()).toMatch(UUID_V4_REGEX)
+  })
+
+  it("falls back to Math.random when Web Crypto is unavailable entirely", () => {
+    vi.stubGlobal("crypto", undefined)
+    expect(generateId()).toMatch(UUID_V4_REGEX)
   })
 })
 
