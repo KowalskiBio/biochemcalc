@@ -1750,6 +1750,8 @@ pub fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), DbErr
 pub struct CreateSetPayload {
     pub category_id: Uuid,
     pub mode: TemplateMode,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[tauri::command]
@@ -1758,7 +1760,49 @@ pub fn create_set(
     payload: CreateSetPayload,
 ) -> Result<crate::models::Set, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    SetRepo::create(&conn, payload.category_id, payload.mode)
+    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    SetRepo::create(&conn, payload.category_id, payload.mode, name)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeSetsPayload {
+    pub source_set_id: Uuid,
+    pub target_set_id: Uuid,
+}
+
+/// Link every template of `source_set_id` into `target_set_id`. The source
+/// set is kept as-is (the templates are shared, not moved). Returns the
+/// number of newly linked templates.
+#[tauri::command]
+pub fn merge_sets(
+    state: State<'_, AppState>,
+    payload: MergeSetsPayload,
+) -> Result<u32, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    SetRepo::merge_into(&conn, &payload.source_set_id, &payload.target_set_id)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAggregateSetPayload {
+    pub category_id: Uuid,
+    pub mode: TemplateMode,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub source_set_ids: Vec<Uuid>,
+}
+
+/// Create a "souhrnná sada": a new set that links (shares) every template of
+/// the selected source sets. Sources must live in the same category.
+#[tauri::command]
+pub fn create_aggregate_set(
+    state: State<'_, AppState>,
+    payload: CreateAggregateSetPayload,
+) -> Result<crate::models::Set, DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    SetRepo::create_aggregate(&conn, payload.category_id, payload.mode, name, &payload.source_set_ids)
 }
 
 #[derive(Debug, Deserialize)]

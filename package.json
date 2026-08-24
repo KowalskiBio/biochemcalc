@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "bash scripts/dev-local.sh",
+    "db:pull": "bash scripts/db-pull.sh",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

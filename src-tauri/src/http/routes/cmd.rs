@@ -14,11 +14,12 @@ use crate::commands::reports::{
     QuestionReportDetail, QuestionReportSummary,
 };
 use crate::commands::{
-    self, BulkImportTemplatesPayload, ClearTemplateHistoryPayload, CreateCategoryPayload,
+    self, BulkImportTemplatesPayload, ClearTemplateHistoryPayload, CreateAggregateSetPayload,
+    CreateCategoryPayload,
     CreateConstantPayload, CreateSetPayload, CreateTemplatePayload, CreateTopicGroupPayload,
     CreateTopicPayload, CreateVariablePayload, DeleteProjektPayload, ExportPayload,
     ExportProjektToTxtPayload, ExportResult, GenerateForTemplatesPayload, GeneratedTemplate,
-    LoadProjektPayload, MoveSetPayload, MoveTopicToGroupPayload, OutputFileContent,
+    LoadProjektPayload, MergeSetsPayload, MoveSetPayload, MoveTopicToGroupPayload, OutputFileContent,
     RegenerateVariantPayload, RenameTopicGroupPayload, ReorderTemplatesPayload,
     ReorderTopicGroupsPayload, ReorderTopicsInGroupPayload, SaveProjektPayload,
     SetTemplatePayload, TemplateLocation, TemplateWithDetails, UpdateConstantPayload,
@@ -554,10 +555,12 @@ async fn create_set(
     Json(payload): Json<CreateSetPayload>,
 ) -> Result<Json<Set>, HttpError> {
     let conn = conn!(state);
+    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
     Ok(Json(SetRepo::create(
         &conn,
         payload.category_id,
         payload.mode,
+        name,
     )?))
 }
 
@@ -579,6 +582,33 @@ async fn move_set(
         &conn,
         &payload.set_id,
         &payload.target_category_id,
+    )?))
+}
+
+async fn merge_sets(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<MergeSetsPayload>,
+) -> Result<Json<u32>, HttpError> {
+    let conn = conn!(state);
+    Ok(Json(SetRepo::merge_into(
+        &conn,
+        &payload.source_set_id,
+        &payload.target_set_id,
+    )?))
+}
+
+async fn create_aggregate_set(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateAggregateSetPayload>,
+) -> Result<Json<Set>, HttpError> {
+    let conn = conn!(state);
+    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    Ok(Json(SetRepo::create_aggregate(
+        &conn,
+        payload.category_id,
+        payload.mode,
+        name,
+        &payload.source_set_ids,
     )?))
 }
 
@@ -895,6 +925,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/create_set", post(create_set))
         .route("/update_set_name", post(update_set_name))
         .route("/move_set", post(move_set))
+        .route("/merge_sets", post(merge_sets))
+        .route("/create_aggregate_set", post(create_aggregate_set))
         .route("/update_set_mode", post(update_set_mode))
         .route("/add_template_to_set", post(add_template_to_set))
         .route(

@@ -39,6 +39,7 @@ src-tauri/target
 .codegraph
 test-results
 qa-screenshots
+.local-dev
 
 # Syncthing conflict duplicates
 *.sync-conflict-*

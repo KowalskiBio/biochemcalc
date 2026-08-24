@@ -288,8 +288,28 @@ export const categoriesApi = {
 // ============================================================================
 
 export const setsApi = {
-  create: (categoryId: string, mode: TemplateMode): Promise<SetModel> =>
-    apiFetch<SetModel>("create_set", { categoryId, mode }),
+  create: (categoryId: string, mode: TemplateMode, name?: string | null): Promise<SetModel> =>
+    apiFetch<SetModel>("create_set", { categoryId, mode, name: name ?? null }),
+
+  /**
+   * Create a "souhrnná sada": a new set that links (shares) every template of
+   * the selected source sets. Sources must live in the same category.
+   */
+  createAggregate: (
+    categoryId: string,
+    mode: TemplateMode,
+    name: string | null,
+    sourceSetIds: string[],
+  ): Promise<SetModel> =>
+    apiFetch<SetModel>("create_aggregate_set", { categoryId, mode, name, sourceSetIds }),
+
+  /**
+   * Link every question of `sourceSetId` into `targetSetId`. The source set
+   * is kept as-is (the questions are shared, not moved). Returns the number
+   * of newly linked questions.
+   */
+  merge: (sourceSetId: string, targetSetId: string): Promise<number> =>
+    apiFetch<number>("merge_sets", { sourceSetId, targetSetId }),
 
   updateName: (setId: string, name: string | null): Promise<void> =>
     apiFetch<void>("update_set_name", { setId, name }),

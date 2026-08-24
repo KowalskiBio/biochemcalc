@@ -38,6 +38,7 @@ export function TopicDetailPage() {
   const [editName, setEditName] = useState("")
   const [savingName, setSavingName] = useState(false)
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null)
+  const [hoveredSetId, setHoveredSetId] = useState<string | null>(null)
 
   const isCarrying = useCarryStore((s) => s.isCarrying)
   const carryKind = useCarryStore((s) => s.kind)
@@ -144,6 +145,30 @@ export function TopicDetailPage() {
       }
     },
     [carriedSet, categoriesWithSets, toast, loadData, endCarry],
+  )
+
+  const handleMergeSets = useCallback(
+    async (targetSet: QuestionSet) => {
+      if (!carriedSet || carriedSet.id === targetSet.id) return
+      const targetLabel =
+        targetSet.name || cs.topics.setIndex.replace("{index}", String(targetSet.setIndex))
+      try {
+        const inserted = await setsApi.merge(carriedSet.id, targetSet.id)
+        toast({
+          title: (inserted > 0
+            ? cs.topics.mergeSetsSuccess
+            : cs.topics.mergeSetsNoQuestions
+          ).replace("{name}", targetLabel),
+        })
+        await loadData()
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err)
+        toast({ title: cs.topics.mergeSetsError, description: message, variant: "destructive" })
+      } finally {
+        endCarry()
+      }
+    },
+    [carriedSet, toast, loadData, endCarry],
   )
 
   const handleDropQuestionOnSet = useCallback(
@@ -340,7 +365,7 @@ export function TopicDetailPage() {
           {categoriesWithSets
             .sort((a, b) => a.category.pointValue - b.category.pointValue)
             .map(({ category, sets }) => {
-              const isDropTarget = isCarryingSet && hoveredCategory === category.id
+              const isDropTarget = isCarryingSet && hoveredCategory === category.id && !hoveredSetId
               return (
                 <Card
                   key={category.id}
@@ -385,14 +410,32 @@ export function TopicDetailPage() {
                           const setLabel =
                             set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))
                           const isBeingCarried = isCarryingSet && carriedSet?.id === set.id
+                          const isMergeTarget =
+                            isCarryingSet && !isBeingCarried && hoveredSetId === set.id
                           return (
                             // biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop card; keyboard DnD parity is a follow-up
                             <div
                               key={set.id}
                               onMouseDown={(e) => handleSetMouseDown(e, set)}
-                              onMouseUp={() => {
+                              onMouseEnter={() => {
+                                if (isCarryingSet && carriedSet?.id !== set.id) {
+                                  setHoveredSetId(set.id)
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if (isCarryingSet) setHoveredSetId(null)
+                              }}
+                              onMouseUp={(e) => {
                                 if (isCarryingQuestion) {
                                   void handleDropQuestionOnSet(set.id, category.id)
+                                  return
+                                }
+                                if (isCarryingSet && carriedSet && carriedSet.id !== set.id) {
+                                  // Keep the bubbling category-card drop (move to
+                                  // category) from swallowing this merge drop.
+                                  e.stopPropagation()
+                                  setHoveredSetId(null)
+                                  void handleMergeSets(set)
                                 }
                               }}
                             >
@@ -414,9 +457,15 @@ export function TopicDetailPage() {
                                 </Card>
                               ) : (
                                 <Card
-                                  className={`cursor-pointer hover:border-primary transition-colors ${
-                                    isBeingCarried ? "opacity-40 border-primary" : ""
-                                  } ${isCarryingSet && !isBeingCarried ? "border-dashed" : ""}`}
+                                  className={`cursor-pointer transition-colors ${
+                                    isMergeTarget
+                                      ? "border-primary border-2 ring-2 ring-primary/40 bg-primary/5"
+                                      : "hover:border-primary"
+                                  } ${isBeingCarried ? "opacity-40 border-primary" : ""} ${
+                                    isCarryingSet && !isBeingCarried && !isMergeTarget
+                                      ? "border-dashed"
+                                      : ""
+                                  }`}
                                   onClick={() => {
                                     if (justDraggedRef.current) {
                                       justDraggedRef.current = false
@@ -435,6 +484,11 @@ export function TopicDetailPage() {
                                         {modeLabel(set.mode)}
                                       </Badge>
                                     </div>
+                                    {isMergeTarget && (
+                                      <p className="text-xs text-primary mt-2 text-center">
+                                        {cs.topics.dropSetToMergeHint}
+                                      </p>
+                                    )}
                                   </CardContent>
                                 </Card>
                               )}

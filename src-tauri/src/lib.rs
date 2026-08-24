@@ -145,6 +145,8 @@ pub fn run() {
             commands::create_set,
             commands::update_set_name,
             commands::move_set,
+            commands::merge_sets,
+            commands::create_aggregate_set,
             commands::update_set_mode,
             commands::add_template_to_set,
             commands::remove_template_from_set,

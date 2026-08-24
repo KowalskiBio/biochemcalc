@@ -11,6 +11,7 @@ impl SetRepo {
         conn: &Connection,
         category_id: Uuid,
         mode: TemplateMode,
+        name: Option<&str>,
     ) -> Result<crate::models::Set, DbError> {
         let next_index: u8 = conn
             .query_row(
@@ -20,11 +21,115 @@ impl SetRepo {
             )
             .unwrap_or(1);
 
-        let set = crate::models::Set::new(category_id, next_index, mode);
+        let mut set = crate::models::Set::new(category_id, next_index, mode);
+        set.name = name.map(|n| n.to_string());
         conn.execute(
             "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![set.id, set.category_id, set.set_index, serde_mode(set.mode), set.name],
         )?;
+        Ok(set)
+    }
+
+    /// Copy (link) every template from `source_set_id` into `target_set_id`,
+    /// appended after the target's existing templates. The source set is left
+    /// untouched and templates already present in the target are skipped.
+    /// All of the source's templates adopt the target category's point value.
+    /// Returns the number of newly linked templates.
+    pub fn merge_into(
+        conn: &Connection,
+        source_set_id: &Uuid,
+        target_set_id: &Uuid,
+    ) -> Result<u32, DbError> {
+        if source_set_id == target_set_id {
+            return Ok(0);
+        }
+        let tx = conn.unchecked_transaction()?;
+
+        let target_point_value: u8 = tx.query_row(
+            "SELECT c.point_value FROM categories c
+             INNER JOIN sets s ON s.category_id = c.id
+             WHERE s.id = ?1",
+            params![target_set_id],
+            |row| row.get(0),
+        )?;
+
+        let offset: u32 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM set_templates WHERE set_id = ?1",
+                params![target_set_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO set_templates (set_id, template_id, sort_order)
+             SELECT ?1, st.template_id, st.sort_order + ?2
+             FROM set_templates st WHERE st.set_id = ?3 ORDER BY st.sort_order",
+            params![target_set_id, offset, source_set_id],
+        )?;
+
+        tx.execute(
+            "UPDATE templates SET point_value = ?1 WHERE id IN (
+                SELECT st.template_id FROM set_templates st WHERE st.set_id = ?2
+            )",
+            params![target_point_value, source_set_id],
+        )?;
+
+        tx.commit()?;
+        Ok(inserted as u32)
+    }
+
+    /// Create a new set (with optional name) whose templates are links to
+    /// every template of the given source sets, in the order the sources were
+    /// passed. Duplicates across sources are linked only once. All sources
+    /// must live in `category_id` so the shared templates' point values stay
+    /// consistent with the new set's category.
+    pub fn create_aggregate(
+        conn: &Connection,
+        category_id: Uuid,
+        mode: TemplateMode,
+        name: Option<&str>,
+        source_set_ids: &[Uuid],
+    ) -> Result<crate::models::Set, DbError> {
+        if source_set_ids.is_empty() {
+            return Err(DbError::Validation(
+                "Aggregate set needs at least one source set".into(),
+            ));
+        }
+        let tx = conn.unchecked_transaction()?;
+
+        for sid in source_set_ids {
+            let source_category: Uuid = tx.query_row(
+                "SELECT category_id FROM sets WHERE id = ?1",
+                params![sid],
+                |row| row.get(0),
+            )?;
+            if source_category != category_id {
+                return Err(DbError::Validation(
+                    "Aggregate sources must be in the same category as the new set".into(),
+                ));
+            }
+        }
+
+        let set = Self::create(&tx, category_id, mode, name)?;
+
+        for sid in source_set_ids {
+            let next_order: u32 = tx
+                .query_row(
+                    "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM set_templates WHERE set_id = ?1",
+                    params![set.id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            tx.execute(
+                "INSERT OR IGNORE INTO set_templates (set_id, template_id, sort_order)
+                 SELECT ?1, st.template_id, st.sort_order + ?2
+                 FROM set_templates st WHERE st.set_id = ?3 ORDER BY st.sort_order",
+                params![set.id, next_order, sid],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(set)
     }
 
@@ -334,14 +439,165 @@ mod tests {
         let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
         assert_eq!(sets.len(), 4);
 
-        let fifth = SetRepo::create(&conn, cat.id, TemplateMode::Closed).expect("create 5th set");
+        let fifth = SetRepo::create(&conn, cat.id, TemplateMode::Closed, None).expect("create 5th set");
         assert_eq!(fifth.set_index, 5);
 
-        let sixth = SetRepo::create(&conn, cat.id, TemplateMode::Open).expect("create 6th set");
+        let sixth = SetRepo::create(&conn, cat.id, TemplateMode::Open, None).expect("create 6th set");
         assert_eq!(sixth.set_index, 6);
         assert_eq!(sixth.mode, TemplateMode::Open);
 
         let (_, all_sets) = CategoryRepo::get_with_sets(&conn, &cat.id).expect("get");
         assert_eq!(all_sets.len(), 6);
+    }
+
+    #[test]
+    fn create_with_name_persists_it() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat, _) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+
+        let set = SetRepo::create(&conn, cat.id, TemplateMode::Closed, Some("Opakování"))
+            .expect("create named set");
+        assert_eq!(set.name.as_deref(), Some("Opakování"));
+
+        let (_, sets) = CategoryRepo::get_with_sets(&conn, &cat.id).expect("get");
+        let found = sets.iter().find(|s| s.id == set.id).expect("found");
+        assert_eq!(found.name.as_deref(), Some("Opakování"));
+    }
+
+    #[test]
+    fn merge_copies_templates_and_keeps_source() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+        let source = &sets[0];
+        let target = &sets[1];
+
+        let t1 = create_template(&conn, "Q1");
+        let t2 = create_template(&conn, "Q2");
+        let t3 = create_template(&conn, "Q3");
+        SetRepo::add_template(&conn, &source.id, &t1.id).expect("add t1");
+        SetRepo::add_template(&conn, &source.id, &t2.id).expect("add t2");
+        SetRepo::add_template(&conn, &target.id, &t3.id).expect("add t3");
+
+        let inserted = SetRepo::merge_into(&conn, &source.id, &target.id).expect("merge");
+        assert_eq!(inserted, 2);
+
+        // Source untouched.
+        let source_items = SetRepo::list_templates(&conn, &source.id).expect("list source");
+        assert_eq!(source_items.len(), 2);
+
+        // Target has its own template first, then the merged ones in order.
+        let target_items = SetRepo::list_templates(&conn, &target.id).expect("list target");
+        assert_eq!(target_items.len(), 3);
+        assert_eq!(target_items[0].template_id, t3.id);
+        assert_eq!(target_items[1].template_id, t1.id);
+        assert_eq!(target_items[2].template_id, t2.id);
+    }
+
+    #[test]
+    fn merge_dedupes_templates_already_in_target() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+        let source = &sets[0];
+        let target = &sets[1];
+
+        let t1 = create_template(&conn, "Q1");
+        SetRepo::add_template(&conn, &source.id, &t1.id).expect("add to source");
+        SetRepo::add_template(&conn, &target.id, &t1.id).expect("add to target");
+
+        let inserted = SetRepo::merge_into(&conn, &source.id, &target.id).expect("merge");
+        assert_eq!(inserted, 0);
+        let target_items = SetRepo::list_templates(&conn, &target.id).expect("list target");
+        assert_eq!(target_items.len(), 1);
+    }
+
+    #[test]
+    fn merge_across_categories_updates_point_values() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat2, sets2) = CategoryRepo::create(&conn, topic.id, 2).expect("create 2b cat");
+        let (cat4, sets4) = CategoryRepo::create(&conn, topic.id, 4).expect("create 4b cat");
+        let source = &sets2[0];
+        let target = &sets4[0];
+
+        let t = create_template(&conn, "Q");
+        SetRepo::add_template(&conn, &source.id, &t.id).expect("add");
+
+        SetRepo::merge_into(&conn, &source.id, &target.id).expect("merge");
+
+        let point_value: u8 = conn
+            .query_row(
+                "SELECT point_value FROM templates WHERE id = ?1",
+                params![t.id],
+                |row| row.get(0),
+            )
+            .expect("query point value");
+        assert_eq!(point_value, 4);
+
+        // Source keeps its (now re-valued) template; both categories exist.
+        assert_eq!(cat2.point_value, 2);
+        assert_eq!(cat4.point_value, 4);
+        assert_eq!(
+            SetRepo::list_templates(&conn, &source.id)
+                .expect("list source")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn aggregate_links_all_sources_in_order_and_dedupes() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+        let s1 = &sets[0];
+        let s2 = &sets[1];
+
+        let t1 = create_template(&conn, "Q1");
+        let t2 = create_template(&conn, "Q2");
+        let t3 = create_template(&conn, "Q3");
+        SetRepo::add_template(&conn, &s1.id, &t1.id).expect("add t1");
+        SetRepo::add_template(&conn, &s1.id, &t2.id).expect("add t2");
+        SetRepo::add_template(&conn, &s2.id, &t2.id).expect("add t2 dup");
+        SetRepo::add_template(&conn, &s2.id, &t3.id).expect("add t3");
+
+        let agg = SetRepo::create_aggregate(
+            &conn,
+            cat.id,
+            TemplateMode::Open,
+            Some("Souhrn"),
+            &[s1.id, s2.id],
+        )
+        .expect("aggregate");
+        assert_eq!(agg.name.as_deref(), Some("Souhrn"));
+        assert_eq!(agg.mode, TemplateMode::Open);
+
+        let items = SetRepo::list_templates(&conn, &agg.id).expect("list");
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].template_id, t1.id);
+        assert_eq!(items[1].template_id, t2.id);
+        assert_eq!(items[2].template_id, t3.id);
+
+        // Sources untouched.
+        assert_eq!(
+            SetRepo::list_templates(&conn, &s1.id).expect("list s1").len(),
+            2
+        );
+    }
+
+    #[test]
+    fn aggregate_rejects_foreign_category_and_empty_sources() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat2, _) = CategoryRepo::create(&conn, topic.id, 2).expect("create 2b cat");
+        let (cat4, sets4) = CategoryRepo::create(&conn, topic.id, 4).expect("create 4b cat");
+
+        let foreign = SetRepo::create_aggregate(&conn, cat2.id, TemplateMode::Closed, None, &[sets4[0].id]);
+        assert!(matches!(foreign, Err(DbError::Validation(_))));
+
+        let empty = SetRepo::create_aggregate(&conn, cat2.id, TemplateMode::Closed, None, &[]);
+        assert!(matches!(empty, Err(DbError::Validation(_))));
     }
 }
