@@ -143,6 +143,9 @@ pub struct PracticeAnswerResult {
     pub point_value: u8,
     /// Closed mode: which option was right.
     pub correct_option: Option<u8>,
+    /// Closed mode: the "alternace" option, if the template has one — also
+    /// graded correct, and highlighted alongside `correct_option`.
+    pub alternate_option: Option<u8>,
     /// What the answer should have been, one entry per answer slot.
     pub correct_answers: Vec<PracticeCorrectAnswer>,
 }
@@ -269,6 +272,7 @@ fn build_question(
         &fixed_values,
         &targets,
         &decoys,
+        template.alternative_formula.as_deref(),
         false,
         None,
         template.significant_digits,
@@ -284,6 +288,7 @@ fn build_question(
         mode,
         correct_answer: variant.correct_answer,
         correct_option: variant.correct_option,
+        alternate_option: variant.alternate_option,
         interval_lo: variant.interval_lo,
         interval_hi: variant.interval_hi,
         answers_data: variant.answers_data.clone(),
@@ -399,6 +404,7 @@ pub fn do_submit_answer(
                 DbError::Validation("Vyberte jednu z možností".into())
             })?;
             Some(selected) == attempt.correct_option
+                || (attempt.alternate_option.is_some() && Some(selected) == attempt.alternate_option)
         }
         TemplateMode::Open => {
             let answers = payload.answers.as_deref().unwrap_or(&[]);
@@ -412,6 +418,7 @@ pub fn do_submit_answer(
         correct,
         point_value: attempt.point_value,
         correct_option: attempt.correct_option,
+        alternate_option: attempt.alternate_option,
         correct_answers: correct_answers(&attempt),
     })
 }
@@ -566,6 +573,54 @@ mod tests {
             "g".into(),
             point_value,
         );
+        let constraint = ResultConstraint::new(
+            template.id,
+            Some(0.0),
+            Some(100.0),
+            None,
+            ConstraintType::Range,
+        );
+        let tv = TemplateVariable {
+            template_id: template.id,
+            variable_id: variable.id,
+            placeholder: "X".into(),
+            greater_than_variable_id: None,
+            less_than_variable_id: None,
+        };
+        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
+            .expect("insert template");
+        SetRepo::add_template(conn, &sets[0].id, &template.id).expect("add template to set");
+
+        topic.id
+    }
+
+    /// Same "double X" question as `seed_topic`, but with an "alternace"
+    /// formula attached — for tests exercising the second correct
+    /// closed-mode option.
+    fn seed_topic_with_alternative_formula(
+        conn: &Connection,
+        name: &str,
+        point_value: u8,
+        alternative_formula: &str,
+    ) -> Uuid {
+        let mut topic = Topic::new(name.to_string());
+        topic.for_students = true;
+        crate::db::repos::TopicRepo::insert(conn, &topic).expect("insert topic");
+
+        let (_, sets) = CategoryRepo::create(conn, topic.id, point_value).expect("create category");
+
+        let variable = Variable::new("Hmotnost".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
+        VariableRepo::insert_raw(conn, &variable).expect("insert variable");
+
+        let mut template = Template::new(
+            format!("{name}: kolik je dvojnásobek [[X]] g? [Y]"),
+            "Y = X * 2".into(),
+            "Y = X × 2".into(),
+            None,
+            "g".into(),
+            point_value,
+        );
+        template.alternative_formula = Some(alternative_formula.to_string());
         let constraint = ResultConstraint::new(
             template.id,
             Some(0.0),
@@ -785,6 +840,59 @@ mod tests {
         let me = board.iter().find(|r| r.username == "student").expect("me");
         assert_eq!(me.correct_count, 12, "the wrong answer must not score");
         assert_eq!(me.answered_count, 13);
+    }
+
+    /// An "alternace" formula's value becomes a second correct closed-mode
+    /// option — selecting it must score exactly like selecting the primary
+    /// correct option.
+    #[test]
+    fn selecting_the_alternate_option_also_scores_as_correct() {
+        let conn = setup_conn();
+        let topic_id = seed_topic_with_alternative_formula(&conn, "Roztoky", 2, "Y * 3");
+        let student = insert_student(&conn, "student");
+
+        let mut graded_the_alternate = false;
+        for _ in 0..40 {
+            let question = do_next_question(
+                &conn,
+                &student,
+                &NextQuestionPayload {
+                    topic_id,
+                    point_value: 2,
+                },
+            )
+            .expect("serve question");
+            if question.mode != TemplateMode::Closed {
+                continue;
+            }
+            let expected = question.assigned_values["X"] * 2.0;
+            let alternate_value = expected * 3.0;
+            let options = question.answer_slots[0]
+                .numeric_options
+                .clone()
+                .expect("closed questions carry options");
+            let Some(alt_index) = options
+                .iter()
+                .position(|o| (o - alternate_value).abs() < 1e-6)
+            else {
+                continue;
+            };
+
+            let payload = SubmitAnswerPayload {
+                attempt_id: question.attempt_id,
+                selected_option: Some(alt_index as u8 + 1),
+                answers: None,
+            };
+            let result = do_submit_answer(&conn, &student, &payload).expect("grade");
+            assert!(result.correct, "selecting the alternate option should score as correct");
+            assert_eq!(result.alternate_option, Some(alt_index as u8 + 1));
+            graded_the_alternate = true;
+        }
+
+        assert!(
+            graded_the_alternate,
+            "expected at least one closed-mode attempt in 40 tries to offer the alternate option"
+        );
     }
 
     #[test]

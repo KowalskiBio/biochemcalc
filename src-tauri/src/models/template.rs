@@ -63,6 +63,10 @@ pub struct Template {
     pub force_scientific: bool,
     #[serde(default)]
     pub decoy_formula: Option<String>,
+    /// "Alternace": at most one alternative equation that also evaluates to
+    /// a correct answer, becoming a second correct closed-mode option.
+    #[serde(default)]
+    pub alternative_formula: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -86,6 +90,7 @@ impl Template {
             significant_digits: None,
             force_scientific: false,
             decoy_formula: None,
+            alternative_formula: None,
             created_at: Utc::now(),
         }
     }

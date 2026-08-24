@@ -344,7 +344,8 @@ export function StudentPracticePage() {
                     const label = OPTION_LABELS[rowIdx] ?? String(rowIdx + 1)
                     const option = rowIdx + 1
                     const isSelected = selectedOption === option
-                    const isTheAnswer = result?.correctOption === option
+                    const isTheAnswer =
+                      result?.correctOption === option || result?.alternateOption === option
                     const gotItWrong = result != null && isSelected && !result.correct
 
                     return (

@@ -50,6 +50,8 @@ pub struct TeacherQuestionSnapshot {
     pub answer_slots: Vec<PracticeAnswerSlot>,
     pub correct_answers: Vec<PracticeCorrectAnswer>,
     pub correct_option: Option<u8>,
+    #[serde(default)]
+    pub alternate_option: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,6 +88,7 @@ pub struct QuestionReportDetail {
     pub answer_slots: Vec<PracticeAnswerSlot>,
     pub correct_answers: Vec<PracticeCorrectAnswer>,
     pub correct_option: Option<u8>,
+    pub alternate_option: Option<u8>,
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +155,7 @@ pub fn do_report_question(
         answer_slots: build_answer_slots_from_attempt(&attempt, &template.result_unit),
         correct_answers: correct_answers(&attempt),
         correct_option: attempt.correct_option,
+        alternate_option: attempt.alternate_option,
     };
 
     let snapshot_json = serde_json::to_string(&snapshot)?;
@@ -246,6 +250,7 @@ pub fn do_get_question_report(
         answer_slots: snapshot.answer_slots,
         correct_answers: snapshot.correct_answers,
         correct_option: snapshot.correct_option,
+        alternate_option: snapshot.alternate_option,
     })
 }
 

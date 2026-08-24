@@ -22,6 +22,9 @@ pub struct PracticeAttemptRecord {
     pub mode: TemplateMode,
     pub correct_answer: f64,
     pub correct_option: Option<u8>,
+    /// 1-based index of the "alternace" option, if the template has one.
+    /// Selecting either this or `correct_option` grades as correct.
+    pub alternate_option: Option<u8>,
     pub interval_lo: Option<f64>,
     pub interval_hi: Option<f64>,
     /// Present only for multi-answer questions (`[n mol][m g]`-style).
@@ -130,8 +133,8 @@ impl PracticeRepo {
                  id, user_id, template_id, topic_id, point_value, mode,
                  correct_answer, correct_option, interval_lo, interval_hi,
                  answers_data, is_correct, created_at, answered_at,
-                 assigned_values, assigned_strings, numeric_options
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15)",
+                 assigned_values, assigned_strings, numeric_options, alternate_option
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15, ?16)",
             params![
                 attempt.id,
                 attempt.user_id,
@@ -148,6 +151,7 @@ impl PracticeRepo {
                 assigned_values,
                 assigned_strings,
                 numeric_options,
+                attempt.alternate_option,
             ],
         )?;
         Ok(())
@@ -166,7 +170,7 @@ impl PracticeRepo {
             conn,
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
                     correct_answer, correct_option, interval_lo, interval_hi, answers_data,
-                    assigned_values, assigned_strings, numeric_options
+                    assigned_values, assigned_strings, numeric_options, alternate_option
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2 AND is_correct IS NULL",
             params![id, user_id],
@@ -184,7 +188,7 @@ impl PracticeRepo {
             conn,
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
                     correct_answer, correct_option, interval_lo, interval_hi, answers_data,
-                    assigned_values, assigned_strings, numeric_options
+                    assigned_values, assigned_strings, numeric_options, alternate_option
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2",
             params![id, user_id],
@@ -212,6 +216,7 @@ impl PracticeRepo {
                     mode: TemplateMode::parse(&mode).unwrap_or(TemplateMode::Open),
                     correct_answer: row.get(6)?,
                     correct_option: row.get(7)?,
+                    alternate_option: row.get(14)?,
                     interval_lo: row.get(8)?,
                     interval_hi: row.get(9)?,
                     answers_data: None,
@@ -333,6 +338,7 @@ mod tests {
             mode: TemplateMode::Open,
             correct_answer: 42.0,
             correct_option: None,
+            alternate_option: None,
             interval_lo: Some(41.0),
             interval_hi: Some(43.0),
             answers_data: None,

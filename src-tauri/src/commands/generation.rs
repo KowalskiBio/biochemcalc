@@ -108,6 +108,7 @@ pub fn do_generate_for_templates(
             &fixed_values,
             &targets,
             &decoys,
+            template.alternative_formula.as_deref(),
             true,
             spread_override,
             template.significant_digits,
@@ -280,6 +281,7 @@ pub(crate) fn do_regenerate_variant(
         &fixed_values,
         &targets,
         &decoys,
+        template.alternative_formula.as_deref(),
         true,
         None,
         template.significant_digits,
@@ -293,11 +295,13 @@ pub(crate) fn do_regenerate_variant(
             TemplateMode::Closed => {
                 let mut rng = StdRng::seed_from_u64(payload.seed.wrapping_add(1));
                 // A manual answer override is the teacher directly picking the
-                // correct value; the decoy is left out of scope here rather
-                // than evaluated against a correct answer the teacher chose.
-                let (options, position) = generate_numeric_options(
+                // correct value; the decoy and alternace are left out of scope
+                // here rather than evaluated against a correct answer the
+                // teacher chose.
+                let (options, position, _alt_position) = generate_numeric_options(
                     manual_answer,
                     &[],
+                    None,
                     &constraint,
                     &mut rng,
                     &payload.difficulty,
@@ -309,6 +313,7 @@ pub(crate) fn do_regenerate_variant(
                 .map_err(|e| DbError::Validation(e.to_string()))?;
                 variant.numeric_options = Some(options);
                 variant.correct_option = Some(position);
+                variant.alternate_option = None;
             }
             TemplateMode::Open => {
                 let (lo, hi) = open_interval(manual_answer, &constraint, &payload.difficulty, None);
@@ -551,6 +556,7 @@ pub fn do_export_projekt_to_txt(
             significant_digits: pq.significant_digits,
             force_scientific: pq.force_scientific,
             decoy_formula: None,
+            alternative_formula: None,
             created_at: Utc::now(),
         });
 
@@ -797,6 +803,7 @@ mod tests {
             significant_digits: None,
             force_scientific: false,
             decoy_formula: None,
+            alternative_formula: None,
             created_at: Utc::now(),
         };
         TemplateRepo::insert(&conn, &template, &[], &[], None, &[]).expect("insert template");

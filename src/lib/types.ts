@@ -156,6 +156,11 @@ export interface Template {
   forceScientific?: boolean
   /** @deprecated Superseded by the per-template `decoys` list; kept only so a legacy value still round-trips on read. */
   decoyFormula?: string
+  /**
+   * "Alternace": an optional alternative equation that also evaluates to a
+   * correct answer, becoming a second correct closed-mode option.
+   */
+  alternativeFormula?: string
   createdAt: string
   // Extended with related data
   variables?: TemplateVariableInput[]
@@ -231,6 +236,7 @@ export interface UpdateTemplateWithVariablesPayload {
   significantDigits?: number
   forceScientific?: boolean
   decoys: TemplateDecoyInput[]
+  alternativeFormula?: string
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -272,6 +278,7 @@ export interface TemplateInput {
   significantDigits?: number
   forceScientific?: boolean
   decoys?: TemplateDecoyInput[]
+  alternativeFormula?: string
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -337,6 +344,8 @@ export interface AnswerField {
   unit?: string
   numericOptions?: number[]
   correctOption?: number
+  /** "Alternace" option, also correct alongside `correctOption`. */
+  alternateOption?: number
   intervalLo?: number
   intervalHi?: number
 }
@@ -350,6 +359,8 @@ export interface Variant {
   correctAnswer: number
   numericOptions?: number[]
   correctOption?: number
+  /** "Alternace" option, also correct alongside `correctOption`. */
+  alternateOption?: number
   intervalLo?: number
   intervalHi?: number
   seed: number
@@ -727,6 +738,8 @@ export interface PracticeAnswerResult {
   correct: boolean
   pointValue: number
   correctOption?: number
+  /** "Alternace" option, also correct alongside `correctOption`. */
+  alternateOption?: number
   correctAnswers: PracticeCorrectAnswer[]
 }
 
@@ -791,4 +804,6 @@ export interface QuestionReportDetail {
   answerSlots: PracticeAnswerSlot[]
   correctAnswers: PracticeCorrectAnswer[]
   correctOption?: number
+  /** "Alternace" option, also correct alongside `correctOption`. */
+  alternateOption?: number
 }

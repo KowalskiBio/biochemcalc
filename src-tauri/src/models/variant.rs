@@ -12,6 +12,11 @@ pub struct AnswerField {
     pub unit: Option<String>,
     pub numeric_options: Option<Vec<f64>>,
     pub correct_option: Option<u8>,
+    /// 1-based index of the "alternace" option, if the template has one and
+    /// it evaluated to a value distinct enough from the correct answer to
+    /// get its own option slot. A student picking either index is correct.
+    #[serde(default)]
+    pub alternate_option: Option<u8>,
     pub interval_lo: Option<f64>,
     pub interval_hi: Option<f64>,
 }
@@ -34,6 +39,10 @@ pub struct Variant {
     pub numeric_options: Option<Vec<f64>>,
     /// 1-based index of the correct option among r1-r6.
     pub correct_option: Option<u8>,
+    /// 1-based index of the "alternace" option, mirroring
+    /// `AnswerField::alternate_option` for single-answer templates.
+    #[serde(default)]
+    pub alternate_option: Option<u8>,
     /// Interval bounds used in open mode.
     pub interval_lo: Option<f64>,
     pub interval_hi: Option<f64>,
@@ -66,6 +75,7 @@ impl Variant {
             correct_answer,
             numeric_options,
             correct_option,
+            alternate_option: None,
             interval_lo,
             interval_hi,
             seed,

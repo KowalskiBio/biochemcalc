@@ -286,7 +286,9 @@ export function ReportsPage() {
                     (_, rowIdx) => {
                       const label = OPTION_LABELS[rowIdx] ?? String(rowIdx + 1)
                       const option = rowIdx + 1
-                      const isTheAnswer = selectedReport.correctOption === option
+                      const isTheAnswer =
+                        selectedReport.correctOption === option ||
+                        selectedReport.alternateOption === option
 
                       return (
                         <div
@@ -355,8 +357,10 @@ export function ReportsPage() {
                 ) : selectedReport.correctOption != null ? (
                   <p className="text-sm text-muted-foreground">
                     {cs.reports.correctAnswer}:{" "}
-                    {OPTION_LABELS[selectedReport.correctOption - 1] ??
-                      String(selectedReport.correctOption)}
+                    {[selectedReport.correctOption, selectedReport.alternateOption]
+                      .filter((option): option is number => option != null)
+                      .map((option) => OPTION_LABELS[option - 1] ?? String(option))
+                      .join(", ")}
                   </p>
                 ) : null}
               </div>

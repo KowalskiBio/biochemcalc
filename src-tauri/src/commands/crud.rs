@@ -356,6 +356,7 @@ fn clone_template(
     new_template.significant_digits = src.significant_digits;
     new_template.force_scientific = src.force_scientific;
     new_template.decoy_formula = src.decoy_formula.clone();
+    new_template.alternative_formula = src.alternative_formula.clone();
 
     let old_links = TemplateRepo::get_variables(tx, old_template_id)?;
     for link in &old_links {
@@ -876,6 +877,8 @@ pub struct UpdateTemplateWithVariablesPayload {
     pub force_scientific: bool,
     #[serde(default)]
     pub decoys: Vec<TemplateDecoyInput>,
+    #[serde(default)]
+    pub alternative_formula: Option<String>,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -895,6 +898,8 @@ pub struct CreateTemplatePayload {
     pub force_scientific: bool,
     #[serde(default)]
     pub decoys: Vec<TemplateDecoyInput>,
+    #[serde(default)]
+    pub alternative_formula: Option<String>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -999,6 +1004,7 @@ pub(crate) fn do_create_template(
     );
     template.significant_digits = payload.significant_digits;
     template.force_scientific = payload.force_scientific;
+    template.alternative_formula = payload.alternative_formula;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
@@ -1144,6 +1150,8 @@ pub struct UpdateTemplatePayload {
     pub force_scientific: bool,
     #[serde(default)]
     pub decoys: Vec<TemplateDecoyInput>,
+    #[serde(default)]
+    pub alternative_formula: Option<String>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -1185,12 +1193,13 @@ pub(crate) fn do_update_template(
         significant_digits: payload.significant_digits,
         force_scientific: payload.force_scientific,
         decoy_formula: None,
+        alternative_formula: payload.alternative_formula,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, created_at=?11 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1201,6 +1210,7 @@ pub(crate) fn do_update_template(
             template.point_value,
             template.significant_digits,
             template.force_scientific,
+            template.alternative_formula,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1362,11 +1372,12 @@ pub fn apply_template_variable_mutations(
         significant_digits: payload.significant_digits,
         force_scientific: payload.force_scientific,
         decoy_formula: None,
+        alternative_formula: payload.alternative_formula.clone(),
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, created_at=?10 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, created_at=?11 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1377,6 +1388,7 @@ pub fn apply_template_variable_mutations(
             template.point_value,
             template.significant_digits,
             template.force_scientific,
+            template.alternative_formula,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -2033,6 +2045,7 @@ mod tests {
             significant_digits: None,
             force_scientific: false,
             decoys: Vec::new(),
+            alternative_formula: None,
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 30;
+const CURRENT_USER_VERSION: u32 = 31;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -156,6 +156,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 30 {
         apply_migration_v30(conn)?;
         conn.pragma_update(None, "user_version", "30")?;
+    }
+
+    if user_version < 31 {
+        apply_migration_v31(conn)?;
+        conn.pragma_update(None, "user_version", "31")?;
     }
 
     Ok(())
@@ -1074,6 +1079,22 @@ fn apply_migration_v30(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// "Alternace": at most one alternative equation per template that also
+/// evaluates to a correct answer. Unlike decoys (an unbounded list), this is
+/// 0-or-1, so it's a plain nullable column rather than a child table.
+/// `alternate_option` on `practice_attempts` mirrors `correct_option` so a
+/// student picking either the primary or the alternate closed-mode option
+/// grades as correct.
+fn apply_migration_v31(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE templates ADD COLUMN alternative_formula TEXT;
+        ALTER TABLE practice_attempts ADD COLUMN alternate_option INTEGER;
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1251,7 +1272,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 30);
+        assert_eq!(user_version(&conn), 31);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1341,7 +1362,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 30);
+        assert_eq!(user_version(&conn), 31);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1366,7 +1387,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 30);
+        assert_eq!(user_version(&conn), 31);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");

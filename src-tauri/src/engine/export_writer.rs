@@ -464,6 +464,7 @@ mod tests {
             significant_digits: None,
             force_scientific: false,
             decoy_formula: None,
+            alternative_formula: None,
             created_at: Utc::now(),
         }
     }
@@ -949,6 +950,7 @@ mod tests {
                 unit: Some("mol".to_string()),
                 numeric_options: Some(vec![2.0, 1.5, 2.5, 3.0, 1.0]),
                 correct_option: Some(1),
+                alternate_option: None,
                 interval_lo: None,
                 interval_hi: None,
             },
@@ -958,6 +960,7 @@ mod tests {
                 unit: Some("g".to_string()),
                 numeric_options: Some(vec![4.0, 3.2, 4.8, 5.0, 3.5]),
                 correct_option: Some(1),
+                alternate_option: None,
                 interval_lo: None,
                 interval_hi: None,
             },
@@ -989,6 +992,7 @@ mod tests {
                 unit: Some("mol".to_string()),
                 numeric_options: None,
                 correct_option: None,
+                alternate_option: None,
                 interval_lo: Some(1.8),
                 interval_hi: Some(2.2),
             },
@@ -998,6 +1002,7 @@ mod tests {
                 unit: Some("g".to_string()),
                 numeric_options: None,
                 correct_option: None,
+                alternate_option: None,
                 interval_lo: Some(3.8),
                 interval_hi: Some(4.2),
             },
@@ -1109,6 +1114,7 @@ mod tests {
             significant_digits: Some(sig),
             force_scientific: false,
             decoy_formula: None,
+            alternative_formula: None,
             created_at: Utc::now(),
         }
     }

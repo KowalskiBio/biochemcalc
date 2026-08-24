@@ -303,6 +303,10 @@ function buildDecoyInputs(rows: DecoyRow[]): TemplateDecoyInput[] {
     }))
 }
 
+function buildAlternativeFormulaInput(formula: string): string | undefined {
+  return formula.trim() === "" ? undefined : normalizeFormulaForEvaluation(formula)
+}
+
 export function QuestionDetailDialog({
   templateId,
   open,
@@ -351,6 +355,12 @@ export function QuestionDetailDialog({
   )
   const [decoyRows, setDecoyRows] = useState<DecoyRow[]>(
     (initialTemplateDetails?.decoys ?? []).map(toDecoyRow),
+  )
+  const [alternativeFormula, setAlternativeFormula] = useState(
+    initialTemplateDetails?.template.alternativeFormula ?? "",
+  )
+  const [showAlternativeFormulaInput, setShowAlternativeFormulaInput] = useState(
+    !!initialTemplateDetails?.template.alternativeFormula,
   )
   const [mockSeed, setMockSeed] = useState(0)
   const [sampleSeed, setSampleSeed] = useState(1)
@@ -411,6 +421,8 @@ export function QuestionDetailDialog({
       )
       setForceScientific(details.template.forceScientific ?? false)
       setDecoyRows(details.decoys.map(toDecoyRow))
+      setAlternativeFormula(details.template.alternativeFormula ?? "")
+      setShowAlternativeFormulaInput(!!details.template.alternativeFormula)
       setIsEditingAnswer(false)
       setEditingVariableKey(null)
       setValidationErrors({})
@@ -544,6 +556,7 @@ export function QuestionDetailDialog({
     if (newSigDigits !== currentSigDigits) return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
     if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
+    if (alternativeFormula !== (templateDetails?.template.alternativeFormula ?? "")) return true
     return dirtyVariableKeys.size > 0
   }, [
     editText,
@@ -552,6 +565,7 @@ export function QuestionDetailDialog({
     editSignificantDigits,
     forceScientific,
     decoyRows,
+    alternativeFormula,
     templateDetails,
     dirtyVariableKeys,
   ])
@@ -647,6 +661,7 @@ export function QuestionDetailDialog({
       significantDigits: sigDigits,
       forceScientific,
       decoys: buildDecoyInputs(decoyRows),
+      alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
       constraint: templateDetails.template.constraint,
@@ -687,6 +702,8 @@ export function QuestionDetailDialog({
     )
     setForceScientific(templateDetails?.template.forceScientific ?? false)
     setDecoyRows((templateDetails?.decoys ?? []).map(toDecoyRow))
+    setAlternativeFormula(templateDetails?.template.alternativeFormula ?? "")
+    setShowAlternativeFormulaInput(!!templateDetails?.template.alternativeFormula)
     setIsEditingAnswer(false)
     setLocalVariables(originalVariables.map((v) => ({ ...v })))
     setIsEditingText(false)
@@ -719,6 +736,7 @@ export function QuestionDetailDialog({
         significantDigits: sigDigits,
         forceScientific,
         decoys: buildDecoyInputs(decoyRows),
+        alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: templateDetails.template.constraint,
@@ -764,6 +782,7 @@ export function QuestionDetailDialog({
       significantDigits: sigDigits,
       forceScientific: newValue,
       decoys: buildDecoyInputs(decoyRows),
+      alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
       variableMutations: templateDetails.variables.map((vwp) => ({
         action: "keep" as const,
         variableId: vwp.variable.id,
@@ -982,6 +1001,11 @@ export function QuestionDetailDialog({
     }
     return byRow
   }, [decoyRows, equationValidationVariables, constants])
+
+  const alternativeFormulaMissingReferences = useMemo(
+    () => validateEquationReferences(alternativeFormula, equationValidationVariables, constants),
+    [alternativeFormula, equationValidationVariables, constants],
+  )
 
   const usedConstants = useMemo(() => {
     if (!templateDetails || activeEquationText.trim().length === 0) return []
@@ -1612,6 +1636,74 @@ export function QuestionDetailDialog({
                         )}
                       </div>
                     )}
+                    <div className="space-y-2">
+                      {showAlternativeFormulaInput ? (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="alternativeFormula">
+                              {cs.questions.alternativeEquationLabel}
+                            </Label>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setAlternativeFormula("")
+                                setShowAlternativeFormulaInput(false)
+                              }}
+                              disabled={isSaving}
+                            >
+                              <X className="size-4 mr-2" />
+                              {cs.questions.removeAlternative}
+                            </Button>
+                          </div>
+                          <Input
+                            id="alternativeFormula"
+                            value={alternativeFormula}
+                            onChange={(e) => setAlternativeFormula(e.target.value)}
+                            placeholder="X * 3 + Y"
+                            disabled={isSaving}
+                          />
+                          {alternativeFormula.trim().length > 0 && (
+                            <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+                              <p className="text-sm font-medium text-foreground-secondary">
+                                {cs.questions.equationPreview}
+                              </p>
+                              <MathRenderer text={renderEquationAsLatex(alternativeFormula)} />
+                              {alternativeFormulaMissingReferences.length > 0 && (
+                                <div className="rounded-md bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-900 p-3 text-sm text-yellow-800 dark:text-yellow-200">
+                                  <p className="font-medium">{cs.questions.missingVariables}</p>
+                                  <p className="text-xs opacity-90 mb-1">
+                                    {cs.questions.missingVariablesDescription}
+                                  </p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {alternativeFormulaMissingReferences.map((name) => (
+                                      <code
+                                        key={name}
+                                        className="bg-yellow-100 dark:bg-yellow-900/40 px-1 rounded"
+                                      >
+                                        [[{name}]]
+                                      </code>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowAlternativeFormulaInput(true)}
+                          disabled={isSaving}
+                        >
+                          <Plus className="size-4 mr-2" />
+                          {cs.questions.addAlternative}
+                        </Button>
+                      )}
+                    </div>
                     <div className="space-y-4">
                       {decoyRows.map((row, index) => {
                         const rowMissingReferences = decoyMissingReferences[row.key] ?? []

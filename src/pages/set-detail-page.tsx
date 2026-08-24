@@ -757,6 +757,7 @@ export function SetDetailPage() {
                   // option distinct.
                   const optionsPrecision = resolveOptionsPrecision(options)
                   const correctOption = variant?.correctOption
+                  const alternateOption = variant?.alternateOption
                   const equationText = tmpl.equationText?.trim() || tmpl.formula
                   const recomputed =
                     equationText && variant
@@ -814,7 +815,8 @@ export function SetDetailPage() {
                               return answersData[0]?.numericOptions?.map((_, optionIdx) => {
                                 const label = optionLabels[optionIdx]
                                 const isCorrect =
-                                  optionIdx + 1 === (answersData[0]?.correctOption ?? correctOption)
+                                  optionIdx + 1 === (answersData[0]?.correctOption ?? correctOption) ||
+                                  optionIdx + 1 === (answersData[0]?.alternateOption ?? alternateOption)
                                 return (
                                   <div
                                     key={label}
@@ -858,7 +860,8 @@ export function SetDetailPage() {
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                             {options.map((value, optionIdx) => {
                               const label = optionLabels[optionIdx]
-                              const isCorrect = optionIdx + 1 === correctOption
+                              const isCorrect =
+                                optionIdx + 1 === correctOption || optionIdx + 1 === alternateOption
                               return (
                                 <div
                                   key={label}
