@@ -756,6 +756,54 @@ describe("formatSignificantDigits", () => {
   })
 })
 
+describe("notation parameter", () => {
+  describe("formatNumberMaxDecimals with notation", () => {
+    it("'scientific' always uses scientific notation", () => {
+      expect(formatNumberMaxDecimals(12300, 2, false, "scientific")).toBe("1.23×10^4")
+      expect(formatNumberMaxDecimals(0.01, 2, false, "scientific")).toBe("1.00×10^-2")
+      expect(formatNumberMaxDecimals(100, 2, false, "scientific")).toBe("1.00×10^2")
+    })
+
+    it("'normal' keeps plain decimal for moderate values", () => {
+      expect(formatNumberMaxDecimals(0.01, 2, false, "normal")).toBe("0.01")
+      expect(formatNumberMaxDecimals(12300, 2, false, "normal")).toBe("12300")
+      expect(formatNumberMaxDecimals(999999, 2, false, "normal")).toBe("999999")
+    })
+
+    it("'normal' falls back to scientific when the value would round to zero", () => {
+      expect(formatNumberMaxDecimals(0.001, 2, false, "normal")).toBe("1.00×10^-3")
+      expect(formatNumberMaxDecimals(1e-7, 2, false, "normal")).toBe("1.00×10^-7")
+    })
+
+    it("'auto' uses threshold-based behavior", () => {
+      expect(formatNumberMaxDecimals(0.01, 2, false, "auto")).toBe("1.00×10^-2")
+      expect(formatNumberMaxDecimals(0.1, 2, false, "auto")).toBe("0.1")
+      expect(formatNumberMaxDecimals(1e6, 2, false, "auto")).toBe("1.00×10^6")
+    })
+  })
+
+  describe("formatSignificantDigits with notation", () => {
+    it("'scientific' always uses scientific notation", () => {
+      expect(formatSignificantDigits(123.456, 4, false, "scientific")).toBe("1.235×10^2")
+      expect(formatSignificantDigits(0.5, 3, false, "scientific")).toBe("5.00×10^-1")
+    })
+
+    it("'normal' keeps plain decimal for values above the lower threshold", () => {
+      expect(formatSignificantDigits(0.5, 3, false, "normal")).toBe("0.500")
+      expect(formatSignificantDigits(123.456, 4, false, "normal")).toBe("123.5")
+    })
+
+    it("'normal' keeps plain decimal for small values that do not round to zero", () => {
+      expect(formatSignificantDigits(1e-5, 3, false, "normal")).toBe("0.0000100")
+    })
+
+    it("'auto' uses threshold-based behavior", () => {
+      expect(formatSignificantDigits(0.05, 3, false, "auto")).toBe("5.00×10^-2")
+      expect(formatSignificantDigits(0.5, 3, false, "auto")).toBe("0.500")
+    })
+  })
+})
+
 describe("buildSubstitutedEquation", () => {
   function makeStringVar(symbol: string, placeholder: string): VariableWithPlaceholder {
     return {

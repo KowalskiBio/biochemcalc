@@ -19,6 +19,44 @@ impl Default for VariableType {
     }
 }
 
+/// How a variable's numeric value is displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Notation {
+    /// Switch to scientific notation automatically based on magnitude
+    /// thresholds (below 0.1, at or above 1e6, or rounding to zero).
+    Auto,
+    /// Always render in scientific notation (e.g. 1,23×10⁴).
+    Scientific,
+    /// Always render as a plain decimal, falling back to scientific
+    /// only when the value would otherwise round to zero.
+    Normal,
+}
+
+impl Default for Notation {
+    fn default() -> Self {
+        Notation::Auto
+    }
+}
+
+impl Notation {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "scientific" => Notation::Scientific,
+            "normal" => Notation::Normal,
+            _ => Notation::Auto,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Notation::Auto => "auto",
+            Notation::Scientific => "scientific",
+            Notation::Normal => "normal",
+        }
+    }
+}
+
 /// A variable placeholder such as X or Y with a numeric range or string values.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +79,10 @@ pub struct Variable {
     /// When set, displayed values use this many significant figures instead
     /// of the fixed decimal-place `precision`.
     pub significant_digits: Option<u8>,
+    /// Controls how the variable's value is displayed: auto (threshold-based),
+    /// always scientific, or always plain decimal. `None` is treated as `Auto`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notation: Option<Notation>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -69,6 +111,7 @@ impl Variable {
             greater_than: None,
             less_than: None,
             significant_digits: None,
+            notation: None,
             created_at: Utc::now(),
         }
     }
@@ -89,6 +132,7 @@ impl Variable {
             greater_than: None,
             less_than: None,
             significant_digits: None,
+            notation: None,
             created_at: Utc::now(),
         }
     }

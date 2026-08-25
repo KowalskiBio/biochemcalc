@@ -69,6 +69,7 @@ import {
 import { buildPreviewVariant, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   CategoryWithSets,
+  Notation,
   ProjektQuestion,
   QuestionDifficulty,
   SaveProjektInput,
@@ -420,7 +421,20 @@ export function SetDetailPage() {
 
       const questions: ProjektQuestion[] = generated.map((g) => {
         const variant = g.variants[0]
-        const tmpl = templateDetailsById.get(g.template.id)?.template ?? g.template
+        const td = templateDetailsById.get(g.template.id)
+        const tmpl = td?.template ?? g.template
+        const variablePrecisions: Record<string, number> = {}
+        const variableSignificantDigits: Record<string, number> = {}
+        const variableNotations: Record<string, Notation> = {}
+        for (const v of td?.variables ?? []) {
+          variablePrecisions[v.variable.symbol] = v.variable.precision
+          if (v.variable.significantDigits) {
+            variableSignificantDigits[v.variable.symbol] = v.variable.significantDigits
+          }
+          if (v.variable.notation && v.variable.notation !== "auto") {
+            variableNotations[v.variable.symbol] = v.variable.notation
+          }
+        }
         return {
           templateId: g.template.id,
           questionText: tmpl.questionText,
@@ -429,7 +443,13 @@ export function SetDetailPage() {
           correctAnswer: variant?.correctAnswer,
           assignedValues: variant?.assignedValues || {},
           assignedStrings: variant?.assignedStrings || {},
-          variablePrecisions: {},
+          variablePrecisions,
+          variableSignificantDigits:
+            Object.keys(variableSignificantDigits).length > 0
+              ? variableSignificantDigits
+              : undefined,
+          variableNotations:
+            Object.keys(variableNotations).length > 0 ? variableNotations : undefined,
           resultPrecision: 2,
           significantDigits: tmpl.significantDigits,
           forceScientific: tmpl.forceScientific ?? false,
@@ -815,8 +835,10 @@ export function SetDetailPage() {
                               return answersData[0]?.numericOptions?.map((_, optionIdx) => {
                                 const label = optionLabels[optionIdx]
                                 const isCorrect =
-                                  optionIdx + 1 === (answersData[0]?.correctOption ?? correctOption) ||
-                                  optionIdx + 1 === (answersData[0]?.alternateOption ?? alternateOption)
+                                  optionIdx + 1 ===
+                                    (answersData[0]?.correctOption ?? correctOption) ||
+                                  optionIdx + 1 ===
+                                    (answersData[0]?.alternateOption ?? alternateOption)
                                 return (
                                   <div
                                     key={label}

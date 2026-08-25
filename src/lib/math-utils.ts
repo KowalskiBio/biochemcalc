@@ -1,7 +1,7 @@
 import { normalizeFormulaForEvaluation } from "@/lib/bulk-import-parser"
 import { calculateMolarMass, parseChemicalFormula } from "@/lib/chemical-formula-parser"
 import { ATOMIC_WEIGHTS } from "@/lib/periodic-table-data"
-import type { LocalVariableEdit, VariableWithPlaceholder, Variant } from "@/lib/types"
+import type { LocalVariableEdit, Notation, VariableWithPlaceholder, Variant } from "@/lib/types"
 import { extractPlaceholders, extractPlaceholderValues } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
@@ -1097,15 +1097,31 @@ export function formatSignificantDigits(
   value: number | undefined | null,
   sigDigits: number,
   forceScientific = false,
+  notation?: Notation,
 ): string {
   if (value == null || !Number.isFinite(value)) return ""
   if (value === 0) return (0).toFixed(Math.max(0, sigDigits - 1))
 
   const abs = Math.abs(value)
 
-  // Scientific notation when the value is too small (more than one leading
-  // zero after the decimal point) or too large, or when explicitly forced.
-  if (forceScientific || abs < SCIENTIFIC_LOWER_THRESHOLD || abs >= SCIENTIFIC_UPPER_THRESHOLD) {
+  // Resolve the effective notation: an explicit `notation` arg takes
+  // precedence over the legacy `forceScientific` boolean.
+  const wantScientific = notation === "scientific" || (notation == null && forceScientific)
+  const wantNormal = notation === "normal"
+
+  // Scientific notation when forced, or (for auto/normal) when the value is
+  // too small/large. "normal" suppresses the threshold triggers but keeps the
+  // zero-collapse fallback so a tiny value doesn't silently read "0".
+  const tooSmall = abs < SCIENTIFIC_LOWER_THRESHOLD
+  const tooLarge = abs >= SCIENTIFIC_UPPER_THRESHOLD
+  const useScientific =
+    wantScientific ||
+    (!wantNormal && (tooSmall || tooLarge)) ||
+    (wantNormal &&
+      tooSmall &&
+      value.toFixed(Math.max(0, sigDigits - 1 - Math.floor(Math.log10(abs)))) === "0")
+
+  if (useScientific) {
     const mantissa = value / 10 ** Math.floor(Math.log10(abs))
     const mantissaDigits = sigDigits - 1
     return `${mantissa.toFixed(mantissaDigits)}×10^${Math.floor(Math.log10(abs))}`
@@ -1124,18 +1140,25 @@ export function formatNumberMaxDecimals(
   value: number | undefined | null,
   maxDecimals = 2,
   forceScientific = false,
+  notation?: Notation,
 ): string {
   if (value == null || !Number.isFinite(value)) return ""
   const decimals = Math.max(0, maxDecimals)
   const fixed = value.toFixed(decimals)
   const rounded = Number(fixed)
 
-  if (
-    forceScientific ||
-    (rounded === 0 && value !== 0) ||
-    Math.abs(rounded) >= SCIENTIFIC_UPPER_THRESHOLD ||
-    (value !== 0 && Math.abs(value) < SCIENTIFIC_LOWER_THRESHOLD)
-  ) {
+  // Resolve the effective notation: an explicit `notation` arg takes
+  // precedence over the legacy `forceScientific` boolean.
+  const wantScientific = notation === "scientific" || (notation == null && forceScientific)
+  const wantNormal = notation === "normal"
+
+  // "normal" suppresses the magnitude thresholds but keeps the zero-collapse
+  // fallback so a tiny value doesn't silently read "0".
+  const wouldRoundToZero = rounded === 0 && value !== 0
+  const tooLarge = Math.abs(rounded) >= SCIENTIFIC_UPPER_THRESHOLD
+  const tooSmall = value !== 0 && Math.abs(value) < SCIENTIFIC_LOWER_THRESHOLD
+
+  if (wantScientific || wouldRoundToZero || (!wantNormal && (tooLarge || tooSmall))) {
     return toScientificNotation(value)
   }
   return rounded.toString()
@@ -1182,12 +1205,16 @@ export function buildSubstitutedEquation(
     .filter((vwp) => vwp.variable.varType === "string" && vwp.placeholder !== "ANS")
     .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
 
-  const varFormat = new Map<string, { significantDigits?: number; precision?: number }>()
+  const varFormat = new Map<
+    string,
+    { significantDigits?: number; precision?: number; notation?: Notation }
+  >()
   for (const vwp of variables) {
     if (vwp.placeholder === "ANS") continue
     const fmt = {
       significantDigits: vwp.variable.significantDigits,
       precision: vwp.variable.precision,
+      notation: vwp.variable.notation,
     }
     varFormat.set(vwp.placeholder, fmt)
     varFormat.set(vwp.variable.symbol, fmt)
@@ -1228,7 +1255,7 @@ export function buildSubstitutedEquation(
     const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
     substituted = substituted.replace(
       new RegExp(`\\[\\[${escapeRegexLiteral(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
-      formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision),
+      formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision, fmt?.notation),
     )
   }
   for (const v of stringSources) {
@@ -1253,7 +1280,7 @@ export function buildSubstitutedEquation(
     const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
     const formatted =
       typeof value === "number"
-        ? formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision)
+        ? formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision, fmt?.notation)
         : value
     substituted = substituted.replace(
       new RegExp(
@@ -1280,6 +1307,7 @@ export function formatValueForSubstitution(
   value: number,
   significantDigits?: number,
   _precision?: number,
+  notation?: Notation,
 ): string {
   if (!Number.isFinite(value)) return String(value)
   if (value === 0) {
@@ -1288,13 +1316,31 @@ export function formatValueForSubstitution(
     }
     return "0"
   }
+  const abs = Math.abs(value)
+  const order = Math.floor(Math.log10(abs))
+
+  // Resolve notation: "scientific" always emits e-notation; "normal" never
+  // does (unless the value would round to zero at the given precision);
+  // "auto"/undefined uses the magnitude thresholds.
+  const wantScientific = notation === "scientific"
+  const wantNormal = notation === "normal"
+  const autoScientific = order >= 6 || order <= -2
+
   if (significantDigits != null && significantDigits > 0) {
-    const abs = Math.abs(value)
-    const order = Math.floor(Math.log10(abs))
-    if (order >= 6 || order <= -2) {
+    if (wantScientific || (!wantNormal && autoScientific)) {
       const mantissa = value / 10 ** order
       const mantissaDigits = significantDigits - 1
       return `${mantissa.toFixed(mantissaDigits)}e${order}`
+    }
+    // "normal" mode: fall back to scientific only if the decimal form would
+    // collapse to zero at the available precision.
+    if (wantNormal && order < 0) {
+      const decimalPlaces = significantDigits - 1 - order
+      if (value.toFixed(decimalPlaces) === "0".padEnd(decimalPlaces + 1, "0")) {
+        const mantissa = value / 10 ** order
+        const mantissaDigits = significantDigits - 1
+        return `${mantissa.toFixed(mantissaDigits)}e${order}`
+      }
     }
     const decimalPlaces = significantDigits - 1 - order
     if (decimalPlaces < 0) {
@@ -1302,6 +1348,14 @@ export function formatValueForSubstitution(
       return (Math.round(value / factor) * factor).toFixed(0)
     }
     return value.toFixed(decimalPlaces)
+  }
+  // No significant digits set.
+  // "scientific" always emits e-notation; "normal" always emits plain
+  // decimal (String(value)); "auto"/undefined preserves the original
+  // behavior of returning String(value), which the equation evaluator
+  // and LaTeX renderer handle natively.
+  if (wantScientific) {
+    return `${value.toExponential(2)}`
   }
   return String(value)
 }

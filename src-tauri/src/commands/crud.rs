@@ -4,7 +4,7 @@ use crate::db::repos::{
 };
 use crate::db::{AppState, DbError};
 use crate::models::{
-    Category, Constant, ConstraintType, ResultConstraint, Set, Template, TemplateConstant,
+    Category, Constant, ConstraintType, Notation, ResultConstraint, Set, Template, TemplateConstant,
     TemplateDecoy, TemplateDecoyInput, TemplateMode, TemplateVariable, Topic, TopicGroup,
     Variable, VariableType,
 };
@@ -105,6 +105,26 @@ fn record_variable_history(
                 "string_values",
                 Some(&serde_json::to_string(&old.string_values).unwrap_or_default()),
                 Some(&serde_json::to_string(&new.string_values).unwrap_or_default()),
+            )?;
+        }
+        if old.significant_digits != new.significant_digits {
+            VariableHistoryRepo::record_change(
+                conn,
+                &new.id,
+                &template_id,
+                "significantDigits",
+                old.significant_digits.map(|n| n.to_string()).as_deref(),
+                new.significant_digits.map(|n| n.to_string()).as_deref(),
+            )?;
+        }
+        if old.notation != new.notation {
+            VariableHistoryRepo::record_change(
+                conn,
+                &new.id,
+                &template_id,
+                "notation",
+                old.notation.map(|n| n.as_str().to_string()).as_deref(),
+                new.notation.map(|n| n.as_str().to_string()).as_deref(),
             )?;
         }
     } else {
@@ -591,6 +611,8 @@ pub struct CreateVariablePayload {
     pub paired_constants: Option<Vec<std::collections::HashMap<String, f64>>>,
     #[serde(default)]
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub notation: Option<Notation>,
 }
 
 #[tauri::command]
@@ -608,6 +630,7 @@ pub fn create_variable(
             );
             v.paired_constants = payload.paired_constants;
             v.significant_digits = payload.significant_digits;
+            v.notation = payload.notation;
             v
         }
         VariableType::Numeric => {
@@ -621,6 +644,7 @@ pub fn create_variable(
                 payload.precision,
             );
             v.significant_digits = payload.significant_digits;
+            v.notation = payload.notation;
             v
         }
     };
@@ -656,6 +680,8 @@ pub struct UpdateVariablePayload {
     pub paired_constants: Option<Vec<std::collections::HashMap<String, f64>>>,
     #[serde(default)]
     pub significant_digits: Option<u8>,
+    #[serde(default)]
+    pub notation: Option<Notation>,
 }
 
 #[tauri::command]
@@ -679,6 +705,7 @@ pub fn update_variable(
         greater_than: None,
         less_than: None,
         significant_digits: payload.significant_digits,
+        notation: payload.notation,
         created_at: Utc::now(),
     };
     VariableRepo::update(&conn, &variable)?;
@@ -943,17 +970,24 @@ pub(crate) fn build_variable_from_payload(payload: CreateVariablePayload) -> Var
                 payload.string_values.unwrap_or_default(),
             );
             v.paired_constants = payload.paired_constants;
+            v.significant_digits = payload.significant_digits;
+            v.notation = payload.notation;
             v
         }
-        VariableType::Numeric => Variable::new(
-            payload.name,
-            payload.symbol,
-            payload.min_value,
-            payload.max_value,
-            payload.step,
-            payload.unit,
-            payload.precision,
-        ),
+        VariableType::Numeric => {
+            let mut v = Variable::new(
+                payload.name,
+                payload.symbol,
+                payload.min_value,
+                payload.max_value,
+                payload.step,
+                payload.unit,
+                payload.precision,
+            );
+            v.significant_digits = payload.significant_digits;
+            v.notation = payload.notation;
+            v
+        }
     }
 }
 
@@ -1467,6 +1501,7 @@ pub fn apply_template_variable_mutations(
                     greater_than: None,
                     less_than: None,
                     significant_digits: variable.significant_digits,
+                    notation: variable.notation,
                     created_at: Utc::now(),
                 };
                 VariableRepo::update(&tx, &updated)?;
@@ -2073,6 +2108,7 @@ mod tests {
             string_values: None,
             paired_constants: None,
             significant_digits: None,
+            notation: None,
         }
     }
 

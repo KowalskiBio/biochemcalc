@@ -25,5 +25,5 @@ pub use template::{
 pub use topic::Topic;
 pub use topic_group::TopicGroup;
 pub use user::{InviteCode, Role, User};
-pub use variable::{Variable, VariableType};
+pub use variable::{Notation, Variable, VariableType};
 pub use variant::{AnswerField, Variant};

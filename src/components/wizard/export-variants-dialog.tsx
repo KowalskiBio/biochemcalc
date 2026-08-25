@@ -26,6 +26,7 @@ import { generationApi } from "@/lib/api"
 import { QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
   ExportQuestion,
+  Notation,
   QuestionDifficulty,
   TemplateMode,
   TemplateWithDetails,
@@ -234,10 +235,14 @@ export function ExportVariantsDialog({
         for (const variant of templateResult.variants) {
           const variablePrecisions: Record<string, number> = {}
           const variableSignificantDigits: Record<string, number> = {}
+          const variableNotations: Record<string, Notation> = {}
           for (const v of templateDetails.variables) {
             variablePrecisions[v.variable.symbol] = v.variable.precision
             if (v.variable.significantDigits) {
               variableSignificantDigits[v.variable.symbol] = v.variable.significantDigits
+            }
+            if (v.variable.notation && v.variable.notation !== "auto") {
+              variableNotations[v.variable.symbol] = v.variable.notation
             }
           }
 
@@ -246,6 +251,8 @@ export function ExportVariantsDialog({
             variant,
             variablePrecisions,
             variableSignificantDigits,
+            variableNotations:
+              Object.keys(variableNotations).length > 0 ? variableNotations : undefined,
             resultPrecision: 2,
             resultSignificantDigits: templateDetails.template.significantDigits,
             forceScientific: templateDetails.template.forceScientific ?? false,

@@ -4,6 +4,9 @@
 // Variable type - can be numeric or string
 export type VariableType = "numeric" | "string"
 
+// How a variable's numeric value is displayed
+export type Notation = "auto" | "scientific" | "normal"
+
 // Topic model - groups categories under a common heading
 export interface Topic {
   id: string
@@ -49,6 +52,7 @@ export interface Variable {
   stringValues?: string[]
   pairedConstants?: Array<Record<string, number>>
   significantDigits?: number
+  notation?: Notation
   createdAt: string
 }
 
@@ -65,6 +69,7 @@ export interface VariableInput {
   stringValues?: string[]
   pairedConstants?: Array<Record<string, number>>
   significantDigits?: number
+  notation?: Notation
 }
 
 /**
@@ -257,6 +262,7 @@ export interface LocalVariableEdit {
   stringValues?: string[]
   pairedConstants?: Array<Record<string, number>>
   significantDigits?: number
+  notation?: Notation
   greaterThanVariableId?: string
   lessThanVariableId?: string
   isNew: boolean
@@ -384,6 +390,7 @@ export interface ExportQuestion {
   variant: Variant
   variablePrecisions: Record<string, number>
   variableSignificantDigits?: Record<string, number>
+  variableNotations?: Record<string, Notation>
   resultPrecision: number
   resultSignificantDigits?: number
   forceScientific?: boolean
@@ -590,6 +597,7 @@ export interface ProjektQuestion {
   assignedStrings?: Record<string, string>
   variablePrecisions: Record<string, number>
   variableSignificantDigits?: Record<string, number>
+  variableNotations?: Record<string, Notation>
   resultPrecision: number
   significantDigits?: number
   forceScientific?: boolean

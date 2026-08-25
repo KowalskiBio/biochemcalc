@@ -268,6 +268,7 @@ async fn update_variable(
         greater_than: None,
         less_than: None,
         significant_digits: payload.significant_digits,
+        notation: payload.notation,
         created_at: chrono::Utc::now(),
     };
     VariableRepo::update(&conn, &variable)?;

@@ -46,6 +46,7 @@ import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-
 import type {
   HistoryEntry,
   LocalVariableEdit,
+  Notation,
   TemplateDecoy,
   TemplateDecoyInput,
   TemplateWithDetails,
@@ -100,6 +101,7 @@ function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
     stringValues: vwp.variable.stringValues,
     pairedConstants: vwp.variable.pairedConstants,
     significantDigits: vwp.variable.significantDigits,
+    notation: vwp.variable.notation,
     greaterThanVariableId: vwp.greaterThanVariableId,
     lessThanVariableId: vwp.lessThanVariableId,
     isNew: false,
@@ -247,6 +249,7 @@ function buildVariableInput(v: LocalVariableEdit): VariableInput {
     stringValues: v.stringValues,
     pairedConstants: v.pairedConstants,
     significantDigits: v.significantDigits,
+    notation: v.notation,
   }
 }
 
@@ -269,6 +272,7 @@ function variableChanged(
     current.unit !== original.unit ||
     current.precision !== original.precision ||
     current.significantDigits !== original.significantDigits ||
+    current.notation !== original.notation ||
     current.placeholder !== original.placeholder ||
     current.greaterThanVariableId !== original.greaterThanVariableId ||
     current.lessThanVariableId !== original.lessThanVariableId ||
@@ -1061,12 +1065,16 @@ export function QuestionDetailDialog({
         .filter((vwp) => vwp.variable.varType === "string")
         .map((vwp) => ({ placeholder: vwp.placeholder, symbol: vwp.variable.symbol }))
 
-      const varFormat = new Map<string, { significantDigits?: number; precision?: number }>()
+      const varFormat = new Map<
+        string,
+        { significantDigits?: number; precision?: number; notation?: Notation }
+      >()
       for (const vwp of displayTemplateVariables) {
         if (vwp.placeholder === "ANS") continue
         const fmt = {
           significantDigits: vwp.variable.significantDigits,
           precision: vwp.variable.precision,
+          notation: vwp.variable.notation,
         }
         varFormat.set(vwp.placeholder, fmt)
         varFormat.set(vwp.variable.symbol, fmt)
@@ -1094,7 +1102,7 @@ export function QuestionDetailDialog({
         const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
         substituted = substituted.replace(
           new RegExp(`\\[\\[${escapeRegex(v.placeholder)}(?:=[^\\]]*)?\\]\\]`, "g"),
-          formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision),
+          formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision, fmt?.notation),
         )
       }
       for (const v of stringSources) {
@@ -1115,7 +1123,12 @@ export function QuestionDetailDialog({
         const fmt = varFormat.get(v.placeholder) ?? varFormat.get(v.symbol)
         const formatted =
           typeof value === "number"
-            ? formatValueForSubstitution(value, fmt?.significantDigits, fmt?.precision)
+            ? formatValueForSubstitution(
+                value,
+                fmt?.significantDigits,
+                fmt?.precision,
+                fmt?.notation,
+              )
             : value
         substituted = substituted.replace(
           new RegExp(

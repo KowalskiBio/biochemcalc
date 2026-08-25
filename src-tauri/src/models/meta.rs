@@ -149,6 +149,8 @@ pub struct ProjektQuestion {
     pub variable_precisions: std::collections::HashMap<String, u8>,
     #[serde(default)]
     pub variable_significant_digits: std::collections::HashMap<String, u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variable_notations: Option<std::collections::HashMap<String, crate::models::Notation>>,
     pub result_precision: u8,
     #[serde(default)]
     pub significant_digits: Option<u8>,

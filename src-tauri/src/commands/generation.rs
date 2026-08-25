@@ -9,8 +9,8 @@ use crate::engine::generator::{
     open_interval, GenerationError,
 };
 use crate::models::{
-    ConstraintType, OutputFile, Projekt, ProjektContent, ProjektQuestion, ResultConstraint,
-    Template, TemplateMode, Variant,
+    ConstraintType, Notation, OutputFile, Projekt, ProjektContent, ProjektQuestion,
+    ResultConstraint, Template, TemplateMode, Variant,
 };
 use chrono::Utc;
 use rand::rngs::StdRng;
@@ -138,6 +138,8 @@ pub struct ExportQuestionInput {
     pub variable_precisions: HashMap<String, u8>,
     #[serde(default)]
     pub variable_significant_digits: HashMap<String, u8>,
+    #[serde(default)]
+    pub variable_notations: HashMap<String, Notation>,
     pub result_precision: u8,
     #[serde(default)]
     pub result_significant_digits: Option<u8>,
@@ -181,6 +183,7 @@ pub fn do_export_to_txt(
             variant: &input.variant,
             variable_precisions: input.variable_precisions.clone(),
             variable_significant_digits: input.variable_significant_digits.clone(),
+            variable_notations: input.variable_notations.clone(),
             result_precision: input.result_precision,
             result_significant_digits: input.result_significant_digits,
             force_scientific: input.force_scientific,
@@ -588,6 +591,7 @@ pub fn do_export_projekt_to_txt(
             variant: &variants[i],
             variable_precisions: pq.variable_precisions.clone(),
             variable_significant_digits: pq.variable_significant_digits.clone(),
+            variable_notations: pq.variable_notations.clone().unwrap_or_default(),
             result_precision: pq.result_precision,
             result_significant_digits: pq.significant_digits,
             force_scientific: pq.force_scientific,

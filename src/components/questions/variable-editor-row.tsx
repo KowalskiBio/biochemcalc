@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 import { cs } from "@/i18n/cs"
 import { FIRST_THREE_ROWS_ELEMENTS, KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
-import type { LocalVariableEdit, VariableType } from "@/lib/types"
+import type { LocalVariableEdit, Notation, VariableType } from "@/lib/types"
 
 // X/Y/Z placeholder colors
 const PLACEHOLDER_COLORS: Record<string, string> = {
@@ -419,7 +419,7 @@ export function VariableEditorRow({
           </>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">{cs.questions.variableMin}</Label>
                 <NumericInput
@@ -467,6 +467,22 @@ export function VariableEditorRow({
                     }
                   }}
                 />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">{cs.questions.notationLabel}</Label>
+                <Select
+                  value={variable.notation ?? "auto"}
+                  onValueChange={(v) => onChange("notation", v as Notation)}
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">{cs.questions.notationAuto}</SelectItem>
+                    <SelectItem value="scientific">{cs.questions.notationScientific}</SelectItem>
+                    <SelectItem value="normal">{cs.questions.notationNormal}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <ComparisonSelectors

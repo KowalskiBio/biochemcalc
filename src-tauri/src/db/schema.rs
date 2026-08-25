@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 31;
+const CURRENT_USER_VERSION: u32 = 32;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -161,6 +161,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 31 {
         apply_migration_v31(conn)?;
         conn.pragma_update(None, "user_version", "31")?;
+    }
+
+    if user_version < 32 {
+        apply_migration_v32(conn)?;
+        conn.pragma_update(None, "user_version", "32")?;
     }
 
     Ok(())
@@ -1095,6 +1100,11 @@ fn apply_migration_v31(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+fn apply_migration_v32(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE variables ADD COLUMN notation TEXT;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1272,7 +1282,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 31);
+        assert_eq!(user_version(&conn), 32);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1362,7 +1372,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 31);
+        assert_eq!(user_version(&conn), 32);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1387,7 +1397,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 31);
+        assert_eq!(user_version(&conn), 32);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");

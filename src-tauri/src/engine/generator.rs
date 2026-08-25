@@ -1048,6 +1048,7 @@ mod tests {
             greater_than: None,
             less_than: None,
             significant_digits: None,
+            notation: None,
             created_at: chrono::Utc::now(),
         }
     }

@@ -1,4 +1,4 @@
-use crate::models::{Template, TemplateMode, Variant};
+use crate::models::{Notation, Template, TemplateMode, Variant};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -137,7 +137,7 @@ fn fmt_variable_value(
     value: f64,
     precision: u8,
     sig_digits: Option<u8>,
-    force_scientific: bool,
+    notation: Notation,
 ) -> String {
     // Mirrors formatSignificantDigits/formatNumberMaxDecimals in
     // src/lib/math-utils.ts: the mantissa gets as many decimals as the
@@ -146,19 +146,36 @@ fn fmt_variable_value(
     let mantissa_decimals = sig_digits
         .map(|n| n.saturating_sub(1))
         .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
-    if force_scientific && value != 0.0 && value.is_finite() {
+    let want_scientific = notation == Notation::Scientific;
+    let want_normal = notation == Notation::Normal;
+    if want_scientific && value != 0.0 && value.is_finite() {
         return fmt_scientific_cz(value, mantissa_decimals);
     }
     match sig_digits {
         Some(n) => {
             let formatted = fmt_significant_cz(value, n);
             let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
+            // "normal" suppresses the threshold triggers but keeps the
+            // zero-collapse fallback so a tiny value doesn't read "0".
+            if (want_scientific || (!want_normal && ((rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD)))
+                && value != 0.0
+                && value.is_finite()
+            {
+                return fmt_scientific_cz(value, mantissa_decimals);
+            }
+            formatted
+        }
+        None => {
+            if want_normal {
+                return fmt_value_cz(value, precision);
+            }
+            let formatted = fmt_value_cz(value, precision);
+            let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
             if (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD {
                 return fmt_scientific_cz(value, mantissa_decimals);
             }
             formatted
         }
-        None => fmt_value_cz(value, precision),
     }
 }
 
@@ -172,14 +189,14 @@ fn fmt_variable_value(
 /// open-answer interval bounds, which already have their own joint "both
 /// bounds must stay distinguishable" precision logic and intentionally keep
 /// small-but-ordinary values (e.g. `0,08..0,15`) as plain decimals.
-fn fmt_option_value(value: f64, precision: u8, sig_digits: Option<u8>, force_scientific: bool) -> String {
-    if !force_scientific && value != 0.0 && value.is_finite() && value.abs() < SCIENTIFIC_LOWER_THRESHOLD {
+fn fmt_option_value(value: f64, precision: u8, sig_digits: Option<u8>, notation: Notation) -> String {
+    if notation != Notation::Scientific && value != 0.0 && value.is_finite() && value.abs() < SCIENTIFIC_LOWER_THRESHOLD {
         let mantissa_decimals = sig_digits
             .map(|n| n.saturating_sub(1))
             .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
         return fmt_scientific_cz(value, mantissa_decimals);
     }
-    fmt_variable_value(value, precision, sig_digits, force_scientific)
+    fmt_variable_value(value, precision, sig_digits, notation)
 }
 
 fn render_question(
@@ -188,6 +205,7 @@ fn render_question(
     assigned_strings: &HashMap<String, String>,
     precisions: &HashMap<String, u8>,
     significant_digits: &HashMap<String, u8>,
+    notations: &HashMap<String, Notation>,
 ) -> String {
     // The trailing `[n]` / `[n mol]` markers tell the generator which symbol
     // to solve for — they are not part of the question and must never reach
@@ -217,7 +235,8 @@ fn render_question(
         if let Some(&value) = assigned.get(lookup_key) {
             let precision = precisions.get(lookup_key).copied().unwrap_or(1);
             let sig_digits = significant_digits.get(lookup_key).copied();
-            rendered.push_str(&fmt_variable_value(value, precision, sig_digits, false));
+            let notation = notations.get(lookup_key).copied().unwrap_or(Notation::Auto);
+            rendered.push_str(&fmt_variable_value(value, precision, sig_digits, notation));
         } else if !has_eq {
             if let Some(value) = assigned_strings.get(symbol) {
                 rendered.push_str(&format_chemical_text(value));
@@ -239,7 +258,7 @@ fn render_multi_closed_options(
     answers: &[crate::models::AnswerField],
     precision: u8,
     sig_digits: Option<u8>,
-    force_scientific: bool,
+    notation: Notation,
     point_value: u8,
 ) {
     let option_count = answers[0]
@@ -257,9 +276,9 @@ fn render_multi_closed_options(
                 let value = a.numeric_options.as_ref().unwrap()[idx];
                 let unit = a.unit.as_deref().unwrap_or("");
                 if unit.is_empty() {
-                    fmt_option_value(value, precision, sig_digits, force_scientific)
+                    fmt_option_value(value, precision, sig_digits, notation)
                 } else {
-                    format!("{} {}", fmt_option_value(value, precision, sig_digits, force_scientific), unit)
+                    format!("{} {}", fmt_option_value(value, precision, sig_digits, notation), unit)
                 }
             })
             .collect();
@@ -288,7 +307,7 @@ fn render_multi_open_intervals(
     point_value: u8,
     result_precision: u8,
     result_sig_digits: Option<u8>,
-    force_scientific: bool,
+    notation: Notation,
 ) {
     let parts: Vec<String> = answers
         .iter()
@@ -299,7 +318,7 @@ fn render_multi_open_intervals(
             let mantissa_decimals = result_sig_digits
                 .map(|n| n.saturating_sub(1))
                 .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
-            let (lo_str, hi_str) = if force_scientific && lo != 0.0 && hi != 0.0 {
+            let (lo_str, hi_str) = if notation == Notation::Scientific && lo != 0.0 && hi != 0.0 {
                 (
                     fmt_scientific_cz(lo, mantissa_decimals),
                     fmt_scientific_cz(hi, mantissa_decimals),
@@ -307,8 +326,8 @@ fn render_multi_open_intervals(
             } else {
                 match result_sig_digits {
                     Some(n) => (
-                        fmt_variable_value(lo, 0, Some(n), false),
-                        fmt_variable_value(hi, 0, Some(n), false),
+                        fmt_variable_value(lo, 0, Some(n), Notation::Auto),
+                        fmt_variable_value(hi, 0, Some(n), Notation::Auto),
                     ),
                     None => {
                         let precision = interval_precision(lo, hi, result_precision);
@@ -333,6 +352,7 @@ pub struct ExportQuestion<'a> {
     pub variant: &'a Variant,
     pub variable_precisions: HashMap<String, u8>,
     pub variable_significant_digits: HashMap<String, u8>,
+    pub variable_notations: HashMap<String, Notation>,
     pub result_precision: u8,
     pub result_significant_digits: Option<u8>,
     pub force_scientific: bool,
@@ -354,8 +374,15 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
             &q.variant.assigned_strings,
             &q.variable_precisions,
             &q.variable_significant_digits,
+            &q.variable_notations,
         );
         out.push_str(&format!("{} ({} b)\n\n", rendered, q.template.point_value));
+
+        let result_notation = if q.force_scientific {
+            Notation::Scientific
+        } else {
+            Notation::Auto
+        };
 
         match q.mode {
             TemplateMode::Closed => {
@@ -365,7 +392,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         answers,
                         q.result_precision,
                         q.result_significant_digits,
-                        q.force_scientific,
+                        result_notation,
                         q.template.point_value,
                     );
                 } else {
@@ -379,7 +406,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_option_value(*value, q.result_precision, q.result_significant_digits, q.force_scientific),
+                            fmt_option_value(*value, q.result_precision, q.result_significant_digits, result_notation),
                             q.template.result_unit
                         ));
                     }
@@ -398,7 +425,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         q.template.point_value,
                         q.result_precision,
                         q.result_significant_digits,
-                        q.force_scientific,
+                        result_notation,
                     );
                 } else {
                     let lo = q
@@ -421,8 +448,8 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                     } else {
                         match q.result_significant_digits {
                             Some(n) => (
-                                fmt_variable_value(lo, 0, Some(n), false),
-                                fmt_variable_value(hi, 0, Some(n), false),
+                                fmt_variable_value(lo, 0, Some(n), Notation::Auto),
+                                fmt_variable_value(hi, 0, Some(n), Notation::Auto),
                             ),
                             None => {
                                 let precision = interval_precision(lo, hi, q.result_precision);
@@ -493,6 +520,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -518,6 +546,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -552,6 +581,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -618,6 +648,7 @@ mod tests {
             variant: &variant,
             variable_precisions: [("X".to_string(), 0)].into(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: None,
             force_scientific: false,
@@ -658,6 +689,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: Some(4),
             force_scientific: false,
@@ -693,6 +725,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: None,
             force_scientific: false,
@@ -724,6 +757,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: None,
             force_scientific: false,
@@ -754,6 +788,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: None,
             force_scientific: false,
@@ -786,6 +821,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: None,
             force_scientific: false,
@@ -822,6 +858,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -848,6 +885,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -878,6 +916,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -902,6 +941,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -928,6 +968,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -971,6 +1012,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -1013,6 +1055,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -1032,6 +1075,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -1052,6 +1096,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -1072,6 +1117,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -1092,6 +1138,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 1,
             result_significant_digits: None,
             force_scientific: false,
@@ -1133,6 +1180,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: Some(3),
             force_scientific: false,
@@ -1168,6 +1216,7 @@ mod tests {
             variant: &variant,
             variable_precisions: HashMap::new(),
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: Some(3),
             force_scientific: false,
@@ -1194,6 +1243,7 @@ mod tests {
             variant: &variant,
             variable_precisions: precisions,
             variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
             result_precision: 2,
             result_significant_digits: None,
             force_scientific: false,
@@ -1214,5 +1264,53 @@ mod tests {
         assert_eq!(fmt_significant_cz(111554.0, 5), "111550");
         assert_eq!(fmt_significant_cz(111554.0, 6), "111554");
         assert_eq!(fmt_significant_cz(111554.0, 7), "111554,0");
+    }
+
+    #[test]
+    fn per_variable_notation_scientific_forces_scientific_in_question_text() {
+        let template = make_template("Hmotnost [[X]] g...");
+        let variant = make_closed_variant();
+        let precisions = [("X".to_string(), 1)].into();
+        let mut notations: HashMap<String, Notation> = HashMap::new();
+        notations.insert("X".to_string(), Notation::Scientific);
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            variable_notations: notations,
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+        assert!(
+            output.contains("3,20×10<sup>1</sup>"),
+            "expected scientific notation for X in question text, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn per_variable_notation_normal_keeps_plain_decimal_in_question_text() {
+        let template = make_template("Hmotnost [[X]] g...");
+        let variant = make_closed_variant();
+        let precisions = [("X".to_string(), 1)].into();
+        let mut notations: HashMap<String, Notation> = HashMap::new();
+        notations.insert("X".to_string(), Notation::Normal);
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            variable_notations: notations,
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+        assert!(
+            output.contains("32,0 g"),
+            "expected plain decimal for X in question text, got:\n{output}"
+        );
     }
 }

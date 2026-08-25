@@ -11,7 +11,7 @@ import {
 import { PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
-import type { DatabazeEntry, VariableWithPlaceholder, Variant } from "./types"
+import type { DatabazeEntry, Notation, VariableWithPlaceholder, Variant } from "./types"
 
 /**
  * All this renderer needs of a variable: which placeholder it fills and how
@@ -89,10 +89,15 @@ function formatTextSegment(text: string): string {
   return formatChemicalText(text)
 }
 
-function formatNumberSegment(value: number, precision: number, significantDigits?: number): string {
+function formatNumberSegment(
+  value: number,
+  precision: number,
+  significantDigits?: number,
+  notation?: Notation,
+): string {
   const formatted = significantDigits
-    ? formatSignificantDigits(value, significantDigits)
-    : formatNumberMaxDecimals(value, precision)
+    ? formatSignificantDigits(value, significantDigits, false, notation)
+    : formatNumberMaxDecimals(value, precision, false, notation)
   return scientificNotationToHtml(formatted)
 }
 
@@ -235,6 +240,7 @@ function renderPlaceholderSpan(
             previewValueForVariable(variable),
             effectivePrecision(variable),
             variable.significantDigits,
+            variable.notation,
           )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
@@ -391,6 +397,7 @@ function renderPlaceholderSpanWithVariant(
           rawValue,
           effectivePrecision(variable),
           variable.significantDigits,
+          variable.notation,
         )
         return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
       }
@@ -404,6 +411,7 @@ function renderPlaceholderSpanWithVariant(
             previewValueForVariable(variable),
             effectivePrecision(variable),
             variable.significantDigits,
+            variable.notation,
           )
     return `<span class="inline-flex items-center font-semibold ${colorClass}">${displayValue}</span>`
   }
