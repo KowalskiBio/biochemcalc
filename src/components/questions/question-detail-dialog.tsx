@@ -2159,6 +2159,43 @@ export function QuestionDetailDialog({
                         </div>
                       )}
                     </div>
+
+                    {/* Alternace (read-only) */}
+                    {templateDetails.template.alternativeFormula &&
+                      templateDetails.template.alternativeFormula.trim() !== "" && (
+                        <div className="rounded-lg bg-muted/50 p-4 space-y-2">
+                          <p className="text-sm font-medium text-foreground-secondary">
+                            {cs.questions.alternativeEquationLabel}
+                          </p>
+                          <MathRenderer
+                            text={renderEquationAsLatex(
+                              templateDetails.template.alternativeFormula,
+                            )}
+                            className="[&_.katex-display]:!my-0 [&_p]:!my-0"
+                          />
+                        </div>
+                      )}
+
+                    {/* Decoys (read-only) */}
+                    {templateDetails.decoys.length > 0 && (
+                      <div className="space-y-3">
+                        {templateDetails.decoys.map((decoy, index) => (
+                          <div key={decoy.id} className="rounded-lg bg-muted/50 p-4 space-y-2">
+                            <p className="text-sm font-medium text-foreground-secondary">
+                              {cs.questions.decoyEquationLabel}
+                              {templateDetails.decoys.length > 1 ? ` #${index + 1}` : ""}
+                            </p>
+                            <MathRenderer
+                              text={renderEquationAsLatex(decoy.formula)}
+                              className="[&_.katex-display]:!my-0 [&_p]:!my-0"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              {cs.questions.decoyOptionCountLabel}: {decoy.optionCount}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
               </CardContent>
