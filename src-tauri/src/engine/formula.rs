@@ -633,6 +633,20 @@ pub fn evaluate_assignments(
     constants: &HashMap<String, f64>,
     strings: &HashMap<String, String>,
 ) -> Result<HashMap<String, f64>, FormulaError> {
+    evaluate_assignments_with_answers(assignments, variables, constants, strings, &HashMap::new())
+}
+
+/// Same as [`evaluate_assignments`], but seeds the result map with
+/// pre-computed `answers` so that assignments inside a decoy/alternace formula
+/// can chain off intermediates produced by the main formula (e.g. a decoy
+/// `n = n * 2` reuses the `n` already solved by `n = V / M`).
+pub fn evaluate_assignments_with_answers(
+    assignments: &[FormulaAssignment],
+    variables: &HashMap<String, f64>,
+    constants: &HashMap<String, f64>,
+    strings: &HashMap<String, String>,
+    answers: &HashMap<String, f64>,
+) -> Result<HashMap<String, f64>, FormulaError> {
     let mut graph: std::collections::HashMap<usize, Vec<usize>> = HashMap::new();
     let mut in_degree = vec![0; assignments.len()];
 
@@ -653,7 +667,7 @@ pub fn evaluate_assignments(
         }
     }
 
-    let mut results = HashMap::new();
+    let mut results = answers.clone();
     let mut evaluated_count = 0;
     while let Some(i) = queue.pop_front() {
         evaluated_count += 1;
@@ -992,5 +1006,46 @@ mod tests {
         .unwrap();
         assert!((results["ms"] - 30.0).abs() < 1e-9);
         assert!((results["mv"] - -20.0).abs() < 1e-9);
+    }
+
+    /// `evaluate_assignments_with_answers` seeds the result map with
+    /// pre-computed answer values, so a decoy assignment like `n = n * 2`
+    /// can reuse the `n` already solved by the main formula without
+    /// re-computing it from scratch.
+    #[test]
+    fn evaluate_assignments_with_answers_chains_off_precomputed_answers() {
+        let assignments = parse_formula_assignments("n = n * 2").unwrap();
+        let answers = vars(&[("n", 5.0), ("m", 10.0)]);
+        let results = evaluate_assignments_with_answers(
+            &assignments,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &answers,
+        )
+        .unwrap();
+        assert!((results["n"] - 10.0).abs() < 1e-9, "n should be overwritten to 10");
+        assert!(
+            (results["m"] - 10.0).abs() < 1e-9,
+            "seeded m should still be present unchanged"
+        );
+    }
+
+    /// A decoy with multiple assignments seeded by the main formula's
+    /// answers resolves dependencies between its own parts.
+    #[test]
+    fn evaluate_assignments_with_answers_resolves_decoy_internal_dependencies() {
+        let assignments = parse_formula_assignments("a = n * 2; b = a + m").unwrap();
+        let answers = vars(&[("n", 3.0), ("m", 4.0)]);
+        let results = evaluate_assignments_with_answers(
+            &assignments,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &answers,
+        )
+        .unwrap();
+        assert!((results["a"] - 6.0).abs() < 1e-9);
+        assert!((results["b"] - 10.0).abs() < 1e-9);
     }
 }

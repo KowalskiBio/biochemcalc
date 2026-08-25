@@ -361,6 +361,7 @@ fn round_to_unit(value: f64, unit: f64) -> f64 {
 
 /// One decoy's already-evaluated value plus how many option slots it asked
 /// for ("počet"), before apportionment scales it down to fit the budget.
+#[derive(Clone, Copy)]
 pub(crate) struct DecoyAnchor {
     pub value: f64,
     pub requested_count: u8,
@@ -806,37 +807,174 @@ fn generate_multi_answer_variant(
     // Decoys may deliberately reference an intermediate assignment target
     // (e.g. `n` in `n = V / M; m = n * M2`), so they're evaluated with the
     // same answer values available to the assignments themselves.
-    let decoy_anchors: Vec<DecoyAnchor> = decoys
-        .iter()
-        .filter_map(|d| {
-            crate::engine::formula::evaluate_with_answers(
+    //
+    // When the question has explicit answer targets (e.g. [n mol][m g]), a
+    // decoy with an assignment like `n = n * 2` is routed only to the target
+    // it names, so a decoy meant for `n` never leaks into `m`'s option set.
+    // A decoy may name multiple targets (`n = n * 2; m = m * 3`) and each
+    // routed value claims the decoy's full requested slot count for its
+    // target. A bare expression (e.g. `X * 3`) with no `=` falls back to the
+    // legacy behavior of offering the same value to every target, where
+    // generate_numeric_options's own validation silently drops it from
+    // targets whose scale it doesn't fit.
+    //
+    // When there are no explicit targets (just a semicolon-separated
+    // formula), all decoys are evaluated as single values and offered to
+    // the primary result, matching the pre-target-routing behavior.
+    let mut decoys_by_target: HashMap<String, Vec<DecoyAnchor>> = HashMap::new();
+    let mut untargeted_decoys: Vec<DecoyAnchor> = Vec::new();
+
+    if !targets.is_empty() {
+        for d in decoys {
+            let parsed = match crate::engine::formula::parse_formula_assignments(&d.formula) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            let has_target = parsed.iter().any(|a| !a.target.is_empty());
+            if has_target {
+                let Ok(results) = crate::engine::formula::evaluate_assignments_with_answers(
+                    &parsed,
+                    assigned_numeric,
+                    constants,
+                    assigned_strings,
+                    &answer_values,
+                ) else {
+                    continue;
+                };
+                for a in &parsed {
+                    if a.target.is_empty() {
+                        continue;
+                    }
+                    if !targets.iter().any(|t| t.symbol == a.target) {
+                        continue;
+                    }
+                    if let Some(&value) = results.get(a.target.as_str()) {
+                        decoys_by_target
+                            .entry(a.target.clone())
+                            .or_default()
+                            .push(DecoyAnchor {
+                                value,
+                                requested_count: d.option_count,
+                            });
+                    }
+                }
+            } else if let Ok(value) = crate::engine::formula::evaluate_with_answers(
                 &d.formula,
                 assigned_numeric,
                 constants,
                 assigned_strings,
                 &answer_values,
-            )
-            .ok()
-            .map(|value| DecoyAnchor {
-                value,
-                requested_count: d.option_count,
+            ) {
+                untargeted_decoys.push(DecoyAnchor {
+                    value,
+                    requested_count: d.option_count,
+                });
+            }
+        }
+    } else {
+        untargeted_decoys = decoys
+            .iter()
+            .filter_map(|d| {
+                crate::engine::formula::evaluate_with_answers(
+                    &d.formula,
+                    assigned_numeric,
+                    constants,
+                    assigned_strings,
+                    &answer_values,
+                )
+                .ok()
+                .map(|value| DecoyAnchor {
+                    value,
+                    requested_count: d.option_count,
+                })
             })
-        })
-        .collect();
+            .collect();
+    }
 
-    // "Alternace": evaluated the same way as decoys, with access to every
-    // intermediate assignment. An unparseable/failing formula is treated as
-    // absent rather than failing generation, same as an invalid decoy.
-    let alternate_value: Option<f64> = alternative_formula.and_then(|formula| {
-        crate::engine::formula::evaluate_with_answers(
-            formula,
-            assigned_numeric,
-            constants,
-            assigned_strings,
-            &answer_values,
-        )
-        .ok()
-    });
+    // "Alternace": an optional alternative equation that also evaluates to a
+    // correct answer, becoming a second guaranteed-slot option that's also
+    // marked correct. Routed per-target the same way as decoys: a formula
+    // like `n = V * 2` only provides an alternate for `n`, while a bare
+    // expression is offered to every target. An unparseable/failing formula
+    // is treated as absent rather than failing generation, same as an
+    // invalid decoy.
+    let mut alternate_by_target: HashMap<String, f64> = HashMap::new();
+    let mut untargeted_alternate: Option<f64> = None;
+
+    if let Some(alt_formula) = alternative_formula {
+        if !targets.is_empty() {
+            match crate::engine::formula::parse_formula_assignments(alt_formula) {
+                Ok(parsed) if parsed.iter().any(|a| !a.target.is_empty()) => {
+                    if let Ok(results) =
+                        crate::engine::formula::evaluate_assignments_with_answers(
+                            &parsed,
+                            assigned_numeric,
+                            constants,
+                            assigned_strings,
+                            &answer_values,
+                        )
+                    {
+                        for a in &parsed {
+                            if a.target.is_empty() {
+                                continue;
+                            }
+                            if !targets.iter().any(|t| t.symbol == a.target) {
+                                continue;
+                            }
+                            if let Some(&value) = results.get(a.target.as_str()) {
+                                alternate_by_target.insert(a.target.clone(), value);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    untargeted_alternate = crate::engine::formula::evaluate_with_answers(
+                        alt_formula,
+                        assigned_numeric,
+                        constants,
+                        assigned_strings,
+                        &answer_values,
+                    )
+                    .ok();
+                }
+            }
+        } else {
+            untargeted_alternate = crate::engine::formula::evaluate_with_answers(
+                alt_formula,
+                assigned_numeric,
+                constants,
+                assigned_strings,
+                &answer_values,
+            )
+            .ok();
+        }
+    }
+
+    /// Build the effective decoy anchor list for one target: the target's
+    /// own routed decoys followed by the untargeted (bare-expression) ones
+    /// that apply to every target.
+    fn effective_decoys<'a>(
+        target_symbol: &str,
+        by_target: &'a HashMap<String, Vec<DecoyAnchor>>,
+        untargeted: &'a [DecoyAnchor],
+    ) -> Vec<DecoyAnchor> {
+        let mut combined: Vec<DecoyAnchor> = Vec::new();
+        if let Some(targeted) = by_target.get(target_symbol) {
+            combined.extend_from_slice(targeted);
+        }
+        combined.extend_from_slice(untargeted);
+        combined
+    }
+
+    /// Resolve the alternate value for one target: a target-specific
+    /// alternate wins over the untargeted (bare-expression) one.
+    fn effective_alternate(
+        target_symbol: &str,
+        by_target: &HashMap<String, f64>,
+        untargeted: Option<f64>,
+    ) -> Option<f64> {
+        by_target.get(target_symbol).copied().or(untargeted)
+    }
 
     let options_seed = base_seed.wrapping_add(1);
 
@@ -870,15 +1008,20 @@ fn generate_multi_answer_variant(
             match mode {
                 TemplateMode::Closed => {
                     let mut rng = StdRng::seed_from_u64(options_seed);
-                    // Each target independently accepts or discards every decoy
-                    // anchor and the alternate value via generate_numeric_options's
-                    // own validation (a value that doesn't fit this target's
-                    // constraint/scale is silently dropped), so it's safe to offer
-                    // the same decoys/alternate to every target.
+                    let target_decoys = effective_decoys(
+                        &target.symbol,
+                        &decoys_by_target,
+                        &untargeted_decoys,
+                    );
+                    let target_alternate = effective_alternate(
+                        &target.symbol,
+                        &alternate_by_target,
+                        untargeted_alternate,
+                    );
                     let (options, position, alt_position) = generate_numeric_options(
                         correct,
-                        &decoy_anchors,
-                        alternate_value,
+                        &target_decoys,
+                        target_alternate,
                         constraint,
                         &mut rng,
                         difficulty,
@@ -911,10 +1054,19 @@ fn generate_multi_answer_variant(
     {
         TemplateMode::Closed => {
             let mut rng = StdRng::seed_from_u64(options_seed);
+            let primary_symbol = targets.first().map(|t| t.symbol.as_str());
+            let primary_decoys = match primary_symbol {
+                Some(sym) => effective_decoys(sym, &decoys_by_target, &untargeted_decoys),
+                None => untargeted_decoys.clone(),
+            };
+            let primary_alternate = match primary_symbol {
+                Some(sym) => effective_alternate(sym, &alternate_by_target, untargeted_alternate),
+                None => untargeted_alternate,
+            };
             let (options, position, alt_position) = generate_numeric_options(
                 primary_correct,
-                &decoy_anchors,
-                alternate_value,
+                &primary_decoys,
+                primary_alternate,
                 constraint,
                 &mut rng,
                 difficulty,
@@ -1888,6 +2040,229 @@ mod tests {
         );
         let alt_option = answers[0].alternate_option.expect("alternate should get its own slot");
         assert!((n_options[alt_option as usize - 1] - alternate_value).abs() < 1e-6);
+    }
+
+    /// A decoy written as an assignment (`n = n * 2`) is routed only to the
+    /// answer target it names. The decoy value must appear among `n`'s
+    /// options and must NOT leak into `m`'s option set.
+    #[test]
+    fn targeted_decoy_only_applies_to_its_named_target() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "n = V / 10; m = n * 5",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &targets,
+            &[make_decoy("n = n * 2", 2)],
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let v = variant.assigned_values["V"];
+        let n = v / 10.0;
+        let decoy_value = n * 2.0;
+        let answers = variant.answers_data.as_ref().unwrap();
+
+        let n_options = answers[0].numeric_options.as_ref().unwrap();
+        assert!(
+            n_options.iter().any(|o| (o - decoy_value).abs() < 1e-6),
+            "expected decoy value {decoy_value} among n's options {n_options:?}"
+        );
+
+        let m_options = answers[1].numeric_options.as_ref().unwrap();
+        assert!(
+            !m_options.iter().any(|o| (o - decoy_value).abs() < 1e-6),
+            "decoy meant for n must not leak into m's options {m_options:?}"
+        );
+    }
+
+    /// A single decoy formula with multiple assignments (`n = n * 2; m = m * 3`)
+    /// routes each computed value to its respective answer target.
+    #[test]
+    fn multi_target_decoy_routes_each_value_to_its_target() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "n = V / 10; m = n * 5",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &targets,
+            &[make_decoy("n = n * 2; m = m * 3", 2)],
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let v = variant.assigned_values["V"];
+        let n = v / 10.0;
+        let m = n * 5.0;
+        let n_decoy = n * 2.0;
+        let m_decoy = m * 3.0;
+        let answers = variant.answers_data.as_ref().unwrap();
+
+        let n_options = answers[0].numeric_options.as_ref().unwrap();
+        assert!(
+            n_options.iter().any(|o| (o - n_decoy).abs() < 1e-6),
+            "expected n's decoy value {n_decoy} among n's options {n_options:?}"
+        );
+
+        let m_options = answers[1].numeric_options.as_ref().unwrap();
+        assert!(
+            m_options.iter().any(|o| (o - m_decoy).abs() < 1e-6),
+            "expected m's decoy value {m_decoy} among m's options {m_options:?}"
+        );
+        assert!(
+            !m_options.iter().any(|o| (o - n_decoy).abs() < 1e-6),
+            "n's decoy value must not appear in m's options {m_options:?}"
+        );
+    }
+
+    /// An alternace written as an assignment (`n = n * 2`) is routed only to
+    /// the answer target it names: `n` gets an alternate option, `m` does not.
+    #[test]
+    fn targeted_alternace_only_applies_to_its_named_target() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "n = V / 10; m = n * 5",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &targets,
+            &[],
+            Some("n = n * 2"),
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let v = variant.assigned_values["V"];
+        let n = v / 10.0;
+        let alternate_value = n * 2.0;
+        let answers = variant.answers_data.as_ref().unwrap();
+
+        let n_options = answers[0].numeric_options.as_ref().unwrap();
+        assert!(
+            n_options.iter().any(|o| (o - alternate_value).abs() < 1e-6),
+            "expected alternate value {alternate_value} among n's options {n_options:?}"
+        );
+        let alt_option = answers[0].alternate_option.expect("n should get an alternate slot");
+        assert!((n_options[alt_option as usize - 1] - alternate_value).abs() < 1e-6);
+
+        assert!(
+            answers[1].alternate_option.is_none(),
+            "m must not get an alternate option when the alternace targets n"
+        );
+    }
+
+    /// A decoy whose assignment target doesn't match any answer target
+    /// (e.g. `x = n * 2` when targets are `n` and `m`) is silently dropped
+    /// rather than failing generation.
+    #[test]
+    fn decoy_targeting_non_answer_symbol_is_silently_dropped() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "n = V / 10; m = n * 5",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &targets,
+            &[make_decoy("x = n * 2", 2)],
+            None,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let answers = variant.answers_data.as_ref().unwrap();
+        for (i, answer) in answers.iter().enumerate() {
+            let options = answer.numeric_options.as_ref().unwrap();
+            assert_eq!(
+                options.len(),
+                5,
+                "target {} should still get 5 options",
+                i
+            );
+        }
     }
 
     #[test]
