@@ -278,7 +278,11 @@ fn render_multi_closed_options(
                 if unit.is_empty() {
                     fmt_option_value(value, precision, sig_digits, notation)
                 } else {
-                    format!("{} {}", fmt_option_value(value, precision, sig_digits, notation), unit)
+                    format!(
+                        "{} {}",
+                        fmt_option_value(value, precision, sig_digits, notation),
+                        format_chemical_text(unit)
+                    )
                 }
             })
             .collect();
@@ -341,7 +345,7 @@ fn render_multi_open_intervals(
             if unit.is_empty() {
                 format!("\"{}..{}\"", lo_str, hi_str)
             } else {
-                format!("\"{}..{}\" {}", lo_str, hi_str, unit)
+                format!("\"{}..{}\" {}", lo_str, hi_str, format_chemical_text(unit))
             }
         })
         .collect();
@@ -410,7 +414,7 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                             " :r{} {} {}\n",
                             label,
                             fmt_option_value(*value, q.result_precision, q.result_significant_digits, result_notation),
-                            q.template.result_unit
+                            format_chemical_text(&q.template.result_unit)
                         ));
                     }
                     let correct = q
@@ -464,10 +468,17 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         }
                     };
                     out.push_str(" :n\n");
+                    let unit_str = format_chemical_text(&q.template.result_unit);
+                    let unit_str = if unit_str.trim().is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", unit_str)
+                    };
                     out.push_str(&format!(
-                        ":n=\"{}..{}\" {} ok\n",
+                        ":n=\"{}..{}\"{} {} ok\n",
                         lo_str,
                         hi_str,
+                        unit_str,
                         q.template.point_value
                     ));
                 }
@@ -596,7 +607,7 @@ mod tests {
 
         assert!(output.contains(" :n\n"), "missing open marker in:\n{output}");
         assert!(
-            output.contains(":n=\"45,1..45,9\" 3 ok"),
+            output.contains(":n=\"45,1..45,9\" g 3 ok"),
             "missing interval in:\n{output}"
         );
         assert!(
@@ -872,7 +883,7 @@ mod tests {
         }]);
 
         assert!(output.contains(" :n\n"));
-        assert!(output.contains(":n=\"45,1..45,9\" 3 ok"));
+        assert!(output.contains(":n=\"45,1..45,9\" g 3 ok"));
     }
 
     #[test]
@@ -1389,6 +1400,92 @@ mod tests {
         assert!(
             output.contains("32,0 g"),
             "expected plain decimal for X in question text, got:\n{output}"
+        );
+    }
+
+    /// Units with chemical notation (e.g. `cm^-3`, `g*mol^-1`) must be
+    /// formatted as HTML in the export, not left as raw `^` or `*`.
+    #[test]
+    fn closed_options_format_units_as_html() {
+        let template = Template {
+            id: Uuid::new_v4(),
+            question_text: "Vypočítejte hustotu.".to_string(),
+            formula: "X * 2".to_string(),
+            equation_text: String::new(),
+            numeric_answer: None,
+            result_unit: "g*cm^-3".to_string(),
+            point_value: 3,
+            significant_digits: None,
+            force_scientific: false,
+            decoy_formula: None,
+            alternative_formula: None,
+            created_at: Utc::now(),
+        };
+        let variant = make_closed_variant();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains("g.cm<sup>-3</sup>"),
+            "expected HTML-formatted unit, got:\n{output}"
+        );
+        assert!(
+            !output.contains("g*cm^-3"),
+            "raw unit notation leaked into export:\n{output}"
+        );
+    }
+
+    #[test]
+    fn open_interval_formats_unit_as_html() {
+        let template = Template {
+            id: Uuid::new_v4(),
+            question_text: "Vypočítejte molární hmotnost.".to_string(),
+            formula: "X * 2".to_string(),
+            equation_text: String::new(),
+            numeric_answer: None,
+            result_unit: "g*mol^-1".to_string(),
+            point_value: 3,
+            significant_digits: None,
+            force_scientific: false,
+            decoy_formula: None,
+            alternative_formula: None,
+            created_at: Utc::now(),
+        };
+        let variant = Variant {
+            numeric_options: None,
+            correct_option: None,
+            interval_lo: Some(45.1),
+            interval_hi: Some(45.9),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            output.contains("g.mol<sup>-1</sup>"),
+            "expected HTML-formatted unit in open interval, got:\n{output}"
+        );
+        assert!(
+            !output.contains("g*mol^-1"),
+            "raw unit notation leaked into open interval export:\n{output}"
         );
     }
 }
