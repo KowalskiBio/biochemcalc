@@ -285,6 +285,9 @@ fn render_multi_closed_options(
         out.push_str(&format!(" :r{} {}\n", label, parts.join(", ")));
     }
     out.push_str(&format!(":r{} ok {}\n", correct_option, point_value));
+    if let Some(alt) = answers[0].alternate_option {
+        out.push_str(&format!(":r{} ok {}\n", alt, point_value));
+    }
 }
 
 /// Decimals needed to keep an interval's two bounds distinguishable.
@@ -415,6 +418,9 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         .correct_option
                         .expect("closed variant has correct option");
                     out.push_str(&format!(":r{} ok {}\n", correct, q.template.point_value));
+                    if let Some(alt) = q.variant.alternate_option {
+                        out.push_str(&format!(":r{} ok {}\n", alt, q.template.point_value));
+                    }
                 }
             }
             TemplateMode::Open => {
@@ -1021,6 +1027,78 @@ mod tests {
 
         assert!(output.contains(" :r1 2,0 mol, 4,0 g"));
         assert!(output.contains(":r1 ok 3"));
+    }
+
+    /// When alternace is present the export must mark both the primary
+    /// correct option (a) and the alternate (b) as ok, so a student picking
+    /// either scores the points.
+    #[test]
+    fn closed_export_marks_both_correct_and_alternate_as_ok() {
+        let template = make_template("Kolik gramů?");
+        let variant = Variant {
+            numeric_options: Some(vec![64.0, 60.0, 70.0, 58.0, 80.0]),
+            correct_option: Some(1),
+            alternate_option: Some(2),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(output.contains(":r1 ok 3"), "primary correct must be marked ok");
+        assert!(output.contains(":r2 ok 3"), "alternate must also be marked ok");
+    }
+
+    /// Same for multi-answer closed export: when the first target carries an
+    /// alternate_option, both rows are marked ok.
+    #[test]
+    fn multi_answer_closed_export_marks_alternate_as_ok() {
+        let template = make_template("Vypočítejte [n mol][m g]");
+        let mut variant = make_closed_variant();
+        variant.answers_data = Some(vec![
+            crate::models::AnswerField {
+                symbol: "n".to_string(),
+                value: 2.0,
+                unit: Some("mol".to_string()),
+                numeric_options: Some(vec![2.0, 1.5, 2.5, 3.0, 1.0]),
+                correct_option: Some(1),
+                alternate_option: Some(2),
+                interval_lo: None,
+                interval_hi: None,
+            },
+            crate::models::AnswerField {
+                symbol: "m".to_string(),
+                value: 4.0,
+                unit: Some("g".to_string()),
+                numeric_options: Some(vec![4.0, 3.2, 4.8, 5.0, 3.5]),
+                correct_option: Some(1),
+                alternate_option: Some(2),
+                interval_lo: None,
+                interval_hi: None,
+            },
+        ]);
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(output.contains(":r1 ok 3"), "primary correct must be marked ok");
+        assert!(output.contains(":r2 ok 3"), "alternate must also be marked ok");
     }
 
     #[test]

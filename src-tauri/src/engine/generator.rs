@@ -572,23 +572,27 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         )));
     }
 
-    let correct_position_zero_based: usize = if force_correct_first {
+    let has_alternate = rounded_alternate.is_some();
+
+    // When alternace is present the layout is always: a) correct, b) alternate,
+    // c..) distractors — regardless of `force_correct_first` (which only
+    // governs the no-alternate path). Without alternace, the correct
+    // answer's position follows `force_correct_first` as before, so the
+    // no-alternate path stays RNG-identical.
+    let correct_position_zero_based: usize = if force_correct_first || has_alternate {
         0
     } else {
         rng.random_range(0..count)
     };
     let correct_position_one_based = correct_position_zero_based as u8 + 1;
 
-    // Pick a slot for the alternate distinct from the correct answer's own
-    // slot (unaffected by `force_correct_first`, which only pins the
-    // primary correct answer). Only draws when an alternate is actually
-    // present, so no-alternate generation stays byte-identical to before.
-    let alternate_position_zero_based: Option<usize> = rounded_alternate.map(|_| loop {
-        let candidate = rng.random_range(0..count);
-        if candidate != correct_position_zero_based {
-            break candidate;
-        }
-    });
+    // The alternate is always at position b) (index 1) when present. No RNG
+    // is consumed, so the no-alternate path stays byte-identical to before.
+    let alternate_position_zero_based: Option<usize> = if has_alternate {
+        Some(1)
+    } else {
+        None
+    };
 
     if !valid_decoys.is_empty() {
         // Shuffle so decoy-anchored options don't always land at the lowest
@@ -1803,8 +1807,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(options.len(), 5);
+        // When alternace is present the correct answer is always at a) (1)
+        // and the alternate at b) (2), regardless of force_correct_first.
+        assert_eq!(correct_pos, 1, "correct must be at a) when alternace is present");
         let alt_pos = alt_pos.expect("valid alternate should get its own option slot");
-        assert_ne!(alt_pos, correct_pos, "alternate must not share the correct answer's slot");
+        assert_eq!(alt_pos, 2, "alternate must be at b) when alternace is present");
         assert!((options[alt_pos as usize - 1] - alternate).abs() < 1e-9);
         assert!((options[correct_pos as usize - 1] - correct).abs() < 1e-9);
     }
