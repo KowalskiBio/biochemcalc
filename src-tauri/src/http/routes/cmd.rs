@@ -551,6 +551,15 @@ async fn delete_category(
     Ok(())
 }
 
+async fn delete_set(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<IdBody>,
+) -> Result<(), HttpError> {
+    let conn = conn!(state);
+    SetRepo::delete(&conn, &body.id)?;
+    Ok(())
+}
+
 async fn create_set(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateSetPayload>,
@@ -923,6 +932,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/get_category", post(get_category))
         .route("/get_category_with_sets", post(get_category_with_sets))
         .route("/delete_category", post(delete_category))
+        .route("/delete_set", post(delete_set))
         .route("/create_set", post(create_set))
         .route("/update_set_name", post(update_set_name))
         .route("/move_set", post(move_set))

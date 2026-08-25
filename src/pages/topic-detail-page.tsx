@@ -30,6 +30,8 @@ export function TopicDetailPage() {
   const hasLoadedRef = useRef(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeleteSetDialogOpen, setIsDeleteSetDialogOpen] = useState(false)
+  const [isDeleteSetZoneHovered, setIsDeleteSetZoneHovered] = useState(false)
   const [isAddQuestionOpen, setIsAddQuestionOpen] = useState(false)
   const [isAddSetOpen, setIsAddSetOpen] = useState(false)
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
@@ -102,6 +104,23 @@ export function TopicDetailPage() {
       setIsDeleteDialogOpen(false)
     }
   }, [topicId, navigate, toast])
+
+  const handleDeleteSet = useCallback(async () => {
+    if (!carriedSet) return
+    try {
+      setIsDeleting(true)
+      await setsApi.delete(carriedSet.id)
+      toast({ title: cs.topics.deleteSetSuccess })
+      setIsDeleteSetDialogOpen(false)
+      endCarry()
+      await loadData()
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: cs.topics.deleteSetError, description: message, variant: "destructive" })
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [carriedSet, toast, loadData, endCarry])
 
   const handleRenameTopic = useCallback(async () => {
     if (!topicId || !topic) return
@@ -504,6 +523,29 @@ export function TopicDetailPage() {
         </div>
       </RefreshOverlay>
 
+      {isCarryingSet && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop drop zone, same pattern as set cards */}
+          <div
+            className={`flex items-center gap-2 rounded-lg border-2 px-6 py-3 transition-colors cursor-pointer ${
+              isDeleteSetZoneHovered
+                ? "border-destructive bg-destructive/10 text-destructive"
+                : "border-destructive/40 bg-destructive/5 text-destructive/70"
+            }`}
+            onMouseEnter={() => setIsDeleteSetZoneHovered(true)}
+            onMouseLeave={() => setIsDeleteSetZoneHovered(false)}
+            onMouseUp={() => {
+              if (isCarryingSet) {
+                setIsDeleteSetDialogOpen(true)
+              }
+            }}
+          >
+            <Trash2 className="size-5" />
+            <span className="font-medium text-sm">{cs.topics.deleteSet}</span>
+          </div>
+        </div>
+      )}
+
       {topic && (
         <DeleteConfirmDialog
           open={isDeleteDialogOpen}
@@ -513,6 +555,21 @@ export function TopicDetailPage() {
           description={cs.topics.deleteTopicConfirm.replace("{name}", topic.name)}
         />
       )}
+
+      <DeleteConfirmDialog
+        open={isDeleteSetDialogOpen}
+        onOpenChange={(open) => {
+          setIsDeleteSetDialogOpen(open)
+          if (!open) setIsDeleteSetZoneHovered(false)
+        }}
+        onConfirm={handleDeleteSet}
+        title={cs.topics.deleteSet}
+        description={
+          carriedSet
+            ? `${cs.topics.deleteSetConfirm} „${carriedSet.name || cs.topics.setIndex.replace("{index}", String(carriedSet.setIndex))}“`
+            : cs.topics.deleteSetConfirm
+        }
+      />
 
       <AddQuestionDialog
         open={isAddQuestionOpen}

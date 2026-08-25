@@ -1792,6 +1792,12 @@ pub fn delete_category(state: State<'_, AppState>, id: Uuid) -> Result<(), DbErr
     CategoryRepo::delete(&conn, &id)
 }
 
+#[tauri::command]
+pub fn delete_set(state: State<'_, AppState>, id: Uuid) -> Result<(), DbError> {
+    let conn = crate::util::lock_db(&state.db);
+    SetRepo::delete(&conn, &id)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSetPayload {

@@ -323,6 +323,17 @@ impl SetRepo {
         tx.commit()?;
         Ok(next_index)
     }
+
+    /// Delete a set. The `ON DELETE CASCADE` on `set_templates.set_id`
+    /// removes the link rows, but the templates themselves are left intact
+    /// (they may belong to other sets).
+    pub fn delete(conn: &Connection, id: &Uuid) -> Result<(), DbError> {
+        let affected = conn.execute("DELETE FROM sets WHERE id = ?1", params![id])?;
+        if affected == 0 {
+            return Err(DbError::NotFound(format!("Set {id}")));
+        }
+        Ok(())
+    }
 }
 
 fn serde_mode(mode: TemplateMode) -> &'static str {
@@ -463,6 +474,38 @@ mod tests {
         let (_, sets) = CategoryRepo::get_with_sets(&conn, &cat.id).expect("get");
         let found = sets.iter().find(|s| s.id == set.id).expect("found");
         assert_eq!(found.name.as_deref(), Some("Opakování"));
+    }
+
+    #[test]
+    fn delete_removes_set_and_unlinks_templates_but_keeps_them() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+        let set = &sets[0];
+
+        let t1 = create_template(&conn, "Q1");
+        SetRepo::add_template(&conn, &set.id, &t1.id).expect("add t1");
+
+        SetRepo::delete(&conn, &set.id).expect("delete set");
+
+        // The set is gone.
+        let (_, remaining) = CategoryRepo::get_with_sets(&conn, &cat.id).expect("get");
+        assert!(!remaining.iter().any(|s| s.id == set.id));
+
+        // The link row is gone (cascade).
+        let links = SetRepo::list_templates(&conn, &set.id).expect("list");
+        assert!(links.is_empty());
+
+        // The template itself still exists.
+        let fetched = crate::db::repos::TemplateRepo::get_by_id(&conn, &t1.id).expect("get tpl");
+        assert_eq!(fetched.id, t1.id);
+    }
+
+    #[test]
+    fn delete_unknown_set_returns_not_found() {
+        let conn = setup_conn();
+        let err = SetRepo::delete(&conn, &Uuid::new_v4()).unwrap_err();
+        assert!(matches!(err, DbError::NotFound(_)));
     }
 
     #[test]

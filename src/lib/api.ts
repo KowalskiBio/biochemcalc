@@ -314,6 +314,8 @@ export const setsApi = {
   updateName: (setId: string, name: string | null): Promise<void> =>
     apiFetch<void>("update_set_name", { setId, name }),
 
+  delete: (setId: string): Promise<void> => apiFetch<void>("delete_set", { id: setId }),
+
   moveToCategory: (setId: string, targetCategoryId: string): Promise<number> =>
     apiFetch<number>("move_set", { setId, targetCategoryId }),
 

@@ -570,6 +570,11 @@ export const cs = {
     renameError: "Nepodařilo se přejmenovat",
     moveSetSuccess: "Sada přesunuta",
     moveSetError: "Nepodařilo se přesunout sadu",
+    deleteSet: "Smazat sadu",
+    deleteSetConfirm:
+      "Opravdu chcete smazat tuto sadu? Otázky v ní nebudou smazány, ale nebudou z této sady dostupné.",
+    deleteSetSuccess: "Sada smazána",
+    deleteSetError: "Nepodařilo se smazat sadu",
     dropQuestionHere: "Sem pusťte otázku",
     carryingQuestion: "Nesete otázku — přetáhněte ji nad navigaci a počkejte pro přesun",
     dragSadaHint: "Přetáhněte sadu do jiné kategorie",

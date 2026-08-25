@@ -51,6 +51,9 @@ export function TopicsPage() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [editGroupName, setEditGroupName] = useState("")
   const [deletingGroup, setDeletingGroup] = useState<TopicGroup | null>(null)
+  const [isDeleteTopicDialogOpen, setIsDeleteTopicDialogOpen] = useState(false)
+  const [isDeleteTopicZoneHovered, setIsDeleteTopicZoneHovered] = useState(false)
+  const [isDeletingTopic, setIsDeletingTopic] = useState(false)
 
   const isCarrying = useCarryStore((s) => s.isCarrying)
   const carryKind = useCarryStore((s) => s.kind)
@@ -276,6 +279,23 @@ export function TopicsPage() {
       setDeletingGroup(null)
     }
   }, [deletingGroup, toast, fetchAll])
+
+  const handleDeleteTopic = useCallback(async () => {
+    if (!carriedTopic) return
+    try {
+      setIsDeletingTopic(true)
+      await topicsApi.delete(carriedTopic.id)
+      toast({ title: cs.topics.deleteSuccess })
+      setIsDeleteTopicDialogOpen(false)
+      endCarry()
+      await fetchAll()
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: cs.topics.deleteError, description: message, variant: "destructive" })
+    } finally {
+      setIsDeletingTopic(false)
+    }
+  }, [carriedTopic, toast, fetchAll, endCarry])
 
   const renderTopicCard = useCallback(
     (topic: Topic) => {
@@ -641,6 +661,42 @@ export function TopicsPage() {
           </RefreshOverlay>
         )}
       </div>
+
+      {isCarryingTopic && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop drop zone, same pattern as set cards */}
+          <div
+            className={`flex items-center gap-2 rounded-lg border-2 px-6 py-3 transition-colors cursor-pointer ${
+              isDeleteTopicZoneHovered
+                ? "border-destructive bg-destructive/10 text-destructive"
+                : "border-destructive/40 bg-destructive/5 text-destructive/70"
+            }`}
+            onMouseEnter={() => setIsDeleteTopicZoneHovered(true)}
+            onMouseLeave={() => setIsDeleteTopicZoneHovered(false)}
+            onMouseUp={() => {
+              if (isCarryingTopic && !isDeletingTopic) {
+                setIsDeleteTopicDialogOpen(true)
+              }
+            }}
+          >
+            <Trash2 className="size-5" />
+            <span className="font-medium text-sm">{cs.topics.deleteTopic}</span>
+          </div>
+        </div>
+      )}
+
+      <DeleteConfirmDialog
+        open={isDeleteTopicDialogOpen}
+        onOpenChange={(open) => {
+          setIsDeleteTopicDialogOpen(open)
+          if (!open) setIsDeleteTopicZoneHovered(false)
+        }}
+        onConfirm={handleDeleteTopic}
+        title={cs.topics.deleteTopic}
+        description={
+          carriedTopic ? cs.topics.deleteTopicConfirm.replace("{name}", carriedTopic.name) : ""
+        }
+      />
 
       <CreateTopicDialog
         open={isCreateDialogOpen}

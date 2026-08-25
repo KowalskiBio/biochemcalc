@@ -142,6 +142,7 @@ pub fn run() {
             commands::get_category,
             commands::get_category_with_sets,
             commands::delete_category,
+            commands::delete_set,
             commands::create_set,
             commands::update_set_name,
             commands::move_set,

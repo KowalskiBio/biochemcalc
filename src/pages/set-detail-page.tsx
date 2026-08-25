@@ -106,6 +106,8 @@ export function SetDetailPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [templateToDelete, setTemplateToDelete] = useState<Template | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeleteSetDialogOpen, setIsDeleteSetDialogOpen] = useState(false)
+  const [isDeletingSet, setIsDeletingSet] = useState(false)
   const [regeneratingMap, setRegeneratingMap] = useState<Record<string, boolean>>({})
   const [savingToProjekt, setSavingToProjekt] = useState<string | null | "saving">(null)
   const [projektName, setProjektName] = useState("")
@@ -290,6 +292,22 @@ export function SetDetailPage() {
     setTemplateToDelete(template)
     setIsDeleteDialogOpen(true)
   }, [])
+
+  const handleDeleteSet = useCallback(async () => {
+    if (!set) return
+    try {
+      setIsDeletingSet(true)
+      await setsApi.delete(set.id)
+      toast({ title: cs.topics.deleteSetSuccess })
+      setIsDeleteSetDialogOpen(false)
+      navigate(parentTopicId ? `/topics/${parentTopicId}` : "/topics")
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: cs.topics.deleteSetError, description: message, variant: "destructive" })
+    } finally {
+      setIsDeletingSet(false)
+    }
+  }, [set, toast, navigate, parentTopicId])
 
   const refreshTemplate = useCallback(
     async (templateId: string) => {
@@ -587,6 +605,16 @@ export function SetDetailPage() {
             {templateDetails.length} {cs.sets.questions.toLowerCase()}
           </p>
         </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="ml-auto"
+          onClick={() => setIsDeleteSetDialogOpen(true)}
+          disabled={isDeletingSet}
+        >
+          <Trash2 className="size-4 mr-2" />
+          {cs.common.delete}
+        </Button>
       </div>
 
       <RefreshOverlay isRefreshing={isRefreshing}>
@@ -1227,6 +1255,18 @@ export function SetDetailPage() {
           }}
         />
       )}
+
+      <DeleteConfirmDialog
+        open={isDeleteSetDialogOpen}
+        onOpenChange={setIsDeleteSetDialogOpen}
+        onConfirm={handleDeleteSet}
+        title={cs.topics.deleteSet}
+        description={
+          set
+            ? `${cs.topics.deleteSetConfirm} „${set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))}“`
+            : cs.topics.deleteSetConfirm
+        }
+      />
     </div>
   )
 }
