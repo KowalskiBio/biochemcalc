@@ -623,6 +623,352 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     ))
 }
 
+/// Whether two rounded values are indistinguishable on the display grid.
+fn close_enough(a: f64, b: f64, rounding_unit: f64) -> bool {
+    (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON)
+}
+
+/// Fills `pool` with up to `needed` more values deviated around `anchor`,
+/// unique against the correct answer, the alternate (if any), and every
+/// value already in `pool`. Returns whether it reached the target count
+/// within budget. Same logic `generate_numeric_options` uses internally,
+/// factored out for the multi-target row filler below.
+#[allow(clippy::too_many_arguments)]
+fn generate_around_value<R: Rng>(
+    anchor: f64,
+    needed: usize,
+    pool: &mut Vec<f64>,
+    rng: &mut R,
+    max_deviation: f64,
+    rounding_unit: f64,
+    rounded_correct: f64,
+    rounded_alternate: Option<f64>,
+    constraint: &ResultConstraint,
+) -> bool {
+    let start_len = pool.len();
+    let mut attempts = 0;
+
+    while pool.len() < start_len + needed && attempts < 500 {
+        attempts += 1;
+
+        let deviation = rng.random_range(MIN_DISTRACTOR_DEVIATION..=max_deviation);
+        let direction = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
+
+        let reference_magnitude = if anchor == 0.0 { 1.0 } else { anchor.abs() };
+        let delta = reference_magnitude * deviation;
+        let candidate = anchor + direction * delta;
+
+        if !candidate.is_finite() || (candidate - anchor).abs() <= anchor.abs() * f64::EPSILON {
+            continue;
+        }
+
+        let rounded = round_to_unit(candidate, rounding_unit);
+        let far_enough_from_correct = !close_enough(rounded, rounded_correct, rounding_unit)
+            && !rounded_alternate.is_some_and(|alt| close_enough(rounded, alt, rounding_unit));
+        let unique = !pool
+            .iter()
+            .any(|p: &f64| (p - rounded).abs() <= rounding_unit * 0.5);
+
+        if validate_result(rounded, constraint).is_ok() && far_enough_from_correct && unique {
+            pool.push(rounded);
+        }
+    }
+
+    pool.len() >= start_len + needed
+}
+
+/// One answer role in the shared, cross-target option-row layout for a
+/// multi-answer question: which row is the correct answer, which is the
+/// alternace, and which rows belong to a given decoy formula (its exact
+/// value, or one of its extra perturbed distractors). Decided once and
+/// reused for every target, so a decoy/alternace's values for different
+/// targets always land in the same option row instead of drifting apart
+/// the way independent per-target shuffles used to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OptionRole {
+    Correct,
+    Alternate,
+    DecoyExact(usize),
+    DecoyPerturb(usize),
+    CorrectPerturb,
+}
+
+/// One decoy formula's computed value per answer target it applies to.
+/// A targeted decoy (`n = n * 2; m = m * 3`) may cover only some targets; an
+/// untargeted/bare-expression decoy applies the same value to every target.
+struct DecoyRowValues {
+    requested_count: u8,
+    values: HashMap<String, f64>,
+}
+
+/// Decide the shared option-row layout for a multi-answer question: which
+/// row holds the correct answer, the alternace (if any), each decoy row's
+/// exact value and its extra perturbed distractors, and plain
+/// correct-cluster noise. This depends only on counts/config — never on any
+/// target's actual values — so every target can be filled against the
+/// identical layout and stay row-aligned.
+fn plan_option_roles<R: Rng>(
+    count: usize,
+    decoy_rows: &[DecoyRowValues],
+    has_alternate: bool,
+    force_correct_first: bool,
+    rng: &mut R,
+) -> Vec<OptionRole> {
+    let alt_slot = usize::from(has_alternate);
+    let decoy_budget = count - 1 - alt_slot;
+    let requested: Vec<usize> = decoy_rows
+        .iter()
+        .map(|d| d.requested_count as usize)
+        .collect();
+    let decoy_counts = apportion_largest_remainder(&requested, decoy_budget);
+    let correct_cluster_size = count - decoy_counts.iter().sum::<usize>() - alt_slot;
+
+    let mut pool_roles: Vec<OptionRole> = Vec::with_capacity(count.saturating_sub(1));
+    let has_decoys = decoy_counts.iter().any(|&n| n > 0);
+
+    for (row_idx, &n) in decoy_counts.iter().enumerate() {
+        if n == 0 {
+            continue;
+        }
+        pool_roles.push(OptionRole::DecoyExact(row_idx));
+        for _ in 1..n {
+            pool_roles.push(OptionRole::DecoyPerturb(row_idx));
+        }
+    }
+    for _ in 1..correct_cluster_size {
+        pool_roles.push(OptionRole::CorrectPerturb);
+    }
+
+    if has_decoys {
+        for i in (1..pool_roles.len()).rev() {
+            let j = rng.random_range(0..=i);
+            pool_roles.swap(i, j);
+        }
+    }
+
+    let correct_position_zero_based: usize = if force_correct_first || has_alternate {
+        0
+    } else {
+        rng.random_range(0..count)
+    };
+    let alternate_position_zero_based: Option<usize> = if has_alternate { Some(1) } else { None };
+
+    let mut role_order = Vec::with_capacity(count);
+    let mut pool_iter = pool_roles.into_iter();
+    for position in 0..count {
+        if position == correct_position_zero_based {
+            role_order.push(OptionRole::Correct);
+        } else if Some(position) == alternate_position_zero_based {
+            role_order.push(OptionRole::Alternate);
+        } else {
+            role_order.push(
+                pool_iter
+                    .next()
+                    .expect("role available for every non-fixed slot"),
+            );
+        }
+    }
+
+    role_order
+}
+
+/// Generate one fallback distractor around `anchor`, unique against
+/// everything already placed for this target. Used whenever a role in a
+/// target's option row can't use its "real" value — an invalid/missing
+/// decoy or alternace value for this specific target, or plain
+/// correct-cluster noise.
+#[allow(clippy::too_many_arguments)]
+fn fallback_distractor<R: Rng>(
+    anchor: f64,
+    placed: &[f64],
+    rng: &mut R,
+    max_deviation: f64,
+    rounding_unit: f64,
+    rounded_correct: f64,
+    rounded_alternate: Option<f64>,
+    constraint: &ResultConstraint,
+) -> Result<f64, GenerationError> {
+    let mut pool = placed.to_vec();
+    let start_len = pool.len();
+    if !generate_around_value(
+        anchor,
+        1,
+        &mut pool,
+        rng,
+        max_deviation,
+        rounding_unit,
+        rounded_correct,
+        rounded_alternate,
+        constraint,
+    ) {
+        return Err(GenerationError::Distractor(format!(
+            "could not generate a fallback distractor around {anchor}"
+        )));
+    }
+    Ok(pool[start_len])
+}
+
+/// Fill one answer target's `numeric_options` against the shared
+/// `role_order`, so the row this target's decoy/alternace value lands in
+/// matches the row every other target's value for that same decoy/alternace
+/// lands in. A role this target has no valid value for (a decoy that didn't
+/// name it, or a value that collides with this target's own correct answer)
+/// falls back to a plain distractor for this target instead of leaving the
+/// row inconsistent. Returns the option list plus whether this target's own
+/// alternace value actually resolved (so the caller can report
+/// `alternate_option` only for targets the alternace genuinely covers).
+#[allow(clippy::too_many_arguments)]
+fn fill_target_options<R: Rng>(
+    role_order: &[OptionRole],
+    correct: f64,
+    decoy_rows: &[DecoyRowValues],
+    alternate_values: &HashMap<String, f64>,
+    target_symbol: &str,
+    constraint: &ResultConstraint,
+    rng: &mut R,
+    difficulty: &str,
+    spread_override: Option<f64>,
+    result_significant_digits: Option<u8>,
+) -> Result<(Vec<f64>, bool), GenerationError> {
+    let max_deviation = spread_override
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
+    let rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
+    let rounded_correct = round_to_unit(correct, rounding_unit);
+
+    let rounded_alternate: Option<f64> = alternate_values
+        .get(target_symbol)
+        .copied()
+        .and_then(|value| {
+            if !value.is_finite() {
+                return None;
+            }
+            let rounded = round_to_unit(value, rounding_unit);
+            if validate_result(rounded, constraint).is_err()
+                || close_enough(rounded, rounded_correct, rounding_unit)
+            {
+                return None;
+            }
+            Some(rounded)
+        });
+
+    let mut placed: Vec<f64> = vec![rounded_correct];
+    if let Some(alt) = rounded_alternate {
+        placed.push(alt);
+    }
+
+    // Deterministic order (list index, not hash order) so a fixed seed keeps
+    // producing identical output.
+    let mut needed_decoys: Vec<usize> = role_order
+        .iter()
+        .filter_map(|role| match role {
+            OptionRole::DecoyExact(k) => Some(*k),
+            _ => None,
+        })
+        .collect();
+    needed_decoys.sort_unstable();
+    needed_decoys.dedup();
+
+    let mut decoy_anchor: HashMap<usize, f64> = HashMap::new();
+    for k in needed_decoys {
+        let candidate = decoy_rows[k]
+            .values
+            .get(target_symbol)
+            .copied()
+            .and_then(|v| {
+                if !v.is_finite() {
+                    return None;
+                }
+                let rounded = round_to_unit(v, rounding_unit);
+                if validate_result(rounded, constraint).is_err() {
+                    return None;
+                }
+                if close_enough(rounded, rounded_correct, rounding_unit) {
+                    return None;
+                }
+                if rounded_alternate.is_some_and(|alt| close_enough(rounded, alt, rounding_unit)) {
+                    return None;
+                }
+                if placed
+                    .iter()
+                    .any(|&p| close_enough(rounded, p, rounding_unit))
+                {
+                    return None;
+                }
+                Some(rounded)
+            });
+        let resolved = match candidate {
+            Some(v) => v,
+            None => fallback_distractor(
+                rounded_correct,
+                &placed,
+                rng,
+                max_deviation,
+                rounding_unit,
+                rounded_correct,
+                rounded_alternate,
+                constraint,
+            )?,
+        };
+        decoy_anchor.insert(k, resolved);
+        placed.push(resolved);
+    }
+
+    let mut numeric_options = Vec::with_capacity(role_order.len());
+    for role in role_order {
+        let value = match *role {
+            OptionRole::Correct => rounded_correct,
+            OptionRole::Alternate => match rounded_alternate {
+                Some(alt) => alt,
+                None => fallback_distractor(
+                    rounded_correct,
+                    &placed,
+                    rng,
+                    max_deviation,
+                    rounding_unit,
+                    rounded_correct,
+                    rounded_alternate,
+                    constraint,
+                )?,
+            },
+            OptionRole::DecoyExact(k) => *decoy_anchor
+                .get(&k)
+                .expect("anchor precomputed for every DecoyExact role"),
+            OptionRole::DecoyPerturb(k) => {
+                let anchor = decoy_anchor.get(&k).copied().unwrap_or(rounded_correct);
+                fallback_distractor(
+                    anchor,
+                    &placed,
+                    rng,
+                    max_deviation,
+                    rounding_unit,
+                    rounded_correct,
+                    rounded_alternate,
+                    constraint,
+                )?
+            }
+            OptionRole::CorrectPerturb => fallback_distractor(
+                rounded_correct,
+                &placed,
+                rng,
+                max_deviation,
+                rounding_unit,
+                rounded_correct,
+                rounded_alternate,
+                constraint,
+            )?,
+        };
+        if !matches!(role, OptionRole::DecoyExact(_)) {
+            // DecoyExact values are already in `placed` from the
+            // precomputation pass above; avoid double-inserting them.
+            placed.push(value);
+        }
+        numeric_options.push(value);
+    }
+
+    Ok((numeric_options, rounded_alternate.is_some()))
+}
+
 pub fn generate_variant(
     template_id: Uuid,
     formula: &str,
@@ -812,20 +1158,25 @@ fn generate_multi_answer_variant(
     // (e.g. `n` in `n = V / M; m = n * M2`), so they're evaluated with the
     // same answer values available to the assignments themselves.
     //
-    // When the question has explicit answer targets (e.g. [n mol][m g]), a
-    // decoy with an assignment like `n = n * 2` is routed only to the target
-    // it names, so a decoy meant for `n` never leaks into `m`'s option set.
-    // A decoy may name multiple targets (`n = n * 2; m = m * 3`) and each
-    // routed value claims the decoy's full requested slot count for its
-    // target. A bare expression (e.g. `X * 3`) with no `=` falls back to the
-    // legacy behavior of offering the same value to every target, where
-    // generate_numeric_options's own validation silently drops it from
-    // targets whose scale it doesn't fit.
+    // When the question has explicit answer targets (e.g. [n mol][m g]),
+    // each decoy row is grouped by ROW (not by target): a decoy naming
+    // multiple targets (`ms = ...; mv = mr - ms`) keeps its values for every
+    // target it covers tied together in one `DecoyRowValues`, so the shared
+    // row layout below (`plan_option_roles`) can place all of a decoy's
+    // per-target values in the same option row instead of letting
+    // independent per-target shuffles scatter them across different rows.
+    // A decoy targeting a specific symbol (`n = n * 2`) only ever populates
+    // that symbol's slot in `values`; a bare expression (e.g. `X * 3`) with
+    // no `=` applies the same value to every target, matching the legacy
+    // behavior. A decoy whose target(s) don't match any answer target is
+    // dropped entirely (empty `values`), same as before.
     //
     // When there are no explicit targets (just a semicolon-separated
-    // formula), all decoys are evaluated as single values and offered to
-    // the primary result, matching the pre-target-routing behavior.
-    let mut decoys_by_target: HashMap<String, Vec<DecoyAnchor>> = HashMap::new();
+    // formula), decoys are evaluated as single untargeted values offered to
+    // the primary result, matching the pre-target-routing behavior — this
+    // path is untouched by the row-alignment fix since there's only one
+    // "column" and nothing to misalign.
+    let mut decoy_rows: Vec<DecoyRowValues> = Vec::new();
     let mut untargeted_decoys: Vec<DecoyAnchor> = Vec::new();
 
     if !targets.is_empty() {
@@ -835,6 +1186,8 @@ fn generate_multi_answer_variant(
                 Err(_) => continue,
             };
             let has_target = parsed.iter().any(|a| !a.target.is_empty());
+            let mut values: HashMap<String, f64> = HashMap::new();
+
             if has_target {
                 let Ok(results) = crate::engine::formula::evaluate_assignments_with_answers(
                     &parsed,
@@ -853,13 +1206,7 @@ fn generate_multi_answer_variant(
                         continue;
                     }
                     if let Some(&value) = results.get(a.target.as_str()) {
-                        decoys_by_target
-                            .entry(a.target.clone())
-                            .or_default()
-                            .push(DecoyAnchor {
-                                value,
-                                requested_count: d.option_count,
-                            });
+                        values.insert(a.target.clone(), value);
                     }
                 }
             } else if let Ok(value) = crate::engine::formula::evaluate_with_answers(
@@ -869,11 +1216,19 @@ fn generate_multi_answer_variant(
                 assigned_strings,
                 &answer_values,
             ) {
-                untargeted_decoys.push(DecoyAnchor {
-                    value,
-                    requested_count: d.option_count,
-                });
+                for t in targets {
+                    values.insert(t.symbol.clone(), value);
+                }
             }
+
+            if values.is_empty() {
+                continue;
+            }
+
+            decoy_rows.push(DecoyRowValues {
+                requested_count: d.option_count,
+                values,
+            });
         }
     } else {
         untargeted_decoys = decoys
@@ -902,7 +1257,7 @@ fn generate_multi_answer_variant(
     // expression is offered to every target. An unparseable/failing formula
     // is treated as absent rather than failing generation, same as an
     // invalid decoy.
-    let mut alternate_by_target: HashMap<String, f64> = HashMap::new();
+    let mut alternate_values: HashMap<String, f64> = HashMap::new();
     let mut untargeted_alternate: Option<f64> = None;
 
     if let Some(alt_formula) = alternative_formula {
@@ -926,20 +1281,23 @@ fn generate_multi_answer_variant(
                                 continue;
                             }
                             if let Some(&value) = results.get(a.target.as_str()) {
-                                alternate_by_target.insert(a.target.clone(), value);
+                                alternate_values.insert(a.target.clone(), value);
                             }
                         }
                     }
                 }
                 _ => {
-                    untargeted_alternate = crate::engine::formula::evaluate_with_answers(
+                    if let Ok(value) = crate::engine::formula::evaluate_with_answers(
                         alt_formula,
                         assigned_numeric,
                         constants,
                         assigned_strings,
                         &answer_values,
-                    )
-                    .ok();
+                    ) {
+                        for t in targets {
+                            alternate_values.insert(t.symbol.clone(), value);
+                        }
+                    }
                 }
             }
         } else {
@@ -952,32 +1310,6 @@ fn generate_multi_answer_variant(
             )
             .ok();
         }
-    }
-
-    /// Build the effective decoy anchor list for one target: the target's
-    /// own routed decoys followed by the untargeted (bare-expression) ones
-    /// that apply to every target.
-    fn effective_decoys<'a>(
-        target_symbol: &str,
-        by_target: &'a HashMap<String, Vec<DecoyAnchor>>,
-        untargeted: &'a [DecoyAnchor],
-    ) -> Vec<DecoyAnchor> {
-        let mut combined: Vec<DecoyAnchor> = Vec::new();
-        if let Some(targeted) = by_target.get(target_symbol) {
-            combined.extend_from_slice(targeted);
-        }
-        combined.extend_from_slice(untargeted);
-        combined
-    }
-
-    /// Resolve the alternate value for one target: a target-specific
-    /// alternate wins over the untargeted (bare-expression) one.
-    fn effective_alternate(
-        target_symbol: &str,
-        by_target: &HashMap<String, f64>,
-        untargeted: Option<f64>,
-    ) -> Option<f64> {
-        by_target.get(target_symbol).copied().or(untargeted)
     }
 
     let options_seed = base_seed.wrapping_add(1);
@@ -997,6 +1329,38 @@ fn generate_multi_answer_variant(
         .unwrap_or(0.0);
     let mut answers_data = Vec::with_capacity(targets.len());
 
+    // The row layout (which row is correct/alternate/each decoy row's exact
+    // and perturbed values) is decided ONCE, shared by every target, so a
+    // decoy or alternace value for different targets always lands in the
+    // same option row — this is what actually fixes the row-desync bug.
+    let shared_role_order: Option<Vec<OptionRole>> =
+        if mode == TemplateMode::Closed && !targets.is_empty() {
+            let count = clamp_option_count(option_count);
+            let mut role_rng = StdRng::seed_from_u64(options_seed);
+            Some(plan_option_roles(
+                count,
+                &decoy_rows,
+                !alternate_values.is_empty(),
+                force_correct_first,
+                &mut role_rng,
+            ))
+        } else {
+            None
+        };
+    let shared_correct_option: Option<u8> = shared_role_order.as_ref().map(|roles| {
+        roles
+            .iter()
+            .position(|r| matches!(r, OptionRole::Correct))
+            .expect("role order always places Correct") as u8
+            + 1
+    });
+    let shared_alternate_position: Option<u8> = shared_role_order.as_ref().and_then(|roles| {
+        roles
+            .iter()
+            .position(|r| matches!(r, OptionRole::Alternate))
+            .map(|p| p as u8 + 1)
+    });
+
     for (idx, target) in targets.iter().enumerate() {
         let correct = *answer_values
             .get(&target.symbol)
@@ -1011,30 +1375,28 @@ fn generate_multi_answer_variant(
         let (numeric_options, correct_option, alternate_option, interval_lo, interval_hi) =
             match mode {
                 TemplateMode::Closed => {
-                    let mut rng = StdRng::seed_from_u64(options_seed);
-                    let target_decoys = effective_decoys(
-                        &target.symbol,
-                        &decoys_by_target,
-                        &untargeted_decoys,
-                    );
-                    let target_alternate = effective_alternate(
-                        &target.symbol,
-                        &alternate_by_target,
-                        untargeted_alternate,
-                    );
-                    let (options, position, alt_position) = generate_numeric_options(
+                    let mut rng = StdRng::seed_from_u64(options_seed.wrapping_add(idx as u64 + 1));
+                    let role_order = shared_role_order
+                        .as_ref()
+                        .expect("Closed mode with targets always plans a shared role order");
+                    let (options, has_alternate) = fill_target_options(
+                        role_order,
                         correct,
-                        &target_decoys,
-                        target_alternate,
+                        &decoy_rows,
+                        &alternate_values,
+                        &target.symbol,
                         constraint,
                         &mut rng,
                         difficulty,
-                        option_count,
-                        force_correct_first,
                         spread_override,
                         result_significant_digits,
                     )?;
-                    (Some(options), Some(position), alt_position, None, None)
+                    let alternate_option = if has_alternate {
+                        shared_alternate_position
+                    } else {
+                        None
+                    };
+                    (Some(options), shared_correct_option, alternate_option, None, None)
                 }
                 TemplateMode::Open => {
                     let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
@@ -1056,21 +1418,25 @@ fn generate_multi_answer_variant(
 
     let (numeric_options, correct_option, alternate_option, interval_lo, interval_hi) = match mode
     {
+        TemplateMode::Closed if !targets.is_empty() => {
+            // Reuse the first target's already row-aligned result for the
+            // legacy top-level Variant fields instead of re-running
+            // generation with a second, separately-seeded RNG stream.
+            let first = answers_data.first().expect("targets is non-empty here");
+            (
+                first.numeric_options.clone(),
+                first.correct_option,
+                first.alternate_option,
+                None,
+                None,
+            )
+        }
         TemplateMode::Closed => {
             let mut rng = StdRng::seed_from_u64(options_seed);
-            let primary_symbol = targets.first().map(|t| t.symbol.as_str());
-            let primary_decoys = match primary_symbol {
-                Some(sym) => effective_decoys(sym, &decoys_by_target, &untargeted_decoys),
-                None => untargeted_decoys.clone(),
-            };
-            let primary_alternate = match primary_symbol {
-                Some(sym) => effective_alternate(sym, &alternate_by_target, untargeted_alternate),
-                None => untargeted_alternate,
-            };
             let (options, position, alt_position) = generate_numeric_options(
                 primary_correct,
-                &primary_decoys,
-                primary_alternate,
+                &untargeted_decoys,
+                untargeted_alternate,
                 constraint,
                 &mut rng,
                 difficulty,
@@ -2166,6 +2532,205 @@ mod tests {
         );
     }
 
+    /// A decoy scenario that names both targets (mirroring a real question:
+    /// `ms = ...; mv = mr - ms`) must place both targets' values in the SAME
+    /// option row — regression test for the row-desync bug where
+    /// independent per-target shuffling could scatter one decoy's values for
+    /// different targets across unrelated rows.
+    #[test]
+    fn decoy_row_stays_aligned_across_targets() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+
+        for seed in 0..50u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &variables,
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                &[make_decoy("n = n * 2; m = n * 5", 2)],
+                None,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let v = variant.assigned_values["V"];
+            let n = v / 10.0;
+            let n_decoy = n * 2.0;
+            let m_decoy = n_decoy * 5.0;
+            let answers = variant.answers_data.as_ref().unwrap();
+
+            let n_options = answers[0].numeric_options.as_ref().unwrap();
+            let m_options = answers[1].numeric_options.as_ref().unwrap();
+
+            let n_row = n_options
+                .iter()
+                .position(|o| (o - n_decoy).abs() < 1e-6)
+                .unwrap_or_else(|| {
+                    panic!("seed={seed}: n's decoy value {n_decoy} missing from {n_options:?}")
+                });
+            let m_row = m_options
+                .iter()
+                .position(|o| (o - m_decoy).abs() < 1e-6)
+                .unwrap_or_else(|| {
+                    panic!("seed={seed}: m's decoy value {m_decoy} missing from {m_options:?}")
+                });
+
+            assert_eq!(
+                n_row, m_row,
+                "seed={seed}: decoy row for n (row {n_row}) and m (row {m_row}) must match"
+            );
+        }
+    }
+
+    /// A decoy whose value collides with ONE target's own correct answer
+    /// (and so must fall back to a plain distractor for that target) must
+    /// not break generation or row alignment for the OTHER target it
+    /// validly covers — mirroring a real report where a decoy's `ms` value
+    /// happened to equal the correct `ms` while its `mv` value was a
+    /// genuine, distinct distractor.
+    #[test]
+    fn decoy_partial_collision_with_one_targets_correct_answer_still_generates() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+
+        for seed in 0..50u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &variables,
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                // n's decoy exactly reproduces the correct n (a real
+                // collision); m's decoy (3x the decoy's own n) is a
+                // genuinely distinct value.
+                &[make_decoy("n = n; m = n * 3", 2)],
+                None,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let v = variant.assigned_values["V"];
+            let n = v / 10.0;
+            let m_decoy = n * 3.0;
+            let answers = variant.answers_data.as_ref().unwrap();
+
+            let n_options = answers[0].numeric_options.as_ref().unwrap();
+            let m_options = answers[1].numeric_options.as_ref().unwrap();
+            assert_eq!(n_options.len(), 5, "seed={seed}");
+            assert_eq!(m_options.len(), 5, "seed={seed}");
+
+            assert!(
+                m_options.iter().any(|o| (o - m_decoy).abs() < 1e-6),
+                "seed={seed}: expected m's decoy value {m_decoy} among {m_options:?}"
+            );
+
+            let n_correct = answers[0].value;
+            assert_eq!(
+                n_options
+                    .iter()
+                    .filter(|o| (**o - n_correct).abs() < 1e-6)
+                    .count(),
+                1,
+                "seed={seed}: n's correct answer must appear exactly once even though \
+                 the decoy collided with it: {n_options:?}"
+            );
+        }
+    }
+
+    /// `correct_option` (and `alternate_option`, when the alternace covers
+    /// every target) must be identical across every target's `AnswerField`
+    /// — export and UI table rendering only ever read `answers_data[0]`'s
+    /// position and assume it applies to every other target's row too.
+    #[test]
+    fn correct_and_alternate_option_positions_match_across_targets() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+
+        for seed in 0..50u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &variables,
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                &[make_decoy("n = n * 2; m = n * 5", 2)],
+                Some("n = n * 3; m = n * 3 * 5"),
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let answers = variant.answers_data.as_ref().unwrap();
+            assert_eq!(
+                answers[0].correct_option, answers[1].correct_option,
+                "seed={seed}: correct_option must match across targets"
+            );
+            assert_eq!(
+                answers[0].alternate_option, answers[1].alternate_option,
+                "seed={seed}: alternate_option must match across targets when the \
+                 alternace covers both targets"
+            );
+        }
+    }
+
     /// An alternace written as an assignment (`n = n * 2`) is routed only to
     /// the answer target it names: `n` gets an alternate option, `m` does not.
     #[test]
@@ -2719,6 +3284,83 @@ mod tests {
                     "bad override {bad:?} should fall back to the medium preset's ~50% ceiling, got {rel}"
                 );
             }
+        }
+    }
+
+    /// Regression test for a real bug report: a CuSO4*5H2O hydration
+    /// question asking for both `ms` (solute mass) and `mv` (water mass),
+    /// with a decoy (`ms = mr*(wperc/100)`, forgetting the hydrate ratio)
+    /// that produces a self-consistent wrong (ms, mv) pair. Before the fix,
+    /// this decoy's ms and mv values landed in different, unrelated option
+    /// rows; a second decoy (`mv = mr + ms`, wrong sign) whose ms happens to
+    /// equal the correct answer also exercises the partial-collision
+    /// fallback in the same scenario.
+    #[test]
+    fn cuso4_hydrate_report_decoy_pairs_stay_row_aligned() {
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "ms".to_string(),
+                unit: Some("g".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "mv".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let mut fixed_values = HashMap::new();
+        fixed_values.insert("mr".to_string(), 417.0);
+        fixed_values.insert("wperc".to_string(), 16.4);
+
+        for seed in 0..20u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "ms = mr * (wperc/100) * (M_CuSO4_5H2O / M_CuSO4); mv = mr - ms",
+                &[],
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &fixed_values,
+                &targets,
+                &[
+                    make_decoy("ms = mr * (wperc/100); mv = mr - ms", 1),
+                    make_decoy(
+                        "ms = mr * (wperc/100) * (M_CuSO4_5H2O / M_CuSO4); mv = mr + ms",
+                        1,
+                    ),
+                ],
+                None,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let answers = variant.answers_data.as_ref().unwrap();
+            let ms_options = answers[0].numeric_options.as_ref().unwrap();
+            let mv_options = answers[1].numeric_options.as_ref().unwrap();
+
+            let mr = 417.0;
+            let wperc = 16.4;
+            let ms_decoy1 = mr * (wperc / 100.0);
+            let mv_decoy1 = mr - ms_decoy1;
+
+            let ms_row = ms_options
+                .iter()
+                .position(|o| (o - ms_decoy1).abs() < 0.5)
+                .unwrap_or_else(|| panic!("seed={seed}: decoy1 ms missing from {ms_options:?}"));
+            let mv_row = mv_options
+                .iter()
+                .position(|o| (o - mv_decoy1).abs() < 0.5)
+                .unwrap_or_else(|| panic!("seed={seed}: decoy1 mv missing from {mv_options:?}"));
+            assert_eq!(
+                ms_row, mv_row,
+                "seed={seed}: decoy1 ms/mv must land in the same row: ms={ms_options:?} mv={mv_options:?}"
+            );
         }
     }
 }
