@@ -450,13 +450,14 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         requested: usize,
     }
 
-    // A teacher-supplied decoy is only used if it survives the same sanity
-    // checks a random distractor would: finite, within the constraint, far
-    // enough from the correct answer once rounded, far enough from the
-    // alternate answer (if any), and far enough from every earlier
-    // already-accepted decoy (a later formula that rounds to the same value
-    // is silently dropped). Anything else falls back to normal random
-    // distractors so generation never fails because of a bad decoy.
+    // A decoy that requested at least one slot always gets one — it isn't
+    // second-guessed against the correct answer, the alternate, or another
+    // decoy here. If a teacher's decoy formula happens to compute the same
+    // number as the correct equation (or the alternate, or another decoy),
+    // that's their mistake to notice and fix, not something generation
+    // silently reinterprets or drops. Only a formula that failed to
+    // evaluate to a real, in-range number falls back to a normal random
+    // distractor.
     let mut valid_decoys: Vec<ValidDecoy> = Vec::new();
     for d in decoys {
         if d.requested_count == 0 || !d.value.is_finite() {
@@ -464,15 +465,6 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         }
         let rounded = round_to_unit(d.value, rounding_unit);
         if validate_result(rounded, constraint).is_err() {
-            continue;
-        }
-        if close(rounded, rounded_correct) {
-            continue;
-        }
-        if rounded_alternate.is_some_and(|alt| close(rounded, alt)) {
-            continue;
-        }
-        if valid_decoys.iter().any(|vd| close(rounded, vd.rounded)) {
             continue;
         }
         valid_decoys.push(ValidDecoy {
@@ -594,10 +586,12 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         None
     };
 
-    if !valid_decoys.is_empty() {
+    if !valid_decoys.is_empty() && !force_correct_first {
         // Shuffle so decoy-anchored options don't always land at the lowest
-        // non-correct indices. Only done when a decoy is present — the
-        // no-decoy path must stay RNG-identical to before this feature.
+        // non-correct indices. Only done for the random student generator —
+        // teacher-facing generation keeps the authored decoy order so it's
+        // always predictable which option letter a given decoy claims (the
+        // first decoy at option b, the second at option c, and so on).
         for i in (1..pool.len()).rev() {
             let j = rng.random_range(0..=i);
             pool.swap(i, j);
@@ -739,7 +733,12 @@ fn plan_option_roles<R: Rng>(
         pool_roles.push(OptionRole::CorrectPerturb);
     }
 
-    if has_decoys {
+    if has_decoys && !force_correct_first {
+        // Shuffle so decoy-anchored options don't always land at the lowest
+        // non-correct indices. Only done for the random student generator —
+        // teacher-facing generation keeps the authored decoy order so it's
+        // always predictable which option letter a given decoy claims (the
+        // first decoy at option b, the second at option c, and so on).
         for i in (1..pool_roles.len()).rev() {
             let j = rng.random_range(0..=i);
             pool_roles.swap(i, j);
@@ -871,6 +870,13 @@ fn fill_target_options<R: Rng>(
 
     let mut decoy_anchor: HashMap<usize, f64> = HashMap::new();
     for k in needed_decoys {
+        // A decoy's real value for this target is used as-is whenever it's
+        // finite and in-constraint — even if it happens to equal the correct
+        // answer, the alternate, or another decoy's value for this same
+        // target. That coincidence is often the entire point of the decoy
+        // (e.g. one target's formula is unchanged, only another target's is
+        // wrong), so it isn't second-guessed here; only a genuinely
+        // unusable value falls back to a random distractor.
         let candidate = decoy_rows[k]
             .values
             .get(target_symbol)
@@ -881,18 +887,6 @@ fn fill_target_options<R: Rng>(
                 }
                 let rounded = round_to_unit(v, rounding_unit);
                 if validate_result(rounded, constraint).is_err() {
-                    return None;
-                }
-                if close_enough(rounded, rounded_correct, rounding_unit) {
-                    return None;
-                }
-                if rounded_alternate.is_some_and(|alt| close_enough(rounded, alt, rounding_unit)) {
-                    return None;
-                }
-                if placed
-                    .iter()
-                    .any(|&p| close_enough(rounded, p, rounding_unit))
-                {
                     return None;
                 }
                 Some(rounded)
@@ -2106,7 +2100,12 @@ mod tests {
     }
 
     #[test]
-    fn decoy_equal_to_correct_falls_back_to_a_random_distractor() {
+    fn decoy_equal_to_correct_still_earns_its_slot_as_an_intentional_duplicate() {
+        // A decoy that happens to compute the same value as the correct
+        // answer still gets its requested slot(s) — it isn't dropped or
+        // reinterpreted. If a teacher's decoy formula collides with the
+        // correct one, that shows up as a duplicate option, which is their
+        // mistake to notice, not something generation silently hides.
         let constraint = make_constraint(Some(0.0), Some(1000.0), None);
         let correct = 20.0;
         let mut rng = StdRng::seed_from_u64(1);
@@ -2121,8 +2120,8 @@ mod tests {
         assert_eq!(options.len(), 5);
         assert_eq!(
             options.iter().filter(|o| (**o - correct).abs() < 1e-9).count(),
-            1,
-            "decoy colliding with the correct answer must not create a duplicate"
+            2,
+            "expected the correct slot AND the decoy's own (colliding) slot to both show {correct}, got {options:?}"
         );
     }
 
@@ -2211,7 +2210,13 @@ mod tests {
     }
 
     #[test]
-    fn decoys_never_collide_with_the_alternate_option() {
+    fn decoy_colliding_with_the_alternate_option_still_earns_its_own_slot() {
+        // A decoy formula that happens to compute the same value as the
+        // alternate still gets its own slot with that real value — it isn't
+        // dropped in favor of the alternate's reserved slot. The two are
+        // independent: the alternate is a second guaranteed-correct answer,
+        // the decoy is a guaranteed-wrong one, and a coincidental numeric
+        // match between them is the teacher's business, not generation's.
         let constraint = make_constraint(Some(0.0), Some(1000.0), None);
         let correct = 20.0;
         let alternate = 60.0;
@@ -2234,13 +2239,10 @@ mod tests {
                 None,
             )
             .unwrap();
-            // The decoy formula happens to equal the alternate value, so it
-            // must be dropped in favor of the (already reserved) alternate
-            // slot rather than colliding with it.
             assert_eq!(
                 options.iter().filter(|o| (**o - alternate).abs() < 1e-9).count(),
-                1,
-                "seed={seed}: alternate value must appear exactly once, got {options:?}"
+                2,
+                "seed={seed}: the alternate's own slot AND the colliding decoy's slot should both show {alternate}, got {options:?}"
             );
             let alt_pos = alt_pos.expect("alternate should still get its own slot");
             assert_ne!(alt_pos, correct_pos, "seed={seed}");
@@ -2664,15 +2666,17 @@ mod tests {
                 "seed={seed}: expected m's decoy value {m_decoy} among {m_options:?}"
             );
 
+            // The decoy's `n` is deliberately unchanged from correct (only
+            // `m` is wrong), so it earns its own slot showing that same
+            // value — an intentional duplicate, not something to hide.
             let n_correct = answers[0].value;
             assert_eq!(
                 n_options
                     .iter()
                     .filter(|o| (**o - n_correct).abs() < 1e-6)
                     .count(),
-                1,
-                "seed={seed}: n's correct answer must appear exactly once even though \
-                 the decoy collided with it: {n_options:?}"
+                2,
+                "seed={seed}: n's correct answer AND the colliding decoy's own n slot should both show {n_correct}: {n_options:?}"
             );
         }
     }
@@ -3059,7 +3063,10 @@ mod tests {
     }
 
     #[test]
-    fn two_decoys_colliding_with_each_other_after_rounding_keep_only_the_earlier_one() {
+    fn two_decoys_colliding_with_each_other_after_rounding_both_keep_their_full_slots() {
+        // Two decoys that happen to compute the identical value are NOT
+        // deduplicated against each other — each keeps its full authored
+        // počet, even though that means the same number shows up twice.
         let constraint = make_constraint(Some(0.0), Some(10_000_000.0), None);
         let correct = 10.0;
         let decoy_value = 1_000.0;
@@ -3083,10 +3090,14 @@ mod tests {
         let (d_lo, d_hi) = band(decoy_value);
         let decoy_slots = options.iter().filter(|o| **o >= d_lo && **o <= d_hi).count();
         assert_eq!(
-            decoy_slots, 2,
-            "only the earlier-listed decoy survives, keeping its full počet=2: {options:?}"
+            decoy_slots, 4,
+            "both decoys keep their full počet=2 (4 slots total), even though they collide: {options:?}"
         );
-        assert!(options.iter().any(|o| (o - decoy_value).abs() < 1e-9));
+        assert_eq!(
+            options.iter().filter(|o| (**o - decoy_value).abs() < 1e-9).count(),
+            2,
+            "both decoys' exact anchor value should appear, once each: {options:?}"
+        );
     }
 
     #[test]
@@ -3158,19 +3169,20 @@ mod tests {
     }
 
     /// Decoy acceptance semantics must survive the finer grid: a decoy
-    /// differing in the last significant place is kept, while one that
-    /// rounds onto the correct answer is dropped.
+    /// differing in the last significant place is kept as its own distinct
+    /// slot, while one that rounds onto the correct answer still earns its
+    /// full requested slots — it just shows up as a duplicate of correct.
     #[test]
     fn decoy_keeps_slots_on_the_significant_digits_grid() {
         let constraint = make_constraint(Some(0.0), Some(100.0), None);
         let correct = 23.4759;
         let decoys = [
             DecoyAnchor {
-                value: 23.4694, // rounds to 23.469 — kept
+                value: 23.4694, // rounds to 23.469 — distinct from correct
                 requested_count: 1,
             },
             DecoyAnchor {
-                value: 23.4757, // rounds to 23.476 — collides, dropped
+                value: 23.4757, // rounds to 23.476 — same as correct, kept anyway
                 requested_count: 3,
             },
         ];
@@ -3182,8 +3194,8 @@ mod tests {
         assert!(options.iter().any(|o| (o - 23.469).abs() < 1e-9));
         assert_eq!(
             options.iter().filter(|o| (**o - 23.476).abs() < 1e-9).count(),
-            1,
-            "the decoy rounding onto the correct answer must be dropped: {options:?}"
+            2,
+            "correct's own slot AND the colliding decoy's slot should both show 23.476: {options:?}"
         );
     }
 
@@ -3362,5 +3374,125 @@ mod tests {
                 "seed={seed}: decoy1 ms/mv must land in the same row: ms={ms_options:?} mv={mv_options:?}"
             );
         }
+    }
+
+    #[test]
+    fn teacher_preview_pins_first_decoy_to_b_and_second_to_c_while_student_mode_stays_random() {
+        // Teacher-facing generation (force_correct_first=true) must keep
+        // decoys in their authored order — decoy 1 always at option b,
+        // decoy 2 always at option c — so a teacher can predict which
+        // letter a given decoy claims. Interactive student practice
+        // (force_correct_first=false) keeps shuffling that placement.
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(100000.0), None);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let decoys = [
+            make_decoy("n = V / 2; m = n * 6", 1),
+            make_decoy("n = V / 40; m = n * 4", 1),
+        ];
+        let close = |a: f64, b: f64| (a - b).abs() <= b.abs() * 0.02 + 0.01;
+
+        for seed in 0..20u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 15",
+                &[make_variable("V", 20.0, 100.0, 10.0, 0)],
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                &decoys,
+                None,
+                true, // teacher preview
+                None,
+                None,
+            )
+            .unwrap();
+
+            let v = variant.assigned_values["V"];
+            let decoy1_n = v / 2.0;
+            let decoy1_m = decoy1_n * 6.0;
+            let decoy2_n = v / 40.0;
+            let decoy2_m = decoy2_n * 4.0;
+
+            let answers = variant.answers_data.as_ref().unwrap();
+            let n_options = answers[0].numeric_options.as_ref().unwrap();
+            let m_options = answers[1].numeric_options.as_ref().unwrap();
+
+            assert!(
+                close(n_options[1], decoy1_n) && close(m_options[1], decoy1_m),
+                "seed={seed}: expected decoy 1 at option b (n={decoy1_n}, m={decoy1_m}), got (n={}, m={})",
+                n_options[1],
+                m_options[1]
+            );
+            assert!(
+                close(n_options[2], decoy2_n) && close(m_options[2], decoy2_m),
+                "seed={seed}: expected decoy 2 at option c (n={decoy2_n}, m={decoy2_m}), got (n={}, m={})",
+                n_options[2],
+                m_options[2]
+            );
+        }
+
+        // Student mode: decoys stay paired across targets, but at least one
+        // seed must place a decoy somewhere other than the teacher's fixed
+        // b/c slots, proving the layout is actually randomized.
+        let mut saw_decoy_outside_bc = false;
+        for seed in 0..20u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 15",
+                &[make_variable("V", 20.0, 100.0, 10.0, 0)],
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                &decoys,
+                None,
+                false, // student practice
+                None,
+                None,
+            )
+            .unwrap();
+
+            let v = variant.assigned_values["V"];
+            let decoy1_n = v / 2.0;
+            let decoy1_m = decoy1_n * 6.0;
+            let decoy2_n = v / 40.0;
+            let decoy2_m = decoy2_n * 4.0;
+
+            let answers = variant.answers_data.as_ref().unwrap();
+            let n_options = answers[0].numeric_options.as_ref().unwrap();
+            let m_options = answers[1].numeric_options.as_ref().unwrap();
+
+            for i in 0..n_options.len() {
+                if close(n_options[i], decoy1_n) && close(m_options[i], decoy1_m) && i != 1 {
+                    saw_decoy_outside_bc = true;
+                }
+                if close(n_options[i], decoy2_n) && close(m_options[i], decoy2_m) && i != 2 {
+                    saw_decoy_outside_bc = true;
+                }
+            }
+        }
+        assert!(
+            saw_decoy_outside_bc,
+            "expected at least one student-mode seed to place a decoy outside the teacher's fixed b/c slots"
+        );
     }
 }
