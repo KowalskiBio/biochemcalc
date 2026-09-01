@@ -331,7 +331,12 @@ export function TemplatesPage() {
         <TemplateDialog
           open={isEditDialogOpen}
           onOpenChange={setIsEditDialogOpen}
-          onSubmit={(input) => handleUpdateTemplate(selectedTemplate.id, input)}
+          onSubmit={(input) =>
+            handleUpdateTemplate(selectedTemplate.id, {
+              ...input,
+              difficulty: selectedTemplate.difficulty ?? null,
+            })
+          }
           title={cs.templates.editTemplate}
           confirmText={cs.common.save}
           initialValues={{

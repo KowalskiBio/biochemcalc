@@ -166,6 +166,11 @@ export interface Template {
    * correct answer, becoming a second correct closed-mode option.
    */
   alternativeFormula?: string
+  /**
+   * Per-question difficulty override. null (or absent) means the question
+   * inherits the set-wide difficulty preset at generation time.
+   */
+  difficulty?: QuestionDifficulty | null
   createdAt: string
   // Extended with related data
   variables?: TemplateVariableInput[]
@@ -242,6 +247,7 @@ export interface UpdateTemplateWithVariablesPayload {
   forceScientific?: boolean
   decoys: TemplateDecoyInput[]
   alternativeFormula?: string
+  difficulty?: QuestionDifficulty | null
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -285,6 +291,7 @@ export interface TemplateInput {
   forceScientific?: boolean
   decoys?: TemplateDecoyInput[]
   alternativeFormula?: string
+  difficulty?: QuestionDifficulty | null
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
