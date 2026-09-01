@@ -11,13 +11,6 @@ import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { MathRenderer } from "@/components/ui/math-renderer"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -54,7 +47,6 @@ import type {
   HistoryEntry,
   LocalVariableEdit,
   Notation,
-  QuestionDifficulty,
   TemplateDecoy,
   TemplateDecoyInput,
   TemplateWithDetails,
@@ -365,9 +357,6 @@ export function QuestionDetailDialog({
   const [forceScientific, setForceScientific] = useState(
     initialTemplateDetails?.template.forceScientific ?? false,
   )
-  const [localDifficulty, setLocalDifficulty] = useState<QuestionDifficulty | "inherit">(
-    initialTemplateDetails?.template.difficulty ?? "inherit",
-  )
   const [decoyRows, setDecoyRows] = useState<DecoyRow[]>(
     (initialTemplateDetails?.decoys ?? []).map(toDecoyRow),
   )
@@ -435,7 +424,6 @@ export function QuestionDetailDialog({
           : "",
       )
       setForceScientific(details.template.forceScientific ?? false)
-      setLocalDifficulty(details.template.difficulty ?? "inherit")
       setDecoyRows(details.decoys.map(toDecoyRow))
       setAlternativeFormula(details.template.alternativeFormula ?? "")
       setShowAlternativeFormulaInput(!!details.template.alternativeFormula)
@@ -571,7 +559,6 @@ export function QuestionDetailDialog({
       editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
     if (newSigDigits !== currentSigDigits) return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
-    if (localDifficulty !== (templateDetails?.template.difficulty ?? "inherit")) return true
     if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
     if (alternativeFormula !== (templateDetails?.template.alternativeFormula ?? "")) return true
     return dirtyVariableKeys.size > 0
@@ -581,7 +568,6 @@ export function QuestionDetailDialog({
     editResultUnit,
     editSignificantDigits,
     forceScientific,
-    localDifficulty,
     decoyRows,
     alternativeFormula,
     templateDetails,
@@ -680,7 +666,6 @@ export function QuestionDetailDialog({
       forceScientific,
       decoys: buildDecoyInputs(decoyRows),
       alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
-      difficulty: localDifficulty === "inherit" ? null : localDifficulty,
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
       constraint: templateDetails.template.constraint,
@@ -720,7 +705,6 @@ export function QuestionDetailDialog({
         : "",
     )
     setForceScientific(templateDetails?.template.forceScientific ?? false)
-    setLocalDifficulty(templateDetails?.template.difficulty ?? "inherit")
     setDecoyRows((templateDetails?.decoys ?? []).map(toDecoyRow))
     setAlternativeFormula(templateDetails?.template.alternativeFormula ?? "")
     setShowAlternativeFormulaInput(!!templateDetails?.template.alternativeFormula)
@@ -757,7 +741,6 @@ export function QuestionDetailDialog({
         forceScientific,
         decoys: buildDecoyInputs(decoyRows),
         alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
-        difficulty: localDifficulty === "inherit" ? null : localDifficulty,
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: templateDetails.template.constraint,
@@ -804,7 +787,6 @@ export function QuestionDetailDialog({
       forceScientific: newValue,
       decoys: buildDecoyInputs(decoyRows),
       alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
-      difficulty: localDifficulty === "inherit" ? null : localDifficulty,
       variableMutations: templateDetails.variables.map((vwp) => ({
         action: "keep" as const,
         variableId: vwp.variable.id,
@@ -1640,26 +1622,6 @@ export function QuestionDetailDialog({
                       <p className="text-xs text-muted-foreground">
                         {cs.questions.significantDigitsHelp}
                       </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="difficulty">{cs.questions.difficultyLabel}</Label>
-                      <Select
-                        value={localDifficulty}
-                        onValueChange={(value) =>
-                          setLocalDifficulty(value as QuestionDifficulty | "inherit")
-                        }
-                        disabled={isSaving}
-                      >
-                        <SelectTrigger id="difficulty" className="max-w-[180px]">
-                          <SelectValue placeholder={cs.form.difficultyPlaceholder} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="inherit">{cs.questions.difficultyInherit}</SelectItem>
-                          <SelectItem value="easy">{cs.difficulty.easy}</SelectItem>
-                          <SelectItem value="medium">{cs.difficulty.medium}</SelectItem>
-                          <SelectItem value="hard">{cs.difficulty.hard}</SelectItem>
-                        </SelectContent>
-                      </Select>
                     </div>
                     {editEquationText.trim().length > 0 && (
                       <div className="rounded-lg bg-muted/50 p-4 space-y-2">

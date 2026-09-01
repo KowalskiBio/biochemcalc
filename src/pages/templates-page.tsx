@@ -334,7 +334,6 @@ export function TemplatesPage() {
           onSubmit={(input) =>
             handleUpdateTemplate(selectedTemplate.id, {
               ...input,
-              difficulty: selectedTemplate.difficulty ?? null,
             })
           }
           title={cs.templates.editTemplate}

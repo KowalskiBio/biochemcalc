@@ -845,8 +845,6 @@ export const cs = {
     lessThan: "Menší než",
     noComparison: "Žádné",
     comparisonConstraint: "Vztah k jiné proměnné",
-    difficultyLabel: "Obtížnost (nastavení otázky)",
-    difficultyInherit: "Dle sady (výchozí)",
     impliedLessThan: "Automaticky: musí být menší než {variable}",
     impliedGreaterThan: "Automaticky: musí být větší než {variable}",
     validation: {
@@ -1088,7 +1086,6 @@ export const cs = {
     category: "Kategorie",
     categoryPlaceholder: "Vyberte kategorii...",
     difficulty: "Obtížnost",
-    difficultyPlaceholder: "Vyberte obtížnost...",
     expression: "Výraz",
     expressionPlaceholder: "Zadejte matematický výraz...",
     precision: "Přesnost",

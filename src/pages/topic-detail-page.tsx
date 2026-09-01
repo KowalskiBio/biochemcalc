@@ -212,7 +212,6 @@ export function TopicDetailPage() {
             pointValue: targetPointValue,
             decoys: details.decoys.map((d) => ({ formula: d.formula, optionCount: d.optionCount })),
             alternativeFormula: details.template.alternativeFormula,
-            difficulty: details.template.difficulty ?? null,
             variableMutations: details.variables.map((vwp) => ({
               action: "keep" as const,
               variableId: vwp.variable.id,
