@@ -427,7 +427,8 @@ export function ExportVariantsDialog({
                           placeholder={String(
                             defaultSpreadPercentFor(
                               mode,
-                              mode === "closed" ? closedDifficulty : openDifficulty,
+                              templateDetails.template.difficulty ??
+                                (mode === "closed" ? closedDifficulty : openDifficulty),
                             ),
                           )}
                           aria-label={cs.sets.exportDialog.spreadPercent}
