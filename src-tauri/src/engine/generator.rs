@@ -255,24 +255,29 @@ fn sd_fraction_for_difficulty(difficulty: &str) -> f64 {
 
 /// Compute the lower and upper bounds for an open answer.
 /// The half-width is driven by difficulty unless the teacher provided an
-/// explicit SD, which always wins. `spread_override` — a per-export custom
-/// deviation fraction, e.g. from the export dialog's per-question "Odchylka
-/// (%)" field — sits between those two: it beats the difficulty preset but
-/// never an explicit SD. Sanitized here too (not just at the call boundary)
-/// so a stray non-finite/non-positive value can never produce a nonsensical
-/// interval, regardless of caller.
+/// explicit positive SD, which always wins. `spread_override` — a per-export
+/// custom deviation fraction, e.g. from the export dialog's per-question
+/// "Odchylka (%)" field — sits between those two: it beats the difficulty
+/// preset but never an explicit SD. Sanitized here too (not just at the call
+/// boundary): sd_allowed is only honored when finite and > 0, otherwise it
+/// ghosts to the spread_override/difficulty path so a stray zero, negative or
+/// NaN value can never produce a degenerate interval, regardless of caller.
 pub(crate) fn open_interval(
     correct: f64,
     constraint: &ResultConstraint,
     difficulty: &str,
     spread_override: Option<f64>,
 ) -> (f64, f64) {
-    let half_width = constraint.sd_allowed.map(|sd| sd.abs()).unwrap_or_else(|| {
-        let fraction = spread_override
-            .filter(|v| v.is_finite() && *v > 0.0)
-            .unwrap_or_else(|| sd_fraction_for_difficulty(difficulty));
-        (correct.abs() * fraction).max(0.01)
-    });
+    let half_width = constraint
+        .sd_allowed
+        .filter(|sd| sd.is_finite() && *sd > 0.0)
+        .map(f64::abs)
+        .unwrap_or_else(|| {
+            let fraction = spread_override
+                .filter(|v| v.is_finite() && *v > 0.0)
+                .unwrap_or_else(|| sd_fraction_for_difficulty(difficulty));
+            (correct.abs() * fraction).max(0.01)
+        });
     (correct - half_width, correct + half_width)
 }
 
@@ -402,6 +407,68 @@ fn apportion_largest_remainder(requested: &[usize], budget: usize) -> Vec<usize>
     floors
 }
 
+/// The effective absolute SD window for a question, or None when unset or
+/// invalid (not finite or not > 0). Decided as a pure Option before any RNG
+/// is consumed so the unset/invalid path keeps its byte-identical RNG
+/// sequence. Mirrors the `spread_override` sanitization filter.
+fn effective_sd_window(constraint: &ResultConstraint) -> Option<f64> {
+    constraint
+        .sd_allowed
+        .filter(|sd| sd.is_finite() && *sd > 0.0)
+}
+
+/// Sample one distractor inside the absolute ±sd window around
+/// `rounded_correct`, on the `unit` display grid. Returns None when no
+/// distinct in-window value remains (float collapse that rounds every grid
+/// offset back onto the correct answer, a window narrower than a grid step,
+/// or uniqueness exhausted). The value is far enough from the correct and
+/// the alternate, unique against `placed`, and satisfies `validate_result`.
+fn generate_in_window_distractor<R: Rng>(
+    rounded_correct: f64,
+    sd: f64,
+    unit: f64,
+    placed: &[f64],
+    rounded_alternate: Option<f64>,
+    constraint: &ResultConstraint,
+    rng: &mut R,
+) -> Option<f64> {
+    // Largest integer grid offset k with |k|*unit <= sd - unit/2, so a grid
+    // position rounded_correct + k*unit always rounds back inside ±sd.
+    let k_span = (sd - unit * 0.5) / unit;
+    if k_span < 1.0 {
+        return None;
+    }
+    let k_max = k_span.floor() as i64;
+    let close = |a: f64, b: f64| (a - b).abs() <= unit * 0.5 * (1.0 + f64::EPSILON);
+    let mut attempts = 0;
+    while attempts < 500 {
+        attempts += 1;
+        let k = rng.random_range(-k_max..=k_max);
+        if k == 0 {
+            continue;
+        }
+        let rounded = round_to_unit(rounded_correct + k as f64 * unit, unit);
+        // |rounded - rounded_correct| = |k|*unit <= sd - unit/2 < sd, so the
+        // value always stays strictly inside the window once rounded.
+        if (rounded - rounded_correct).abs() > sd * (1.0 + 1e-9) {
+            continue;
+        }
+        if close(rounded, rounded_correct)
+            || rounded_alternate.is_some_and(|alt| close(rounded, alt))
+        {
+            continue;
+        }
+        if placed.iter().any(|p| close(rounded, *p)) {
+            continue;
+        }
+        if validate_result(rounded, constraint).is_err() {
+            continue;
+        }
+        return Some(rounded);
+    }
+    None
+}
+
 pub(crate) fn generate_numeric_options<R: Rng>(
     correct: f64,
     decoys: &[DecoyAnchor],
@@ -423,7 +490,28 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
 
-    let rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
+    // The absolute SD window: when the teacher set a finite positive
+    // sd_allowed, that absolute number becomes the single per-question
+    // authority for the closed option window. Decided here, before any RNG
+    // consumption, so the unset path keeps its exact byte-identical RNG
+    // sequence (the ghost regression).
+    let sd_window = effective_sd_window(constraint);
+
+    let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
+    // When an SD window is active the grid must be fine enough to fit `count`
+    // distinct steps inside the ±sd window: round to the finer of the display
+    // grid and 2*sd/count (display_grid's own clamps stay intact).
+    let rounding_unit = match sd_window {
+        Some(sd) => {
+            let sd_unit = 2.0 * sd / count as f64;
+            if sd_unit < base_rounding_unit {
+                sd_unit
+            } else {
+                base_rounding_unit
+            }
+        }
+        None => base_rounding_unit,
+    };
     let rounded_correct = round_to_unit(correct, rounding_unit);
     let close = |a: f64, b: f64| (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON);
 
@@ -467,6 +555,14 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         if validate_result(rounded, constraint).is_err() {
             continue;
         }
+        // When an SD window is active, a decoy anchored outside that window
+        // can't earn its slot (it would break the window guarantee for the
+        // whole option set); its slots flow to the correct-answer cluster.
+        // Without an SD window, a decoy always claims its requested slot,
+        // coincidental value matches included.
+        if sd_window.is_some_and(|sd| (rounded - rounded_correct).abs() > sd) {
+            continue;
+        }
         valid_decoys.push(ValidDecoy {
             rounded,
             requested: d.requested_count as usize,
@@ -496,6 +592,27 @@ pub(crate) fn generate_numeric_options<R: Rng>(
 
         while pool.len() < start_len + needed && attempts < 500 {
             attempts += 1;
+
+            // Absolute in-window sampling: when an SD window is active, every
+            // distractor (correct-cluster and decoy-cluster perturbation alike)
+            // is drawn from the window centered on rounded_correct, ignoring
+            // the anchor. The window is narrowed by half a unit so rounding can
+            // never exit [correct - sd, correct + sd].
+            if let Some(sd) = sd_window {
+                match generate_in_window_distractor(
+                    rounded_correct,
+                    sd,
+                    rounding_unit,
+                    pool,
+                    rounded_alternate,
+                    constraint,
+                    rng,
+                ) {
+                    Some(v) => pool.push(v),
+                    None => return false,
+                }
+                continue;
+            }
 
             let deviation = rng.random_range(MIN_DISTRACTOR_DEVIATION..=max_deviation);
             let direction = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
@@ -556,12 +673,19 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     if correct_cluster_size > 1
         && !generate_around(correct, correct_cluster_size - 1, &mut pool, rng)
     {
-        return Err(GenerationError::Distractor(format!(
-            "only generated {} unique distractors for correct answer {} (constraint: {:?})",
-            pool.len(),
-            rounded_correct,
-            constraint
-        )));
+        let detail = match sd_window {
+            Some(sd) => format!(
+                "not enough distinct options inside the absolute SD window for correct answer {} (sd {}, option count {})",
+                rounded_correct, sd, count
+            ),
+            None => format!(
+                "only generated {} unique distractors for correct answer {} (constraint: {:?})",
+                pool.len(),
+                rounded_correct,
+                constraint
+            ),
+        };
+        return Err(GenerationError::Distractor(detail));
     }
 
     let has_alternate = rounded_alternate.is_some();
@@ -625,8 +749,10 @@ fn close_enough(a: f64, b: f64, rounding_unit: f64) -> bool {
 /// Fills `pool` with up to `needed` more values deviated around `anchor`,
 /// unique against the correct answer, the alternate (if any), and every
 /// value already in `pool`. Returns whether it reached the target count
-/// within budget. Same logic `generate_numeric_options` uses internally,
-/// factored out for the multi-target row filler below.
+/// within budget. When an SD window is active, values are instead drawn
+/// absolutely from the window around `rounded_correct`. Same logic
+/// `generate_numeric_options` uses internally, factored out for the
+/// multi-target row filler below.
 #[allow(clippy::too_many_arguments)]
 fn generate_around_value<R: Rng>(
     anchor: f64,
@@ -638,12 +764,29 @@ fn generate_around_value<R: Rng>(
     rounded_correct: f64,
     rounded_alternate: Option<f64>,
     constraint: &ResultConstraint,
+    sd_window: Option<f64>,
 ) -> bool {
     let start_len = pool.len();
     let mut attempts = 0;
 
     while pool.len() < start_len + needed && attempts < 500 {
         attempts += 1;
+
+        if let Some(sd) = sd_window {
+            match generate_in_window_distractor(
+                rounded_correct,
+                sd,
+                rounding_unit,
+                pool,
+                rounded_alternate,
+                constraint,
+                rng,
+            ) {
+                Some(v) => pool.push(v),
+                None => return false,
+            }
+            continue;
+        }
 
         let deviation = rng.random_range(MIN_DISTRACTOR_DEVIATION..=max_deviation);
         let direction = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
@@ -786,6 +929,7 @@ fn fallback_distractor<R: Rng>(
     rounded_correct: f64,
     rounded_alternate: Option<f64>,
     constraint: &ResultConstraint,
+    sd_window: Option<f64>,
 ) -> Result<f64, GenerationError> {
     let mut pool = placed.to_vec();
     let start_len = pool.len();
@@ -799,6 +943,7 @@ fn fallback_distractor<R: Rng>(
         rounded_correct,
         rounded_alternate,
         constraint,
+        sd_window,
     ) {
         return Err(GenerationError::Distractor(format!(
             "could not generate a fallback distractor around {anchor}"
@@ -832,7 +977,20 @@ fn fill_target_options<R: Rng>(
     let max_deviation = spread_override
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
-    let rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
+    let sd_window = effective_sd_window(constraint);
+    let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
+    let count = role_order.len().max(1);
+    let rounding_unit = match sd_window {
+        Some(sd) => {
+            let sd_unit = 2.0 * sd / count as f64;
+            if sd_unit < base_rounding_unit {
+                sd_unit
+            } else {
+                base_rounding_unit
+            }
+        }
+        None => base_rounding_unit,
+    };
     let rounded_correct = round_to_unit(correct, rounding_unit);
 
     let rounded_alternate: Option<f64> = alternate_values
@@ -889,6 +1047,11 @@ fn fill_target_options<R: Rng>(
                 if validate_result(rounded, constraint).is_err() {
                     return None;
                 }
+                // The SD window overrides the always-earns-slot rule: a decoy
+                // outside the window falls back to an in-window distractor.
+                if sd_window.is_some_and(|sd| (rounded - rounded_correct).abs() > sd) {
+                    return None;
+                }
                 Some(rounded)
             });
         let resolved = match candidate {
@@ -902,6 +1065,7 @@ fn fill_target_options<R: Rng>(
                 rounded_correct,
                 rounded_alternate,
                 constraint,
+                sd_window,
             )?,
         };
         decoy_anchor.insert(k, resolved);
@@ -923,6 +1087,7 @@ fn fill_target_options<R: Rng>(
                     rounded_correct,
                     rounded_alternate,
                     constraint,
+                    sd_window,
                 )?,
             },
             OptionRole::DecoyExact(k) => *decoy_anchor
@@ -939,6 +1104,7 @@ fn fill_target_options<R: Rng>(
                     rounded_correct,
                     rounded_alternate,
                     constraint,
+                    sd_window,
                 )?
             }
             OptionRole::CorrectPerturb => fallback_distractor(
@@ -950,6 +1116,7 @@ fn fill_target_options<R: Rng>(
                 rounded_correct,
                 rounded_alternate,
                 constraint,
+                sd_window,
             )?,
         };
         if !matches!(role, OptionRole::DecoyExact(_)) {
@@ -3376,6 +3543,7 @@ mod tests {
         }
     }
 
+
     #[test]
     fn teacher_preview_pins_first_decoy_to_b_and_second_to_c_while_student_mode_stays_random() {
         // Teacher-facing generation (force_correct_first=true) must keep
@@ -3494,5 +3662,202 @@ mod tests {
             saw_decoy_outside_bc,
             "expected at least one student-mode seed to place a decoy outside the teacher's fixed b/c slots"
         );
+    }
+
+    /// Closed + SD: every generated option must land INSIDE the absolute
+    /// ±sd window around the correct answer, all distinct, correct present.
+    #[test]
+    fn closed_with_sd_options_all_inside_the_absolute_window() {
+        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let correct = 7.0;
+        for seed in 0..30u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, correct_pos, _alt) = generate_numeric_options(
+                correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, None,
+            )
+            .expect(&format!("seed={seed}: generation failed"));
+
+            assert_eq!(options.len(), 4, "seed={seed}");
+            for o in &options {
+                assert!(
+                    *o >= 6.8 && *o <= 7.2,
+                    "seed={seed}: option {o} outside the ±0.2 window: {options:?}"
+                );
+            }
+            let mut sorted = options.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            for i in 1..sorted.len() {
+                assert!(
+                    (sorted[i] - sorted[i - 1]).abs() > 1e-9,
+                    "seed={seed}: duplicate options {options:?}"
+                );
+            }
+            assert!(
+                (options[(correct_pos as usize) - 1] - correct).abs() < 1e-9,
+                "seed={seed}: correct option must equal {correct}"
+            );
+        }
+    }
+
+    /// Open + SD: the accepted interval is exactly correct ± sd.
+    #[test]
+    fn open_with_sd_interval_is_exactly_correct_plus_minus_sd() {
+        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let (lo, hi) = open_interval(7.0, &constraint, "medium", None);
+        assert!((lo - 6.8).abs() < 1e-9, "unexpected lower bound {lo}");
+        assert!((hi - 7.2).abs() < 1e-9, "unexpected upper bound {hi}");
+    }
+
+    /// Open + invalid persisted SD (0, negative, NaN) must GHOST to the
+    /// difficulty/spread path — a medium preset is ±30% of the correct value.
+    #[test]
+    fn open_invalid_sd_ghosts_to_difficulty_or_spread_override() {
+        for bad in [Some(0.0), Some(-0.5), Some(f64::NAN)] {
+            let constraint = make_constraint_typed(None, None, bad, ConstraintType::Sd);
+            let (lo, hi) = open_interval(100.0, &constraint, "medium", None);
+            assert!(
+                (lo - 70.0).abs() < 1e-9,
+                "bad sd {bad:?} must fall back to preset, got lo={lo}"
+            );
+            assert!(
+                (hi - 130.0).abs() < 1e-9,
+                "bad sd {bad:?} must fall back to preset, got hi={hi}"
+            );
+        }
+        // A valid spread_override also beats an invalid persisted sd.
+        let constraint = make_constraint_typed(None, None, Some(f64::NAN), ConstraintType::Sd);
+        let (lo, hi) = open_interval(100.0, &constraint, "medium", Some(0.9));
+        assert!((lo - 10.0).abs() < 1e-9, "unexpected lower bound {lo}");
+        assert!((hi - 190.0).abs() < 1e-9, "unexpected upper bound {hi}");
+    }
+
+    /// Tiny-SD float collapse (correct 1e6, sd 1e-12 rounds every in-window
+    /// grid offset back onto the correct answer) must return a Distractor
+    /// error naming the correct value, sd and option count.
+    #[test]
+    fn tiny_sd_float_collapse_returns_distractor_error() {
+        let constraint = make_constraint_typed(None, None, Some(1e-12), ConstraintType::Sd);
+        let correct = 1e6;
+        let mut rng = StdRng::seed_from_u64(1);
+        let res =
+            generate_numeric_options(correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, None);
+        let err = res.expect_err("tiny sd must fail generation");
+        match err {
+            GenerationError::Distractor(msg) => {
+                assert!(
+                    msg.contains("1000000"),
+                    "error must name the correct value: {msg}"
+                );
+                assert!(
+                    msg.contains("0.000000000001"),
+                    "error must name the sd: {msg}"
+                );
+                assert!(
+                    msg.contains("4"),
+                    "error should reference the option count: {msg}"
+                );
+            }
+            other => panic!("expected Distractor, got {other:?}"),
+        }
+    }
+
+    /// A "both" constraint whose min/max cannot contain correct ± sd (so the
+    /// range can't even hold the open interval) fails via the existing
+    /// validate_result range-edge semantics — the sampled correct answer is
+    /// rejected and generation ultimately reports the constraint as
+    /// unsatisfiable.
+    ///
+    /// This documents the intended range-edge semantics: when SD is set on a
+    /// range-constrained question, the teacher is responsible for a min/max
+    /// wide enough to contain correct ± sd; otherwise generation fails rather
+    /// than silently shrinking the window.
+    #[test]
+    fn both_constraint_with_sd_exceeding_range_fails_via_validate_result() {
+        let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
+        let constants = HashMap::new();
+        // correct = X * 2 in [2, 20]; min/max [5, 6] and sd 2 would need the
+        // open interval correct ± 2 ⊂ [5, 6], which no sampled correct can
+        // satisfy.
+        let constraint = make_constraint_typed(Some(5.0), Some(6.0), Some(2.0), ConstraintType::Both);
+        let res = generate_variant(
+            Uuid::new_v4(),
+            "X * 2",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Open,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            None,
+        );
+        match res {
+            Err(GenerationError::ConstraintUnsatisfiable { .. }) => {}
+            other => panic!("expected ConstraintUnsatisfiable, got {other:?}"),
+        }
+    }
+
+    /// Multi-answer closed + SD: each target's window anchors on ITS OWN
+    /// correct value, and every option for each target stays inside that
+    /// target's ±sd window.
+    #[test]
+    fn multi_answer_closed_with_sd_keeps_each_target_inside_its_own_window() {
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint_typed(None, None, Some(0.5), ConstraintType::Sd);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+
+        for seed in 0..20u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &variables,
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                &[],
+                None,
+                false,
+                None,
+                None,
+            )
+            .expect(&format!("seed={seed}: generation failed"));
+
+            let answers = variant.answers_data.as_ref().unwrap();
+            for answer in answers {
+                let options = answer.numeric_options.as_ref().unwrap();
+                let correct = answer.value;
+                let window = 0.5;
+                for o in options {
+                    assert!(
+                        (o - correct).abs() <= window * (1.0 + 1e-9),
+                        "seed={seed}: option {o} outside ±{window} of {correct}: {options:?}"
+                    );
+                }
+                let mut sorted = options.clone();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                for i in 1..sorted.len() {
+                    assert!(
+                        (sorted[i] - sorted[i - 1]).abs() > 1e-9,
+                        "seed={seed}: duplicate options {options:?}"
+                    );
+                }
+            }
+        }
     }
 }
