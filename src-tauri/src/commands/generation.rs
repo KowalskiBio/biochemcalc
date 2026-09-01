@@ -50,6 +50,22 @@ pub struct GeneratedTemplate {
     pub variants: Vec<Variant>,
 }
 
+/// Server-side per-question difficulty resolution: a template's own
+/// difficulty wins when it is a known preset, otherwise the caller's
+/// fallback (the set-wide batch preset or PRACTICE_DIFFICULTY) applies.
+/// An invalid stored string silently inherits the fallback — deliberately
+/// the same silent-fallback philosophy commit 25fb01f applied to bad
+/// teacher-supplied input (any malformed teacher data degrades to the
+/// batch default rather than erroring the whole generation).
+pub(crate) fn resolve_difficulty<'a>(template_difficulty: Option<&str>, fallback: &'a str) -> &'a str {
+    match template_difficulty {
+        Some("easy") => "easy",
+        Some("medium") => "medium",
+        Some("hard") => "hard",
+        _ => fallback,
+    }
+}
+
 #[tauri::command]
 pub fn generate_for_templates(
     state: State<'_, AppState>,
@@ -94,6 +110,7 @@ pub fn do_generate_for_templates(
         // Teacher-facing generation (this preview/export path) always places
         // the correct answer at position 1 (R1/A) so the teacher doesn't have
         // to hunt for it; only interactive student practice keeps it random.
+        let difficulty = resolve_difficulty(template.difficulty.as_deref(), &payload.difficulty);
         let variants = generate_variants_with_targets(
             template.id,
             &template.formula,
@@ -103,7 +120,7 @@ pub fn do_generate_for_templates(
             payload.mode,
             payload.count as usize,
             template_base_seed,
-            &payload.difficulty,
+            difficulty,
             payload.option_count,
             &fixed_values,
             &targets,
@@ -263,6 +280,10 @@ pub(crate) fn do_regenerate_variant(
     payload: RegenerateVariantPayload,
 ) -> Result<Variant, DbError> {
     let template = TemplateRepo::get_by_id(conn, &payload.template_id)?;
+    // Per-question difficulty wins over the batch preset; apply the resolved
+    // value consistently to initial generation AND both manual-answer recalcs
+    // so a regenerated variant's spread never disagrees across a single call.
+    let difficulty = resolve_difficulty(template.difficulty.as_deref(), &payload.difficulty);
     let (variables, constants, constraint, fixed_values) =
         load_template_dependencies(conn, &template)?;
     let mut targets = extract_target_symbols(&template.question_text);
@@ -279,7 +300,7 @@ pub(crate) fn do_regenerate_variant(
         &constraint,
         payload.mode,
         payload.seed,
-        &payload.difficulty,
+        difficulty,
         payload.option_count,
         &fixed_values,
         &targets,
@@ -307,7 +328,7 @@ pub(crate) fn do_regenerate_variant(
                     None,
                     &constraint,
                     &mut rng,
-                    &payload.difficulty,
+                    difficulty,
                     payload.option_count,
                     true,
                     None,
@@ -319,7 +340,7 @@ pub(crate) fn do_regenerate_variant(
                 variant.alternate_option = None;
             }
             TemplateMode::Open => {
-                let (lo, hi) = open_interval(manual_answer, &constraint, &payload.difficulty, None);
+                let (lo, hi) = open_interval(manual_answer, &constraint, difficulty, None);
                 variant.interval_lo = Some(lo);
                 variant.interval_hi = Some(hi);
             }
@@ -560,6 +581,7 @@ pub fn do_export_projekt_to_txt(
             force_scientific: pq.force_scientific,
             decoy_formula: None,
             alternative_formula: None,
+            difficulty: None,
             created_at: Utc::now(),
         });
 
@@ -808,6 +830,7 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            difficulty: None,
             created_at: Utc::now(),
         };
         TemplateRepo::insert(&conn, &template, &[], &[], None, &[]).expect("insert template");
@@ -1066,6 +1089,175 @@ mod tests {
         assert!(
             with_override_max > 0.55,
             "a 90% custom_spread_percent should exceed the medium preset's 50% ceiling, got {with_override_max}"
+        );
+    }
+
+    fn set_template_difficulty(conn: &rusqlite::Connection, template_id: Uuid, difficulty: Option<&str>) {
+        let updated = conn
+            .execute(
+                "UPDATE templates SET difficulty = ?2 WHERE id = ?1",
+                rusqlite::params![template_id, difficulty],
+            )
+            .expect("update template difficulty");
+        assert_eq!(updated, 1, "template row must exist to set difficulty");
+    }
+
+    fn max_relative_deviation(results: &[GeneratedTemplate]) -> f64 {
+        results[0]
+            .variants
+            .iter()
+            .flat_map(|v| v.numeric_options.as_ref().unwrap().iter())
+            .zip(results[0].variants.iter().flat_map(|v| {
+                std::iter::repeat(v.correct_answer).take(v.numeric_options.as_ref().unwrap().len())
+            }))
+            .map(|(&option, correct)| (option - correct).abs() / correct)
+            .fold(0.0_f64, f64::max)
+    }
+
+    /// The closed-mode spread follows the template's own "easy" preset, not
+    /// the batch "hard" — easy's 70% distractor ceiling beats hard's 30%.
+    #[test]
+    fn closed_template_difficulty_beats_batch_difficulty() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+        set_template_difficulty(&conn, template_id, Some("easy"));
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 10,
+            base_seed: 777,
+            mode: TemplateMode::Closed,
+            difficulty: "hard".into(),
+            option_count: 5,
+            custom_spread_percent: None,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let max_dev = max_relative_deviation(&results);
+        assert!(
+            max_dev > 0.31,
+            "template difficulty easy should widen past hard's 30% ceiling, got {max_dev}"
+        );
+        assert!(
+            max_dev <= 0.71,
+            "template difficulty easy caps at 70%, got {max_dev}"
+        );
+    }
+
+    /// The open-mode interval half-width follows the template's own "hard"
+    /// preset (10% of the correct value) over the batch "easy" (50%).
+    #[test]
+    fn open_template_difficulty_beats_batch_difficulty() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+        set_template_difficulty(&conn, template_id, Some("hard"));
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 1,
+            base_seed: 777,
+            mode: TemplateMode::Open,
+            difficulty: "easy".into(),
+            option_count: 5,
+            custom_spread_percent: None,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let variant = &results[0].variants[0];
+        let correct = variant.correct_answer;
+        let lo = variant.interval_lo.expect("open variant has interval_lo");
+        let hi = variant.interval_hi.expect("open variant has interval_hi");
+        let half_width_ratio = (hi - correct).abs() / correct;
+        assert!(
+            (half_width_ratio - 0.10).abs() < 1e-6,
+            "hard preset should give a 10% half-width, got {half_width_ratio} (lo={lo}, hi={hi}, correct={correct})"
+        );
+        assert!(
+            (half_width_ratio - 0.50).abs() > 1e-3,
+            "batch easy's 50% half-width must not win, got {half_width_ratio}"
+        );
+    }
+
+    /// A NULL template difficulty inherits the batch preset (closed "easy"
+    /// yields easy's 70% spread).
+    #[test]
+    fn null_template_difficulty_inherits_batch() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+        // Template::new leaves difficulty None — never set it here.
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 10,
+            base_seed: 777,
+            mode: TemplateMode::Closed,
+            difficulty: "easy".into(),
+            option_count: 5,
+            custom_spread_percent: None,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let max_dev = max_relative_deviation(&results);
+        assert!(
+            max_dev > 0.31,
+            "NULL template difficulty should inherit the batch easy 70% spread, got {max_dev}"
+        );
+    }
+
+    /// An invalid stored string behaves like NULL: it inherits the batch
+    /// preset rather than erroring or applying an unknown spread.
+    #[test]
+    fn invalid_template_difficulty_inherits_batch() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+        set_template_difficulty(&conn, template_id, Some("eazy"));
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 10,
+            base_seed: 777,
+            mode: TemplateMode::Closed,
+            difficulty: "easy".into(),
+            option_count: 5,
+            custom_spread_percent: None,
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let max_dev = max_relative_deviation(&results);
+        assert!(
+            max_dev > 0.31,
+            "an invalid template difficulty should inherit the batch easy 70% spread, got {max_dev}"
+        );
+    }
+
+    /// A custom spread percent outranks even a valid per-question difficulty:
+    /// the export dialog's explicit per-row override (42%) beats easy's 70%.
+    #[test]
+    fn custom_spread_percent_beats_per_question_difficulty() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let template_id = insert_template_with_decoy(&conn, None);
+        set_template_difficulty(&conn, template_id, Some("easy"));
+
+        let payload = GenerateForTemplatesPayload {
+            template_ids: vec![template_id],
+            count: 10,
+            base_seed: 777,
+            mode: TemplateMode::Closed,
+            difficulty: "hard".into(),
+            option_count: 5,
+            custom_spread_percent: Some(42.0),
+        };
+
+        let results = do_generate_for_templates(&conn, &payload).expect("generate");
+        let max_dev = max_relative_deviation(&results);
+        assert!(
+            max_dev < 0.50,
+            "a 42% custom spread must cap below easy's 70% ceiling, got {max_dev}"
         );
     }
 
