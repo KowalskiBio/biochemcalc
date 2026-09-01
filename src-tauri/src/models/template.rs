@@ -59,6 +59,10 @@ pub struct Template {
     pub point_value: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub significant_digits: Option<u8>,
+    /// Per-question difficulty override ("easy"/"medium"/"hard"); NULL means
+    /// "inherit" the set-wide difficulty preset.
+    #[serde(default)]
+    pub difficulty: Option<String>,
     #[serde(default)]
     pub force_scientific: bool,
     #[serde(default)]
@@ -88,6 +92,7 @@ impl Template {
             result_unit,
             point_value,
             significant_digits: None,
+            difficulty: None,
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,

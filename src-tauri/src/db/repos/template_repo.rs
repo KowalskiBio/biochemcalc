@@ -37,8 +37,8 @@ impl TemplateRepo {
         decoys: &[TemplateDecoyInput],
     ) -> Result<(), DbError> {
         tx.execute(
-            "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, topic_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO templates (id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, difficulty, topic_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 template.id,
                 template.question_text,
@@ -51,6 +51,7 @@ impl TemplateRepo {
                 template.force_scientific,
                 template.decoy_formula,
                 template.alternative_formula,
+                template.difficulty,
                 Uuid::nil(),
                 template.created_at.to_rfc3339(),
             ],
@@ -111,7 +112,7 @@ impl TemplateRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Template>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, difficulty, created_at
              FROM templates ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -127,7 +128,8 @@ impl TemplateRepo {
                 force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
                 decoy_formula: row.get(9)?,
                 alternative_formula: row.get(10)?,
-                created_at: parse_dt(row.get::<_, String>(11)?),
+                difficulty: row.get(11)?,
+                created_at: parse_dt(row.get::<_, String>(12)?),
             })
         })?;
         let mut items = Vec::new();
@@ -143,7 +145,7 @@ impl TemplateRepo {
         equation_text: &str,
     ) -> Result<Option<Template>, DbError> {
         let result = conn.query_row(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, difficulty, created_at
              FROM templates
              WHERE question_text = ?1 AND equation_text = ?2
              LIMIT 1",
@@ -161,7 +163,8 @@ impl TemplateRepo {
                     force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
                     decoy_formula: row.get(9)?,
                     alternative_formula: row.get(10)?,
-                    created_at: parse_dt(row.get::<_, String>(11)?),
+                    difficulty: row.get(11)?,
+                    created_at: parse_dt(row.get::<_, String>(12)?),
                 })
             },
         );
@@ -174,7 +177,7 @@ impl TemplateRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Template, DbError> {
         conn.query_row(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, difficulty, created_at
              FROM templates WHERE id = ?1",
             params![id],
             |row| {
@@ -190,7 +193,8 @@ impl TemplateRepo {
                     force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
                     decoy_formula: row.get(9)?,
                     alternative_formula: row.get(10)?,
-                    created_at: parse_dt(row.get::<_, String>(11)?),
+                    difficulty: row.get(11)?,
+                    created_at: parse_dt(row.get::<_, String>(12)?),
                 })
             },
         )
@@ -326,7 +330,7 @@ impl TemplateRepo {
         equation_text: &str,
     ) -> Result<Vec<Template>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, created_at
+            "SELECT id, question_text, formula, equation_text, numeric_answer, result_unit, point_value, significant_digits, force_scientific, decoy_formula, alternative_formula, difficulty, created_at
              FROM templates WHERE equation_text = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![equation_text], |row| {
@@ -342,7 +346,8 @@ impl TemplateRepo {
                 force_scientific: row.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
                 decoy_formula: row.get(9)?,
                 alternative_formula: row.get(10)?,
-                created_at: parse_dt(row.get::<_, String>(11)?),
+                difficulty: row.get(11)?,
+                created_at: parse_dt(row.get::<_, String>(12)?),
             })
         })?;
         let mut items = Vec::new();

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 32;
+const CURRENT_USER_VERSION: u32 = 33;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -166,6 +166,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 32 {
         apply_migration_v32(conn)?;
         conn.pragma_update(None, "user_version", "32")?;
+    }
+
+    if user_version < 33 {
+        apply_migration_v33(conn)?;
+        conn.pragma_update(None, "user_version", "33")?;
     }
 
     Ok(())
@@ -1105,6 +1110,16 @@ fn apply_migration_v32(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Per-question difficulty: a single nullable TEXT override ("easy",
+/// "medium", "hard") that, when set, beats the set-wide difficulty at
+/// generation time. NULL means "inherit" (follow the set-wide preset), so
+/// the column is a plain nullable column exactly like v31's
+/// `alternative_formula`, no CHECK constraint, no default, pure additive.
+fn apply_migration_v33(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE templates ADD COLUMN difficulty TEXT;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1282,7 +1297,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 32);
+        assert_eq!(user_version(&conn), 33);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1372,7 +1387,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 32);
+        assert_eq!(user_version(&conn), 33);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1397,10 +1412,98 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 32);
+        assert_eq!(user_version(&conn), 33);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");
+    }
+
+    /// A fresh database must reach v33 and carry a plain nullable `difficulty`
+    /// column on `templates` (no CHECK constraint, no default, "inherit" is
+    /// represented by NULL, matching how the v31 `alternative_formula` column
+    /// is a plain nullable TEXT).
+    #[test]
+    fn v33_adds_nullable_difficulty_column_to_a_fresh_database() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        assert_eq!(user_version(&conn), 33);
+
+        let columns: Vec<(String, String, i64)> = {
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(templates)")
+                .expect("prepare table_info");
+            stmt.query_map([], |row| {
+                Ok((row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .expect("query table_info")
+            .collect::<rusqlite::Result<_>>()
+            .expect("collect")
+        };
+        let difficulty = columns
+            .iter()
+            .find(|(name, _, _)| name == "difficulty")
+            .expect("templates must have a difficulty column");
+        assert_eq!(difficulty.1, "TEXT", "difficulty must be TEXT");
+        assert_eq!(
+            difficulty.2, 0,
+            "difficulty must be nullable (notnull=0), no CHECK/default"
+        );
+    }
+
+    /// A database that last saw v32 (the deployed state before this feature)
+    /// must pick up exactly the v33 block on upgrade: the `difficulty` column
+    /// appears and `user_version` advances to 33 without rewriting data.
+    #[test]
+    fn v33_applies_cleanly_on_a_pre_v33_database() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+
+        let migrations: [MigrationFn; 32] = [
+            apply_migration_v1,
+            apply_migration_v2,
+            apply_migration_v3,
+            apply_migration_v4,
+            apply_migration_v5,
+            apply_migration_v6,
+            apply_migration_v7,
+            apply_migration_v8,
+            apply_migration_v9,
+            apply_migration_v10,
+            apply_migration_v11,
+            apply_migration_v12,
+            apply_migration_v13,
+            apply_migration_v14,
+            apply_migration_v15,
+            apply_migration_v16,
+            apply_migration_v17,
+            apply_migration_v18,
+            apply_migration_v19,
+            apply_migration_v20,
+            apply_migration_v21,
+            apply_migration_v22,
+            apply_migration_v23,
+            apply_migration_v24,
+            apply_migration_v25,
+            apply_migration_v26,
+            apply_migration_v27,
+            apply_migration_v28,
+            apply_migration_v29,
+            apply_migration_v30,
+            apply_migration_v31,
+            apply_migration_v32,
+        ];
+        for (index, apply) in migrations.iter().enumerate() {
+            apply(&conn).unwrap_or_else(|e| panic!("v{}: {e}", index + 1));
+            conn.pragma_update(None, "user_version", format!("{}", index + 1))
+                .expect("set version");
+        }
+        assert_eq!(user_version(&conn), 32);
+
+        run_migrations(&conn).expect("migrate v32 -> latest");
+
+        assert_eq!(user_version(&conn), 33);
+        conn.execute_batch("SELECT difficulty FROM templates LIMIT 1;")
+            .expect("new difficulty column after v32 -> v33 upgrade");
     }
 
     /// Reproduces a template that already had a single `decoy_formula` set

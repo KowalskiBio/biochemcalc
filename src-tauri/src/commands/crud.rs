@@ -906,6 +906,11 @@ pub struct UpdateTemplateWithVariablesPayload {
     pub decoys: Vec<TemplateDecoyInput>,
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    /// Full-replace: an omitted difficulty deserializes to None and writes
+    /// NULL, clearing a previously set per-question difficulty. Callers must
+    /// always send the field explicitly.
+    #[serde(default)]
+    pub difficulty: Option<String>,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -927,6 +932,8 @@ pub struct CreateTemplatePayload {
     pub decoys: Vec<TemplateDecoyInput>,
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    #[serde(default)]
+    pub difficulty: Option<String>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -1039,6 +1046,7 @@ pub(crate) fn do_create_template(
     template.significant_digits = payload.significant_digits;
     template.force_scientific = payload.force_scientific;
     template.alternative_formula = payload.alternative_formula;
+    template.difficulty = payload.difficulty;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
@@ -1186,6 +1194,8 @@ pub struct UpdateTemplatePayload {
     pub decoys: Vec<TemplateDecoyInput>,
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    #[serde(default)]
+    pub difficulty: Option<String>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -1228,12 +1238,13 @@ pub(crate) fn do_update_template(
         force_scientific: payload.force_scientific,
         decoy_formula: None,
         alternative_formula: payload.alternative_formula,
+        difficulty: payload.difficulty,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, created_at=?11 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, difficulty=?11, created_at=?12 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1245,6 +1256,7 @@ pub(crate) fn do_update_template(
             template.significant_digits,
             template.force_scientific,
             template.alternative_formula,
+            template.difficulty,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1407,11 +1419,12 @@ pub fn apply_template_variable_mutations(
         force_scientific: payload.force_scientific,
         decoy_formula: None,
         alternative_formula: payload.alternative_formula.clone(),
+        difficulty: payload.difficulty.clone(),
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, created_at=?11 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, difficulty=?11, created_at=?12 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1423,6 +1436,7 @@ pub fn apply_template_variable_mutations(
             template.significant_digits,
             template.force_scientific,
             template.alternative_formula,
+            template.difficulty,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -2087,6 +2101,7 @@ mod tests {
             force_scientific: false,
             decoys: Vec::new(),
             alternative_formula: None,
+            difficulty: None,
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,
@@ -2750,5 +2765,72 @@ mod tests {
 
         let new_topic = do_duplicate_topic(&conn, &topic.id).expect("duplicate");
         assert_eq!(new_topic.group_id, Some(group.id));
+    }
+
+    fn build_create_payload(difficulty: Option<String>) -> CreateTemplatePayload {
+        CreateTemplatePayload {
+            question_text: "Výpočet látek s obtížností [[V00]]".into(),
+            formula: "V00".into(),
+            equation_text: "m = [[V00]] g".into(),
+            numeric_answer: None,
+            result_unit: "g".into(),
+            point_value: 2,
+            significant_digits: None,
+            force_scientific: false,
+            decoys: Vec::new(),
+            alternative_formula: None,
+            difficulty,
+            variables: Vec::new(),
+            constants: Vec::new(),
+            constraint: None,
+        }
+    }
+
+    fn build_simple_update_payload(template_id: Uuid, difficulty: Option<String>) -> UpdateTemplatePayload {
+        UpdateTemplatePayload {
+            id: template_id,
+            question_text: "Výpočet látek s obtížností [[V00]]".into(),
+            formula: "V00".into(),
+            equation_text: "m = [[V00]] g".into(),
+            numeric_answer: None,
+            result_unit: "g".into(),
+            point_value: 2,
+            significant_digits: None,
+            force_scientific: false,
+            decoys: Vec::new(),
+            alternative_formula: None,
+            difficulty,
+            variables: Vec::new(),
+            constants: Vec::new(),
+            constraint: None,
+        }
+    }
+
+    #[test]
+    fn difficulty_round_trips_through_create_and_both_update_commands() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let (_, _, _, _) = create_topic_category_set_template(&conn);
+
+        // Create with difficulty "hard".
+        let created = do_create_template(&conn, build_create_payload(Some("hard".into())))
+            .expect("create template");
+        let template_id = created.id;
+        let read_back = TemplateRepo::get_by_id(&conn, &template_id).expect("get template");
+        assert_eq!(read_back.difficulty.as_deref(), Some("hard"));
+
+        // update_with_variables path clears it (full-replace to null).
+        let mut with_vars = build_payload(template_id);
+        with_vars.question_text = "Výpočet látek s obtížností [[V00]]".into();
+        with_vars.difficulty = None;
+        apply_template_variable_mutations(&conn, with_vars).expect("apply mutations");
+        let read_back = TemplateRepo::get_by_id(&conn, &template_id).expect("get template");
+        assert_eq!(read_back.difficulty, None);
+
+        // Simple update_template path sets "easy".
+        do_update_template(&conn, build_simple_update_payload(template_id, Some("easy".into())))
+            .expect("update template");
+        let read_back = TemplateRepo::get_by_id(&conn, &template_id).expect("get template");
+        assert_eq!(read_back.difficulty.as_deref(), Some("easy"));
     }
 }
