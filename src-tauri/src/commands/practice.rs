@@ -12,7 +12,7 @@
 //! practising on exactly what a teacher would put on a test, with fresh
 //! numbers each time.
 
-use crate::commands::generation::{load_template_dependencies, resolve_difficulty};
+use crate::commands::generation::load_template_dependencies;
 use crate::db::repos::{
     ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, TemplateDecoyRepo,
     TemplateRepo,
@@ -259,7 +259,7 @@ fn build_question(
 
     // Interactive student practice keeps the correct answer's position
     // random — only teacher-facing generation forces it to R1/A.
-    let difficulty = resolve_difficulty(template.difficulty.as_deref(), PRACTICE_DIFFICULTY);
+    let difficulty = PRACTICE_DIFFICULTY;
     let variant = generate_variant_with_targets(
         template.id,
         &template.formula,
@@ -696,52 +696,6 @@ mod tests {
                 assert!(question.answer_slots[0].numeric_options.is_none());
             }
         }
-    }
-
-    /// Practice must honor a template's own difficulty over the
-    /// PRACTICE_DIFFICULTY fallback: a "hard" template yields a 10% open
-    /// interval half-width, not the medium preset's 30%.
-    #[test]
-    fn practice_build_question_honors_template_difficulty() {
-        let conn = setup_conn();
-        let topic_id = seed_topic(&conn, "Roztoky", 2);
-        let student = insert_student(&conn, "student");
-        let template_id = PracticeRepo::list_template_ids(&conn, &topic_id, 2)
-            .expect("list template ids")
-            .pop()
-            .expect("seeded topic has a template");
-        let updated = conn
-            .execute(
-                "UPDATE templates SET difficulty = 'hard' WHERE id = ?1",
-                rusqlite::params![template_id],
-            )
-            .expect("update template difficulty");
-        assert_eq!(updated, 1, "template row must exist to set difficulty");
-
-        let mut rng = StdRng::seed_from_u64(4242);
-        let _question = build_question(&conn, &student, &topic_id, &template_id, TemplateMode::Open, &mut rng)
-            .expect("build question");
-
-        // PracticeQuestion deliberately hides the correct answer and the
-        // tolerance interval (they stay server-side until grading), so read
-        // them back from the attempt this call persisted.
-        let (correct, lo, hi): (f64, f64, f64) = {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT correct_answer, interval_lo, interval_hi FROM practice_attempts \
-                     WHERE user_id = ?1 AND template_id = ?2 ORDER BY created_at DESC LIMIT 1",
-                )
-                .expect("prepare");
-            stmt.query_row(rusqlite::params![student, template_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .expect("query attempt")
-        };
-        let half_width_ratio = (hi - correct).abs() / correct;
-        assert!(
-            (half_width_ratio - 0.10).abs() < 1e-6,
-            "hard template should give a 10% half-width over PRACTICE_DIFFICULTY's 30%, got {half_width_ratio} (lo={lo}, hi={hi}, correct={correct})"
-        );
     }
 
     /// Guards against accidentally flipping `force_correct_first` to `true`

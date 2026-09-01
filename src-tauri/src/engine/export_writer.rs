@@ -509,7 +509,6 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
-            difficulty: None,
             created_at: Utc::now(),
         }
     }
@@ -1252,7 +1251,6 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
-            difficulty: None,
             created_at: Utc::now(),
         }
     }
@@ -1421,7 +1419,6 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
-            difficulty: None,
             created_at: Utc::now(),
         };
         let variant = make_closed_variant();
@@ -1461,7 +1458,6 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
-            difficulty: None,
             created_at: Utc::now(),
         };
         let variant = Variant {
