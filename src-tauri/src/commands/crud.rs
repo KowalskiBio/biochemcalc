@@ -2751,4 +2751,119 @@ mod tests {
         let new_topic = do_duplicate_topic(&conn, &topic.id).expect("duplicate");
         assert_eq!(new_topic.group_id, Some(group.id));
     }
+
+    #[test]
+    fn create_template_persists_sd_constraint() {
+        // Shape 1 on the create path: no min/max + sd_allowed -> constraint row
+        // of type "sd" with the absolute SD persisted.
+        let state = setup();        let conn = state.db.lock().expect("lock");
+
+        let payload = CreateTemplatePayload {
+            question_text: "Vypočítej [[V00]].".into(),
+            formula: "V00".into(),
+            equation_text: "V00".into(),
+            numeric_answer: None,
+            result_unit: "g".into(),
+            point_value: 2,
+            significant_digits: None,
+            force_scientific: false,
+            decoys: Vec::new(),
+            alternative_formula: None,
+            variables: Vec::new(),
+            constants: Vec::new(),
+            constraint: Some(ConstraintInput {
+                min_result: None,
+                max_result: None,
+                sd_allowed: Some(0.2),
+                constraint_type: ConstraintType::Sd,
+            }),
+        };
+
+        let template = do_create_template(&conn, payload).expect("create template");
+        let rc = TemplateRepo::get_constraint(&conn, &template.id)
+            .expect("constraint query")
+            .expect("sd row present");
+        assert_eq!(rc.constraint_type, ConstraintType::Sd);
+        assert_eq!(rc.sd_allowed, Some(0.2));
+        assert_eq!(rc.min_result, None);
+        assert_eq!(rc.max_result, None);
+    }
+
+    #[test]
+    fn answer_sd_constraint_payload_shapes_persist_correctly() {
+        // All four frontend constraint shapes are asserted via persisted rows.
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let (_, _, _, template_id) = create_topic_category_set_template(&conn);
+
+        // Shape 1: no pre-existing min/max + SD -> type "sd", sd set.
+        let sd_payload = UpdateTemplateWithVariablesPayload {
+            constraint: Some(ConstraintInput {
+                min_result: None,
+                max_result: None,
+                sd_allowed: Some(0.2),
+                constraint_type: ConstraintType::Sd,
+            }),
+            ..build_payload(template_id)
+        };
+        apply_template_variable_mutations(&conn, sd_payload).expect("apply sd");
+        let rc = TemplateRepo::get_constraint(&conn, &template_id)
+            .expect("constraint query")
+            .expect("sd row present");
+        assert_eq!(rc.constraint_type, ConstraintType::Sd);
+        assert_eq!(rc.sd_allowed, Some(0.2));
+        assert_eq!(rc.min_result, None);
+        assert_eq!(rc.max_result, None);
+
+        // Shape 2: range + SD -> type "both", min/max preserved, sd set.
+        let both_payload = UpdateTemplateWithVariablesPayload {
+            constraint: Some(ConstraintInput {
+                min_result: Some(5.0),
+                max_result: Some(9.0),
+                sd_allowed: Some(0.2),
+                constraint_type: ConstraintType::Both,
+            }),
+            ..build_payload(template_id)
+        };
+        apply_template_variable_mutations(&conn, both_payload).expect("apply both");
+        let rc = TemplateRepo::get_constraint(&conn, &template_id)
+            .expect("constraint query")
+            .expect("both row present");
+        assert_eq!(rc.constraint_type, ConstraintType::Both);
+        assert_eq!(rc.min_result, Some(5.0));
+        assert_eq!(rc.max_result, Some(9.0));
+        assert_eq!(rc.sd_allowed, Some(0.2));
+
+        // Shape 3: both + SD cleared (sd_allowed None) -> type "range", sd null.
+        let range_payload = UpdateTemplateWithVariablesPayload {
+            constraint: Some(ConstraintInput {
+                min_result: Some(5.0),
+                max_result: Some(9.0),
+                sd_allowed: None,
+                constraint_type: ConstraintType::Range,
+            }),
+            ..build_payload(template_id)
+        };
+        apply_template_variable_mutations(&conn, range_payload).expect("apply range");
+        let rc = TemplateRepo::get_constraint(&conn, &template_id)
+            .expect("constraint query")
+            .expect("range row present");
+        assert_eq!(rc.constraint_type, ConstraintType::Range);
+        assert_eq!(rc.sd_allowed, None);
+        assert_eq!(rc.min_result, Some(5.0));
+        assert_eq!(rc.max_result, Some(9.0));
+
+        // Shape 4: sd-only + SD cleared, no min/max (constraint: null) -> row gone.
+        let cleared_payload = UpdateTemplateWithVariablesPayload {
+            constraint: None,
+            ..build_payload(template_id)
+        };
+        apply_template_variable_mutations(&conn, cleared_payload).expect("apply cleared");
+        assert!(
+            TemplateRepo::get_constraint(&conn, &template_id)
+                .expect("constraint query")
+                .is_none(),
+            "clearing SD on an sd-only constraint must remove the row"
+        );
+    }
 }

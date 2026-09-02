@@ -750,6 +750,9 @@ export const cs = {
     variablePrecision: "Přesnost",
     significantDigits: "Platné číslice",
     significantDigitsHelp: "Počet platných číslic ve výsledné odpovědi (např. 4 → 22.00).",
+    sdAnswerLabel: "Odpověď ± (SD)",
+    sdAnswerHelp:
+      "Větší číslo = širší tolerance a rozprostřenější možnosti = snazší otázka. Prázdné = dle obtížnosti sady.",
     notationLabel: "Zobrazení",
     notationAuto: "Auto",
     notationScientific: "Vědecká (1,23×10⁴)",

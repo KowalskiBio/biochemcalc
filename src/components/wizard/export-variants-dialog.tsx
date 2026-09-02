@@ -356,6 +356,8 @@ export function ExportVariantsDialog({
                   variantCount: 1,
                 }
                 const isIncluded = state.included
+                const sdAllowed = templateDetails.template.constraint?.sdAllowed
+                const hasSd = sdAllowed != null && Number.isFinite(sdAllowed) && sdAllowed > 0
                 const constantsMap = Object.fromEntries(
                   templateDetails.constants.map((c) => [c.symbol, c.value]),
                 )
@@ -423,13 +425,17 @@ export function ExportVariantsDialog({
                           }
                           onClick={(e) => e.stopPropagation()}
                           className="w-20 text-right no-spinner"
-                          disabled={!isIncluded}
-                          placeholder={String(
-                            defaultSpreadPercentFor(
-                              mode,
-                              mode === "closed" ? closedDifficulty : openDifficulty,
-                            ),
-                          )}
+                          disabled={!isIncluded || hasSd}
+                          placeholder={
+                            hasSd
+                              ? `SD ±${sdAllowed}`
+                              : String(
+                                  defaultSpreadPercentFor(
+                                    mode,
+                                    mode === "closed" ? closedDifficulty : openDifficulty,
+                                  ),
+                                )
+                          }
                           aria-label={cs.sets.exportDialog.spreadPercent}
                         />
                         <span className="text-sm text-muted-foreground">%</span>

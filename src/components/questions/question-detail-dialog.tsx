@@ -44,6 +44,7 @@ import {
 import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
+  ConstraintInput,
   HistoryEntry,
   LocalVariableEdit,
   Notation,
@@ -354,6 +355,11 @@ export function QuestionDetailDialog({
       ? String(initialTemplateDetails.template.significantDigits)
       : "",
   )
+  const [sdText, setSdText] = useState<string>(
+    initialTemplateDetails?.template.constraint?.sdAllowed != null
+      ? String(initialTemplateDetails.template.constraint.sdAllowed)
+      : "",
+  )
   const [forceScientific, setForceScientific] = useState(
     initialTemplateDetails?.template.forceScientific ?? false,
   )
@@ -421,6 +427,11 @@ export function QuestionDetailDialog({
       setEditSignificantDigits(
         details.template.significantDigits != null
           ? String(details.template.significantDigits)
+          : "",
+      )
+      setSdText(
+        details.template.constraint?.sdAllowed != null
+          ? String(details.template.constraint.sdAllowed)
           : "",
       )
       setForceScientific(details.template.forceScientific ?? false)
@@ -558,6 +569,11 @@ export function QuestionDetailDialog({
     const newSigDigits =
       editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
     if (newSigDigits !== currentSigDigits) return true
+    const currentSd = templateDetails?.template.constraint?.sdAllowed
+    const parsedSd = Number(sdText)
+    const newSd =
+      sdText.trim() === "" || Number.isNaN(parsedSd) || parsedSd <= 0 ? undefined : parsedSd
+    if (newSd !== currentSd) return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
     if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
     if (alternativeFormula !== (templateDetails?.template.alternativeFormula ?? "")) return true
@@ -567,12 +583,38 @@ export function QuestionDetailDialog({
     editEquationText,
     editResultUnit,
     editSignificantDigits,
+    sdText,
     forceScientific,
     decoyRows,
     alternativeFormula,
     templateDetails,
     dirtyVariableKeys,
   ])
+
+  // The engine keys on sd_allowed presence, not constraintType; stale wizard
+  // data may carry an sd with type "range", so read the effective SD regardless.
+  const buildAnswerConstraint = (): ConstraintInput | undefined => {
+    const existing = templateDetails?.template.constraint
+    const parsed = Number(sdText)
+    const hasMinMax = existing?.minResult != null || existing?.maxResult != null
+    if (sdText.trim() === "" || Number.isNaN(parsed) || parsed <= 0) {
+      if (hasMinMax) {
+        return {
+          minResult: existing?.minResult,
+          maxResult: existing?.maxResult,
+          sdAllowed: undefined,
+          constraintType: "range",
+        }
+      }
+      return undefined
+    }
+    return {
+      minResult: existing?.minResult,
+      maxResult: existing?.maxResult,
+      sdAllowed: parsed,
+      constraintType: hasMinMax ? "both" : "sd",
+    }
+  }
 
   const handleSave = async () => {
     if (!templateDetails) return
@@ -668,7 +710,7 @@ export function QuestionDetailDialog({
       alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
-      constraint: templateDetails.template.constraint,
+      constraint: buildAnswerConstraint(),
     }
 
     setIsSaving(true)
@@ -702,6 +744,11 @@ export function QuestionDetailDialog({
     setEditSignificantDigits(
       templateDetails?.template.significantDigits != null
         ? String(templateDetails.template.significantDigits)
+        : "",
+    )
+    setSdText(
+      templateDetails?.template.constraint?.sdAllowed != null
+        ? String(templateDetails.template.constraint.sdAllowed)
         : "",
     )
     setForceScientific(templateDetails?.template.forceScientific ?? false)
@@ -743,7 +790,7 @@ export function QuestionDetailDialog({
         alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
-        constraint: templateDetails.template.constraint,
+        constraint: buildAnswerConstraint(),
       }
 
       const response = await templatesApi.updateWithVariables(payload)
@@ -793,7 +840,7 @@ export function QuestionDetailDialog({
         placeholder: vwp.placeholder,
       })),
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
-      constraint: templateDetails.template.constraint,
+      constraint: buildAnswerConstraint(),
     }
     try {
       const response = await templatesApi.updateWithVariables(payload)
@@ -1622,6 +1669,20 @@ export function QuestionDetailDialog({
                       <p className="text-xs text-muted-foreground">
                         {cs.questions.significantDigitsHelp}
                       </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="answerSd">{cs.questions.sdAnswerLabel}</Label>
+                      <Input
+                        id="answerSd"
+                        type="number"
+                        step="any"
+                        value={sdText}
+                        onChange={(e) => setSdText(e.target.value)}
+                        placeholder="např. 0.2"
+                        disabled={isSaving}
+                        className="max-w-[120px]"
+                      />
+                      <p className="text-xs text-muted-foreground">{cs.questions.sdAnswerHelp}</p>
                     </div>
                     {editEquationText.trim().length > 0 && (
                       <div className="rounded-lg bg-muted/50 p-4 space-y-2">
