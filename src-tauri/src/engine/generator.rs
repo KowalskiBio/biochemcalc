@@ -499,11 +499,19 @@ pub(crate) fn generate_numeric_options<R: Rng>(
 
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
     // When an SD window is active the grid must be fine enough to fit `count`
-    // distinct steps inside the ±sd window: round to the finer of the display
-    // grid and 2*sd/count (display_grid's own clamps stay intact).
+    // distinct steps inside the ±sd window. Each grid position must keep a
+    // half-unit safety margin on either side (k_span = sd/unit - 0.5), so the
+    // number of usable distinct non-zero offsets is 2*floor(sd/unit - 0.5).
+    // Dividing by count would leave fewer than count - 1 usable offsets for
+    // every even count (e.g. count=4 -> unit = sd/2 -> only 2 offsets, but 3
+    // distractors are needed, so generation fails; count=2 -> k_span = 0.5 < 1
+    // -> always fails). Dividing by count + 1 gives sd/unit = (count+1)/2, so
+    // 2*floor(sd/unit - 0.5) = 2*floor(count/2) >= count - 1 for every option
+    // count (verified for 2..=5: 2, 2, 4, 4). Round to the finer of the display
+    // grid and this finer 2*sd/(count+1) grid (display_grid clamps stay intact).
     let rounding_unit = match sd_window {
         Some(sd) => {
-            let sd_unit = 2.0 * sd / count as f64;
+            let sd_unit = 2.0 * sd / (count as f64 + 1.0);
             if sd_unit < base_rounding_unit {
                 sd_unit
             } else {
@@ -982,7 +990,10 @@ fn fill_target_options<R: Rng>(
     let count = role_order.len().max(1);
     let rounding_unit = match sd_window {
         Some(sd) => {
-            let sd_unit = 2.0 * sd / count as f64;
+            // Same finer-than-display-grid invariant as generate_numeric_options:
+            // 2*sd/(count+1) keeps 2*floor(sd/unit - 0.5) >= count - 1 usable
+            // distinct non-zero offsets inside the ±sd window for every count.
+            let sd_unit = 2.0 * sd / (count as f64 + 1.0);
             if sd_unit < base_rounding_unit {
                 sd_unit
             } else {
@@ -3695,6 +3706,87 @@ mod tests {
             assert!(
                 (options[(correct_pos as usize) - 1] - correct).abs() < 1e-9,
                 "seed={seed}: correct option must equal {correct}"
+            );
+        }
+    }
+
+    /// Even-count SD shrink-binding must succeed: the old 2*sd/count grid left
+    /// only 2*floor(count/2 - 0.5) usable offsets (2 for count=4, needing 3
+    /// distractors, so generation always failed); the fixed 2*sd/(count+1)
+    /// grid leaves 2*floor(count/2) = 4 offsets, so a 4-option pool resolves.
+    /// Here the display grid is 1.0 (123.456 with 3 sig digits) and the SD
+    /// shrink binds because 2*1.4/5 = 0.56 < 1.0.
+    #[test]
+    fn sd_even_count_shrink_binds_and_succeeds() {
+        let constraint = make_constraint_typed(None, None, Some(1.4), ConstraintType::Sd);
+        let correct = 123.456;
+        for seed in 0..30u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, correct_pos, _alt) = generate_numeric_options(
+                correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, Some(3),
+            )
+            .expect(&format!("seed={seed}: generation failed"));
+
+            let unit = 2.0 * 1.4 / (4.0 + 1.0);
+            let rounded_correct = round_to_unit(correct, unit);
+            assert_eq!(options.len(), 4, "seed={seed}");
+            for o in &options {
+                assert!(
+                    *o >= rounded_correct - 1.4 && *o <= rounded_correct + 1.4,
+                    "seed={seed}: option {o} outside the ±1.4 window: {options:?}"
+                );
+                assert!(
+                    (o - rounded_correct).abs() <= 1.4,
+                    "seed={seed}: |option - rounded_correct| exceeds sd: {o}"
+                );
+            }
+            let mut sorted = options.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            for i in 1..sorted.len() {
+                assert!(
+                    (sorted[i] - sorted[i - 1]).abs() > 1e-9,
+                    "seed={seed}: duplicate options {options:?}"
+                );
+            }
+            assert!(
+                (options[(correct_pos as usize) - 1] - rounded_correct).abs() < 1e-9,
+                "seed={seed}: correct option must equal rounded_correct {rounded_correct}"
+            );
+        }
+    }
+
+    /// count=2 with a binding SD window must yield 2 distinct in-window
+    /// options: the old 2*sd/count grid made k_span = 0.5 < 1 (generate_
+    /// in_window_distractor returned None and generation failed); the fixed
+    /// 2*sd/(count+1) grid gives k_span = 1.0. Here 2*0.9/3 = 0.6 < 1.0, so
+    /// the shrink binds.
+    #[test]
+    fn sd_count_two_shrink_binds_and_succeeds() {
+        let constraint = make_constraint_typed(None, None, Some(0.9), ConstraintType::Sd);
+        let correct = 123.456;
+        for seed in 0..30u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, correct_pos, _alt) = generate_numeric_options(
+                correct, &[], None, &constraint, &mut rng, "medium", 2, false, None, Some(3),
+            )
+            .expect(&format!("seed={seed}: generation failed"));
+
+            let unit = 2.0 * 0.9 / (2.0 + 1.0);
+            let rounded_correct = round_to_unit(correct, unit);
+            assert_eq!(options.len(), 2, "seed={seed}");
+            for o in &options {
+                assert!(
+                    *o >= rounded_correct - 0.9 && *o <= rounded_correct + 0.9,
+                    "seed={seed}: option {o} outside the ±0.9 window: {options:?}"
+                );
+            }
+            assert!(
+                (options[0] - options[1]).abs() > 1e-9,
+                "seed={seed}: options must be distinct: {options:?}"
+            );
+            assert!(
+                (options[(correct_pos as usize) - 1] - rounded_correct).abs() < 1e-9,
+                "seed={seed}: correct option must equal rounded_correct {rounded_correct}"
             );
         }
     }
