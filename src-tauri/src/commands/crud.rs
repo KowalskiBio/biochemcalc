@@ -1394,6 +1394,8 @@ pub fn apply_template_variable_mutations(
     let tx = conn.unchecked_transaction()?;
 
     let old_template = TemplateRepo::get_by_id(&tx, &payload.id)?;
+    let old_constraint = TemplateRepo::get_constraint(&tx, &payload.id)?;
+    let new_sd = payload.constraint.as_ref().and_then(|c| c.sd_allowed);
 
     let mut template = Template {
         id: payload.id,
@@ -1639,6 +1641,17 @@ pub fn apply_template_variable_mutations(
     }
 
     record_template_field_history(&tx, payload.id, &old_template, &template)?;
+
+    let old_sd = old_constraint.as_ref().and_then(|c| c.sd_allowed);
+    if old_sd != new_sd {
+        TemplateHistoryRepo::record_change(
+            &tx,
+            &payload.id,
+            "sdAllowed",
+            old_sd.map(|v| v.to_string()).as_deref(),
+            new_sd.map(|v| v.to_string()).as_deref(),
+        )?;
+    }
 
     tx.commit()?;
     Ok(template)
@@ -2865,5 +2878,43 @@ mod tests {
                 .is_none(),
             "clearing SD on an sd-only constraint must remove the row"
         );
+    }
+
+    #[test]
+    fn update_records_sd_allowed_history_entries() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let (_, _, _, template_id) = create_topic_category_set_template(&conn);
+
+        let with_sd = |sd: Option<f64>| UpdateTemplateWithVariablesPayload {
+            constraint: Some(ConstraintInput {
+                min_result: None,
+                max_result: None,
+                sd_allowed: sd,
+                constraint_type: ConstraintType::Sd,
+            }),
+            ..build_payload(template_id)
+        };
+
+        apply_template_variable_mutations(&conn, with_sd(Some(0.2))).expect("set sd");
+        apply_template_variable_mutations(&conn, with_sd(Some(0.5))).expect("change sd");
+
+        let entries = TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
+        let mut sd_entries: Vec<(Option<String>, Option<String>)> = entries
+            .iter()
+            .filter(|e| e.field_name == "sdAllowed")
+            .map(|e| (e.old_value.clone(), e.new_value.clone()))
+            .collect();
+        sd_entries.sort();
+        assert_eq!(
+            sd_entries,
+            vec![(None, Some("0.2".into())), (Some("0.2".into()), Some("0.5".into()))],
+            "unset->0.2 and 0.2->0.5 must both be recorded: {entries:?}"
+        );
+
+        apply_template_variable_mutations(&conn, with_sd(Some(0.5))).expect("resave same sd");
+        let entries = TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
+        let count = entries.iter().filter(|e| e.field_name == "sdAllowed").count();
+        assert_eq!(count, 2, "re-saving the same sd must not add a history entry");
     }
 }

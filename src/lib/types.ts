@@ -170,6 +170,11 @@ export interface Template {
   // Extended with related data
   variables?: TemplateVariableInput[]
   constants?: TemplateConstantInput[]
+  /**
+   * Form-input convenience only: never populated by the backend's template
+   * read model. The persisted constraint arrives on
+   * `TemplateWithDetails.constraint` (a sibling of `template`).
+   */
   constraint?: ConstraintInput
 }
 

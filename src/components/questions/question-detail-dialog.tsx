@@ -356,8 +356,8 @@ export function QuestionDetailDialog({
       : "",
   )
   const [sdText, setSdText] = useState<string>(
-    initialTemplateDetails?.template.constraint?.sdAllowed != null
-      ? String(initialTemplateDetails.template.constraint.sdAllowed)
+    initialTemplateDetails?.constraint?.sdAllowed != null
+      ? String(initialTemplateDetails.constraint.sdAllowed)
       : "",
   )
   const [forceScientific, setForceScientific] = useState(
@@ -429,11 +429,7 @@ export function QuestionDetailDialog({
           ? String(details.template.significantDigits)
           : "",
       )
-      setSdText(
-        details.template.constraint?.sdAllowed != null
-          ? String(details.template.constraint.sdAllowed)
-          : "",
-      )
+      setSdText(details.constraint?.sdAllowed != null ? String(details.constraint.sdAllowed) : "")
       setForceScientific(details.template.forceScientific ?? false)
       setDecoyRows(details.decoys.map(toDecoyRow))
       setAlternativeFormula(details.template.alternativeFormula ?? "")
@@ -569,7 +565,7 @@ export function QuestionDetailDialog({
     const newSigDigits =
       editSignificantDigits.trim() === "" ? undefined : Number(editSignificantDigits)
     if (newSigDigits !== currentSigDigits) return true
-    const currentSd = templateDetails?.template.constraint?.sdAllowed
+    const currentSd = templateDetails?.constraint?.sdAllowed
     const parsedSd = Number(sdText)
     const newSd =
       sdText.trim() === "" || Number.isNaN(parsedSd) || parsedSd <= 0 ? undefined : parsedSd
@@ -594,7 +590,7 @@ export function QuestionDetailDialog({
   // The engine keys on sd_allowed presence, not constraintType; stale wizard
   // data may carry an sd with type "range", so read the effective SD regardless.
   const buildAnswerConstraint = (): ConstraintInput | undefined => {
-    const existing = templateDetails?.template.constraint
+    const existing = templateDetails?.constraint
     const parsed = Number(sdText)
     const hasMinMax = existing?.minResult != null || existing?.maxResult != null
     if (sdText.trim() === "" || Number.isNaN(parsed) || parsed <= 0) {
@@ -747,8 +743,8 @@ export function QuestionDetailDialog({
         : "",
     )
     setSdText(
-      templateDetails?.template.constraint?.sdAllowed != null
-        ? String(templateDetails.template.constraint.sdAllowed)
+      templateDetails?.constraint?.sdAllowed != null
+        ? String(templateDetails.constraint.sdAllowed)
         : "",
     )
     setForceScientific(templateDetails?.template.forceScientific ?? false)

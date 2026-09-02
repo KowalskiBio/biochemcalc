@@ -356,7 +356,7 @@ export function ExportVariantsDialog({
                   variantCount: 1,
                 }
                 const isIncluded = state.included
-                const sdAllowed = templateDetails.template.constraint?.sdAllowed
+                const sdAllowed = templateDetails.constraint?.sdAllowed
                 const hasSd = sdAllowed != null && Number.isFinite(sdAllowed) && sdAllowed > 0
                 const constantsMap = Object.fromEntries(
                   templateDetails.constants.map((c) => [c.symbol, c.value]),
