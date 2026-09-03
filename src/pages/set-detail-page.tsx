@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { QuestionDetailDialog } from "@/components/questions/question-detail-dialog"
 import { AddQuestionDialog } from "@/components/topics/add-question-dialog"
+import { EditSetDialog } from "@/components/topics/edit-set-dialog"
 import { MoveQuestionDialog } from "@/components/topics/move-question-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -108,6 +109,7 @@ export function SetDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDeleteSetDialogOpen, setIsDeleteSetDialogOpen] = useState(false)
   const [isDeletingSet, setIsDeletingSet] = useState(false)
+  const [isEditSetDialogOpen, setIsEditSetDialogOpen] = useState(false)
   const [regeneratingMap, setRegeneratingMap] = useState<Record<string, boolean>>({})
   const [savingToProjekt, setSavingToProjekt] = useState<string | null | "saving">(null)
   const [projektName, setProjektName] = useState("")
@@ -606,9 +608,17 @@ export function SetDetailPage() {
           </p>
         </div>
         <Button
-          variant="destructive"
+          variant="outline"
           size="sm"
           className="ml-auto"
+          onClick={() => setIsEditSetDialogOpen(true)}
+        >
+          <Pencil className="size-4 mr-2" />
+          {cs.common.edit}
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
           onClick={() => setIsDeleteSetDialogOpen(true)}
           disabled={isDeletingSet}
         >
@@ -1281,6 +1291,13 @@ export function SetDetailPage() {
             ? `${cs.topics.deleteSetConfirm} „${set.name || cs.topics.setIndex.replace("{index}", String(set.setIndex))}“`
             : cs.topics.deleteSetConfirm
         }
+      />
+
+      <EditSetDialog
+        open={isEditSetDialogOpen}
+        onOpenChange={setIsEditSetDialogOpen}
+        set={set}
+        onUpdated={loadData}
       />
     </div>
   )
