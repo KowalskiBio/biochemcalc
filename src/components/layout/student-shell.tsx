@@ -1,5 +1,5 @@
 import { cva } from "class-variance-authority"
-import { FlaskConical, LogOut, Moon, Settings, Sun, Target, Trophy } from "lucide-react"
+import { FlaskConical, LogOut, Moon, Settings, Sun, Target, Timer, Trophy } from "lucide-react"
 import type React from "react"
 import { type ReactNode, useEffect } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
@@ -24,6 +24,11 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  {
+    path: "/test",
+    icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.test,
+  },
   {
     path: "/",
     icon: <Target className="size-[18px]" strokeWidth={1.75} />,
@@ -97,7 +102,10 @@ function StudentSidebar() {
       <nav className="flex-1 p-3">
         <div className="flex flex-col gap-1">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path
+            const isActive =
+              item.path === "/"
+                ? location.pathname === "/"
+                : location.pathname.startsWith(item.path)
             return (
               <Link
                 key={item.path}

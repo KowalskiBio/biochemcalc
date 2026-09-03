@@ -55,6 +55,7 @@ export const cs = {
     help: "Nápověda",
     victor: "Victor",
     practice: "Procvičování",
+    test: "Test",
     leaderboard: "Žebříček",
     hlaseni: "Hlášení",
   },
@@ -69,6 +70,13 @@ export const cs = {
     difficultyPlaceholder: "Vyberte obtížnost",
     difficultyPoints: "{value} body",
     questionCount: "{count} otázek",
+    setLabel: "Sada",
+    setAny: "Libovolná sada",
+    setIndex: "Sada {index}",
+    questionTypeLabel: "Typ otázek",
+    questionTypeEither: "Libovolný",
+    questionTypeClosed: "Uzavřené",
+    questionTypeOpen: "Otevřené",
     start: "Začít procvičovat",
     noTopics: "Zatím tu nejsou žádné otázky. Až je vyučující připraví, objeví se zde.",
     loadingTopics: "Načítám témata...",
@@ -105,6 +113,15 @@ export const cs = {
     leaderboardLoading: "Načítám žebříček...",
     leaderboardError: "Žebříček se nepodařilo načíst",
 
+    leaderboardApprenticeTitle: "Nejlepší série – Učeň",
+    leaderboardMasterTitle: "Nejlepší série – Mistr",
+    leaderboardStreakDescription: "Nejdelší série správných odpovědí v řadě, bez chyby.",
+    leaderboardStreakCount: "Nejlepší série",
+    leaderboardStreakTime: "Celkový čas",
+    leaderboardStreakTimePerAnswer: "Čas/otázka",
+    leaderboardStreakEmpty: "Zatím nikdo nedokončil žádnou sérii.",
+    leaderboardStreakPickScope: "Vyberte téma a obtížnost pro zobrazení žebříčku.",
+
     settingsTitle: "Nastavení",
     settingsDescription: "Váš účet a vzhled aplikace.",
     appearance: "Vzhled",
@@ -118,6 +135,87 @@ export const cs = {
     reportError: "Hlášení se nepodařilo odeslat",
     reportSending: "Odesílám...",
     reportSubmit: "Odeslat hlášení",
+  },
+
+  // Student test sessions: a fixed batch of questions generated all at once,
+  // as opposed to the endless one-at-a-time practice generator above.
+  test: {
+    startTitle: "Test",
+    startDescription:
+      "Test obsahuje všechny otázky z vybraného tématu a obtížnosti, každou jednou.",
+    timeLimitLabel: "Časový limit (minuty)",
+    startButton: "Zahájit test",
+    startError: "Test se nepodařilo zahájit",
+    starting: "Zahajuji test...",
+
+    inProgressTitle: "Probíhající test",
+    timeRemaining: "Zbývající čas",
+    untimed: "Bez časového limitu",
+    timeUpMessage: "Čas vypršel, test byl automaticky odevzdán.",
+    submitButton: "Odevzdat test",
+    submitting: "Odevzdávám...",
+    submitConfirmTitle: "Odevzdat test?",
+    submitConfirmUnanswered:
+      "Nezodpovězeno zůstává {count} otázek. Po odevzdání už na test nelze odpovídat.",
+    submitConfirmAllAnswered: "Po odevzdání už na test nelze odpovídat.",
+    submitConfirmCancel: "Zpět k testu",
+    submitConfirmConfirm: "Odevzdat",
+    finishError: "Test se nepodařilo odevzdat",
+    noActiveTest: "Žádný probíhající test. Nejdřív ho zahajte.",
+
+    resultsTitle: "Výsledky testu",
+    resultsScore: "{correct} z {total} otázek správně",
+    resultsAnswered: "Zodpovězeno: {count} z {total}",
+    resultsPoints: "Získané body: {points}",
+    resultsTime: "Čas: {time}",
+    backToPractice: "Zpět na procvičování",
+    startAnother: "Zahájit další test",
+    tryAgain: "Znovu",
+    tryAgainError: "Test se nepodařilo znovu zahájit",
+
+    reviewTitle: "Přehled otázek",
+    reviewUnanswered: "Nezodpovězeno",
+    reviewNoAnswer: "Bez odpovědi",
+    reviewCorrect: "Správně",
+    reviewIncorrect: "Špatně",
+
+    modePickerDescription: "Vyberte režim testu.",
+    modeCvicnyTitle: "Cvičný test",
+    modeCvicnyDescription:
+      "Klasický test s časovým limitem. Vyberte téma, obtížnost a sadu, zodpovězte všechny otázky najednou.",
+    modeUcenTitle: "Učeň",
+    modeUcenDescription:
+      "Nekonečná série otázek z vybraného tématu. Série končí první špatnou odpovědí.",
+    modeMistrTitle: "Mistr",
+    modeMistrDescription:
+      "Nekonečná série otázek ze všech témat a obtížností. Série končí první špatnou odpovědí.",
+    modeSelectButton: "Vybrat",
+  },
+
+  // Streak runs: an endless one-question-at-a-time run (Učeň/Mistr) that
+  // ends the instant the student answers one wrong, as opposed to the
+  // fixed-batch test above.
+  streak: {
+    setupStartButton: "Začít sérii",
+    setupStarting: "Zahajuji sérii...",
+    setupStartError: "Sérii se nepodařilo zahájit",
+
+    activeTitle: "Probíhající série",
+    correctSoFar: "Správně zatím: {count}",
+    elapsedTime: "Uplynulý čas",
+    failedMessage: "Bohužel, špatná odpověď. Série skončila.",
+    viewResults: "Zobrazit výsledky",
+    noActiveRun: "Žádná probíhající série. Nejdřív ji zahajte.",
+
+    resultsTitle: "Výsledky série",
+    kindApprentice: "Učeň",
+    kindMaster: "Mistr",
+    resultsCorrectCount: "Správně v řadě: {count}",
+    resultsTotalTime: "Celkový čas: {time}",
+    resultsTimePerAnswer: "Čas na otázku: {time}",
+    resultsTryAgain: "Zkusit znovu",
+    resultsBackToModes: "Zpět na výběr režimu",
+    noResults: "Žádné výsledky k zobrazení.",
   },
 
   // Question reports (teacher inbox)
@@ -618,9 +716,12 @@ export const cs = {
     closedSpreadHard: "Těžká (± 30 %)",
     configureOpen: "Nastavení otevřených otázek",
     configureOpenDescription: "Obtížnost určuje, jak širokou toleranci má uznávaná odpověď.",
+    modeMismatchWarning:
+      "Tato sada je nastavená jako „{setMode}“, ale generujete otázky v režimu „{generateMode}“. Vygenerovaný a exportovaný obsah nebude odpovídat kategorii sady.",
     openToleranceEasy: "Lehká (± 50 %)",
     openToleranceMedium: "Střední (± 30 %)",
     openToleranceHard: "Těžká (± 10 %)",
+    openToleranceVeryHard: "Velmi těžká (± 5 %)",
     difficultyLabel: "Obtížnost",
     optionCountLabel: "Počet možností",
     generateClosed: "Generovat uzavřené",

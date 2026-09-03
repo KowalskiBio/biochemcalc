@@ -2,6 +2,7 @@ pub mod atomic_weights;
 pub mod category;
 pub mod constant;
 pub mod meta;
+pub mod streak_run;
 pub mod template;
 pub mod topic;
 pub mod topic_group;
@@ -18,6 +19,7 @@ pub use meta::{
     ProjektQuestion, SetPackage, TemplateHistoryEntry, VariableHistoryEntry, VariantPackage,
     WizardSession, WizardSessionSet,
 };
+pub use streak_run::StreakRunKind;
 pub use template::{
     ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateDecoy,
     TemplateDecoyInput, TemplateMode, TemplateVariable,

@@ -14,13 +14,14 @@
 
 use crate::commands::generation::load_template_dependencies;
 use crate::db::repos::{
-    ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, TemplateDecoyRepo,
-    TemplateRepo,
+    ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, StreakRunRepo,
+    TemplateDecoyRepo, TemplateRepo, TestSessionRepo,
 };
 use crate::db::DbError;
 use crate::engine::answer_targets::{apply_result_units, extract_target_symbols};
 use crate::engine::generator::generate_variant_with_targets;
 use crate::models::{AnswerField, TemplateMode, Variant};
+use chrono::{Duration, Utc};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,15 @@ const FALLBACK_RELATIVE_TOLERANCE: f64 = 1e-3;
 pub struct NextQuestionPayload {
     pub topic_id: Uuid,
     pub point_value: u8,
+    /// Restrict the served question to this mode. `None` (the default, and
+    /// what every request before this field existed sent) keeps the original
+    /// behavior of drawing from whichever mode(s) the topic/difficulty has.
+    #[serde(default)]
+    pub mode: Option<TemplateMode>,
+    /// Restrict the served question to this one set (sada). `None` draws
+    /// from every set at the topic/difficulty, the original behavior.
+    #[serde(default)]
+    pub set_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +97,25 @@ pub struct PracticeTopic {
 pub struct PracticeDifficulty {
     pub point_value: u8,
     pub question_count: i64,
+    /// The individual sets (sada) this difficulty draws from, so a student
+    /// can narrow practice down to one of them instead of the whole
+    /// difficulty. Never empty when `question_count` is nonzero.
+    pub sets: Vec<PracticeSetOption>,
+}
+
+/// One set (sada) a student can restrict practice to, alongside "any set"
+/// (the default, `set_id: None` in `NextQuestionPayload`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PracticeSetOption {
+    pub id: Uuid,
+    /// The teacher's chosen name, or `None` when the set only has its
+    /// default "Sada {index}" label — the frontend already knows how to
+    /// fall back to that, same as the teacher-facing set list.
+    pub name: Option<String>,
+    pub set_index: u8,
+    pub mode: TemplateMode,
+    pub question_count: i64,
 }
 
 /// A variable paired with the placeholder it fills in the question text —
@@ -112,6 +141,12 @@ pub struct PracticeAnswerSlot {
     pub unit: Option<String>,
     /// Closed mode only: the options to choose between, in display order.
     pub numeric_options: Option<Vec<f64>>,
+    /// The template's result significant-figures setting, so the practice UI
+    /// can format options and the revealed correct answer on the same grid
+    /// the engine generated them. `#[serde(default)]` keeps teacher report
+    /// snapshots stored before this field existed deserializable.
+    #[serde(default)]
+    pub significant_digits: Option<u8>,
 }
 
 /// A question ready to be answered. Deliberately carries no correct answer,
@@ -176,16 +211,30 @@ pub struct LeaderboardEntry {
 /// actually serve.
 pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, DbError> {
     let rows = PracticeRepo::list_practice_topics(conn)?;
+    let set_rows = PracticeRepo::list_practice_sets(conn)?;
 
     // Rows arrive ordered by (topic name, point value), so consecutive rows
     // for one topic fold into a single entry without a lookup map.
     let mut topics: Vec<PracticeTopic> = Vec::new();
     for row in rows {
+        let sets = set_rows
+            .iter()
+            .filter(|s| s.topic_id == row.topic_id && s.point_value == row.point_value)
+            .map(|s| PracticeSetOption {
+                id: s.set_id,
+                name: s.name.clone(),
+                set_index: s.set_index,
+                mode: s.mode,
+                question_count: s.question_count,
+            })
+            .collect();
+
         match topics.last_mut() {
             Some(topic) if topic.id == row.topic_id => {
                 topic.difficulties.push(PracticeDifficulty {
                     point_value: row.point_value,
                     question_count: row.question_count,
+                    sets,
                 });
             }
             _ => topics.push(PracticeTopic {
@@ -194,6 +243,7 @@ pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, 
                 difficulties: vec![PracticeDifficulty {
                     point_value: row.point_value,
                     question_count: row.question_count,
+                    sets,
                 }],
             }),
         }
@@ -206,17 +256,29 @@ pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, 
 // Serving a question
 // ---------------------------------------------------------------------------
 
-/// A fresh random question from `topic_id` at the requested point value, in a
-/// randomly chosen open or closed mode.
+/// A fresh random question from `topic_id` at the requested point value. Mode
+/// (open/closed) is not a separate random choice: it comes from whichever
+/// set the randomly picked template actually belongs to, so a question never
+/// gets served in a mode its set wasn't configured for. If `payload.mode` is
+/// set, only templates whose set actually has that mode are considered. If
+/// `payload.set_id` is set, only that one set's templates are considered.
 pub fn do_next_question(
     conn: &Connection,
     user_id: &Uuid,
     payload: &NextQuestionPayload,
 ) -> Result<PracticeQuestion, DbError> {
-    let template_ids = PracticeRepo::list_template_ids(conn, &payload.topic_id, payload.point_value)?;
+    let mut template_ids = PracticeRepo::list_template_ids(
+        conn,
+        &payload.topic_id,
+        payload.point_value,
+        payload.set_id.as_ref(),
+    )?;
+    if let Some(wanted) = payload.mode {
+        template_ids.retain(|(_, mode)| *mode == wanted);
+    }
     if template_ids.is_empty() {
         return Err(DbError::NotFound(
-            "Pro toto téma a obtížnost zatím nejsou žádné otázky".into(),
+            "Pro toto téma, obtížnost a typ otázek zatím nejsou žádné otázky".into(),
         ));
     }
 
@@ -224,14 +286,19 @@ pub fn do_next_question(
     let mut last_error: Option<DbError> = None;
 
     for _ in 0..MAX_TEMPLATE_ATTEMPTS.min(template_ids.len().saturating_mul(2)) {
-        let template_id = template_ids[rng.random_range(0..template_ids.len())];
-        let mode = if rng.random_range(0..2) == 0 {
-            TemplateMode::Closed
-        } else {
-            TemplateMode::Open
-        };
+        let (template_id, mode) = template_ids[rng.random_range(0..template_ids.len())];
 
-        match build_question(conn, user_id, &payload.topic_id, &template_id, mode, &mut rng) {
+        match build_question(
+            conn,
+            user_id,
+            &payload.topic_id,
+            &template_id,
+            mode,
+            &mut rng,
+            None,
+            None,
+            None,
+        ) {
             Ok(question) => return Ok(question),
             Err(e) => last_error = Some(e),
         }
@@ -242,13 +309,22 @@ pub fn do_next_question(
     }))
 }
 
-fn build_question(
+/// Generate and serve one question, optionally tagging its `practice_attempts`
+/// row into a fixed-batch test session (`crate::commands::test_session`) via
+/// `test_session_id`/`position`, or into an endless streak run
+/// (`crate::commands::streak_run`) via `streak_run_id`. All `None` for
+/// ordinary endless practice; a caller passes at most one of the two kinds.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_question(
     conn: &Connection,
     user_id: &Uuid,
     topic_id: &Uuid,
     template_id: &Uuid,
     mode: TemplateMode,
     rng: &mut StdRng,
+    test_session_id: Option<Uuid>,
+    position: Option<i64>,
+    streak_run_id: Option<Uuid>,
 ) -> Result<PracticeQuestion, DbError> {
     let template = TemplateRepo::get_by_id(conn, template_id)?;
     let (variables, constants, constraint, fixed_values) =
@@ -296,6 +372,9 @@ fn build_question(
         assigned_values: variant.assigned_values.clone(),
         assigned_strings: variant.assigned_strings.clone(),
         numeric_options: variant.numeric_options.clone(),
+        test_session_id,
+        position,
+        streak_run_id,
     };
     PracticeRepo::insert(conn, &attempt)?;
 
@@ -329,7 +408,7 @@ fn build_question(
         assigned_values: variant.assigned_values.clone(),
         assigned_strings: variant.assigned_strings.clone(),
         constants: constants_for_rendering(conn, &constants)?,
-        answer_slots: answer_slots(&template.result_unit, mode, &variant),
+        answer_slots: answer_slots(&template.result_unit, mode, &variant, template.significant_digits),
     })
 }
 
@@ -355,6 +434,7 @@ pub fn answer_slots(
     result_unit: &str,
     mode: TemplateMode,
     variant: &Variant,
+    significant_digits: Option<u8>,
 ) -> Vec<PracticeAnswerSlot> {
     let closed = matches!(mode, TemplateMode::Closed);
 
@@ -369,6 +449,9 @@ pub fn answer_slots(
                 } else {
                     None
                 },
+                // `AnswerField` carries no per-target override, so every slot
+                // inherits the template-level setting.
+                significant_digits,
             })
             .collect(),
         _ => vec![PracticeAnswerSlot {
@@ -379,6 +462,7 @@ pub fn answer_slots(
             } else {
                 None
             },
+            significant_digits,
         }],
     }
 }
@@ -399,6 +483,37 @@ pub fn do_submit_answer(
         || DbError::NotFound("Tato otázka už byla vyhodnocena".into()),
     )?;
 
+    // A question served as part of a test session must stop accepting
+    // answers once that session is over: grading authority lives here on
+    // the server, so a client that keeps a stale timed-test page open past
+    // its deadline (or after "Finish" was already pressed) must not still
+    // be able to score.
+    if let Some(session_id) = attempt.test_session_id {
+        if let Some(session) = TestSessionRepo::get_owned(conn, &session_id, user_id)? {
+            if session.finished_at.is_some() {
+                return Err(DbError::Validation("Test už byl ukončen".into()));
+            }
+            if let Some(limit) = session.time_limit_seconds {
+                let deadline = session.started_at + Duration::seconds(limit as i64);
+                if Utc::now() > deadline {
+                    return Err(DbError::Validation("Čas na test už vypršel".into()));
+                }
+            }
+        }
+    }
+
+    // A streak run stops taking answers the instant it has already failed —
+    // its final score is frozen at the first wrong answer, so a client that
+    // still holds a question served just before that must not be able to
+    // sneak in one more (correct or not) afterward.
+    if let Some(run_id) = attempt.streak_run_id {
+        if let Some(run) = StreakRunRepo::get_owned(conn, &run_id, user_id)? {
+            if run.failed {
+                return Err(DbError::Validation("Tato série už skončila".into()));
+            }
+        }
+    }
+
     let correct = match attempt.mode {
         TemplateMode::Closed => {
             let selected = payload.selected_option.ok_or_else(|| {
@@ -414,6 +529,14 @@ pub fn do_submit_answer(
     };
 
     PracticeRepo::mark_answered(conn, &attempt.id, correct)?;
+
+    if let Some(run_id) = attempt.streak_run_id {
+        if correct {
+            StreakRunRepo::record_correct(conn, &run_id)?;
+        } else {
+            StreakRunRepo::record_failure(conn, &run_id)?;
+        }
+    }
 
     Ok(PracticeAnswerResult {
         correct,
@@ -507,7 +630,7 @@ pub fn do_leaderboard(conn: &Connection) -> Result<Vec<LeaderboardEntry>, DbErro
 /// this codebase already relies on for session tokens (see
 /// `commands::auth::generate_token`), so no new dependency or RNG-API
 /// surface is introduced just to shuffle question order.
-fn entropy_seed() -> u64 {
+pub(crate) fn entropy_seed() -> u64 {
     let bytes = Uuid::new_v4().into_bytes();
     u64::from_le_bytes(bytes[..8].try_into().expect("a UUID is 16 bytes"))
 }
@@ -658,6 +781,35 @@ mod tests {
         assert_eq!(roztoky.difficulties[0].question_count, 1);
     }
 
+    /// A template linked only into an open set must never be served closed,
+    /// and vice versa. This is the fix for `do_next_question` previously
+    /// coin-flipping mode independently of which set(s) a template belongs to.
+    #[test]
+    fn next_question_only_ever_uses_the_templates_actual_set_mode() {
+        let conn = setup_conn();
+        let topic_id = seed_topic(&conn, "Roztoky", 2); // template lives in sets[0], Closed
+        let student = insert_student(&conn, "student");
+
+        for _ in 0..30 {
+            let question = do_next_question(
+                &conn,
+                &student,
+                &NextQuestionPayload {
+                    topic_id,
+                    point_value: 2,
+                    mode: None,
+                    set_id: None,
+                },
+            )
+            .expect("serve question");
+            assert_eq!(
+                question.mode,
+                TemplateMode::Closed,
+                "a template only in a closed set must never be served open"
+            );
+        }
+    }
+
     #[test]
     fn next_question_never_leaks_the_answer() {
         let conn = setup_conn();
@@ -670,6 +822,8 @@ mod tests {
             &NextQuestionPayload {
                 topic_id,
                 point_value: 3,
+                mode: None,
+                set_id: None,
             },
         )
         .expect("serve question");
@@ -715,6 +869,8 @@ mod tests {
                 &NextQuestionPayload {
                     topic_id,
                     point_value: 3,
+                    mode: None,
+                    set_id: None,
                 },
             );
         }
@@ -761,6 +917,8 @@ mod tests {
                 &NextQuestionPayload {
                     topic_id,
                     point_value: 2,
+                    mode: None,
+                    set_id: None,
                 },
             )
             .expect("serve question");
@@ -810,6 +968,8 @@ mod tests {
             &NextQuestionPayload {
                 topic_id,
                 point_value: 2,
+                mode: None,
+                set_id: None,
             },
         )
         .expect("serve question");
@@ -860,6 +1020,8 @@ mod tests {
                 &NextQuestionPayload {
                     topic_id,
                     point_value: 2,
+                    mode: None,
+                    set_id: None,
                 },
             )
             .expect("serve question");
@@ -908,6 +1070,8 @@ mod tests {
             &NextQuestionPayload {
                 topic_id,
                 point_value: 2,
+                mode: None,
+                set_id: None,
             },
         )
         .expect("serve question");
@@ -925,6 +1089,126 @@ mod tests {
         assert!(matches!(second, Err(DbError::NotFound(_))));
     }
 
+    /// A student explicitly asking for a mode a topic has no questions in
+    /// gets the same "no questions" error as an empty topic, rather than
+    /// silently falling back to the other mode.
+    #[test]
+    fn next_question_honors_an_explicit_mode_restriction() {
+        let conn = setup_conn();
+        let topic_id = seed_topic(&conn, "Roztoky", 2); // template only in a closed set
+        let student = insert_student(&conn, "student");
+
+        let closed = do_next_question(
+            &conn,
+            &student,
+            &NextQuestionPayload {
+                topic_id,
+                point_value: 2,
+                mode: Some(TemplateMode::Closed),
+                set_id: None,
+            },
+        )
+        .expect("closed mode is available");
+        assert_eq!(closed.mode, TemplateMode::Closed);
+
+        let open = do_next_question(
+            &conn,
+            &student,
+            &NextQuestionPayload {
+                topic_id,
+                point_value: 2,
+                mode: Some(TemplateMode::Open),
+                set_id: None,
+            },
+        );
+        assert!(
+            matches!(open, Err(DbError::NotFound(_))),
+            "no open-mode question should exist for a template only in a closed set"
+        );
+    }
+
+    /// A student picking one specific set (sada) must never be served a
+    /// question from a sibling set at the same topic/difficulty, even
+    /// though both are eligible without the restriction.
+    #[test]
+    fn next_question_honors_an_explicit_set_restriction() {
+        let conn = setup_conn();
+        let mut topic = Topic::new("Roztoky".into());
+        topic.for_students = true;
+        crate::db::repos::TopicRepo::insert(&conn, &topic).expect("insert topic");
+        let (_, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create category");
+
+        let variable = Variable::new("Hmotnost".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
+        VariableRepo::insert_raw(&conn, &variable).expect("insert variable");
+
+        let make_template = |question_text: &str| {
+            let template = Template::new(
+                question_text.into(),
+                "Y = X * 2".into(),
+                "Y = X × 2".into(),
+                None,
+                "g".into(),
+                2,
+            );
+            let constraint = ResultConstraint::new(
+                template.id,
+                Some(0.0),
+                Some(100.0),
+                None,
+                ConstraintType::Range,
+            );
+            let tv = TemplateVariable {
+                template_id: template.id,
+                variable_id: variable.id,
+                placeholder: "X".into(),
+                greater_than_variable_id: None,
+                less_than_variable_id: None,
+            };
+            TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint), &[])
+                .expect("insert template");
+            template.id
+        };
+
+        let template_a = make_template("Sada A: kolik je dvojnásobek [[X]] g? [Y]");
+        SetRepo::add_template(&conn, &sets[0].id, &template_a).expect("add to set A");
+        let template_b = make_template("Sada B: kolik je dvojnásobek [[X]] g? [Y]");
+        SetRepo::add_template(&conn, &sets[1].id, &template_b).expect("add to set B");
+
+        let student = insert_student(&conn, "student");
+
+        for _ in 0..15 {
+            let question = do_next_question(
+                &conn,
+                &student,
+                &NextQuestionPayload {
+                    topic_id: topic.id,
+                    point_value: 2,
+                    mode: None,
+                    set_id: Some(sets[0].id),
+                },
+            )
+            .expect("serve question restricted to set A");
+            assert!(
+                question.question_text.starts_with("Sada A"),
+                "restricting to set A must never serve set B's template, got {:?}",
+                question.question_text
+            );
+        }
+
+        // The topics list must report each set separately, one question
+        // apiece, alongside the pooled per-difficulty total.
+        let topics = do_list_practice_topics(&conn).expect("list topics");
+        let roztoky = topics.iter().find(|t| t.name == "Roztoky").expect("Roztoky");
+        let difficulty = roztoky
+            .difficulties
+            .iter()
+            .find(|d| d.point_value == 2)
+            .expect("2-point difficulty");
+        assert_eq!(difficulty.question_count, 2);
+        assert_eq!(difficulty.sets.len(), 2);
+        assert!(difficulty.sets.iter().all(|s| s.question_count == 1));
+    }
+
     #[test]
     fn unknown_topic_reports_that_there_are_no_questions() {
         let conn = setup_conn();
@@ -936,6 +1220,8 @@ mod tests {
             &NextQuestionPayload {
                 topic_id: Uuid::new_v4(),
                 point_value: 2,
+                mode: None,
+                set_id: None,
             },
         );
         assert!(matches!(result, Err(DbError::NotFound(_))));

@@ -438,7 +438,12 @@ export interface OutputFileContent {
   content: string
 }
 
-export type QuestionDifficulty = "easy" | "medium" | "hard"
+/**
+ * "very_hard" is an open-question-only tier (a narrower answer tolerance).
+ * There is no closed-mode equivalent, so it's never offered in a
+ * closed-question difficulty selector even though the type is shared.
+ */
+export type QuestionDifficulty = "easy" | "medium" | "hard" | "very_hard"
 
 /**
  * Generate input - now includes mode, difficulty and option count
@@ -706,6 +711,18 @@ export interface PracticeDifficulty {
   /** 2, 3 or 4 — the point value the teacher filed the question under. */
   pointValue: number
   questionCount: number
+  /** The individual sets (sada) this difficulty draws from. */
+  sets: PracticeSetOption[]
+}
+
+/** One set (sada) a student can restrict practice to, alongside "any set". */
+export interface PracticeSetOption {
+  id: string
+  /** The teacher's chosen name, or undefined for the default "Sada {index}" label. */
+  name?: string
+  setIndex: number
+  mode: TemplateMode
+  questionCount: number
 }
 
 /** A variable and the placeholder it fills; feeds the question renderer. */
@@ -721,6 +738,12 @@ export interface PracticeAnswerSlot {
   unit?: string
   /** Closed mode only — the options to pick between, in display order. */
   numericOptions?: number[]
+  /**
+   * The template's result significant-figures setting. When present, the UI
+   * formats the slot's options and its revealed correct answer with that many
+   * significant figures instead of precision-based rounding.
+   */
+  significantDigits?: number
 }
 
 /**
@@ -759,6 +782,10 @@ export interface PracticeAnswerResult {
 export interface NextQuestionInput {
   topicId: string
   pointValue: number
+  /** Restrict the served question to this mode; omitted mixes both. */
+  mode?: TemplateMode
+  /** Restrict the served question to this one set (sada); omitted draws from all of them. */
+  setId?: string
 }
 
 export interface SubmitAnswerInput {
@@ -775,6 +802,116 @@ export interface LeaderboardEntry {
   correctCount: number
   answeredCount: number
   points: number
+}
+
+// ============================================================================
+// Test sessions: a fixed batch of questions generated all at once (timed or
+// untimed), as opposed to the endless one-at-a-time practice generator above.
+// ============================================================================
+
+export interface StartTestInput {
+  topicId: string
+  pointValue: number
+  /** Omitted starts an untimed test: no deadline is ever enforced. */
+  timeLimitSeconds?: number
+  /** Restrict the test to this mode; omitted mixes both. */
+  mode?: TemplateMode
+  /** Restrict the test to this one set (sada); omitted draws from all of them. */
+  setId?: string
+}
+
+export interface TestSessionView {
+  sessionId: string
+  timeLimitSeconds?: number
+  /** ISO 8601 — combine with `timeLimitSeconds` to compute the deadline. */
+  startedAt: string
+  questions: PracticeQuestion[]
+}
+
+export interface FinishTestInput {
+  sessionId: string
+}
+
+export interface TestResults {
+  totalQuestions: number
+  answeredCount: number
+  correctCount: number
+  points: number
+  elapsedSeconds: number
+}
+
+/** What a student entered for one test question — the in-progress page's local, unsubmitted state. */
+export interface TestAnswer {
+  selectedOption?: number
+  answers?: string[]
+}
+
+/**
+ * One graded (or skipped) question, built client-side once a test is
+ * finished, for the results page's review: the question as served, what the
+ * student answered, and — for an answered one — the grading verdict
+ * `submitAnswer` already returned during the finish flow.
+ */
+export interface TestReviewItem {
+  question: PracticeQuestion
+  answer: TestAnswer
+  /** Absent for a question the student left unanswered. */
+  result?: PracticeAnswerResult
+}
+
+// ============================================================================
+// Streak runs: an endless one-question-at-a-time run (like the practice
+// generator, but tracked server-side) that ends the instant the student
+// answers one wrong. "Apprentice" stays scoped to a topic/point value like
+// practice; "master" draws from every topic, at any difficulty.
+// ============================================================================
+
+export type StreakRunKind = "apprentice" | "master"
+
+export interface StartStreakRunInput {
+  kind: StreakRunKind
+  /** Required for "apprentice"; ignored for "master". */
+  topicId?: string
+  pointValue?: number
+  mode?: TemplateMode
+  setId?: string
+}
+
+export interface StreakRunView {
+  runId: string
+  kind: StreakRunKind
+  startedAt: string
+}
+
+export interface NextStreakQuestionInput {
+  runId: string
+}
+
+export interface StreakRunSummaryInput {
+  runId: string
+}
+
+export interface StreakRunSummary {
+  kind: StreakRunKind
+  correctCount: number
+  totalSeconds: number
+  secondsPerAnswer: number
+}
+
+export interface StreakLeaderboardInput {
+  kind: StreakRunKind
+  /** Scope the board to one topic/difficulty/set — meaningful for "apprentice" only. */
+  topicId?: string
+  pointValue?: number
+  setId?: string
+}
+
+export interface StreakLeaderboardEntry {
+  userId: string
+  username: string
+  bestCorrectCount: number
+  totalSeconds: number
+  secondsPerAnswer: number
 }
 
 export interface ChangePasswordInput {

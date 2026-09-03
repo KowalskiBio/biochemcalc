@@ -35,6 +35,14 @@ pub struct PracticeAttemptRecord {
     pub assigned_strings: HashMap<String, String>,
     /// Closed single-answer only: the numeric options as served.
     pub numeric_options: Option<Vec<f64>>,
+    /// Set when this attempt belongs to a fixed-batch test session rather
+    /// than the endless one-at-a-time practice generator.
+    pub test_session_id: Option<Uuid>,
+    /// 0-based ordering within its test session; `None` outside a session.
+    pub position: Option<i64>,
+    /// Set when this attempt belongs to an endless streak run
+    /// (`commands::streak_run`) — mutually exclusive with `test_session_id`.
+    pub streak_run_id: Option<Uuid>,
 }
 
 /// One row of the leaderboard. `correct_count` is the headline score —
@@ -57,6 +65,30 @@ pub struct PracticeTopicRow {
     pub name: String,
     pub point_value: u8,
     pub question_count: i64,
+}
+
+/// One set (sada) within a (topic, point value) pair, with the question
+/// count it actually contributes — used to let a student narrow practice
+/// down to a single named set rather than the whole difficulty.
+#[derive(Debug, Clone)]
+pub struct PracticeSetRow {
+    pub topic_id: Uuid,
+    pub point_value: u8,
+    pub set_id: Uuid,
+    pub set_index: u8,
+    pub mode: TemplateMode,
+    pub name: Option<String>,
+    pub question_count: i64,
+}
+
+/// One randomly-drawable template, tagged with the topic it belongs to — the
+/// shape `list_all_template_ids` returns, since a "master" streak run has no
+/// single topic to attach its `practice_attempts` rows to otherwise.
+#[derive(Debug, Clone)]
+pub struct AnyPracticeTemplateRow {
+    pub template_id: Uuid,
+    pub mode: TemplateMode,
+    pub topic_id: Uuid,
 }
 
 pub struct PracticeRepo;
@@ -95,23 +127,103 @@ impl PracticeRepo {
         Ok(rows)
     }
 
-    /// Ids of every question in a topic at a given difficulty.
+    /// Every set (sada) that has at least one question, for every topic
+    /// opted in for students, paired with its question count — the
+    /// per-difficulty breakdown a student's set selector is built from.
+    pub fn list_practice_sets(conn: &Connection) -> Result<Vec<PracticeSetRow>, DbError> {
+        let mut stmt = conn.prepare(
+            "SELECT tp.id, c.point_value, s.id, s.set_index, s.mode, s.name,
+                    COUNT(DISTINCT st.template_id)
+             FROM topics tp
+             JOIN categories c ON c.topic_id = tp.id
+             JOIN sets s ON s.category_id = c.id
+             JOIN set_templates st ON st.set_id = s.id
+             WHERE tp.for_students = 1
+             GROUP BY tp.id, c.point_value, s.id
+             HAVING COUNT(DISTINCT st.template_id) > 0
+             ORDER BY tp.name COLLATE NOCASE, c.point_value, s.set_index",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                let mode: String = row.get(4)?;
+                Ok(PracticeSetRow {
+                    topic_id: row.get(0)?,
+                    point_value: row.get(1)?,
+                    set_id: row.get(2)?,
+                    set_index: row.get(3)?,
+                    mode: TemplateMode::parse(&mode).unwrap_or(TemplateMode::Open),
+                    name: row.get(5)?,
+                    question_count: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Every question in a topic at a given difficulty, paired with the mode
+    /// of the set it was fetched from. `set_templates` is many-to-many, so a
+    /// template linked into both an open and a closed set appears once per
+    /// mode here: that pairing is what lets a caller honor the set's actual
+    /// configured mode instead of guessing (or coin-flipping) it separately.
+    /// `set_id`, when given, additionally restricts to that one set.
     pub fn list_template_ids(
         conn: &Connection,
         topic_id: &Uuid,
         point_value: u8,
-    ) -> Result<Vec<Uuid>, DbError> {
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT st.template_id
+        set_id: Option<&Uuid>,
+    ) -> Result<Vec<(Uuid, TemplateMode)>, DbError> {
+        let mut sql = "SELECT DISTINCT st.template_id, s.mode
              FROM set_templates st
              JOIN sets s ON s.id = st.set_id
              JOIN categories c ON c.id = s.category_id
-             WHERE c.topic_id = ?1 AND c.point_value = ?2",
-        )?;
-        let ids = stmt
-            .query_map(params![topic_id, point_value], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<Uuid>>>()?;
+             WHERE c.topic_id = ?1 AND c.point_value = ?2"
+            .to_string();
+        if set_id.is_some() {
+            sql.push_str(" AND s.id = ?3");
+        }
+        let mut stmt = conn.prepare(&sql)?;
+        let map_row = |row: &rusqlite::Row| {
+            let mode: String = row.get(1)?;
+            Ok((
+                row.get(0)?,
+                TemplateMode::parse(&mode).unwrap_or(TemplateMode::Open),
+            ))
+        };
+        let ids = match set_id {
+            Some(set_id) => stmt
+                .query_map(params![topic_id, point_value, set_id], map_row)?
+                .collect::<rusqlite::Result<Vec<(Uuid, TemplateMode)>>>()?,
+            None => stmt
+                .query_map(params![topic_id, point_value], map_row)?
+                .collect::<rusqlite::Result<Vec<(Uuid, TemplateMode)>>>()?,
+        };
         Ok(ids)
+    }
+
+    /// Every question across every topic opted in for students, regardless of
+    /// point value — the pool a "master" streak run
+    /// (`commands::streak_run::StreakRunKind::Master`) draws from, unlike
+    /// `list_template_ids` which stays scoped to one topic/point value.
+    pub fn list_all_template_ids(conn: &Connection) -> Result<Vec<AnyPracticeTemplateRow>, DbError> {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT st.template_id, s.mode, c.topic_id
+             FROM set_templates st
+             JOIN sets s ON s.id = st.set_id
+             JOIN categories c ON c.id = s.category_id
+             JOIN topics tp ON tp.id = c.topic_id
+             WHERE tp.for_students = 1",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                let mode: String = row.get(1)?;
+                Ok(AnyPracticeTemplateRow {
+                    template_id: row.get(0)?,
+                    mode: TemplateMode::parse(&mode).unwrap_or(TemplateMode::Open),
+                    topic_id: row.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     pub fn insert(conn: &Connection, attempt: &PracticeAttemptRecord) -> Result<(), DbError> {
@@ -133,8 +245,9 @@ impl PracticeRepo {
                  id, user_id, template_id, topic_id, point_value, mode,
                  correct_answer, correct_option, interval_lo, interval_hi,
                  answers_data, is_correct, created_at, answered_at,
-                 assigned_values, assigned_strings, numeric_options, alternate_option
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15, ?16)",
+                 assigned_values, assigned_strings, numeric_options, alternate_option,
+                 test_session_id, position, streak_run_id
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 attempt.id,
                 attempt.user_id,
@@ -152,6 +265,9 @@ impl PracticeRepo {
                 assigned_strings,
                 numeric_options,
                 attempt.alternate_option,
+                attempt.test_session_id,
+                attempt.position,
+                attempt.streak_run_id,
             ],
         )?;
         Ok(())
@@ -170,7 +286,8 @@ impl PracticeRepo {
             conn,
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
                     correct_answer, correct_option, interval_lo, interval_hi, answers_data,
-                    assigned_values, assigned_strings, numeric_options, alternate_option
+                    assigned_values, assigned_strings, numeric_options, alternate_option,
+                    test_session_id, position, streak_run_id
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2 AND is_correct IS NULL",
             params![id, user_id],
@@ -188,7 +305,8 @@ impl PracticeRepo {
             conn,
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
                     correct_answer, correct_option, interval_lo, interval_hi, answers_data,
-                    assigned_values, assigned_strings, numeric_options, alternate_option
+                    assigned_values, assigned_strings, numeric_options, alternate_option,
+                    test_session_id, position, streak_run_id
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2",
             params![id, user_id],
@@ -223,6 +341,9 @@ impl PracticeRepo {
                     assigned_values: HashMap::new(),
                     assigned_strings: HashMap::new(),
                     numeric_options: None,
+                    test_session_id: row.get(15)?,
+                    position: row.get(16)?,
+                    streak_run_id: row.get(17)?,
                 },
                 answers_data_json,
                 assigned_values_json,
@@ -305,7 +426,8 @@ impl PracticeRepo {
 mod tests {
     use super::*;
     use crate::db::repos::user_repo::{UserRecord, UserRepo};
-    use crate::models::Role;
+    use crate::db::repos::{CategoryRepo, SetRepo, TemplateRepo, TopicRepo};
+    use crate::models::{Role, Template, Topic};
 
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
@@ -345,6 +467,9 @@ mod tests {
             assigned_values: HashMap::new(),
             assigned_strings: HashMap::new(),
             numeric_options: None,
+            test_session_id: None,
+            position: None,
+            streak_run_id: None,
         }
     }
 
@@ -381,6 +506,58 @@ mod tests {
         assert!(PracticeRepo::find_pending(&conn, &record.id, &other)
             .expect("find")
             .is_none());
+    }
+
+    fn insert_template(conn: &Connection, question_text: &str, point_value: u8) -> Uuid {
+        let template = Template::new(
+            question_text.into(),
+            "Y = 1".into(),
+            "Y = 1".into(),
+            None,
+            "g".into(),
+            point_value,
+        );
+        TemplateRepo::insert(conn, &template, &[], &[], None, &[]).expect("insert template");
+        template.id
+    }
+
+    /// A template linked into only a closed set must be reported paired with
+    /// `Closed`, never `Open`: this is the fix for questions being served in
+    /// a mode their set was never configured for.
+    #[test]
+    fn list_template_ids_tags_each_id_with_its_actual_set_mode() {
+        let conn = setup_conn();
+        let mut topic = Topic::new("Roztoky".into());
+        topic.for_students = true;
+        TopicRepo::insert(&conn, &topic).expect("insert topic");
+        let (_, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create category");
+        assert_eq!(sets[0].mode, TemplateMode::Closed);
+        assert_eq!(sets[3].mode, TemplateMode::Open);
+
+        let closed_only = insert_template(&conn, "Closed-only question? [Y]", 2);
+        SetRepo::add_template(&conn, &sets[0].id, &closed_only).expect("add to closed set");
+
+        let open_only = insert_template(&conn, "Open-only question? [Y]", 2);
+        SetRepo::add_template(&conn, &sets[3].id, &open_only).expect("add to open set");
+
+        let both = insert_template(&conn, "Both-modes question? [Y]", 2);
+        SetRepo::add_template(&conn, &sets[1].id, &both).expect("add to second closed set");
+        SetRepo::add_template(&conn, &sets[3].id, &both).expect("add to open set");
+
+        let pairs = PracticeRepo::list_template_ids(&conn, &topic.id, 2, None).expect("list");
+
+        assert!(pairs.contains(&(closed_only, TemplateMode::Closed)));
+        assert!(!pairs.contains(&(closed_only, TemplateMode::Open)));
+
+        assert!(pairs.contains(&(open_only, TemplateMode::Open)));
+        assert!(!pairs.contains(&(open_only, TemplateMode::Closed)));
+
+        // A template linked into sets of both modes must be selectable as
+        // either: it appears once per mode, not merged into a single row.
+        assert!(pairs.contains(&(both, TemplateMode::Closed)));
+        assert!(pairs.contains(&(both, TemplateMode::Open)));
+
+        assert_eq!(pairs.len(), 4);
     }
 
     #[test]

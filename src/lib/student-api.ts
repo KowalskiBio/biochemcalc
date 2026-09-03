@@ -1,12 +1,23 @@
 import { httpRequest } from "./http"
 import type {
+  FinishTestInput,
   LeaderboardEntry,
   NextQuestionInput,
+  NextStreakQuestionInput,
   PracticeAnswerResult,
   PracticeQuestion,
   PracticeTopic,
   ReportQuestionInput,
+  StartStreakRunInput,
+  StartTestInput,
+  StreakLeaderboardEntry,
+  StreakLeaderboardInput,
+  StreakRunSummary,
+  StreakRunSummaryInput,
+  StreakRunView,
   SubmitAnswerInput,
+  TestResults,
+  TestSessionView,
 } from "./types"
 
 /**
@@ -20,7 +31,8 @@ export const studentApi = {
 
   /**
    * A fresh question — new random values every call, so a topic never runs
-   * out. Open or closed is chosen at random per question.
+   * out. Open or closed is chosen at random per question, unless `mode` is
+   * given to restrict it to just one.
    */
   nextQuestion: (input: NextQuestionInput): Promise<PracticeQuestion> =>
     httpRequest<PracticeQuestion>("/api/student/next-question", input),
@@ -38,4 +50,31 @@ export const studentApi = {
 
   leaderboard: (): Promise<LeaderboardEntry[]> =>
     httpRequest<LeaderboardEntry[]>("/api/student/leaderboard"),
+
+  /** Generate every question in a topic/point value at once, timed or not. */
+  startTest: (input: StartTestInput): Promise<TestSessionView> =>
+    httpRequest<TestSessionView>("/api/student/start-test", input),
+
+  /**
+   * Mark a test session finished and get its score summary. Safe to call
+   * more than once (e.g. a reloaded results page): only the first call
+   * freezes the elapsed time, later calls just re-read the same summary.
+   */
+  finishTest: (input: FinishTestInput): Promise<TestResults> =>
+    httpRequest<TestResults>("/api/student/finish-test", input),
+
+  /** Start an endless streak run: "apprentice" (scoped, like practice) or "master" (everything). */
+  startStreakRun: (input: StartStreakRunInput): Promise<StreakRunView> =>
+    httpRequest<StreakRunView>("/api/student/start-streak-run", input),
+
+  /** A fresh question for a run still in progress. Refused once it has already failed. */
+  nextStreakQuestion: (input: NextStreakQuestionInput): Promise<PracticeQuestion> =>
+    httpRequest<PracticeQuestion>("/api/student/next-streak-question", input),
+
+  /** The frozen score of a run that has already ended. */
+  streakRunSummary: (input: StreakRunSummaryInput): Promise<StreakRunSummary> =>
+    httpRequest<StreakRunSummary>("/api/student/streak-run-summary", input),
+
+  streakLeaderboard: (input: StreakLeaderboardInput): Promise<StreakLeaderboardEntry[]> =>
+    httpRequest<StreakLeaderboardEntry[]>("/api/student/streak-leaderboard", input),
 }

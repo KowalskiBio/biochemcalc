@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 34;
+const CURRENT_USER_VERSION: u32 = 36;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -176,6 +176,16 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 34 {
         apply_migration_v34(conn)?;
         conn.pragma_update(None, "user_version", "34")?;
+    }
+
+    if user_version < 35 {
+        apply_migration_v35(conn)?;
+        conn.pragma_update(None, "user_version", "35")?;
+    }
+
+    if user_version < 36 {
+        apply_migration_v36(conn)?;
+        conn.pragma_update(None, "user_version", "36")?;
     }
 
     Ok(())
@@ -1134,6 +1144,78 @@ fn apply_migration_v34(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Timed and untimed test sessions: a fixed batch of questions generated all
+/// at once from a topic/point value and answered together, as opposed to
+/// `practice_attempts`'s original one-at-a-time endless generator.
+///
+/// `practice_attempts` gains `test_session_id`/`position` rather than a
+/// parallel table, so a session's questions are graded by exactly the same
+/// columns and code as ordinary practice, with no separate grading path to
+/// keep in sync.
+fn apply_migration_v35(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS test_sessions (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            topic_id BLOB NOT NULL,
+            point_value INTEGER NOT NULL,
+            time_limit_seconds INTEGER,
+            started_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_test_sessions_user
+        ON test_sessions(user_id);
+
+        ALTER TABLE practice_attempts ADD COLUMN test_session_id BLOB REFERENCES test_sessions(id) ON DELETE CASCADE;
+        ALTER TABLE practice_attempts ADD COLUMN position INTEGER;
+
+        CREATE INDEX IF NOT EXISTS idx_practice_attempts_session
+        ON practice_attempts(test_session_id);
+        ",
+    )?;
+    Ok(())
+}
+
+/// Streak runs: an endless one-question-at-a-time run (`kind` "apprentice",
+/// scoped to a topic/point value like practice, or "master", drawing from
+/// every topic) that ends the instant the student answers one wrong — unlike
+/// `test_sessions`, there is no fixed batch size to reach. `practice_attempts`
+/// gains `streak_run_id` the same way it already carries `test_session_id`,
+/// so grading stays the single shared code path in `commands::practice`.
+fn apply_migration_v36(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS streak_runs (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            topic_id BLOB,
+            point_value INTEGER,
+            mode TEXT,
+            set_id BLOB,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            correct_count INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_streak_runs_user
+        ON streak_runs(user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_streak_runs_kind
+        ON streak_runs(kind);
+
+        ALTER TABLE practice_attempts ADD COLUMN streak_run_id BLOB REFERENCES streak_runs(id) ON DELETE CASCADE;
+
+        CREATE INDEX IF NOT EXISTS idx_practice_attempts_streak_run
+        ON practice_attempts(streak_run_id);
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1311,7 +1393,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 34);
+        assert_eq!(user_version(&conn), 36);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1401,7 +1483,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 34);
+        assert_eq!(user_version(&conn), 36);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1426,7 +1508,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 34);
+        assert_eq!(user_version(&conn), 36);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");
@@ -1441,7 +1523,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 34);
+        assert_eq!(user_version(&conn), 36);
 
         let columns: Vec<(String, String, i64)> = {
             let mut stmt = conn
@@ -1510,7 +1592,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v32 -> latest");
 
-        assert_eq!(user_version(&conn), 34);
+        assert_eq!(user_version(&conn), 36);
         let columns: Vec<String> = {
             let mut stmt = conn
                 .prepare("PRAGMA table_info(templates)")
@@ -1587,7 +1669,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v33 -> v34");
 
-        assert_eq!(user_version(&conn), 34);
+        assert_eq!(user_version(&conn), 36);
 
         let columns: Vec<String> = {
             let mut stmt = conn
@@ -1613,6 +1695,85 @@ mod tests {
         assert_eq!(question_text, "Vypočítejte [[X]].");
         assert_eq!(equation_text, "X × 2");
         assert_eq!(created_at, "2026-09-02T10:00:00+00:00");
+    }
+
+    #[test]
+    fn v35_creates_test_sessions_and_extends_practice_attempts() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        assert!(user_version(&conn) >= 35);
+
+        let column_names = |table: &str| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .expect("prepare table_info");
+            stmt.query_map([], |row| row.get(1))
+                .expect("query table_info")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
+        };
+
+        let test_sessions = column_names("test_sessions");
+        for expected in [
+            "id",
+            "user_id",
+            "topic_id",
+            "point_value",
+            "time_limit_seconds",
+            "started_at",
+            "finished_at",
+        ] {
+            assert!(
+                test_sessions.iter().any(|c| c == expected),
+                "test_sessions is missing column {expected}"
+            );
+        }
+
+        let practice_attempts = column_names("practice_attempts");
+        assert!(practice_attempts.iter().any(|c| c == "test_session_id"));
+        assert!(practice_attempts.iter().any(|c| c == "position"));
+    }
+
+    #[test]
+    fn v36_creates_streak_runs_and_extends_practice_attempts() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        assert_eq!(user_version(&conn), 36);
+
+        let column_names = |table: &str| -> Vec<String> {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .expect("prepare table_info");
+            stmt.query_map([], |row| row.get(1))
+                .expect("query table_info")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
+        };
+
+        let streak_runs = column_names("streak_runs");
+        for expected in [
+            "id",
+            "user_id",
+            "kind",
+            "topic_id",
+            "point_value",
+            "mode",
+            "set_id",
+            "started_at",
+            "ended_at",
+            "correct_count",
+            "failed",
+        ] {
+            assert!(
+                streak_runs.iter().any(|c| c == expected),
+                "streak_runs is missing column {expected}"
+            );
+        }
+
+        let practice_attempts = column_names("practice_attempts");
+        assert!(practice_attempts.iter().any(|c| c == "streak_run_id"));
     }
 
     /// Reproduces a template that already had a single `decoy_formula` set

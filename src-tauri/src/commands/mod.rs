@@ -4,6 +4,8 @@ mod generation;
 pub(crate) mod importer;
 pub mod practice;
 pub mod reports;
+pub mod streak_run;
+pub mod test_session;
 mod victor;
 
 pub use crud::*;

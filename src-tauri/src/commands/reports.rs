@@ -152,7 +152,11 @@ pub fn do_report_question(
         assigned_values: attempt.assigned_values.clone(),
         assigned_strings: attempt.assigned_strings.clone(),
         constants: all_constants,
-        answer_slots: build_answer_slots_from_attempt(&attempt, &template.result_unit),
+        answer_slots: build_answer_slots_from_attempt(
+            &attempt,
+            &template.result_unit,
+            template.significant_digits,
+        ),
         correct_answers: correct_answers(&attempt),
         correct_option: attempt.correct_option,
         alternate_option: attempt.alternate_option,
@@ -274,6 +278,7 @@ pub fn do_delete_question_report(
 fn build_answer_slots_from_attempt(
     attempt: &PracticeAttemptRecord,
     result_unit: &str,
+    significant_digits: Option<u8>,
 ) -> Vec<PracticeAnswerSlot> {
     let closed = matches!(attempt.mode, TemplateMode::Closed);
 
@@ -288,6 +293,7 @@ fn build_answer_slots_from_attempt(
                 } else {
                     None
                 },
+                significant_digits,
             })
             .collect(),
         _ => vec![PracticeAnswerSlot {
@@ -298,6 +304,7 @@ fn build_answer_slots_from_attempt(
             } else {
                 None
             },
+            significant_digits,
         }],
     }
 }
@@ -416,6 +423,8 @@ mod tests {
             &super::super::practice::NextQuestionPayload {
                 topic_id: *topic_id,
                 point_value: 2,
+                mode: None,
+                set_id: None,
             },
         ).expect("serve question")
     }

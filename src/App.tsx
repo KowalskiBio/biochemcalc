@@ -19,6 +19,13 @@ import { SettingsPage } from "@/pages/settings-page"
 import { StudentLeaderboardPage } from "@/pages/student-leaderboard-page"
 import { StudentPracticePage } from "@/pages/student-practice-page"
 import { StudentSettingsPage } from "@/pages/student-settings-page"
+import { StudentStreakActivePage } from "@/pages/student-streak-active-page"
+import { StudentStreakResultsPage } from "@/pages/student-streak-results-page"
+import { StudentStreakSetupPage } from "@/pages/student-streak-setup-page"
+import { StudentTestModePage } from "@/pages/student-test-mode-page"
+import { StudentTestPage } from "@/pages/student-test-page"
+import { StudentTestResultsPage } from "@/pages/student-test-results-page"
+import { StudentTestStartPage } from "@/pages/student-test-start-page"
 import { TestyPage } from "@/pages/testy-page"
 import { TopicDetailPage } from "@/pages/topic-detail-page"
 import { TopicsPage } from "@/pages/topics-page"
@@ -63,6 +70,14 @@ function StudentRoutes() {
     <StudentShell>
       <Routes>
         <Route path="/" element={<StudentPracticePage />} />
+        <Route path="/test" element={<StudentTestModePage />} />
+        <Route path="/test/cvicny" element={<StudentTestStartPage />} />
+        <Route path="/test/cvicny/active" element={<StudentTestPage />} />
+        <Route path="/test/cvicny/results" element={<StudentTestResultsPage />} />
+        <Route path="/test/ucen" element={<StudentStreakSetupPage kind="apprentice" />} />
+        <Route path="/test/mistr" element={<StudentStreakSetupPage kind="master" />} />
+        <Route path="/test/streak/active" element={<StudentStreakActivePage />} />
+        <Route path="/test/streak/results" element={<StudentStreakResultsPage />} />
         <Route path="/leaderboard" element={<StudentLeaderboardPage />} />
         <Route path="/settings" element={<StudentSettingsPage />} />
         <Route path="*" element={<StudentPracticePage />} />

@@ -11,6 +11,15 @@ use crate::commands::practice::{
     SubmitAnswerPayload,
 };
 use crate::commands::reports::{do_report_question, ReportQuestionPayload};
+use crate::commands::streak_run::{
+    do_next_streak_question, do_start_streak_run, do_streak_leaderboard, do_streak_run_summary,
+    NextStreakQuestionPayload, StartStreakRunPayload, StreakLeaderboardEntry,
+    StreakLeaderboardPayload, StreakRunSummary, StreakRunSummaryPayload, StreakRunView,
+};
+use crate::commands::test_session::{
+    do_finish_test, do_start_test, FinishTestPayload, StartTestPayload, TestResults,
+    TestSessionView,
+};
 use crate::db::AppState;
 use crate::http::error::HttpError;
 use crate::http::middleware::CurrentUser;
@@ -59,6 +68,59 @@ async fn report_question(
     Ok(())
 }
 
+async fn start_test(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<StartTestPayload>,
+) -> Result<Json<TestSessionView>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_start_test(&conn, &user.id, &payload)?))
+}
+
+async fn finish_test(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<FinishTestPayload>,
+) -> Result<Json<TestResults>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_finish_test(&conn, &user.id, &payload)?))
+}
+
+async fn start_streak_run(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<StartStreakRunPayload>,
+) -> Result<Json<StreakRunView>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_start_streak_run(&conn, &user.id, &payload)?))
+}
+
+async fn next_streak_question(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<NextStreakQuestionPayload>,
+) -> Result<Json<PracticeQuestion>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_next_streak_question(&conn, &user.id, &payload)?))
+}
+
+async fn streak_run_summary(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<StreakRunSummaryPayload>,
+) -> Result<Json<StreakRunSummary>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_streak_run_summary(&conn, &user.id, &payload)?))
+}
+
+async fn streak_leaderboard(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<StreakLeaderboardPayload>,
+) -> Result<Json<Vec<StreakLeaderboardEntry>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_streak_leaderboard(&conn, &payload)?))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/topics", post(topics))
@@ -66,4 +128,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/submit-answer", post(submit_answer))
         .route("/leaderboard", post(leaderboard))
         .route("/report-question", post(report_question))
+        .route("/start-test", post(start_test))
+        .route("/finish-test", post(finish_test))
+        .route("/start-streak-run", post(start_streak_run))
+        .route("/next-streak-question", post(next_streak_question))
+        .route("/streak-run-summary", post(streak_run_summary))
+        .route("/streak-leaderboard", post(streak_leaderboard))
 }

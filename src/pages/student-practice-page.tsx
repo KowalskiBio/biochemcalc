@@ -22,7 +22,12 @@ import { extractErrorMessage } from "@/lib/http"
 import { resolveOptionsPrecision } from "@/lib/math-utils"
 import { QuestionTextRenderer } from "@/lib/render-question-text"
 import { studentApi } from "@/lib/student-api"
-import type { PracticeAnswerResult, PracticeQuestion, PracticeTopic } from "@/lib/types"
+import type {
+  PracticeAnswerResult,
+  PracticeQuestion,
+  PracticeTopic,
+  TemplateMode,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const
@@ -42,10 +47,12 @@ function parseAnswer(raw: string): number | null {
 /**
  * The student's practice generator: pick a topic and a difficulty, then
  * answer an endless stream of questions built from the teacher's own
- * templates with fresh values each time. Open and closed questions are mixed
- * at random, and every answer is graded on the server (see
- * `/api/student/submit-answer`) — the payload behind a question deliberately
- * contains no correct answer to peek at.
+ * templates with fresh values each time. Practice can be further narrowed to
+ * one specific set (sada) rather than the whole difficulty. Open and closed
+ * questions are mixed at random by default, or a student can restrict
+ * practice to just one via the question-type selector. Every answer is
+ * graded on the server (see `/api/student/submit-answer`) — the payload
+ * behind a question deliberately contains no correct answer to peek at.
  */
 export function StudentPracticePage() {
   const { toast } = useToast()
@@ -54,6 +61,10 @@ export function StudentPracticePage() {
   const [isLoadingTopics, setIsLoadingTopics] = useState(true)
   const [topicId, setTopicId] = useState<string>("")
   const [pointValue, setPointValue] = useState<string>("")
+  /** Empty string means "any set": drawn from all of them, the original behavior. */
+  const [setId, setSetId] = useState<string>("")
+  /** Empty string means "either": mixed at random, the original behavior. */
+  const [modeFilter, setModeFilter] = useState<"" | TemplateMode>("")
 
   const [question, setQuestion] = useState<PracticeQuestion | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -67,6 +78,24 @@ export function StudentPracticePage() {
   const selectedTopic = useMemo(
     () => topics.find((t) => t.id === topicId) ?? null,
     [topics, topicId],
+  )
+
+  const selectedDifficulty = useMemo(
+    () => selectedTopic?.difficulties.find((d) => String(d.pointValue) === pointValue) ?? null,
+    [selectedTopic, pointValue],
+  )
+
+  /**
+   * A specific set's mode is fixed by the teacher — never a separate random
+   * choice like "any set" is. Once one is picked, the question-type filter
+   * has nothing left to decide, so it must reflect (not contradict) that
+   * set's actual mode rather than risk silently AND-ing against it and
+   * producing a "no questions" error for a combination that was never a
+   * real choice to begin with.
+   */
+  const selectedSet = useMemo(
+    () => selectedDifficulty?.sets.find((s) => s.id === setId) ?? null,
+    [selectedDifficulty, setId],
   )
 
   useEffect(() => {
@@ -103,6 +132,7 @@ export function StudentPracticePage() {
       if (!stillAvailable) {
         setPointValue("")
       }
+      setSetId("")
       setQuestion(null)
       setResult(null)
     },
@@ -118,6 +148,10 @@ export function StudentPracticePage() {
       const next = await studentApi.nextQuestion({
         topicId,
         pointValue: Number(pointValue),
+        // A specific set's mode is already fixed; only "any set" leaves the
+        // question-type filter something to actually restrict.
+        mode: setId ? undefined : modeFilter || undefined,
+        setId: setId || undefined,
       })
       setQuestion(next)
       setOpenAnswers(next.answerSlots.map(() => ""))
@@ -130,7 +164,7 @@ export function StudentPracticePage() {
     } finally {
       setIsGenerating(false)
     }
-  }, [topicId, pointValue, toast])
+  }, [topicId, pointValue, modeFilter, setId, toast])
 
   const handleSubmit = useCallback(async () => {
     if (!question || result) return
@@ -234,7 +268,7 @@ export function StudentPracticePage() {
       </div>
 
       <Card>
-        <CardContent className="grid gap-4 pt-6 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end">
           <div className="space-y-2">
             <Label htmlFor="practice-topic">{cs.student.topicLabel}</Label>
             <Select value={topicId} onValueChange={handleTopicChange}>
@@ -257,6 +291,7 @@ export function StudentPracticePage() {
               value={pointValue}
               onValueChange={(value) => {
                 setPointValue(value)
+                setSetId("")
                 setQuestion(null)
                 setResult(null)
               }}
@@ -277,10 +312,59 @@ export function StudentPracticePage() {
             </Select>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="practice-set">{cs.student.setLabel}</Label>
+            <Select
+              value={setId || "any"}
+              onValueChange={(value) => {
+                setSetId(value === "any" ? "" : value)
+                setQuestion(null)
+                setResult(null)
+              }}
+              disabled={!selectedDifficulty}
+            >
+              <SelectTrigger id="practice-set">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">{cs.student.setAny}</SelectItem>
+                {(selectedDifficulty?.sets ?? []).map((set) => (
+                  <SelectItem key={set.id} value={set.id}>
+                    {set.name || cs.student.setIndex.replace("{index}", String(set.setIndex))}
+                    {" · "}
+                    {cs.student.questionCount.replace("{count}", String(set.questionCount))}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="practice-question-type">{cs.student.questionTypeLabel}</Label>
+            <Select
+              value={selectedSet ? selectedSet.mode : modeFilter || "either"}
+              onValueChange={(value) => {
+                setModeFilter(value === "either" ? "" : (value as TemplateMode))
+                setQuestion(null)
+                setResult(null)
+              }}
+              disabled={!!selectedSet}
+            >
+              <SelectTrigger id="practice-question-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="either">{cs.student.questionTypeEither}</SelectItem>
+                <SelectItem value="closed">{cs.student.questionTypeClosed}</SelectItem>
+                <SelectItem value="open">{cs.student.questionTypeOpen}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Button
             onClick={loadQuestion}
             disabled={!topicId || !pointValue || isGenerating}
-            className="sm:mb-0"
+            className="lg:mb-0"
           >
             {isGenerating ? (
               <Loader2 className="size-4 mr-2 animate-spin" />
@@ -374,6 +458,7 @@ export function StudentPracticePage() {
                                   value={value}
                                   unit={slot.unit ?? question.resultUnit}
                                   precision={optionsPrecision[slotIdx]}
+                                  significantDigits={slot.significantDigits}
                                 />
                               </span>
                             )
@@ -450,6 +535,7 @@ export function StudentPracticePage() {
                           <FormattedResult
                             value={answer.value}
                             unit={answer.unit ?? question.resultUnit}
+                            significantDigits={question.answerSlots[idx]?.significantDigits}
                           />
                         </span>
                       ))}
