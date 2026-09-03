@@ -1071,6 +1071,13 @@ export function SetDetailPage() {
             <DialogTitle>{cs.sets.configureClosed}</DialogTitle>
             <DialogDescription>{cs.sets.configureClosedDescription}</DialogDescription>
           </DialogHeader>
+          {set && set.mode !== "closed" && (
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 p-3 text-sm text-amber-800 dark:text-amber-200">
+              {cs.sets.modeMismatchWarning
+                .replace("{setMode}", cs.sets.openMode)
+                .replace("{generateMode}", cs.sets.closedQuestions)}
+            </div>
+          )}
           <div className="grid gap-6 py-4">
             <div className="space-y-2">
               <Label htmlFor="difficulty">{cs.sets.difficultyLabel}</Label>
@@ -1139,6 +1146,13 @@ export function SetDetailPage() {
             <DialogTitle>{cs.sets.configureOpen}</DialogTitle>
             <DialogDescription>{cs.sets.configureOpenDescription}</DialogDescription>
           </DialogHeader>
+          {set && set.mode !== "open" && (
+            <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 p-3 text-sm text-amber-800 dark:text-amber-200">
+              {cs.sets.modeMismatchWarning
+                .replace("{setMode}", cs.sets.closedMode)
+                .replace("{generateMode}", cs.sets.openQuestions)}
+            </div>
+          )}
           <div className="grid gap-6 py-4">
             <div className="space-y-2">
               <Label htmlFor="open-difficulty">{cs.sets.difficultyLabel}</Label>
@@ -1155,6 +1169,7 @@ export function SetDetailPage() {
                   <SelectItem value="easy">{cs.sets.openToleranceEasy}</SelectItem>
                   <SelectItem value="medium">{cs.sets.openToleranceMedium}</SelectItem>
                   <SelectItem value="hard">{cs.sets.openToleranceHard}</SelectItem>
+                  <SelectItem value="very_hard">{cs.sets.openToleranceVeryHard}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -1488,4 +1488,117 @@ mod tests {
             "raw unit notation leaked into open interval export:\n{output}"
         );
     }
+
+    /// Regression: when a template sets result_significant_digits, closed-option
+    /// values must render with EXACTLY that many significant digits — even when
+    /// the engine's significant-figures grid is finer than a legacy SD-based
+    /// refinement window. This locks the end-to-end invariant: exported closed
+    /// options show the configured sig-fig digit count, no more, no less.
+    #[test]
+    fn sig_figs_digit_count_survives_sd_fine_grid_in_closed_single() {
+        let template = make_template_with_sig("Vypočítejte hmotnost z [[X]] g.", 5);
+        let variant = Variant {
+            // Options on the 5-sig-fig grid around 23.476 — a legacy finer SD
+            // grid could have produced these exact values; the export must
+            // still render each with exactly 5 significant digits.
+            numeric_options: Some(vec![23.474, 23.475, 23.476, 23.477, 23.478]),
+            correct_option: Some(3),
+            ..make_closed_variant()
+        };
+        let precisions = [("X".to_string(), 1)].into();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(5),
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        // Every option must render exactly 5 significant digits in Czech format.
+        // 23.474 → 23,474 (5 sig figs), 23.475 → 23,475, etc.
+        assert!(
+            output.contains(" :r1 23,474 g"),
+            "option 1 must render 5 sig figs (23,474), got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r2 23,475 g"),
+            "option 2 must render 5 sig figs (23,475), got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r3 23,476 g"),
+            "option 3 must render 5 sig figs (23,476), got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r4 23,477 g"),
+            "option 4 must render 5 sig figs (23,477), got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r5 23,478 g"),
+            "option 5 must render 5 sig figs (23,478), got:\n{output}"
+        );
+    }
+
+    /// Same invariant for multi-answer closed questions: every option in every
+    /// target must render at the configured significant-digit count, even when
+    /// the engine's sig-fig grid is finer than a legacy SD-based window.
+    #[test]
+    fn sig_figs_digit_count_survives_sd_fine_grid_in_closed_multi() {
+        let template = make_template_with_sig("Vypočítejte [n mol][m g].", 5);
+        let mut variant = make_closed_variant();
+        variant.answers_data = Some(vec![
+            // Target 1: n (mol) — options on the 5-sig-fig grid
+            crate::models::AnswerField {
+                symbol: "n".to_string(),
+                value: 2.0,
+                unit: Some("mol".to_string()),
+                numeric_options: Some(vec![1.2345, 1.2346, 1.2347]),
+                correct_option: Some(2),
+                alternate_option: None,
+                interval_lo: None,
+                interval_hi: None,
+            },
+            // Target 2: m (g) — options on the 5-sig-fig grid
+            crate::models::AnswerField {
+                symbol: "m".to_string(),
+                value: 4.0,
+                unit: Some("g".to_string()),
+                numeric_options: Some(vec![3.4567, 3.4568, 3.4569]),
+                correct_option: Some(2),
+                alternate_option: None,
+                interval_lo: None,
+                interval_hi: None,
+            },
+        ]);
+        let precisions = [("X".to_string(), 1)].into();
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(5),
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        // Every option in every target must render exactly 5 significant digits.
+        // Target 1: 1.2345, 1.2346, 1.2347 (all 5 sig figs)
+        assert!(
+            output.contains(" :r1 1,2345 mol, 3,4567 g"),
+            "row 1 must render 5 sig figs for both targets, got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r2 1,2346 mol, 3,4568 g"),
+            "row 2 must render 5 sig figs for both targets, got:\n{output}"
+        );
+        assert!(
+            output.contains(" :r3 1,2347 mol, 3,4569 g"),
+            "row 3 must render 5 sig figs for both targets, got:\n{output}"
+        );
+    }
 }

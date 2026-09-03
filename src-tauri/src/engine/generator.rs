@@ -244,11 +244,16 @@ fn compute_answer(
 }
 
 /// SD fraction for open-answer intervals derived from the selected difficulty.
+///
+/// `very_hard` is open-mode only. There is no closed-mode equivalent tier,
+/// since `max_deviation_for_difficulty` (the closed/decoy-spread table below)
+/// is a separate, independent scale that this function never touches.
 fn sd_fraction_for_difficulty(difficulty: &str) -> f64 {
     match difficulty {
         "easy" => 0.50,
         "medium" => 0.30,
         "hard" => 0.10,
+        "very_hard" => 0.05,
         _ => 0.30,
     }
 }
@@ -342,19 +347,31 @@ fn display_rounding_unit(value: f64, max_deviation: f64) -> f64 {
 /// and the fallback spread all scale with the unit — and it mirrors exactly
 /// what `formatSignificantDigits` (JS) / `fmt_significant_cz` (Rust) render,
 /// so every view rounds the same server value the same way.
-fn display_grid(value: f64, max_deviation: f64, sig_digits: Option<u8>) -> f64 {
-    if let Some(n) = sig_digits.filter(|&n| n >= 1) {
-        if value.is_finite() && value != 0.0 {
-            let order = value.abs().log10().floor() as i32;
-            let unit = 10f64.powi(order - (n as i32 - 1));
-            // Guard both extremes: degenerate tiny magnitudes (overflowing
-            // powi towards zero) and astronomically large values.
-            if unit.is_finite() && unit > 0.0 {
-                return unit.max(1e-30);
-            }
-        }
+/// The significant-figures grid unit for `value` under `sig_digits`, or
+/// None when significant digits don't apply (unset, a zero digit count,
+/// or a degenerate value/grid). This is `display_grid`'s sig-figs path
+/// factored out so the closed-option rounding decisions below can ask
+/// whether the sig-figs grid is authoritative without re-deriving its
+/// guards differently.
+fn sig_figs_unit(value: f64, sig_digits: Option<u8>) -> Option<f64> {
+    let n = sig_digits.filter(|&n| n >= 1)?;
+    if !(value.is_finite() && value != 0.0) {
+        return None;
     }
-    display_rounding_unit(value, max_deviation)
+    let order = value.abs().log10().floor() as i32;
+    let unit = 10f64.powi(order - (n as i32 - 1));
+    // Guard both extremes: degenerate tiny magnitudes (overflowing
+    // powi towards zero) and astronomically large values.
+    if unit.is_finite() && unit > 0.0 {
+        Some(unit.max(1e-30))
+    } else {
+        None
+    }
+}
+
+fn display_grid(value: f64, max_deviation: f64, sig_digits: Option<u8>) -> f64 {
+    sig_figs_unit(value, sig_digits)
+        .unwrap_or_else(|| display_rounding_unit(value, max_deviation))
 }
 
 fn round_to_unit(value: f64, unit: f64) -> f64 {
@@ -415,6 +432,75 @@ fn effective_sd_window(constraint: &ResultConstraint) -> Option<f64> {
     constraint
         .sd_allowed
         .filter(|sd| sd.is_finite() && *sd > 0.0)
+}
+
+/// The absolute SD window that governs CLOSED-option distractor sampling
+/// (decoy admission, in-window samplers, fallback distractors). When the
+/// significant-figures grid is active but cannot fit enough distinct
+/// in-window offsets for the requested option count — 2*floor(sd/base -
+/// 0.5) < count - 1, the same k_max arithmetic generate_in_window_
+/// distractor uses — the closed-option SD window is disabled entirely:
+/// options fall back to the pre-SD spread-distractor behavior instead of
+/// failing generation or refining the grid past the teacher's sig-figs
+/// setting. Decided as a pure Option before any RNG is consumed, and
+/// identical to `effective_sd_window` whenever the sig-figs grid is
+/// inactive, so the no-sig-figs path keeps its byte-identical RNG sequence.
+fn closed_option_sd_window(
+    sd_window: Option<f64>,
+    sig_figs_active: bool,
+    base_rounding_unit: f64,
+    count: usize,
+) -> Option<f64> {
+    let sd = sd_window?;
+    if !sig_figs_active {
+        return Some(sd);
+    }
+    // Largest integer grid offset k with |k|*unit <= sd - unit/2 (mirrors
+    // generate_in_window_distractor): every non-correct option needs its
+    // own distinct non-zero offset, and the correct answer takes offset 0.
+    let k_span = (sd - base_rounding_unit * 0.5) / base_rounding_unit;
+    let usable_offsets = 2.0 * k_span.floor();
+    if usable_offsets < count as f64 - 1.0 {
+        return None;
+    }
+    Some(sd)
+}
+
+/// The rounding unit every closed-option value (correct, alternace,
+/// decoys, distractors) is quantized onto, shared by
+/// generate_numeric_options and fill_target_options so the two stay in
+/// parity by construction. When the sig-figs grid is active it is
+/// authoritative: the absolute-SD refinement must never produce a finer
+/// grid, or options would show a digit the teacher's sig-figs setting
+/// rounds away. Without sig figs, an active SD window still refines the
+/// display grid: each grid position must keep a half-unit safety margin
+/// on either side (k_span = sd/unit - 0.5), so the number of usable
+/// distinct non-zero offsets is 2*floor(sd/unit - 0.5). Dividing by count
+/// would leave fewer than count - 1 usable offsets for every even count
+/// (e.g. count=4 -> unit = sd/2 -> only 2 offsets, but 3 distractors are
+/// needed, so generation fails; count=2 -> k_span = 0.5 < 1 -> always
+/// fails). Dividing by count + 1 gives sd/unit = (count+1)/2, so
+/// 2*floor(sd/unit - 0.5) = 2*floor(count/2) >= count - 1 for every
+/// option count (verified for 2..=5: 2, 2, 4, 4). Round to the finer of
+/// the display grid and this 2*sd/(count+1) grid (display_grid clamps
+/// stay intact).
+fn closed_option_rounding_unit(
+    sd_window: Option<f64>,
+    base_rounding_unit: f64,
+    sig_figs_active: bool,
+    count: usize,
+) -> f64 {
+    match sd_window {
+        Some(sd) if !sig_figs_active => {
+            let sd_unit = 2.0 * sd / (count as f64 + 1.0);
+            if sd_unit < base_rounding_unit {
+                sd_unit
+            } else {
+                base_rounding_unit
+            }
+        }
+        _ => base_rounding_unit,
+    }
 }
 
 /// Sample one distractor inside the absolute ±sd window around
@@ -490,36 +576,23 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
 
-    // The absolute SD window: when the teacher set a finite positive
-    // sd_allowed, that absolute number becomes the single per-question
-    // authority for the closed option window. Decided here, before any RNG
-    // consumption, so the unset path keeps its exact byte-identical RNG
-    // sequence (the ghost regression).
-    let sd_window = effective_sd_window(constraint);
-
+    // The absolute SD window for closed-option distractor sampling: when the
+    // teacher set a finite positive sd_allowed, that absolute number becomes
+    // the single per-question authority for the closed option window —
+    // unless the sig-figs grid is active and cannot fit enough distinct
+    // in-window offsets for `count` options, in which case the window is
+    // disabled and the pre-SD spread behavior takes over. Decided here,
+    // before any RNG consumption, so the unset path keeps its exact
+    // byte-identical RNG sequence (the ghost regression).
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
-    // When an SD window is active the grid must be fine enough to fit `count`
-    // distinct steps inside the ±sd window. Each grid position must keep a
-    // half-unit safety margin on either side (k_span = sd/unit - 0.5), so the
-    // number of usable distinct non-zero offsets is 2*floor(sd/unit - 0.5).
-    // Dividing by count would leave fewer than count - 1 usable offsets for
-    // every even count (e.g. count=4 -> unit = sd/2 -> only 2 offsets, but 3
-    // distractors are needed, so generation fails; count=2 -> k_span = 0.5 < 1
-    // -> always fails). Dividing by count + 1 gives sd/unit = (count+1)/2, so
-    // 2*floor(sd/unit - 0.5) = 2*floor(count/2) >= count - 1 for every option
-    // count (verified for 2..=5: 2, 2, 4, 4). Round to the finer of the display
-    // grid and this finer 2*sd/(count+1) grid (display_grid clamps stay intact).
-    let rounding_unit = match sd_window {
-        Some(sd) => {
-            let sd_unit = 2.0 * sd / (count as f64 + 1.0);
-            if sd_unit < base_rounding_unit {
-                sd_unit
-            } else {
-                base_rounding_unit
-            }
-        }
-        None => base_rounding_unit,
-    };
+    let sig_figs_active = sig_figs_unit(correct, result_significant_digits).is_some();
+    let sd_window = closed_option_sd_window(
+        effective_sd_window(constraint),
+        sig_figs_active,
+        base_rounding_unit,
+        count,
+    );
+    let rounding_unit = closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
     let rounded_correct = round_to_unit(correct, rounding_unit);
     let close = |a: f64, b: f64| (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON);
 
@@ -985,23 +1058,21 @@ fn fill_target_options<R: Rng>(
     let max_deviation = spread_override
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
-    let sd_window = effective_sd_window(constraint);
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
+    let sig_figs_active = sig_figs_unit(correct, result_significant_digits).is_some();
     let count = role_order.len().max(1);
-    let rounding_unit = match sd_window {
-        Some(sd) => {
-            // Same finer-than-display-grid invariant as generate_numeric_options:
-            // 2*sd/(count+1) keeps 2*floor(sd/unit - 0.5) >= count - 1 usable
-            // distinct non-zero offsets inside the ±sd window for every count.
-            let sd_unit = 2.0 * sd / (count as f64 + 1.0);
-            if sd_unit < base_rounding_unit {
-                sd_unit
-            } else {
-                base_rounding_unit
-            }
-        }
-        None => base_rounding_unit,
-    };
+    // Same gated window and shared rounding-unit decision as
+    // generate_numeric_options: the sig-figs grid is authoritative when
+    // active, and the closed-option SD window is disabled (falling back
+    // to the pre-SD spread behavior) when that grid cannot fit enough
+    // distinct in-window offsets for `count` options.
+    let sd_window = closed_option_sd_window(
+        effective_sd_window(constraint),
+        sig_figs_active,
+        base_rounding_unit,
+        count,
+    );
+    let rounding_unit = closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
     let rounded_correct = round_to_unit(correct, rounding_unit);
 
     let rounded_alternate: Option<f64> = alternate_values
@@ -2217,13 +2288,17 @@ mod tests {
     }
 
     /// The tolerance interval for an open answer widens with easier
-    /// difficulty: easy ±50 %, medium ±30 %, hard ±10 % of the correct value.
+    /// difficulty: easy ±50 %, medium ±30 %, hard ±10 %, very_hard ±5 % of
+    /// the correct value. `very_hard` is a teacher-facing export tier only;
+    /// there is no closed-mode equivalent.
     #[test]
     fn open_interval_width_follows_difficulty() {
         let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
         let correct = 100.0;
 
-        for (difficulty, expected_half_width) in [("easy", 50.0), ("medium", 30.0), ("hard", 10.0)] {
+        for (difficulty, expected_half_width) in
+            [("easy", 50.0), ("medium", 30.0), ("hard", 10.0), ("very_hard", 5.0)]
+        {
             let (lo, hi) = open_interval(correct, &constraint, difficulty, None);
             assert!(
                 (lo - (correct - expected_half_width)).abs() < 1e-9,
@@ -3714,29 +3789,31 @@ mod tests {
     /// only 2*floor(count/2 - 0.5) usable offsets (2 for count=4, needing 3
     /// distractors, so generation always failed); the fixed 2*sd/(count+1)
     /// grid leaves 2*floor(count/2) = 4 offsets, so a 4-option pool resolves.
-    /// Here the display grid is 1.0 (123.456 with 3 sig digits) and the SD
-    /// shrink binds because 2*1.4/5 = 0.56 < 1.0.
+    /// Here the display grid is 0.01 (123.456 without sig digits) and the SD
+    /// shrink binds because 2*0.02/5 = 0.008 < 0.01. (With significant
+    /// digits configured the sig-figs grid wins over this refinement —
+    /// that combination is covered by the sig-figs tests above.)
     #[test]
     fn sd_even_count_shrink_binds_and_succeeds() {
-        let constraint = make_constraint_typed(None, None, Some(1.4), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.02), ConstraintType::Sd);
         let correct = 123.456;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (options, correct_pos, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, Some(3),
+                correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, None,
             )
             .expect(&format!("seed={seed}: generation failed"));
 
-            let unit = 2.0 * 1.4 / (4.0 + 1.0);
+            let unit = 2.0 * 0.02 / (4.0 + 1.0);
             let rounded_correct = round_to_unit(correct, unit);
             assert_eq!(options.len(), 4, "seed={seed}");
             for o in &options {
                 assert!(
-                    *o >= rounded_correct - 1.4 && *o <= rounded_correct + 1.4,
-                    "seed={seed}: option {o} outside the ±1.4 window: {options:?}"
+                    *o >= rounded_correct - 0.02 && *o <= rounded_correct + 0.02,
+                    "seed={seed}: option {o} outside the ±0.02 window: {options:?}"
                 );
                 assert!(
-                    (o - rounded_correct).abs() <= 1.4,
+                    (o - rounded_correct).abs() <= 0.02,
                     "seed={seed}: |option - rounded_correct| exceeds sd: {o}"
                 );
             }
@@ -3758,26 +3835,26 @@ mod tests {
     /// count=2 with a binding SD window must yield 2 distinct in-window
     /// options: the old 2*sd/count grid made k_span = 0.5 < 1 (generate_
     /// in_window_distractor returned None and generation failed); the fixed
-    /// 2*sd/(count+1) grid gives k_span = 1.0. Here 2*0.9/3 = 0.6 < 1.0, so
-    /// the shrink binds.
+    /// 2*sd/(count+1) grid gives k_span = 1.0. Here 2*0.012/3 = 0.008 < 0.01,
+    /// so the shrink binds.
     #[test]
     fn sd_count_two_shrink_binds_and_succeeds() {
-        let constraint = make_constraint_typed(None, None, Some(0.9), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.012), ConstraintType::Sd);
         let correct = 123.456;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
             let (options, correct_pos, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 2, false, None, Some(3),
+                correct, &[], None, &constraint, &mut rng, "medium", 2, false, None, None,
             )
             .expect(&format!("seed={seed}: generation failed"));
 
-            let unit = 2.0 * 0.9 / (2.0 + 1.0);
+            let unit = 2.0 * 0.012 / (2.0 + 1.0);
             let rounded_correct = round_to_unit(correct, unit);
             assert_eq!(options.len(), 2, "seed={seed}");
             for o in &options {
                 assert!(
-                    *o >= rounded_correct - 0.9 && *o <= rounded_correct + 0.9,
-                    "seed={seed}: option {o} outside the ±0.9 window: {options:?}"
+                    *o >= rounded_correct - 0.012 && *o <= rounded_correct + 0.012,
+                    "seed={seed}: option {o} outside the ±0.012 window: {options:?}"
                 );
             }
             assert!(
@@ -3950,6 +4027,388 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// How far `value` sits from the nearest step of the `unit` grid,
+    /// measured in grid steps. Zero (up to float noise) means the value is
+    /// on the grid.
+    fn grid_offset_steps(value: f64, unit: f64) -> f64 {
+        let steps = value / unit;
+        (steps.round() - steps).abs()
+    }
+
+    /// Significant digits + SD: when the teacher sets 5 significant digits
+    /// (a 0.001 grid at ~23.47), the significant-figures display grid is
+    /// authoritative for every closed-option value — correct, decoys and
+    /// random distractors alike. The absolute-SD refinement would like a
+    /// finer grid here (2*sd/(count+1) = 2*0.0028/6 ≈ 0.000933 < 0.001),
+    /// but options on that grid would show a digit the sig-figs formatter
+    /// rounds away. The sig-figs grid itself still fits the window
+    /// (2*floor(sd/0.001 - 0.5) = 4 ≥ count-1), so the window stays active
+    /// and every option must be a multiple of 0.001.
+    #[test]
+    fn sig_figs_grid_wins_over_finer_sd_grid() {
+        let constraint = make_constraint_typed(None, None, Some(0.0028), ConstraintType::Sd);
+        let correct = 23.4759;
+        let decoys = [
+            DecoyAnchor {
+                value: 23.4779, // rounds to 23.478, inside the ±0.0028 window
+                requested_count: 1,
+            },
+        ];
+        for seed in 0..20u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, _pos, _alt) = generate_numeric_options(
+                correct,
+                &decoys,
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                None,
+                Some(5),
+            )
+            .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
+            assert_eq!(options.len(), 5, "seed={seed}");
+            for o in &options {
+                assert!(
+                    grid_offset_steps(*o, 0.001) < 1e-6,
+                    "seed={seed}: option {o} is not on the 0.001 significant-figures grid: {options:?}"
+                );
+            }
+        }
+    }
+
+    /// Significant digits + a window too tight for the grid: with a 0.001
+    /// grid, count=5 and sd=0.0015 the grid offers only
+    /// 2*floor(0.0015/0.001 - 0.5) = 2 distinct in-window offsets — fewer
+    /// than the 4 distractors needed. Instead of erroring (or refining the
+    /// grid past the teacher's sig-figs setting), the closed-option SD
+    /// window must be disabled entirely: generation falls back to the pre-SD
+    /// spread-distractor behavior, still on the sig-figs grid.
+    #[test]
+    fn sd_window_disabled_when_sig_grid_cannot_fit_enough_offsets() {
+        let constraint = make_constraint_typed(None, None, Some(0.0015), ConstraintType::Sd);
+        let correct = 23.4759;
+        for seed in 0..20u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, _pos, _alt) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                None,
+                Some(5),
+            )
+            .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
+            assert_eq!(options.len(), 5, "seed={seed}");
+            for o in &options {
+                assert!(
+                    grid_offset_steps(*o, 0.001) < 1e-6,
+                    "seed={seed}: option {o} is not on the 0.001 significant-figures grid: {options:?}"
+                );
+            }
+            // The window really is disabled: the spread fallback draws
+            // deviations of at least 2% (≥ ~0.47 here), so every
+            // distractor lands far outside the old ±0.0015 window.
+            assert!(
+                options.iter().any(|o| (o - 23.476).abs() > 0.0015),
+                "seed={seed}: expected a spread distractor outside the disabled ±0.0015 window: {options:?}"
+            );
+        }
+    }
+
+    /// Multi-answer parity: the same two sig-figs rules through
+    /// generate_variant_with_targets — the shared row filler
+    /// (fill_target_options) must keep the sig-figs grid authoritative
+    /// over the SD refinement, and disable the closed-option SD window
+    /// when the grid can't fit enough distinct in-window offsets, exactly
+    /// like the single-answer path. With V fixed at 234.759 both targets
+    /// (n = 23.4759, m = 117.3795) sit on a 0.001 sig-figs grid.
+    #[test]
+    fn multi_answer_sig_figs_grid_wins_over_sd() {
+        let constants = HashMap::new();
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        let mut fixed_values = HashMap::new();
+        fixed_values.insert("V".to_string(), 234.759);
+
+        // Part 1: sd=0.0028 would refine the grid to ~0.000933; the
+        // 0.001 sig-figs grid must win (it fits: 2*floor(sd/0.001 - 0.5) = 4).
+        let constraint = make_constraint_typed(None, None, Some(0.0028), ConstraintType::Sd);
+        for seed in 0..10u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &[],
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &fixed_values,
+                &targets,
+                &[],
+                None,
+                false,
+                None,
+                Some(5),
+            )
+            .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
+            let answers = variant.answers_data.as_ref().unwrap();
+            for answer in answers {
+                for o in answer.numeric_options.as_ref().unwrap() {
+                    assert!(
+                        grid_offset_steps(*o, 0.001) < 1e-6,
+                        "seed={seed}: option {o} for target {} is not on the 0.001 sig-figs grid",
+                        answer.symbol
+                    );
+                }
+            }
+        }
+
+        // Part 2: sd=0.0015 leaves only 2 distinct in-window offsets on
+        // the 0.001 grid (4 needed) — the closed-option SD window must be
+        // disabled and generation fall back to spread distractors.
+        let constraint = make_constraint_typed(None, None, Some(0.0015), ConstraintType::Sd);
+        for seed in 0..10u64 {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &[],
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &fixed_values,
+                &targets,
+                &[],
+                None,
+                false,
+                None,
+                Some(5),
+            )
+            .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
+            let answers = variant.answers_data.as_ref().unwrap();
+            for answer in answers {
+                let options = answer.numeric_options.as_ref().unwrap();
+                for o in options {
+                    assert!(
+                        grid_offset_steps(*o, 0.001) < 1e-6,
+                        "seed={seed}: option {o} for target {} is not on the 0.001 sig-figs grid",
+                        answer.symbol
+                    );
+                }
+                assert!(
+                    options.iter().any(|o| (o - answer.value).abs() > 0.0015),
+                    "seed={seed}: expected a spread distractor outside the disabled window for target {}: {options:?}",
+                    answer.symbol
+                );
+            }
+        }
+    }
+
+    /// Open mode is untouched by the sig-figs clamp: with significant
+    /// digits AND an sd set, the accepted interval is still exactly
+    /// correct ± sd (open_interval never sees the sig-figs setting).
+    #[test]
+    fn open_mode_sd_tolerance_unchanged_by_sig_figs_clamp() {
+        let constants = HashMap::new();
+        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let mut fixed_values = HashMap::new();
+        fixed_values.insert("X".to_string(), 3.5);
+        let variant = generate_variant(
+            Uuid::new_v4(),
+            "X * 2",
+            &[],
+            &constants,
+            &constraint,
+            TemplateMode::Open,
+            99,
+            "medium",
+            5,
+            &fixed_values,
+            Some(5),
+        )
+        .unwrap();
+        assert!((variant.correct_answer - 7.0).abs() < 1e-9);
+        let lo = variant.interval_lo.expect("open mode sets interval");
+        let hi = variant.interval_hi.expect("open mode sets interval");
+        assert!(
+            (lo - 6.8).abs() < 1e-9,
+            "sig figs must not change the open-mode sd tolerance, got lo={lo}"
+        );
+        assert!(
+            (hi - 7.2).abs() < 1e-9,
+            "sig figs must not change the open-mode sd tolerance, got hi={hi}"
+        );
+    }
+
+    /// Regression pin (the "ghost"): with significant digits unset, the
+    /// option generation must stay byte-identical to the pre-sig-figs
+    /// behavior — with an SD window set and without one, single-answer
+    /// and multi-answer alike. The expected values were captured from the
+    /// unmodified generator; any RNG-sequence drift breaks this test.
+    #[test]
+    fn no_sig_figs_path_byte_identical() {
+        // Single answer, SD window active (sd 0.2, decoy inside the window).
+        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let decoys = [
+            DecoyAnchor {
+                value: 7.13,
+                requested_count: 1,
+            },
+        ];
+        for (seed, expected, expected_pos) in [
+            (
+                0u64,
+                vec![7.11, 7.09, 7.13, 7.0],
+                4u8,
+            ),
+            (7, vec![7.0, 6.92, 6.82, 7.13], 1),
+            (
+                42,
+                vec![7.13, 7.0200000000000005, 7.01, 7.0],
+                4,
+            ),
+        ] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, pos, alt) = generate_numeric_options(
+                7.0,
+                &decoys,
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                4,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(options, expected, "sd set, seed={seed}");
+            assert_eq!(pos, expected_pos, "sd set, seed={seed}");
+            assert_eq!(alt, None, "sd set, seed={seed}");
+        }
+
+        // Single answer, no SD window (range constraint, decoy with počet 2).
+        let constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
+        let decoys = [
+            DecoyAnchor {
+                value: 260.0,
+                requested_count: 2,
+            },
+        ];
+        for (seed, expected, expected_pos) in [
+            (
+                0u64,
+                vec![100.0, 85.42, 163.56, 96.76, 260.0],
+                1u8,
+            ),
+            (
+                7,
+                vec![268.98, 84.92, 100.0, 91.15, 260.0],
+                3,
+            ),
+            (
+                42,
+                vec![103.65, 100.0, 189.09, 260.0, 132.55],
+                2,
+            ),
+        ] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, pos, alt) = generate_numeric_options(
+                100.0,
+                &decoys,
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(options, expected, "sd unset, seed={seed}");
+            assert_eq!(pos, expected_pos, "sd unset, seed={seed}");
+            assert_eq!(alt, None, "sd unset, seed={seed}");
+        }
+
+        // Multi-answer (fill_target_options), SD window active: the row
+        // layout and every target's options must stay bit-identical.
+        let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
+        let constraint = make_constraint_typed(None, None, Some(0.5), ConstraintType::Sd);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        for (seed, expected_n, expected_m) in [
+            (
+                3u64,
+                vec![1.6400000000000001, 1.31, 1.75, 1.8, 1.95],
+                vec![8.84, 9.18, 9.3, 9.0, 9.370000000000001],
+            ),
+            (
+                11,
+                vec![3.54, 3.27, 3.5, 3.63, 3.5500000000000003],
+                vec![17.56, 17.86, 17.5, 17.61, 17.080000000000002],
+            ),
+        ] {
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 10; m = n * 5",
+                &variables,
+                &HashMap::new(),
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                &targets,
+                &[],
+                None,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+            let answers = variant.answers_data.as_ref().unwrap();
+            assert_eq!(
+                answers[0].numeric_options,
+                Some(expected_n.clone()),
+                "multi sd, seed={seed}"
+            );
+            assert_eq!(
+                answers[1].numeric_options,
+                Some(expected_m.clone()),
+                "multi sd, seed={seed}"
+            );
         }
     }
 }

@@ -55,8 +55,22 @@ interface QuestionRowState {
 // (closed) and sd_fraction_for_difficulty (open) tables — kept here only for
 // this dialog's placeholder text. Purely cosmetic: never sent to the
 // backend, which is always the source of truth for the actual value used.
-const CLOSED_SPREAD_PERCENT: Record<QuestionDifficulty, number> = { easy: 70, medium: 50, hard: 30 }
-const OPEN_SPREAD_PERCENT: Record<QuestionDifficulty, number> = { easy: 50, medium: 30, hard: 10 }
+//
+// `very_hard` is an open-only tier (see `QuestionDifficulty`); the closed
+// entry below is unreachable from the UI (no closed selector offers it) and
+// exists only so this Record stays exhaustive over the shared type.
+const CLOSED_SPREAD_PERCENT: Record<QuestionDifficulty, number> = {
+  easy: 70,
+  medium: 50,
+  hard: 30,
+  very_hard: 30,
+}
+const OPEN_SPREAD_PERCENT: Record<QuestionDifficulty, number> = {
+  easy: 50,
+  medium: 30,
+  hard: 10,
+  very_hard: 5,
+}
 
 function defaultSpreadPercentFor(mode: TemplateMode, difficulty: QuestionDifficulty): number {
   return mode === "closed" ? CLOSED_SPREAD_PERCENT[difficulty] : OPEN_SPREAD_PERCENT[difficulty]
