@@ -111,6 +111,7 @@ function QuestionCard({
                             unit={slot.unit ?? question.resultUnit}
                             precision={optionsPrecision[slotIdx]}
                             significantDigits={slot.significantDigits}
+                            notation={question.forceScientific ? "scientific" : "normal"}
                           />
                         </span>
                       )

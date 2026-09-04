@@ -1090,8 +1090,20 @@ export function resolveOptionsPrecision(
 }
 
 /** Below this magnitude a fixed-point string has more than one leading zero
- * after the decimal point — `0.1` is acceptable, `0.01` is not. */
+ * after the decimal point — `0.1` is acceptable, `0.01` is not. A styling
+ * preference for `notation === undefined` (auto) only — see
+ * {@link SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD} for the unconditional floor. */
 const SCIENTIFIC_LOWER_THRESHOLD = 0.1
+
+/**
+ * Below this magnitude, no fixed-point rendering is legitimate no matter
+ * what the caller asked for — an atomic mass (~1e-22) at, say, 4 significant
+ * digits would otherwise print as 20+ leading decimal zeros instead of
+ * scientific notation, even under an explicit `notation: "normal"` ("not
+ * scientific") choice. `SCIENTIFIC_LOWER_THRESHOLD` is a style preference
+ * `"normal"` may override; this is a correctness floor it may not.
+ */
+const SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD = 1e-6
 
 export function formatSignificantDigits(
   value: number | undefined | null,
@@ -1109,17 +1121,15 @@ export function formatSignificantDigits(
   const wantScientific = notation === "scientific" || (notation == null && forceScientific)
   const wantNormal = notation === "normal"
 
-  // Scientific notation when forced, or (for auto/normal) when the value is
-  // too small/large. "normal" suppresses the threshold triggers but keeps the
-  // zero-collapse fallback so a tiny value doesn't silently read "0".
+  // Scientific notation when forced, when the value is too large or would
+  // print as a wall of decimal zeros (both unconditional — never legitimate
+  // as plain decimal regardless of notation), or — for auto only — merely
+  // too small for stylistic readability. "normal" suppresses only that last,
+  // stylistic trigger.
   const tooSmall = abs < SCIENTIFIC_LOWER_THRESHOLD
   const tooLarge = abs >= SCIENTIFIC_UPPER_THRESHOLD
-  const useScientific =
-    wantScientific ||
-    (!wantNormal && (tooSmall || tooLarge)) ||
-    (wantNormal &&
-      tooSmall &&
-      value.toFixed(Math.max(0, sigDigits - 1 - Math.floor(Math.log10(abs)))) === "0")
+  const wallOfZeros = abs < SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD
+  const useScientific = wantScientific || tooLarge || wallOfZeros || (!wantNormal && tooSmall)
 
   if (useScientific) {
     const mantissa = value / 10 ** Math.floor(Math.log10(abs))
@@ -1152,13 +1162,14 @@ export function formatNumberMaxDecimals(
   const wantScientific = notation === "scientific" || (notation == null && forceScientific)
   const wantNormal = notation === "normal"
 
-  // "normal" suppresses the magnitude thresholds but keeps the zero-collapse
-  // fallback so a tiny value doesn't silently read "0".
+  // Rounding to zero or being too large to read are unconditional — never
+  // legitimate as plain decimal regardless of notation. "normal" suppresses
+  // only the "merely small" stylistic threshold.
   const wouldRoundToZero = rounded === 0 && value !== 0
   const tooLarge = Math.abs(rounded) >= SCIENTIFIC_UPPER_THRESHOLD
   const tooSmall = value !== 0 && Math.abs(value) < SCIENTIFIC_LOWER_THRESHOLD
 
-  if (wantScientific || wouldRoundToZero || (!wantNormal && (tooLarge || tooSmall))) {
+  if (wantScientific || wouldRoundToZero || tooLarge || (!wantNormal && tooSmall)) {
     return toScientificNotation(value)
   }
   return rounded.toString()

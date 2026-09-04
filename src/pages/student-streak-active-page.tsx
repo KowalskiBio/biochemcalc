@@ -246,6 +246,7 @@ export function StudentStreakActivePage() {
                                 unit={slot.unit ?? question.resultUnit}
                                 precision={optionsPrecision[slotIdx]}
                                 significantDigits={slot.significantDigits}
+                                notation={question.forceScientific ? "scientific" : "normal"}
                               />
                             </span>
                           )
@@ -321,6 +322,7 @@ export function StudentStreakActivePage() {
                           value={answer.value}
                           unit={answer.unit ?? question.resultUnit}
                           significantDigits={question.answerSlots[idx]?.significantDigits}
+                          notation={question.forceScientific ? "scientific" : "normal"}
                         />
                       </span>
                     ))}

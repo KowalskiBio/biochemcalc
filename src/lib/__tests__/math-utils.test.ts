@@ -775,6 +775,10 @@ describe("notation parameter", () => {
       expect(formatNumberMaxDecimals(1e-7, 2, false, "normal")).toBe("1.00×10^-7")
     })
 
+    it("'normal' still switches to scientific for values too large to read as decimal", () => {
+      expect(formatNumberMaxDecimals(1.52e24, 2, false, "normal")).toBe("1.52×10^24")
+    })
+
     it("'auto' uses threshold-based behavior", () => {
       expect(formatNumberMaxDecimals(0.01, 2, false, "auto")).toBe("1.00×10^-2")
       expect(formatNumberMaxDecimals(0.1, 2, false, "auto")).toBe("0.1")
@@ -795,6 +799,22 @@ describe("notation parameter", () => {
 
     it("'normal' keeps plain decimal for small values that do not round to zero", () => {
       expect(formatSignificantDigits(1e-5, 3, false, "normal")).toBe("0.0000100")
+    })
+
+    it("'normal' keeps plain decimal for the reported bug's own values (0.009-0.16 mol/l)", () => {
+      expect(formatSignificantDigits(0.013, 2, false, "normal")).toBe("0.013")
+      expect(formatSignificantDigits(0.14, 2, false, "normal")).toBe("0.14")
+      expect(formatSignificantDigits(0.009, 2, false, "normal")).toBe("0.0090")
+      expect(formatSignificantDigits(0.012, 2, false, "normal")).toBe("0.012")
+      expect(formatSignificantDigits(0.016, 2, false, "normal")).toBe("0.016")
+    })
+
+    it("'normal' still switches to scientific for a wall-of-zeros value (atomic mass scale)", () => {
+      expect(formatSignificantDigits(3.44e-22, 4, false, "normal")).toBe("3.440×10^-22")
+    })
+
+    it("'normal' still switches to scientific for values too large to read as decimal", () => {
+      expect(formatSignificantDigits(1.524e25, 3, false, "normal")).toBe("1.52×10^25")
     })
 
     it("'auto' uses threshold-based behavior", () => {

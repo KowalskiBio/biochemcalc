@@ -762,6 +762,10 @@ export interface PracticeQuestion {
   assignedStrings: Record<string, string>
   constants: Record<string, number>
   answerSlots: PracticeAnswerSlot[]
+  /** The template's own "always scientific" toggle — `false` means the
+   * teacher explicitly wants plain decimal (`12300`, not `1.23×10⁴`) for
+   * every option and revealed answer, not just a magnitude-based default. */
+  forceScientific: boolean
 }
 
 export interface PracticeCorrectAnswer {

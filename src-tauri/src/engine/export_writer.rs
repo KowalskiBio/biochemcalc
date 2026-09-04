@@ -24,11 +24,22 @@ const SCIENTIFIC_UPPER_THRESHOLD: f64 = 1e6;
 
 /// Below this magnitude a fixed-point string has more than one leading zero
 /// after the decimal point — `0,1` is acceptable, `0,01` is not. Mirrors
-/// `SCIENTIFIC_LOWER_THRESHOLD` in `src/lib/math-utils.ts`; without this,
-/// atomic-mass-scale answers (~1e-22) print as a wall of decimal zeros
-/// instead of scientific notation, even though the on-screen preview
-/// already switches to scientific for the same value via that JS constant.
+/// `SCIENTIFIC_LOWER_THRESHOLD` in `src/lib/math-utils.ts`. This is a styling
+/// preference for `Auto` mode only — see `SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD`
+/// below for the separate, unconditional correctness floor.
 const SCIENTIFIC_LOWER_THRESHOLD: f64 = 0.1;
+
+/// Below this magnitude, a sig-fig-formatted decimal has so many leading
+/// zeros that it stops being a legitimate "not scientific" rendering no
+/// matter what the caller asked for. An atomic mass (~1e-22) at, say, 4
+/// significant digits never rounds to a literal "0" (so the ordinary
+/// zero-collapse fallback in `fmt_variable_value` never fires), yet printing
+/// 20+ leading zeros is exactly the "wall of decimal zeros" that fallback
+/// exists to avoid. Deliberately far below `SCIENTIFIC_LOWER_THRESHOLD` (an
+/// `Auto`-mode readability preference) — this is a correctness floor, so it
+/// applies even under an explicit `Notation::Normal` ("not scientific")
+/// choice, in `fmt_option_value` only (see its own doc comment for why).
+const SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD: f64 = 1e-6;
 
 /// Czech-formatted scientific notation with an HTML superscript exponent, the
 /// same shape the UI renders and the same markup the exported question text
@@ -147,28 +158,28 @@ fn fmt_variable_value(
         .map(|n| n.saturating_sub(1))
         .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
     let want_scientific = notation == Notation::Scientific;
-    let want_normal = notation == Notation::Normal;
     if want_scientific && value != 0.0 && value.is_finite() {
         return fmt_scientific_cz(value, mantissa_decimals);
     }
+    // Regardless of notation — even an explicit `Normal` ("not scientific")
+    // choice — a value that would either display as a misleading literal
+    // "0" or need more decimal digits than an `f64` actually carries (a
+    // huge value's fixed-point string is mostly float-representation noise
+    // past ~15-17 significant digits) is never a legitimate plain-decimal
+    // rendering. `Normal` only ever suppresses the *moderate*-magnitude
+    // auto-threshold below (`fmt_option_value`'s `SCIENTIFIC_LOWER_THRESHOLD`
+    // check), not this correctness escape hatch.
     match sig_digits {
         Some(n) => {
             let formatted = fmt_significant_cz(value, n);
             let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
-            // "normal" suppresses the threshold triggers but keeps the
-            // zero-collapse fallback so a tiny value doesn't read "0".
-            if (want_scientific || (!want_normal && ((rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD)))
-                && value != 0.0
-                && value.is_finite()
-            {
+            let degenerate = (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD;
+            if degenerate && value != 0.0 && value.is_finite() {
                 return fmt_scientific_cz(value, mantissa_decimals);
             }
             formatted
         }
         None => {
-            if want_normal {
-                return fmt_value_cz(value, precision);
-            }
             let formatted = fmt_value_cz(value, precision);
             let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
             if (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD {
@@ -179,18 +190,28 @@ fn fmt_variable_value(
     }
 }
 
-/// Format one multiple-choice option: same as `fmt_variable_value`, but also
-/// switches to scientific notation for small-but-nonzero values below
-/// `SCIENTIFIC_LOWER_THRESHOLD` that wouldn't otherwise round to exactly
-/// zero. An atomic mass (~1e-22) formatted with, say, 4 significant digits
-/// never rounds to "0" at any precision `fmt_variable_value` would try, so
-/// its existing zero-collapse fallback never fires and it would otherwise
-/// print as a wall of decimal zeros. Scoped to options only — not reused for
-/// open-answer interval bounds, which already have their own joint "both
-/// bounds must stay distinguishable" precision logic and intentionally keep
-/// small-but-ordinary values (e.g. `0,08..0,15`) as plain decimals.
+/// Format one multiple-choice option: same as `fmt_variable_value`, with two
+/// magnitude-based overrides layered on top. Scoped to options only — not
+/// reused for open-answer interval bounds, which already have their own
+/// joint "both bounds must stay distinguishable" precision logic and
+/// intentionally keep small-but-ordinary values (e.g. `0,08..0,15`) as plain
+/// decimals.
+///
+/// - In `Auto` mode only, values below `SCIENTIFIC_LOWER_THRESHOLD` switch to
+///   scientific as a readability preference — an explicit `Notation::Normal`
+///   (the teacher's own "not scientific" choice) or `Notation::Scientific`
+///   must never be second-guessed by it.
+/// - Below `SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD`, scientific notation applies
+///   regardless of notation: an atomic mass (~1e-22) formatted with, say, 4
+///   significant digits never rounds to "0" at any precision
+///   `fmt_variable_value` would try, so its zero-collapse fallback never
+///   fires and it would otherwise print as a wall of decimal zeros — a
+///   correctness floor, not a style choice.
 fn fmt_option_value(value: f64, precision: u8, sig_digits: Option<u8>, notation: Notation) -> String {
-    if notation != Notation::Scientific && value != 0.0 && value.is_finite() && value.abs() < SCIENTIFIC_LOWER_THRESHOLD {
+    let auto_below_threshold =
+        notation == Notation::Auto && value.abs() < SCIENTIFIC_LOWER_THRESHOLD;
+    let wall_of_zeros = value.abs() < SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD;
+    if (auto_below_threshold || wall_of_zeros) && value != 0.0 && value.is_finite() {
         let mantissa_decimals = sig_digits
             .map(|n| n.saturating_sub(1))
             .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
@@ -385,10 +406,13 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
         );
         out.push_str(&format!("{} ({} b)\n\n", rendered, q.template.point_value));
 
+        // `force_scientific` is the teacher's own binary choice (`12300` vs
+        // `1.23×10⁴`), not a hint for an auto-magnitude heuristic — "off"
+        // must mean plain decimal outright, not "decimal unless small".
         let result_notation = if q.force_scientific {
             Notation::Scientific
         } else {
-            Notation::Auto
+            Notation::Normal
         };
 
         match q.mode {
@@ -723,14 +747,14 @@ mod tests {
         );
     }
 
-    /// Each closed option is its own line, so — unlike interval bounds,
-    /// which must stay jointly readable on one `lo..hi` line — one option
-    /// crossing the lower threshold and a sibling option not crossing it is
-    /// fine: each is formatted independently, matching how `FormattedResult`
-    /// (`src/components/ui/formatted-result.tsx`) renders each option in the
-    /// on-screen preview.
+    /// `force_scientific: false` is the teacher's explicit "not scientific"
+    /// choice (`12300`, not `1.23×10⁴`) — it must hold for every option
+    /// regardless of that option's own magnitude. Previously a below-0.1
+    /// option silently flipped to scientific notation anyway (mixing
+    /// `7,96×10⁻²` alongside a sibling `0,15`), contradicting the setting the
+    /// teacher actually chose; this is the regression test for that fix.
     #[test]
-    fn closed_options_below_the_lower_threshold_use_scientific_notation_independently() {
+    fn closed_options_stay_decimal_when_force_scientific_is_off_regardless_of_magnitude() {
         let template = make_template("Vypočítejte koncentraci.");
         let variant = Variant {
             numeric_options: Some(vec![0.0796, 0.1478]),
@@ -750,8 +774,12 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(" :r1 7,96×10<sup>-2</sup>"),
-            "expected the below-threshold option in scientific notation, got:\n{output}"
+            !output.contains("×10"),
+            "no option should use scientific notation when force_scientific is off:\n{output}"
+        );
+        assert!(
+            output.contains(" :r1 0,08 "),
+            "expected the below-threshold option as a plain decimal, got:\n{output}"
         );
         assert!(
             output.contains(" :r2 0,15 "),

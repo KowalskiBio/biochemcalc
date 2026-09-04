@@ -95,6 +95,7 @@ export function QuestionReviewCard({ index, item }: { index: number; item: TestR
                             unit={slot.unit ?? question.resultUnit}
                             precision={optionsPrecision[slotIdx]}
                             significantDigits={slot.significantDigits}
+                            notation={question.forceScientific ? "scientific" : "normal"}
                           />
                         </span>
                       )
@@ -142,6 +143,7 @@ export function QuestionReviewCard({ index, item }: { index: number; item: TestR
                       value={correctAnswer.value}
                       unit={correctAnswer.unit ?? question.resultUnit}
                       significantDigits={question.answerSlots[idx]?.significantDigits}
+                      notation={question.forceScientific ? "scientific" : "normal"}
                     />
                   </span>
                 ))}

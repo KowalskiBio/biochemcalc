@@ -905,7 +905,7 @@ export function SetDetailPage() {
                                               unit={a.unit}
                                               precision={optionsPrecision[idx]}
                                               significantDigits={sigDigits}
-                                              forceScientific={forceSci}
+                                              notation={forceSci ? "scientific" : "normal"}
                                             />
                                           </span>
                                         )
@@ -944,7 +944,7 @@ export function SetDetailPage() {
                                       unit={tmpl.resultUnit}
                                       precision={optionsPrecision}
                                       significantDigits={sigDigits}
-                                      forceScientific={forceSci}
+                                      notation={forceSci ? "scientific" : "normal"}
                                     />
                                   </span>
                                 </div>
@@ -970,7 +970,7 @@ export function SetDetailPage() {
                                     value={a.value}
                                     unit={a.unit}
                                     significantDigits={sigDigits}
-                                    forceScientific={forceSci}
+                                    notation={forceSci ? "scientific" : "normal"}
                                   />
                                   {a.intervalLo != null && a.intervalHi != null && (
                                     <span className="ml-1 text-xs text-muted-foreground">
@@ -978,13 +978,13 @@ export function SetDetailPage() {
                                       <FormattedResult
                                         value={a.intervalLo}
                                         significantDigits={sigDigits}
-                                        forceScientific={forceSci}
+                                        notation={forceSci ? "scientific" : "normal"}
                                       />
                                       –
                                       <FormattedResult
                                         value={a.intervalHi}
                                         significantDigits={sigDigits}
-                                        forceScientific={forceSci}
+                                        notation={forceSci ? "scientific" : "normal"}
                                       />
                                       )
                                     </span>
@@ -999,7 +999,7 @@ export function SetDetailPage() {
                                 value={recomputed?.ok ? recomputed.value : variant?.correctAnswer}
                                 unit={tmpl.resultUnit}
                                 significantDigits={sigDigits}
-                                forceScientific={forceSci}
+                                notation={forceSci ? "scientific" : "normal"}
                               />
                               {recomputed?.ok && hasMismatch && (
                                 <span className="ml-2 text-xs text-amber-600">

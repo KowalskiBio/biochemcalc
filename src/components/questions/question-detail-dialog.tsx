@@ -2018,7 +2018,7 @@ export function QuestionDetailDialog({
                                     <FormattedResult
                                       value={a.value}
                                       precision={displayPrecision}
-                                      forceScientific={forceScientific}
+                                      notation={forceScientific ? "scientific" : "normal"}
                                       significantDigits={
                                         templateDetails?.template.significantDigits
                                       }
@@ -2032,7 +2032,7 @@ export function QuestionDetailDialog({
                                 <FormattedResult
                                   value={sampleVariant.correctAnswer}
                                   precision={displayPrecision}
-                                  forceScientific={forceScientific}
+                                  notation={forceScientific ? "scientific" : "normal"}
                                   significantDigits={templateDetails?.template.significantDigits}
                                   unit={templateDetails.template.resultUnit}
                                 />
@@ -2054,7 +2054,7 @@ export function QuestionDetailDialog({
                             <FormattedResult
                               value={templateDetails.template.numericAnswer}
                               precision={displayPrecision}
-                              forceScientific={forceScientific}
+                              notation={forceScientific ? "scientific" : "normal"}
                               significantDigits={templateDetails?.template.significantDigits}
                               unit={templateDetails.template.resultUnit}
                             />
@@ -2132,7 +2132,7 @@ export function QuestionDetailDialog({
                                           <FormattedResult
                                             value={a.value}
                                             precision={mockResult.resultPrecision}
-                                            forceScientific={forceScientific}
+                                            notation={forceScientific ? "scientific" : "normal"}
                                             significantDigits={
                                               templateDetails?.template.significantDigits
                                             }
@@ -2146,7 +2146,7 @@ export function QuestionDetailDialog({
                                       <FormattedResult
                                         value={mockResult.value}
                                         precision={mockResult.resultPrecision}
-                                        forceScientific={forceScientific}
+                                        notation={forceScientific ? "scientific" : "normal"}
                                         significantDigits={
                                           templateDetails?.template.significantDigits
                                         }

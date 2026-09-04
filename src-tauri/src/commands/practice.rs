@@ -168,6 +168,13 @@ pub struct PracticeQuestion {
     /// `list_constants`.
     pub constants: HashMap<String, f64>,
     pub answer_slots: Vec<PracticeAnswerSlot>,
+    /// The template's own "always scientific" toggle. `false` means the
+    /// teacher explicitly wants plain decimal (`12300`, not `1.23×10⁴`) —
+    /// the frontend must honor that outright rather than falling back to a
+    /// magnitude-based heuristic that would still flip small values (e.g.
+    /// `0.012`) to scientific notation against the teacher's own setting.
+    #[serde(default)]
+    pub force_scientific: bool,
 }
 
 /// The verdict, returned once and only once per attempt.
@@ -409,6 +416,7 @@ pub(crate) fn build_question(
         assigned_strings: variant.assigned_strings.clone(),
         constants: constants_for_rendering(conn, &constants)?,
         answer_slots: answer_slots(&template.result_unit, mode, &variant, template.significant_digits),
+        force_scientific: template.force_scientific,
     })
 }
 
