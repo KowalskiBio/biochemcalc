@@ -20,7 +20,17 @@
 //!   empty, since nothing can issue an invite code before any account
 //!   exists. Safe to leave set permanently — it's a no-op once any account
 //!   exists.
+//! - `BIOCHEMCALC_SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` /
+//!   `_FROM_ADDRESS` / `_FROM_NAME` — optional. Password-reset emails are
+//!   sent via SMTP if host/username/password/from-address are all set,
+//!   otherwise reset links are logged instead (see `src/email.rs`).
+//!   `_PORT` defaults to `587`, `_FROM_NAME` to `BiochemCalc`.
+//! - `BIOCHEMCALC_PUBLIC_URL` — the externally-reachable origin used to
+//!   build password-reset links (e.g. `http://147.251.22.180:8080`).
+//!   Defaults to `http://{BIOCHEMCALC_BIND_ADDR}`, which is only correct for
+//!   direct access with no reverse proxy in front — see deploy notes.
 
+use biochemcalc_lib::email::SmtpConfig;
 use biochemcalc_lib::http::{run_server, ServerConfig};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -79,12 +89,34 @@ async fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("../dist"));
 
+    let smtp = match (
+        std::env::var("BIOCHEMCALC_SMTP_HOST").ok(),
+        std::env::var("BIOCHEMCALC_SMTP_USERNAME").ok(),
+        std::env::var("BIOCHEMCALC_SMTP_PASSWORD").ok(),
+        std::env::var("BIOCHEMCALC_SMTP_FROM_ADDRESS").ok(),
+    ) {
+        (Some(host), Some(username), Some(password), Some(from_address)) => Some(SmtpConfig {
+            host,
+            port: env_or("BIOCHEMCALC_SMTP_PORT", "587")
+                .parse()
+                .unwrap_or(587),
+            username,
+            password,
+            from_address,
+            from_name: env_or("BIOCHEMCALC_SMTP_FROM_NAME", "BiochemCalc"),
+        }),
+        _ => None,
+    };
+    let public_base_url = env_or("BIOCHEMCALC_PUBLIC_URL", &format!("http://{bind_addr}"));
+
     let config = ServerConfig {
         bind_addr,
         data_dir,
         dist_dir,
         admin_username: std::env::var("BIOCHEMCALC_ADMIN_USERNAME").ok(),
         admin_password: std::env::var("BIOCHEMCALC_ADMIN_PASSWORD").ok(),
+        smtp,
+        public_base_url,
     };
 
     eprintln!(

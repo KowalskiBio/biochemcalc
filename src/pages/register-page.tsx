@@ -17,13 +17,14 @@ export function RegisterPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [inviteCode, setInviteCode] = useState("")
+  const [email, setEmail] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
     try {
-      await register(username.trim(), password, inviteCode.trim())
+      await register(username.trim(), password, inviteCode.trim(), email.trim() || undefined)
       navigate("/", { replace: true })
     } catch (error) {
       toast({
@@ -66,6 +67,18 @@ export function RegisterPage() {
                 placeholder={cs.auth.usernamePlaceholder}
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">{cs.auth.emailLabel}</Label>
+              <Input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={cs.auth.emailPlaceholder}
+              />
+              <p className="text-xs text-muted-foreground">{cs.auth.emailOptionalHint}</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">{cs.auth.passwordLabel}</Label>

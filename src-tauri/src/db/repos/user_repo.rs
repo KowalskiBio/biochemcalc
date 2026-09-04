@@ -15,6 +15,7 @@ pub struct UserRecord {
     pub role: Role,
     pub created_at: DateTime<Utc>,
     pub protected: bool,
+    pub email: Option<String>,
 }
 
 impl UserRecord {
@@ -25,6 +26,7 @@ impl UserRecord {
             role: self.role,
             created_at: self.created_at,
             protected: self.protected,
+            email: self.email,
         }
     }
 }
@@ -34,7 +36,7 @@ pub struct UserRepo;
 impl UserRepo {
     pub fn insert(conn: &Connection, user: &UserRecord) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, role, created_at, protected) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO users (id, username, password_hash, role, created_at, protected, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 user.id,
                 user.username,
@@ -42,15 +44,25 @@ impl UserRepo {
                 user.role.as_str(),
                 user.created_at.to_rfc3339(),
                 user.protected,
+                user.email,
             ],
         )
-        .map_err(|e| match e {
+        .map_err(|e| match &e {
+            rusqlite::Error::SqliteFailure(err, Some(msg))
+                if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                if msg.contains("users.email") {
+                    DbError::Conflict("This email is already registered".into())
+                } else {
+                    DbError::Conflict(format!("Username {} is already taken", user.username))
+                }
+            }
             rusqlite::Error::SqliteFailure(err, _)
                 if err.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
                 DbError::Conflict(format!("Username {} is already taken", user.username))
             }
-            other => DbError::Sqlite(other),
+            _ => DbError::Sqlite(e),
         })?;
         Ok(())
     }
@@ -60,8 +72,23 @@ impl UserRepo {
         username: &str,
     ) -> Result<Option<UserRecord>, DbError> {
         let result = conn.query_row(
-            "SELECT id, username, password_hash, role, created_at, protected FROM users WHERE username = ?1 COLLATE NOCASE",
+            "SELECT id, username, password_hash, role, created_at, protected, email FROM users WHERE username = ?1 COLLATE NOCASE",
             params![username],
+            row_to_record,
+        );
+        match result {
+            Ok(record) => Ok(Some(record)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(DbError::Sqlite(e)),
+        }
+    }
+
+    /// Case-insensitive, like `find_by_username`. Used only by the
+    /// forgot-password flow — see `commands::auth::do_forgot_password`.
+    pub fn find_by_email(conn: &Connection, email: &str) -> Result<Option<UserRecord>, DbError> {
+        let result = conn.query_row(
+            "SELECT id, username, password_hash, role, created_at, protected, email FROM users WHERE email = ?1 COLLATE NOCASE",
+            params![email],
             row_to_record,
         );
         match result {
@@ -73,7 +100,7 @@ impl UserRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<UserRecord, DbError> {
         conn.query_row(
-            "SELECT id, username, password_hash, role, created_at, protected FROM users WHERE id = ?1",
+            "SELECT id, username, password_hash, role, created_at, protected, email FROM users WHERE id = ?1",
             params![id],
             row_to_record,
         )
@@ -90,7 +117,7 @@ impl UserRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<UserRecord>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, username, password_hash, role, created_at, protected FROM users ORDER BY created_at DESC",
+            "SELECT id, username, password_hash, role, created_at, protected, email FROM users ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], row_to_record)?;
         rows.map(|r| r.map_err(DbError::Sqlite)).collect()
@@ -129,6 +156,7 @@ fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UserRecord> {
         role,
         created_at: parse_dt(row.get::<_, String>(4)?),
         protected: row.get(5)?,
+        email: row.get(6)?,
     })
 }
 
@@ -160,6 +188,7 @@ mod tests {
             role,
             created_at: Utc::now(),
             protected: false,
+            email: None,
         }
     }
 
@@ -262,5 +291,47 @@ mod tests {
         let conn = setup_conn();
         let result = UserRepo::update_password(&conn, &Uuid::new_v4(), "new-hash");
         assert!(matches!(result, Err(DbError::NotFound(_))));
+    }
+
+    #[test]
+    fn insert_with_email_then_find_by_email() {
+        let conn = setup_conn();
+        let mut user = sample_user("emailed", Role::Student);
+        user.email = Some("Student@Example.com".into());
+        UserRepo::insert(&conn, &user).expect("insert");
+
+        let found = UserRepo::find_by_email(&conn, "student@example.com")
+            .expect("find")
+            .expect("present");
+        assert_eq!(found.id, user.id);
+    }
+
+    #[test]
+    fn duplicate_email_conflicts_case_insensitively() {
+        let conn = setup_conn();
+        let mut first = sample_user("first", Role::Student);
+        first.email = Some("dup@example.com".into());
+        UserRepo::insert(&conn, &first).expect("first insert");
+
+        let mut second = sample_user("second", Role::Student);
+        second.email = Some("DUP@Example.com".into());
+        let result = UserRepo::insert(&conn, &second);
+        assert!(matches!(result, Err(DbError::Conflict(_))));
+    }
+
+    #[test]
+    fn null_email_allows_multiple_accounts() {
+        let conn = setup_conn();
+        UserRepo::insert(&conn, &sample_user("noemail1", Role::Student)).expect("first insert");
+        UserRepo::insert(&conn, &sample_user("noemail2", Role::Student)).expect("second insert");
+
+        assert_eq!(UserRepo::count_all(&conn).expect("count"), 2);
+    }
+
+    #[test]
+    fn find_by_email_for_unknown_address_is_none() {
+        let conn = setup_conn();
+        let found = UserRepo::find_by_email(&conn, "nobody@example.com").expect("find");
+        assert!(found.is_none());
     }
 }

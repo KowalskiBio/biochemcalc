@@ -1,7 +1,8 @@
 use crate::commands::auth::{
-    do_change_password, do_create_invite_code, do_delete_user, do_list_invite_codes,
-    do_list_users, do_login, do_logout, do_register, do_revoke_invite_code, AuthSession,
-    ChangePasswordPayload, CreateInviteCodePayload, LoginPayload, RegisterPayload,
+    do_change_password, do_create_invite_code, do_delete_user, do_forgot_password,
+    do_list_invite_codes, do_list_users, do_login, do_logout, do_register, do_reset_password,
+    do_revoke_invite_code, AuthSession, ChangePasswordPayload, CreateInviteCodePayload,
+    ForgotPasswordPayload, LoginPayload, RegisterPayload, ResetPasswordPayload,
 };
 use crate::db::AppState;
 use crate::http::error::HttpError;
@@ -54,6 +55,43 @@ async fn register(
     let conn = crate::util::lock_db(&state.db);
     let session = do_register(&conn, payload)?;
     Ok(session_response(session))
+}
+
+/// Always returns `204` whether or not `payload.email` belongs to an
+/// account — the response must never leak that (see
+/// `do_forgot_password`'s doc comment). The DB lock is dropped (the `{ }`
+/// block) before `.await`-ing the mailer, mirroring `resolve_user_for_token`
+/// in `middleware.rs`: a `MutexGuard` isn't `Send`, so it can't cross an
+/// await point inside this `async fn`.
+async fn forgot_password(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ForgotPasswordPayload>,
+) -> Result<StatusCode, HttpError> {
+    let issued = {
+        let conn = crate::util::lock_db(&state.db);
+        do_forgot_password(&conn, payload)?
+    };
+    if let Some(issued) = issued {
+        let reset_link = format!("{}/reset-password?token={}", state.public_base_url, issued.token);
+        state
+            .mailer
+            .send_reset_email(
+                issued.user.email.as_deref().unwrap_or_default(),
+                &issued.user.username,
+                &reset_link,
+            )
+            .await;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn reset_password(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ResetPasswordPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_reset_password(&conn, payload)?;
+    Ok(())
 }
 
 async fn logout(
@@ -126,6 +164,8 @@ pub fn public_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/login", post(login))
         .route("/register", post(register))
+        .route("/forgot-password", post(forgot_password))
+        .route("/reset-password", post(reset_password))
 }
 
 /// Any authenticated user (teacher or student).

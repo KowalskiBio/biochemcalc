@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+pub mod email;
 pub mod engine;
 pub mod http;
 mod models;
@@ -89,6 +90,8 @@ pub fn run() {
             app.manage(AppState {
                 db: std::sync::Mutex::new(conn),
                 data_dir,
+                mailer: email::Mailer::Disabled,
+                public_base_url: String::new(),
             });
 
             // Seed built-in constants and editable atomic weights on first launch.

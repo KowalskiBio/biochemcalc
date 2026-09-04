@@ -2,9 +2,11 @@ import { httpRequest } from "./http"
 import type {
   ChangePasswordInput,
   CreateInviteCodeInput,
+  ForgotPasswordInput,
   InviteCode,
   LoginInput,
   RegisterInput,
+  ResetPasswordInput,
   User,
 } from "./types"
 
@@ -27,6 +29,22 @@ export const authApi = {
    */
   changePassword: (input: ChangePasswordInput): Promise<void> =>
     httpRequest<void>("/api/auth/change-password", input),
+
+  /**
+   * Always resolves, whether or not `email` belongs to an account — the
+   * server deliberately never reveals that (see `do_forgot_password` in
+   * `src-tauri/src/commands/auth.rs`). Don't "fix" this to surface a
+   * not-found error; that would leak which emails are registered.
+   */
+  forgotPassword: (input: ForgotPasswordInput): Promise<void> =>
+    httpRequest<void>("/api/auth/forgot-password", input),
+
+  /**
+   * Consumes a reset token minted by `forgotPassword`. Rejects with a
+   * validation error if the token is missing, expired, or already used.
+   */
+  resetPassword: (input: ResetPasswordInput): Promise<void> =>
+    httpRequest<void>("/api/auth/reset-password", input),
 
   /**
    * Teacher-only: mint an invite code for the given role, superseding

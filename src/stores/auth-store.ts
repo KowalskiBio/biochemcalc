@@ -15,7 +15,7 @@ interface AuthState {
   status: AuthStatus
   fetchMe: () => Promise<void>
   login: (username: string, password: string) => Promise<void>
-  register: (username: string, password: string, inviteCode: string) => Promise<void>
+  register: (username: string, password: string, inviteCode: string, email?: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -37,8 +37,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user, status: "authenticated" })
   },
 
-  register: async (username, password, inviteCode) => {
-    const user = await authApi.register({ username, password, inviteCode })
+  register: async (username, password, inviteCode, email) => {
+    const user = await authApi.register({ username, password, inviteCode, email })
     set({ user, status: "authenticated" })
   },
 

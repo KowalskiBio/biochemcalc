@@ -77,6 +77,11 @@ export function LoginPage() {
                 {cs.auth.noAccount}
               </Link>
             </p>
+            <p className="text-center text-sm text-muted-foreground">
+              <Link to="/forgot-password" className="underline">
+                {cs.auth.forgotPasswordLink}
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>

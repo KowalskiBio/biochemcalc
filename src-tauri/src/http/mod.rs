@@ -8,6 +8,7 @@ pub mod routes;
 
 use crate::db::repos::ConstantRepo;
 use crate::db::{open_and_migrate, AppState};
+use crate::email::{Mailer, SmtpConfig};
 use axum::http::StatusCode;
 use axum::middleware::{from_fn, from_fn_with_state, map_response};
 use axum::response::Response;
@@ -25,6 +26,13 @@ pub struct ServerConfig {
     /// account from these so invite-code issuance has somewhere to start.
     pub admin_username: Option<String>,
     pub admin_password: Option<String>,
+    /// SMTP config for password-reset emails; `None` means reset links are
+    /// logged instead of sent (see `src/email.rs`).
+    pub smtp: Option<SmtpConfig>,
+    /// Externally-reachable origin used to build password-reset links, e.g.
+    /// `http://147.251.22.180:8080`. Wrong the moment this sits behind a
+    /// reverse proxy or gets a real domain — see deploy notes.
+    pub public_base_url: String,
 }
 
 pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -44,9 +52,12 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
         }
     }
 
+    let mailer = Mailer::from_config(config.smtp);
     let state = Arc::new(AppState {
         db: Mutex::new(conn),
         data_dir: config.data_dir.clone(),
+        mailer,
+        public_base_url: config.public_base_url.clone(),
     });
 
     let auth_router = routes::auth::public_router()

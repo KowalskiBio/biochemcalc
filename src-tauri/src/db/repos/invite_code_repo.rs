@@ -140,6 +140,7 @@ mod tests {
             role: Role::Student,
             created_at: Utc::now(),
             protected: false,
+            email: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id

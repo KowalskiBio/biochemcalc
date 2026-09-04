@@ -43,6 +43,10 @@ pub struct User {
     /// anyone, including other teachers, so invite-code issuance can never
     /// be locked out entirely. See `do_delete_user`.
     pub protected: bool,
+    /// Optional, set only if the account registered with one — see migration
+    /// v37. Enables self-service password recovery; an account without one
+    /// has no recovery path.
+    pub email: Option<String>,
 }
 
 /// An invite code a teacher mints for a given role. There is no open

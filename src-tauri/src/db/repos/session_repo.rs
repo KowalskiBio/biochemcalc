@@ -65,6 +65,14 @@ impl SessionRepo {
         Ok(())
     }
 
+    /// Kills every session for a user — used after a password reset, since
+    /// whoever just proved control of the mailbox should be the only one
+    /// left logged in.
+    pub fn delete_all_for_user(conn: &Connection, user_id: &Uuid) -> Result<(), DbError> {
+        conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])?;
+        Ok(())
+    }
+
     /// Opportunistic cleanup, called on login/register rather than via a
     /// separate sweep job.
     pub fn delete_expired(conn: &Connection) -> Result<(), DbError> {
@@ -102,11 +110,12 @@ mod tests {
         use crate::models::Role;
         let user = UserRecord {
             id: Uuid::new_v4(),
-            username: "u".into(),
+            username: format!("u-{}", Uuid::new_v4()),
             password_hash: "h".into(),
             role: Role::Teacher,
             created_at: Utc::now(),
             protected: false,
+            email: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id
@@ -146,5 +155,24 @@ mod tests {
 
         let found = SessionRepo::find_valid(&conn, "tok2").expect("find");
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn delete_all_for_user_removes_every_session_for_that_user_only() {
+        let conn = setup_conn();
+        let user_id = insert_user(&conn);
+        let other_user_id = insert_user(&conn);
+        SessionRepo::create(&conn, "tok-a", &user_id, Utc::now() + Duration::days(1))
+            .expect("create session a");
+        SessionRepo::create(&conn, "tok-b", &user_id, Utc::now() + Duration::days(1))
+            .expect("create session b");
+        SessionRepo::create(&conn, "tok-other", &other_user_id, Utc::now() + Duration::days(1))
+            .expect("create other user's session");
+
+        SessionRepo::delete_all_for_user(&conn, &user_id).expect("delete all for user");
+
+        assert!(SessionRepo::find_valid(&conn, "tok-a").expect("find").is_none());
+        assert!(SessionRepo::find_valid(&conn, "tok-b").expect("find").is_none());
+        assert!(SessionRepo::find_valid(&conn, "tok-other").expect("find").is_some());
     }
 }

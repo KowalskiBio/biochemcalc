@@ -49,4 +49,5 @@ simplelog = { version = "0.12", default-features = false }
 axum = "0.8.9"
 tower-http = { version = "0.7.0", features = ["fs", "cors"] }
 argon2 = { version = "0.5.3", features = ["std"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
 

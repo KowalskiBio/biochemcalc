@@ -7,6 +7,7 @@ import { StudentShell } from "@/components/layout/student-shell"
 import { BulkImportPage } from "@/pages/bulk-import-page"
 import { ConstantsPage } from "@/pages/constants-page"
 import { DatabazePage } from "@/pages/databaze-page"
+import { ForgotPasswordPage } from "@/pages/forgot-password-page"
 import { FormulasPage } from "@/pages/formulas-page"
 import { HelpPage } from "@/pages/help-page"
 import { HistoryPage } from "@/pages/history-page"
@@ -14,6 +15,7 @@ import { LoginPage } from "@/pages/login-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
 import { ReportsPage } from "@/pages/reports-page"
+import { ResetPasswordPage } from "@/pages/reset-password-page"
 import { SetDetailPage } from "@/pages/set-detail-page"
 import { SettingsPage } from "@/pages/settings-page"
 import { StudentLeaderboardPage } from "@/pages/student-leaderboard-page"
@@ -104,6 +106,8 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="/*"
           element={

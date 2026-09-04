@@ -15,6 +15,13 @@ pub struct AppState {
     /// exported `.txt` files. Resolved from Tauri's app-data dir on desktop,
     /// or `BIOCHEMCALC_DATA_DIR` on the HTTP server.
     pub data_dir: PathBuf,
+    /// Sends password-reset emails; `Mailer::Disabled` (unused on the Tauri
+    /// desktop build, which has no accounts) logs the link instead. See
+    /// `src/email.rs`.
+    pub mailer: crate::email::Mailer,
+    /// Externally-reachable origin used to build password-reset links.
+    /// Unused on the desktop build.
+    pub public_base_url: String,
 }
 
 impl AppState {
@@ -28,6 +35,8 @@ impl AppState {
         Ok(Self {
             db: Mutex::new(conn),
             data_dir: std::env::temp_dir(),
+            mailer: crate::email::Mailer::Disabled,
+            public_base_url: "http://localhost:8080".to_string(),
         })
     }
 }

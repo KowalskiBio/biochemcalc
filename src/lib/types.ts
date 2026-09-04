@@ -668,6 +668,9 @@ export interface User {
   /** The bootstrap admin (or, on older deployments, the earliest-created
    * teacher) — cannot be deleted by anyone, including other teachers. */
   protected: boolean
+  /** Set only if the account registered with one. Enables self-service
+   * password recovery; an account without one has no recovery path. */
+  email: string | null
 }
 
 export interface InviteCode {
@@ -690,10 +693,20 @@ export interface RegisterInput {
   username: string
   password: string
   inviteCode: string
+  email?: string
 }
 
 export interface CreateInviteCodeInput {
   role: Role
+}
+
+export interface ForgotPasswordInput {
+  email: string
+}
+
+export interface ResetPasswordInput {
+  token: string
+  newPassword: string
 }
 
 // ============================================================================

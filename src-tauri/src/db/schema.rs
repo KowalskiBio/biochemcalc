@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 36;
+const CURRENT_USER_VERSION: u32 = 37;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -186,6 +186,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 36 {
         apply_migration_v36(conn)?;
         conn.pragma_update(None, "user_version", "36")?;
+    }
+
+    if user_version < 37 {
+        apply_migration_v37(conn)?;
+        conn.pragma_update(None, "user_version", "37")?;
     }
 
     Ok(())
@@ -1216,6 +1221,40 @@ fn apply_migration_v36(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Optional self-service password recovery. `email` is nullable — accounts
+/// created before this migration, and any created without one afterward,
+/// simply have no recovery path (unchanged from today; there is deliberately
+/// no teacher-driven "reset this student's password" fallback). SQLite's
+/// UNIQUE index already treats NULL as distinct from every other NULL, so a
+/// plain case-insensitive unique index on `email` is enough on its own to
+/// stop two accounts sharing an address while still allowing any number of
+/// accounts with none at all — no partial-index `WHERE` clause needed.
+///
+/// `password_reset_tokens` mirrors `sessions`' shape (opaque token PK,
+/// `expires_at`) but adds `used_at` for single-use enforcement: a session is
+/// meant to be reused for 30 days, a reset token is meant to work exactly
+/// once and die fast (see `RESET_TOKEN_TTL_HOURS` in `commands::auth`).
+fn apply_migration_v37(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE users ADD COLUMN email TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_nocase
+        ON users(email COLLATE NOCASE);
+
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            token TEXT PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id
+        ON password_reset_tokens(user_id);
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1393,7 +1432,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1483,7 +1522,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1508,7 +1547,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");
@@ -1523,7 +1562,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
 
         let columns: Vec<(String, String, i64)> = {
             let mut stmt = conn
@@ -1592,7 +1631,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v32 -> latest");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
         let columns: Vec<String> = {
             let mut stmt = conn
                 .prepare("PRAGMA table_info(templates)")
@@ -1669,7 +1708,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v33 -> v34");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
 
         let columns: Vec<String> = {
             let mut stmt = conn
@@ -1740,7 +1779,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 36);
+        assert_eq!(user_version(&conn), 37);
 
         let column_names = |table: &str| -> Vec<String> {
             let mut stmt = conn
@@ -1979,5 +2018,53 @@ mod tests {
             )
             .expect("read topic after group delete");
         assert_eq!(remaining_group_id, None, "deleting a group must ungroup its topics, not cascade-delete them");
+    }
+
+    /// Pins the "NULL is distinct from NULL" behavior the v37 doc comment
+    /// relies on: any number of accounts may have no email, but two accounts
+    /// may not share one (case-insensitively), and `password_reset_tokens`
+    /// cascades away with its user like `sessions` already does.
+    #[test]
+    fn v37_email_is_optional_but_unique_when_present() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        apply_migration_v15(&conn).expect("v15");
+        apply_migration_v37(&conn).expect("v37");
+
+        conn.execute_batch(
+            "
+            INSERT INTO users (id, username, password_hash, role, created_at, email) VALUES
+                (randomblob(16), 'no-email-1', 'h', 'student', '2026-01-01T00:00:00Z', NULL),
+                (randomblob(16), 'no-email-2', 'h', 'student', '2026-01-01T00:00:00Z', NULL),
+                (randomblob(16), 'has-email', 'h', 'student', '2026-01-01T00:00:00Z', 'Student@Example.com');
+            ",
+        )
+        .expect("two null emails and one set email must all insert cleanly");
+
+        let dup = conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at, email)
+             VALUES (randomblob(16), 'dup-email', 'h', 'student', '2026-01-01T00:00:00Z', 'student@example.com')",
+            [],
+        );
+        assert!(dup.is_err(), "a case-insensitive duplicate email must be rejected");
+
+        let user_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?1, 'reset-owner', 'h', 'student', '2026-01-01T00:00:00Z')",
+            rusqlite::params![user_id],
+        )
+        .expect("insert user for token FK");
+        conn.execute(
+            "INSERT INTO password_reset_tokens (token, user_id, created_at, expires_at) VALUES ('tok', ?1, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z')",
+            rusqlite::params![user_id],
+        )
+        .expect("insert reset token");
+
+        conn.execute("DELETE FROM users WHERE id = ?1", rusqlite::params![user_id])
+            .expect("delete user");
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM password_reset_tokens", [], |row| row.get(0))
+            .expect("count tokens");
+        assert_eq!(remaining, 0, "deleting the user must cascade-delete their reset tokens");
     }
 }
