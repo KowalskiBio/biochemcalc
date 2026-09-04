@@ -32,13 +32,12 @@
 # it in an `EnvironmentFile=%h/.config/biochemcalc.env` chmod 600 (or
 # `systemd-creds encrypt`), never inline here.
 #
-# TODO once a domain + TLS exist: the session cookie is intentionally not
-# marked `Secure` yet (see src-tauri/src/http/middleware.rs) because this
-# deploys over plain HTTP. Turn that on the moment HTTPS is available —
-# until then, credentials travel in cleartext on the wire. This now also
-# applies to password-reset links (BIOCHEMCALC_PUBLIC_URL below): a
-# captured reset link is a full account takeover, not just session
-# hijack, so it's arguably higher stakes than the cookie.
+# TODO: the session cookie is still not marked `Secure` (see
+# src-tauri/src/http/middleware.rs). HTTPS now exists in front (nginx +
+# Let's Encrypt for biocal.ubch.sci.muni.cz), so it can be turned on, but
+# that would break sessions for anyone still reaching the app directly at
+# http://147.251.22.180:8080, where credentials travel in cleartext.
+# Close the direct-HTTP path first, then flip the cookie.
 #
 # Logs:
 #   journalctl --user -u biochemcalc -f   # stdout/stderr incl. panics
@@ -93,10 +92,12 @@ Environment=BIOCHEMCALC_SMTP_FROM_ADDRESS=RejtarV@sci.muni.cz
 Environment=BIOCHEMCALC_SMTP_FROM_NAME=BiochemCalc
 EnvironmentFile=-%h/.config/biochemcalc-smtp.env
 
-# Externally-reachable origin used to build password-reset links. Defaults
-# to http://<BIND_ADDR>, which is only correct for direct access with no
-# reverse proxy in front — set explicitly once a real domain exists.
-Environment=BIOCHEMCALC_PUBLIC_URL=http://147.251.22.180:8080
+# Externally-reachable origin used to build password-reset links; must be
+# the HTTPS origin users actually see, because nginx (biocal.ubch.sci.muni.cz,
+# Let's Encrypt) fronts the plain-HTTP app on :8080. The default
+# (http://<BIND_ADDR>) is only correct for direct access with no reverse
+# proxy in front.
+Environment=BIOCHEMCALC_PUBLIC_URL=https://biocal.ubch.sci.muni.cz
 
 [Install]
 WantedBy=default.target
