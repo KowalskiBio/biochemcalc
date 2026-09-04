@@ -48,7 +48,12 @@ impl Mailer {
         };
 
         let creds = Credentials::new(config.username, config.password);
-        let transport = match AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host) {
+        // starttls_relay, not relay: MUNI's smtp.muni.cz:587 greets in
+        // plaintext and upgrades via STARTTLS. `relay` would speak implicit
+        // TLS (SMTPS, port 465) from the first byte, so on 587 the server's
+        // plaintext "220" greeting fails TLS parsing ("InvalidContentType")
+        // and every send dies with a connection error.
+        let transport = match AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host) {
             Ok(builder) => builder.port(config.port).credentials(creds).build(),
             Err(e) => {
                 log::error!("failed to build SMTP transport for {}: {e}", config.host);
