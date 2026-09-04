@@ -308,7 +308,11 @@ export function StudentStreakActivePage() {
                   ) : (
                     <X className="size-4 text-destructive" />
                   )}
-                  {result.correct ? cs.student.correct : cs.streak.failedMessage}
+                  {result.correct
+                    ? cs.student.correct
+                    : correctCount === 0
+                      ? cs.streak.failedMessageImmediate
+                      : cs.streak.failedMessage}
                 </p>
                 {!result.correct && (
                   <p className="text-sm text-muted-foreground">

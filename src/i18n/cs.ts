@@ -119,7 +119,7 @@ export const cs = {
     checking: "Kontroluji...",
     nextQuestion: "Další otázka",
     correct: "Správně!",
-    incorrect: "Bohužel, tentokrát ne.",
+    incorrect: "Špatně.",
     correctAnswerIs: "Správná odpověď:",
     correctAnswersAre: "Správné odpovědi:",
     pointsEarned: "+{points} b.",
@@ -232,7 +232,8 @@ export const cs = {
     activeTitle: "Probíhající série",
     correctSoFar: "Správně zatím: {count}",
     elapsedTime: "Uplynulý čas",
-    failedMessage: "Bohužel, špatná odpověď. Série skončila.",
+    failedMessage: "Špatně. Série skončila.",
+    failedMessageImmediate: "Špatně. Série skončila dřív, než začala.",
     viewResults: "Zobrazit výsledky",
     noActiveRun: "Žádná probíhající série. Nejdřív ji zahajte.",
 
