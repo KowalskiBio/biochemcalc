@@ -6,7 +6,7 @@
 //! emailed — this is also what local development relies on, with no SMTP
 //! server needed at all to exercise the flow end-to-end.
 
-use lettre::message::Mailbox;
+use lettre::message::{Mailbox, MultiPart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
@@ -79,19 +79,24 @@ impl Mailer {
                     return;
                 };
 
-                let body = format!(
-                    "Dobrý den,\n\n\
-                     obdrželi jsme žádost o obnovení hesla k vašemu účtu BiochemCalc.\n\
+                let plain = format!(
+                    "Dobrý den, {to_name},\n\n\
+                     obdrželi jsme žádost o obnovení hesla k vašemu účtu BioCal.\n\
                      Pro nastavení nového hesla klikněte na odkaz níže (platný 1 hodinu):\n\n\
                      {reset_link}\n\n\
-                     Pokud jste o obnovení hesla nežádali, tento e-mail můžete ignorovat."
+                     Pokud jste o obnovení hesla nežádali, můžete tento e-mail bez obav ignorovat.\n\n\
+                     --\n\
+                     BioCal - generátor biochemických výpočtových úloh"
                 );
+                let html = RESET_EMAIL_HTML
+                    .replace("{{TO_NAME}}", &html_escape(to_name))
+                    .replace("{{RESET_LINK}}", reset_link);
 
                 let message = match Message::builder()
                     .from(from.clone())
                     .to(to)
-                    .subject("Obnovení hesla — BiochemCalc")
-                    .body(body)
+                    .subject("BioCal: obnovení hesla")
+                    .multipart(MultiPart::alternative_plain_html(plain, html))
                 {
                     Ok(m) => m,
                     Err(e) => {
@@ -105,5 +110,90 @@ impl Mailer {
                 }
             }
         }
+    }
+}
+
+/// `to_name` is a user-chosen username with no charset restriction, so it
+/// must be escaped before substitution into the HTML part; a `<` or `&` in
+/// a name would otherwise inject markup into the email.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Placeholder-based (`{{TO_NAME}}`, `{{RESET_LINK}}`) rather than `format!`
+/// because the CSS braces in inline styles would all need doubling.
+/// Table layout, inline styles only, no external resources: renders in
+/// Gmail, Outlook, and Seznam webmail.
+const RESET_EMAIL_HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>BioCal: obnovení hesla</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f5f5f5; font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#FBFBF7;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width:600px; width:100%;">
+        <tr>
+          <td style="background-color:#155E46; padding:24px 0; text-align:center;">
+            <span style="font-size:28px; font-weight:700; color:#FBFBF7; text-decoration:none;">BioCal</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px 24px 24px;">
+            <p style="font-size:18px; line-height:1.5; margin:0 0 24px 0; color:#111;">Dobrý den, {{TO_NAME}},</p>
+            <p style="font-size:16px; line-height:1.5; margin:0 0 16px 0; color:#333;">Obdrželi jsme žádost o obnovení hesla k vašemu účtu BioCal.</p>
+            <p style="font-size:16px; line-height:1.5; margin:0 0 24px 0; color:#333;">Pro nastavení nového hesla klikněte na tlačítko níže. Odkaz je platný 1 hodinu.</p>
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td align="center">
+                  <a href="{{RESET_LINK}}" style="display:inline-block; background-color:#2E8565; color:#FBFBF7; text-decoration:none; font-size:16px; font-weight:600; padding:14px 28px; border-radius:6px; line-height:1.1;">Obnovit heslo</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 24px 24px;">
+            <p style="font-size:14px; line-height:1.5; margin:0 0 8px 0; color:#555;">Pokud tlačítko nefunguje, zkopírujte do prohlížeče tento odkaz:</p>
+            <p style="font-size:14px; line-height:1.5; margin:0; color:#155E46; word-break:break-all;">{{RESET_LINK}}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 24px 24px;">
+            <p style="font-size:14px; line-height:1.5; margin:0; color:#555;">Pokud jste o obnovení hesla nežádali, můžete tento e-mail bez obav ignorovat.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 24px 24px; border-top:1px solid #e0e0e0;">
+            <p style="font-size:12px; line-height:1.4; margin:0; color:#5A7569;">BioCal - generátor biochemických výpočtových úloh</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::html_escape;
+
+    #[test]
+    fn html_escape_neutralizes_markup_characters() {
+        assert_eq!(
+            html_escape(r#"<b>&"quoted"</b>"#),
+            "&lt;b&gt;&amp;&quot;quoted&quot;&lt;/b&gt;"
+        );
+    }
+
+    #[test]
+    fn html_escape_leaves_plain_names_alone() {
+        assert_eq!(html_escape("novakj"), "novakj");
     }
 }
