@@ -81,12 +81,12 @@ impl Mailer {
 
                 let plain = format!(
                     "Dobrý den, {to_name},\n\n\
-                     obdrželi jsme žádost o obnovení hesla k vašemu účtu BioCal.\n\
+                     obdrželi jsme žádost k obnovení hesla k vašemu účtu BioCal.\n\
                      Pro nastavení nového hesla klikněte na odkaz níže (platný 1 hodinu):\n\n\
                      {reset_link}\n\n\
                      Pokud jste o obnovení hesla nežádali, můžete tento e-mail bez obav ignorovat.\n\n\
                      --\n\
-                     BioCal - generátor biochemických výpočtových úloh"
+                     BioCal – generátor biochemických výpočtových úloh"
                 );
                 let html = RESET_EMAIL_HTML
                     .replace("{{TO_NAME}}", &html_escape(to_name))
@@ -146,7 +146,7 @@ const RESET_EMAIL_HTML: &str = r#"<!DOCTYPE html>
         <tr>
           <td style="padding:32px 24px 24px;">
             <p style="font-size:18px; line-height:1.5; margin:0 0 24px 0; color:#111;">Dobrý den, {{TO_NAME}},</p>
-            <p style="font-size:16px; line-height:1.5; margin:0 0 16px 0; color:#333;">Obdrželi jsme žádost o obnovení hesla k vašemu účtu BioCal.</p>
+            <p style="font-size:16px; line-height:1.5; margin:0 0 16px 0; color:#333;">Obdrželi jsme žádost k obnovení hesla k vašemu účtu BioCal.</p>
             <p style="font-size:16px; line-height:1.5; margin:0 0 24px 0; color:#333;">Pro nastavení nového hesla klikněte na tlačítko níže. Odkaz je platný 1 hodinu.</p>
             <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
               <tr>
@@ -170,7 +170,7 @@ const RESET_EMAIL_HTML: &str = r#"<!DOCTYPE html>
         </tr>
         <tr>
           <td style="padding:16px 24px 24px; border-top:1px solid #e0e0e0;">
-            <p style="font-size:12px; line-height:1.4; margin:0; color:#5A7569;">BioCal - generátor biochemických výpočtových úloh</p>
+            <p style="font-size:12px; line-height:1.4; margin:0; color:#5A7569;">BioCal – generátor biochemických výpočtových úloh</p>
           </td>
         </tr>
       </table>
