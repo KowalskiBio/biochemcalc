@@ -1,4 +1,4 @@
-// Biocal TypeScript Types
+// BioCal TypeScript Types
 // Matches the Rust backend model types exactly
 
 // Variable type - can be numeric or string

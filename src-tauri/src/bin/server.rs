@@ -24,7 +24,7 @@
 //!   `_FROM_ADDRESS` / `_FROM_NAME` — optional. Password-reset emails are
 //!   sent via SMTP if host/username/password/from-address are all set,
 //!   otherwise reset links are logged instead (see `src/email.rs`).
-//!   `_PORT` defaults to `587`, `_FROM_NAME` to `BiochemCalc`.
+//!   `_PORT` defaults to `587`, `_FROM_NAME` to `BioCal`.
 //! - `BIOCHEMCALC_PUBLIC_URL` — the externally-reachable origin used to
 //!   build password-reset links (e.g. `http://147.251.22.180:8080`).
 //!   Defaults to `http://{BIOCHEMCALC_BIND_ADDR}`, which is only correct for
@@ -103,7 +103,7 @@ async fn main() {
             username,
             password,
             from_address,
-            from_name: env_or("BIOCHEMCALC_SMTP_FROM_NAME", "BiochemCalc"),
+            from_name: env_or("BIOCHEMCALC_SMTP_FROM_NAME", "BioCal"),
         }),
         _ => None,
     };

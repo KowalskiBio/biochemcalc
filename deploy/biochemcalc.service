@@ -48,7 +48,7 @@
 # Do NOT live-sync the app-data directory (Syncthing/Dropbox) while the app
 # runs — syncing an open SQLite file is a corruption vector.
 [Unit]
-Description=biochemcalc (web server)
+Description=BioCal (web server)
 After=network-online.target
 Wants=network-online.target
 
@@ -89,7 +89,7 @@ Environment=BIOCHEMCALC_DIST_DIR=%h/biochemcalc-web/dist
 Environment=BIOCHEMCALC_SMTP_HOST=smtp.muni.cz
 Environment=BIOCHEMCALC_SMTP_PORT=587
 Environment=BIOCHEMCALC_SMTP_FROM_ADDRESS=RejtarV@sci.muni.cz
-Environment=BIOCHEMCALC_SMTP_FROM_NAME=BiochemCalc
+Environment=BIOCHEMCALC_SMTP_FROM_NAME=BioCal
 EnvironmentFile=-%h/.config/biochemcalc-smtp.env
 
 # Externally-reachable origin used to build password-reset links; must be

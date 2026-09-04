@@ -160,7 +160,7 @@ export function Sidebar() {
           </div>
           <div className="flex flex-col">
             <span className="font-semibold text-[hsl(var(--sidebar-foreground))] tracking-tight">
-              Biocal
+              BioCal
             </span>
             <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-[hsl(var(--sidebar-foreground))]/40">
               LAB v1

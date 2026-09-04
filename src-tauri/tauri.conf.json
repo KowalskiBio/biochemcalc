@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "biochemcalc",
+  "productName": "BioCal",
   "version": "0.1.0",
   "identifier": "com.kowalski.biochemcalc",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "biochemcalc",
+        "title": "BioCal",
         "width": 800,
         "height": 600
       }

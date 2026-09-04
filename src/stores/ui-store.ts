@@ -2,7 +2,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 /**
- * UI Store for Biocal
+ * UI Store for BioCal
  * Manages global UI state including theme and current page
  */
 
