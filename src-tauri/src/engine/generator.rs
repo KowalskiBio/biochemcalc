@@ -264,19 +264,17 @@ fn sd_fraction_for_difficulty(difficulty: &str) -> f64 {
 /// custom deviation fraction, e.g. from the export dialog's per-question
 /// "Odchylka (%)" field — sits between those two: it beats the difficulty
 /// preset but never an explicit SD. Sanitized here too (not just at the call
-/// boundary): sd_allowed is only honored when finite and > 0, otherwise it
-/// ghosts to the spread_override/difficulty path so a stray zero, negative or
-/// NaN value can never produce a degenerate interval, regardless of caller.
+/// boundary): sd_allowed is only honored when finite, > 0 and narrower than
+/// the answer itself (see `usable_sd_window`), otherwise it ghosts to the
+/// spread_override/difficulty path so no caller can produce a degenerate or
+/// nonsensical interval.
 pub(crate) fn open_interval(
     correct: f64,
     constraint: &ResultConstraint,
     difficulty: &str,
     spread_override: Option<f64>,
 ) -> (f64, f64) {
-    let half_width = constraint
-        .sd_allowed
-        .filter(|sd| sd.is_finite() && *sd > 0.0)
-        .map(f64::abs)
+    let half_width = usable_sd_window(constraint, correct)
         .unwrap_or_else(|| {
             let fraction = spread_override
                 .filter(|v| v.is_finite() && *v > 0.0)
@@ -441,14 +439,34 @@ fn apportion_largest_remainder(requested: &[usize], budget: usize) -> Vec<usize>
     floors
 }
 
-/// The effective absolute SD window for a question, or None when unset or
-/// invalid (not finite or not > 0). Decided as a pure Option before any RNG
-/// is consumed so the unset/invalid path keeps its byte-identical RNG
-/// sequence. Mirrors the `spread_override` sanitization filter.
-fn effective_sd_window(constraint: &ResultConstraint) -> Option<f64> {
+/// The teacher's absolute SD, if it can serve as a tolerance for this
+/// particular answer. None when it is unset, not finite, not > 0, or **at
+/// least as large as the answer itself** — in which case the caller falls
+/// back to the relative difficulty spread.
+///
+/// `sd_allowed` is an absolute number, so the same value a teacher reasonably
+/// reuses across a set is only meaningful next to answers of a similar
+/// magnitude. `sd = 1` is ±0.5 % on a 200 g answer and ±370 % on a mass
+/// fraction of 0.27, where it produced the reported `-0,730..1,28`: an
+/// interval that accepts negative mass fractions, values above 1, and zero.
+/// A tolerance that reaches zero carries no information about the answer at
+/// all, so it is treated as a misconfigured field rather than an intentional
+/// setting, exactly as a zero or NaN already was.
+///
+/// This deliberately does not cap or rescale the SD: one that is narrower
+/// than the answer, however narrow, is still honored in full and still wins
+/// over both the spread override and the difficulty preset. An answer of
+/// exactly zero has no magnitude to compare against and keeps the SD as
+/// given.
+///
+/// Decided as a pure Option before any RNG is consumed, so the paths it does
+/// not change keep their byte-identical RNG sequence.
+fn usable_sd_window(constraint: &ResultConstraint, correct: f64) -> Option<f64> {
     constraint
         .sd_allowed
         .filter(|sd| sd.is_finite() && *sd > 0.0)
+        .map(f64::abs)
+        .filter(|sd| correct == 0.0 || *sd < correct.abs())
 }
 
 /// The absolute SD window that governs CLOSED-option distractor sampling
@@ -460,7 +478,7 @@ fn effective_sd_window(constraint: &ResultConstraint) -> Option<f64> {
 /// options fall back to the pre-SD spread-distractor behavior instead of
 /// failing generation or refining the grid past the teacher's sig-figs
 /// setting. Decided as a pure Option before any RNG is consumed, and
-/// identical to `effective_sd_window` whenever the sig-figs grid is
+/// identical to `usable_sd_window` whenever the sig-figs grid is
 /// inactive, so the no-sig-figs path keeps its byte-identical RNG sequence.
 fn closed_option_sd_window(
     sd_window: Option<f64>,
@@ -604,7 +622,10 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
     let sig_figs_active = sig_figs_unit(correct, result_significant_digits).is_some();
     let sd_window = closed_option_sd_window(
-        effective_sd_window(constraint),
+        // Same guard as the open interval: an SD at least as wide as the
+        // answer would let a distractor sit at zero or on the far side of it
+        // (a negative mass fraction among the options).
+        usable_sd_window(constraint, correct),
         sig_figs_active,
         base_rounding_unit,
         count,
@@ -1084,7 +1105,10 @@ fn fill_target_options<R: Rng>(
     // to the pre-SD spread behavior) when that grid cannot fit enough
     // distinct in-window offsets for `count` options.
     let sd_window = closed_option_sd_window(
-        effective_sd_window(constraint),
+        // Same guard as the open interval: an SD at least as wide as the
+        // answer would let a distractor sit at zero or on the far side of it
+        // (a negative mass fraction among the options).
+        usable_sd_window(constraint, correct),
         sig_figs_active,
         base_rounding_unit,
         count,
@@ -2368,9 +2392,10 @@ mod tests {
     /// per-question spread override, which beats the difficulty preset.
     #[test]
     fn open_interval_precedence_sd_then_override_then_difficulty() {
+        // An SD the answer can carry (2.5 against 100) outranks both.
         let with_sd = ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
-        let (lo, hi) = open_interval(0.05, &with_sd, "hard", Some(0.40));
-        assert!((lo + 2.45).abs() < 1e-9 && (hi - 2.55).abs() < 1e-9, "SD must win: [{lo}, {hi}]");
+        let (lo, hi) = open_interval(100.0, &with_sd, "hard", Some(0.40));
+        assert!((lo - 97.5).abs() < 1e-9 && (hi - 102.5).abs() < 1e-9, "SD must win: [{lo}, {hi}]");
 
         let plain = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
         let (lo, hi) = open_interval(0.05, &plain, "hard", Some(0.40));
@@ -2384,6 +2409,77 @@ mod tests {
             ((hi - lo) / 2.0 - 0.005).abs() < 1e-12,
             "difficulty preset applies when nothing overrides it: [{lo}, {hi}]"
         );
+    }
+
+    /// A reported export: "Jaký je hmotnostní zlomek KI v roztoku..." came
+    /// out as `w = (-0,730..1,28)`. The template carries the same absolute
+    /// `sd_allowed = 1.0` that is perfectly sensible on the gram-scale
+    /// answers elsewhere in the set, but the answer here is a mass fraction
+    /// of 0.271, so ±1 accepted negative fractions, zero, and anything up to
+    /// 1.28. An SD that reaches zero is a misconfigured field, not a
+    /// tolerance, so the difficulty spread takes over.
+    #[test]
+    fn an_sd_wider_than_the_answer_falls_back_to_the_difficulty_spread() {
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(1.0), ConstraintType::Sd);
+
+        // w = 317 / (317 + 854)
+        let w = 317.0 / 1171.0;
+        let (lo, hi) = open_interval(w, &constraint, "medium", None);
+        assert!(lo > 0.0, "a mass fraction interval must not go negative: [{lo}, {hi}]");
+        assert!(
+            ((hi - lo) / 2.0 - w * 0.30).abs() < 1e-9,
+            "expected the medium spread, got [{lo}, {hi}]"
+        );
+
+        // w = 29.8 / 171
+        let w = 29.8 / 171.0;
+        let (lo, hi) = open_interval(w, &constraint, "medium", None);
+        assert!(lo > 0.0, "a mass fraction interval must not go negative: [{lo}, {hi}]");
+        assert!(hi < 1.0, "a mass fraction interval must stay below 1: [{lo}, {hi}]");
+    }
+
+    /// The guard is about the SD being meaningless next to *this* answer, not
+    /// about its size: the very same template setting stays in force for the
+    /// gram-scale answers it was written for.
+    #[test]
+    fn an_sd_narrower_than_the_answer_is_still_honored_in_full() {
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(1.0), ConstraintType::Sd);
+
+        let (lo, hi) = open_interval(213.5, &constraint, "medium", None);
+        assert!(
+            (lo - 212.5).abs() < 1e-9 && (hi - 214.5).abs() < 1e-9,
+            "an absolute SD must still win for an answer it fits: [{lo}, {hi}]"
+        );
+
+        // It also still beats a per-question spread override.
+        let (lo, hi) = open_interval(213.5, &constraint, "medium", Some(0.40));
+        assert!(
+            (lo - 212.5).abs() < 1e-9 && (hi - 214.5).abs() < 1e-9,
+            "SD precedence changed: [{lo}, {hi}]"
+        );
+    }
+
+    /// The closed side reads the same window, so the same misconfiguration
+    /// used to offer a negative mass fraction as one of the options.
+    #[test]
+    fn closed_options_for_a_fraction_stay_positive_with_an_oversized_sd() {
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(1.0), ConstraintType::Sd);
+        let w = 317.0 / 1171.0;
+
+        for seed in 0..8u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, _pos, _alt) = generate_numeric_options(
+                w, &[], None, &constraint, &mut rng, "medium", 5, true, None, None,
+            )
+            .expect("options");
+            assert!(
+                options.iter().all(|o| *o > 0.0),
+                "seed {seed} offered a non-positive mass fraction: {options:?}"
+            );
+        }
     }
 
     /// An explicit teacher-set standard deviation overrides the
@@ -4486,4 +4582,5 @@ mod tests {
             );
         }
     }
+
 }
