@@ -574,7 +574,7 @@ pub fn do_export_projekt_to_txt(
             .filter_map(|(k, v)| v.as_f64().map(|f| (k.clone(), f)))
             .collect();
 
-        variants.push(Variant::new(
+        let mut variant = Variant::new(
             pq.template_id,
             assigned_numeric,
             pq.assigned_strings.clone(),
@@ -584,7 +584,14 @@ pub fn do_export_projekt_to_txt(
             pq.interval_lo,
             pq.interval_hi,
             pq.seed,
-        ));
+        );
+        // `Variant::new` nulls both of these, so a projekt export used to
+        // lose every answer target past the first and the alternace's second
+        // `ok` row, exporting differently from the same questions exported
+        // straight from the set.
+        variant.alternate_option = pq.alternate_option;
+        variant.answers_data = pq.answers_data.clone();
+        variants.push(variant);
     }
 
     let questions: Vec<ExportQuestion<'_>> = content
@@ -1128,5 +1135,135 @@ mod tests {
         assert_eq!(answers[0].unit.as_deref(), Some("mol"));
         assert_eq!(answers[1].symbol, "m");
         assert_eq!(answers[1].unit.as_deref(), Some("g"));
+    }
+    fn projekt_question(mode: TemplateMode) -> ProjektQuestion {
+        ProjektQuestion {
+            template_id: Uuid::new_v4(),
+            question_text: "Vypočítejte [n mol][m g]".into(),
+            result_unit: "mol;g".into(),
+            point_value: 3,
+            correct_answer: Some(2.0),
+            override_answer: None,
+            assigned_values: HashMap::new(),
+            assigned_strings: HashMap::new(),
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: None,
+            result_precision: 2,
+            significant_digits: None,
+            force_scientific: false,
+            numeric_options: None,
+            correct_option: None,
+            alternate_option: None,
+            interval_lo: Some(1.8),
+            interval_hi: Some(2.2),
+            answers_data: Some(vec![
+                crate::models::AnswerField {
+                    symbol: "n".into(),
+                    value: 2.0,
+                    unit: Some("mol".into()),
+                    numeric_options: None,
+                    correct_option: None,
+                    alternate_option: None,
+                    interval_lo: Some(1.8),
+                    interval_hi: Some(2.2),
+                },
+                crate::models::AnswerField {
+                    symbol: "m".into(),
+                    value: 4.0,
+                    unit: Some("g".into()),
+                    numeric_options: None,
+                    correct_option: None,
+                    alternate_option: None,
+                    interval_lo: Some(3.8),
+                    interval_hi: Some(4.2),
+                },
+            ]),
+            mode,
+            seed: 1,
+        }
+    }
+
+    /// A projekt used to be a lossy round trip: `ProjektQuestion` carried no
+    /// answer targets and no alternace, so a two-answer question exported
+    /// from a projekt came out as a one-answer question (unit "mol;g" and
+    /// all), and an alternace question lost its second `ok` row.
+    #[test]
+    fn projekt_export_keeps_answer_targets_and_the_alternace() {
+        let state = setup();
+        let data_dir = std::env::temp_dir().join(format!("projekt-export-{}", Uuid::new_v4()));
+        let conn = state.db.lock().expect("lock");
+
+        let projekt = do_save_projekt(
+            &conn,
+            &data_dir,
+            SaveProjektPayload {
+                name: "Test".into(),
+                topic_name: None,
+                mode: TemplateMode::Open,
+                questions: vec![projekt_question(TemplateMode::Open)],
+            },
+        )
+        .expect("save projekt");
+
+        let export = do_export_projekt_to_txt(
+            &conn,
+            &data_dir,
+            ExportProjektToTxtPayload {
+                projekt_id: projekt.id,
+                filename: "test".into(),
+            },
+        )
+        .expect("export projekt");
+
+        assert!(
+            export.content.contains(" n =  :n1  mol\n"),
+            "first target missing from projekt export:\n{}",
+            export.content
+        );
+        assert!(
+            export.content.contains(" m =  :n2  g\n"),
+            "second target missing from projekt export:\n{}",
+            export.content
+        );
+        assert!(
+            export.content.contains(":n1=1,80..2,20:n2=3,80..4,20 ok 3"),
+            "evaluation row lost a target:\n{}",
+            export.content
+        );
+        assert!(
+            !export.content.contains("mol;g"),
+            "the raw multi-unit string reached the export:\n{}",
+            export.content
+        );
+
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// Projekt files written before those fields existed must keep loading.
+    #[test]
+    fn projekt_question_json_without_the_new_fields_still_loads() {
+        let legacy = r#"{
+            "templateId": "00000000-0000-0000-0000-000000000001",
+            "questionText": "Vypočítejte hmotnost.",
+            "resultUnit": "g",
+            "pointValue": 2,
+            "correctAnswer": 12.0,
+            "overrideAnswer": null,
+            "assignedValues": {},
+            "assignedStrings": {},
+            "variablePrecisions": {},
+            "resultPrecision": 2,
+            "numericOptions": null,
+            "correctOption": null,
+            "intervalLo": 11.0,
+            "intervalHi": 13.0,
+            "mode": "open",
+            "seed": 7
+        }"#;
+
+        let parsed: ProjektQuestion = serde_json::from_str(legacy).expect("legacy projekt question");
+        assert!(parsed.answers_data.is_none());
+        assert!(parsed.alternate_option.is_none());
     }
 }

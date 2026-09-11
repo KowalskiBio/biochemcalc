@@ -475,6 +475,9 @@ export function SetDetailPage() {
           forceScientific: tmpl.forceScientific ?? false,
           numericOptions: variant?.numericOptions,
           correctOption: variant?.correctOption,
+          // The alternace row is a second correct option; without it the
+          // projekt export marks only correctOption as ok.
+          alternateOption: variant?.alternateOption,
           intervalLo: variant?.intervalLo,
           intervalHi: variant?.intervalHi,
           mode: generatedMode,

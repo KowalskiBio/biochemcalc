@@ -158,8 +158,23 @@ pub struct ProjektQuestion {
     pub force_scientific: bool,
     pub numeric_options: Option<Vec<f64>>,
     pub correct_option: Option<u8>,
+    /// The "alternace" row, a second option that is also correct. Without it
+    /// a projekt export would mark only `correct_option` with `ok` and count
+    /// every student who took the alternative route as wrong.
+    #[serde(default)]
+    pub alternate_option: Option<u8>,
     pub interval_lo: Option<f64>,
     pub interval_hi: Option<f64>,
+    /// Per-target answers for a multi-answer question. `numeric_options` /
+    /// `interval_lo` / `interval_hi` above describe the first target only, so
+    /// a projekt that drops this exports a two-answer question as a
+    /// one-answer question (with `result_unit` still reading `"mol;g"`).
+    ///
+    /// `serde(default)` keeps projekt files written before this field existed
+    /// loading unchanged; they simply carry no targets, exactly as they
+    /// exported before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answers_data: Option<Vec<crate::models::AnswerField>>,
     pub mode: TemplateMode,
     pub seed: u64,
 }

@@ -281,10 +281,27 @@ pub(crate) fn open_interval(
             let fraction = spread_override
                 .filter(|v| v.is_finite() && *v > 0.0)
                 .unwrap_or_else(|| sd_fraction_for_difficulty(difficulty));
-            (correct.abs() * fraction).max(0.01)
+            let width = correct.abs() * fraction;
+            if width.is_finite() && width > 0.0 {
+                width
+            } else {
+                ZERO_ANSWER_HALF_WIDTH
+            }
         });
     (correct - half_width, correct + half_width)
 }
+
+/// Half-width for an answer of exactly zero, which has no magnitude for the
+/// chosen fraction to scale.
+///
+/// This is deliberately the *only* absolute floor in `open_interval`. The
+/// same 0.01 used to be applied to every answer, which quietly undid the
+/// difficulty choice for ordinary chemistry results: at `hard` any answer
+/// below 0.1 got ±0.01 (0.05 mol was graded at ±20 % instead of ±10 %), and
+/// below 0.01 the interval stretched across zero, so a student answering `0`
+/// to a 0.0025 mol question scored full marks — in the exported answer key
+/// and in practice grading alike.
+const ZERO_ANSWER_HALF_WIDTH: f64 = 0.01;
 
 const MIN_DISTRACTOR_DEVIATION: f64 = 0.02;
 
@@ -2309,6 +2326,64 @@ mod tests {
                 "{difficulty}: unexpected upper bound {hi}"
             );
         }
+    }
+
+    /// The same relative tiers must hold for the small results chemistry is
+    /// made of. An absolute 0.01 floor used to swallow them whole: every
+    /// difficulty returned ±0.01 for a 0.0025 mol answer, and `hard` was no
+    /// narrower than `medium` anywhere below 0.1.
+    #[test]
+    fn open_interval_width_follows_difficulty_for_small_answers() {
+        let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+
+        for correct in [0.05_f64, 0.0025, 3.44e-22] {
+            for (difficulty, fraction) in
+                [("easy", 0.50), ("medium", 0.30), ("hard", 0.10), ("very_hard", 0.05)]
+            {
+                let (lo, hi) = open_interval(correct, &constraint, difficulty, None);
+                let expected = correct * fraction;
+                assert!(
+                    ((hi - lo) / 2.0 - expected).abs() <= expected * 1e-9,
+                    "{difficulty} at {correct}: half-width {}, expected {expected}",
+                    (hi - lo) / 2.0
+                );
+                // A positive answer's tolerance must never reach zero, or
+                // answering "0" scores full marks.
+                assert!(lo > 0.0, "{difficulty} at {correct}: interval spans zero");
+            }
+        }
+    }
+
+    /// A zero answer has no magnitude to scale, so it keeps the absolute
+    /// fallback width rather than a degenerate zero-wide interval.
+    #[test]
+    fn open_interval_falls_back_to_an_absolute_width_for_a_zero_answer() {
+        let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let (lo, hi) = open_interval(0.0, &constraint, "hard", None);
+        assert!((lo + ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12, "unexpected lower bound {lo}");
+        assert!((hi - ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12, "unexpected upper bound {hi}");
+    }
+
+    /// Precedence is unchanged by the floor fix: an explicit SD beats the
+    /// per-question spread override, which beats the difficulty preset.
+    #[test]
+    fn open_interval_precedence_sd_then_override_then_difficulty() {
+        let with_sd = ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
+        let (lo, hi) = open_interval(0.05, &with_sd, "hard", Some(0.40));
+        assert!((lo + 2.45).abs() < 1e-9 && (hi - 2.55).abs() < 1e-9, "SD must win: [{lo}, {hi}]");
+
+        let plain = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let (lo, hi) = open_interval(0.05, &plain, "hard", Some(0.40));
+        assert!(
+            ((hi - lo) / 2.0 - 0.02).abs() < 1e-12,
+            "override must beat the difficulty preset: [{lo}, {hi}]"
+        );
+
+        let (lo, hi) = open_interval(0.05, &plain, "hard", None);
+        assert!(
+            ((hi - lo) / 2.0 - 0.005).abs() < 1e-12,
+            "difficulty preset applies when nothing overrides it: [{lo}, {hi}]"
+        );
     }
 
     /// An explicit teacher-set standard deviation overrides the

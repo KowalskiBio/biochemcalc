@@ -274,6 +274,43 @@ fn render_question(
     rendered
 }
 
+/// Decimals needed to print every option in one set as a distinct number.
+///
+/// Mirrors `resolveOptionsPrecision` in `src/lib/math-utils.ts`, which the
+/// on-screen option lists already use. The generator only guarantees that
+/// options are distinct on its own rounding grid, and an absolute SD window
+/// makes that grid `2*sd/(count+1)` — finer than the two decimals an export
+/// prints. A question built around `sd_allowed = 0,02` at ~1,0 then reaches
+/// the student as `1,00 / 0,99 / 0,99 / 1,01 / 1,01`: five options, three
+/// values. Significant digits are left alone, since there the grid and the
+/// rendering are the same setting.
+fn options_precision(
+    values: &[f64],
+    preferred: u8,
+    sig_digits: Option<u8>,
+    notation: Notation,
+) -> u8 {
+    const MAX_PRECISION: u8 = 6;
+    if sig_digits.is_some() || values.len() < 2 {
+        return preferred;
+    }
+    let mut precision = preferred;
+    while precision < MAX_PRECISION {
+        let mut rendered: Vec<String> = values
+            .iter()
+            .map(|v| fmt_option_value(*v, precision, sig_digits, notation))
+            .collect();
+        let total = rendered.len();
+        rendered.sort();
+        rendered.dedup();
+        if rendered.len() == total {
+            return precision;
+        }
+        precision += 1;
+    }
+    MAX_PRECISION
+}
+
 fn render_multi_closed_options(
     out: &mut String,
     answers: &[crate::models::AnswerField],
@@ -289,11 +326,25 @@ fn render_multi_closed_options(
         .len();
     let correct_option = answers[0].correct_option.unwrap_or(1);
 
+    // Per target, exactly as the practice UI resolves one precision per slot.
+    let precisions: Vec<u8> = answers
+        .iter()
+        .map(|a| {
+            options_precision(
+                a.numeric_options.as_deref().unwrap_or(&[]),
+                precision,
+                sig_digits,
+                notation,
+            )
+        })
+        .collect();
+
     for idx in 0..option_count {
         let label = idx + 1;
         let parts: Vec<String> = answers
             .iter()
-            .map(|a| {
+            .zip(&precisions)
+            .map(|(a, &precision)| {
                 let value = a.numeric_options.as_ref().unwrap()[idx];
                 let unit = a.unit.as_deref().unwrap_or("");
                 if unit.is_empty() {
@@ -320,8 +371,15 @@ fn render_multi_closed_options(
 /// A ±30 % tolerance on an answer of 0.11 spans 0.08–0.15, but printed at one
 /// decimal both ends collapse to `0,1` — an interval that accepts nothing but
 /// the rounded midpoint. Widen the precision until the bounds actually differ.
+///
+/// The ceiling has to clear the smallest answers a chemistry question asks
+/// for. A `:n` row is a bare decimal (no `×10^x`), so the only way to keep
+/// the bounds of a ~1e-22 tolerance apart is decimals, and a tolerance that
+/// is now a true percentage of the answer (rather than a flat ±0,01) reaches
+/// that far down. A magnitude that needs twenty of them is the teacher's cue
+/// to ask for the answer in a different unit.
 fn interval_precision(lo: f64, hi: f64, preferred: u8) -> u8 {
-    const MAX_PRECISION: u8 = 8;
+    const MAX_PRECISION: u8 = 30;
     let mut precision = preferred;
     while precision < MAX_PRECISION && fmt_cz(lo, precision) == fmt_cz(hi, precision) {
         precision += 1;
@@ -329,49 +387,179 @@ fn interval_precision(lo: f64, hi: f64, preferred: u8) -> u8 {
     precision
 }
 
+/// A plain decimal with `decimals` places, free of the binary noise `{:.0}`
+/// exposes on large magnitudes — `1,05e25` printed in full otherwise ends
+/// `…9496683520`, digits the double never actually carried.
+fn fmt_plain_decimal_cz(value: f64, decimals: u8) -> String {
+    /// Decimal digits a `f64` can justify before its binary expansion shows.
+    const EXACT_DIGITS: i32 = 15;
+    if value == 0.0 || !value.is_finite() {
+        return fmt_cz(value, decimals);
+    }
+    let order = value.abs().log10().floor() as i32;
+    if order < EXACT_DIGITS {
+        return fmt_cz(value, decimals);
+    }
+    // Keep the digits the double justifies, pad the rest of the magnitude
+    // with zeros. The scaled head stays well inside 2^53, so it prints exact.
+    let shift = order - (EXACT_DIGITS - 1);
+    let head = (value / 10f64.powi(shift)).round();
+    format!("{:.0}{}", head, "0".repeat(shift as usize))
+}
+
+/// `fmt_significant_cz` without the scientific escape hatch, for numbers that
+/// have to reach IS MU as bare decimals. Rounding to a whole magnitude goes
+/// through digit padding rather than a `f64` multiply, which would print the
+/// same binary noise `fmt_plain_decimal_cz` exists to avoid.
+fn fmt_plain_significant_cz(value: f64, sig_digits: u8) -> String {
+    if value == 0.0 || !value.is_finite() {
+        return fmt_significant_cz(value, sig_digits);
+    }
+    let order = value.abs().log10().floor() as i32;
+    let decimals = sig_digits as i32 - 1 - order;
+    if decimals <= 0 {
+        let shift = -decimals;
+        let head = (value / 10f64.powi(shift)).round();
+        return format!("{:.0}{}", head, "0".repeat(shift as usize));
+    }
+    fmt_plain_decimal_cz(value, decimals.min(u8::MAX as i32) as u8)
+}
+
+/// Round `value` away from the interval's middle: the lower bound down, the
+/// upper bound up, onto the grid the bound is about to be printed on.
+///
+/// Rounding to nearest can pull a bound inside the tolerance the generator
+/// computed, and the student grading uses that same tolerance, so a printed
+/// bound that clips it marks a genuinely correct answer wrong. Erring outward
+/// instead can only ever accept one printed step more than intended.
+/// `decimals` is signed: negative means rounding onto a whole power of ten,
+/// which is how the significant-digit path treats large magnitudes.
+fn round_outward(value: f64, decimals: i32, up: bool) -> f64 {
+    let factor = 10f64.powi(decimals);
+    if !value.is_finite() || !factor.is_finite() || factor <= 0.0 {
+        return value;
+    }
+    let scaled = value * factor;
+    if !scaled.is_finite() {
+        return value;
+    }
+    // A bound that already sits on the grid must stay put: `2.2 * 100` is
+    // 220.00000000000003 in binary, and ceiling that would publish 2,21.
+    let nearest = scaled.round();
+    if (scaled - nearest).abs() <= scaled.abs().max(1.0) * 1e-9 {
+        return nearest / factor;
+    }
+    (if up { scaled.ceil() } else { scaled.floor() }) / factor
+}
+
+/// The two bounds of an answer interval as an IS MU `:n` evaluation row needs
+/// them: a bare number or `lo..hi`, decimal comma or dot, nothing else.
+///
+/// Scientific notation is deliberately not an option here however the
+/// question's own numbers are styled — `×10<sup>25</sup>` is HTML, and the
+/// row is parsed as a number. A magnitude that would read better in
+/// scientific notation is the teacher's cue to ask for the answer in a
+/// different unit, not something this row can express.
+fn fmt_interval_bounds(
+    lo: f64,
+    hi: f64,
+    result_precision: u8,
+    result_sig_digits: Option<u8>,
+) -> (String, String) {
+    match result_sig_digits {
+        Some(n) => (
+            fmt_plain_significant_cz(round_outward(lo, significant_decimals(lo, n), false), n),
+            fmt_plain_significant_cz(round_outward(hi, significant_decimals(hi, n), true), n),
+        ),
+        None => {
+            // The precision is chosen on the honestly rounded bounds, so the
+            // "both ends must stay distinguishable" escalation is unaffected
+            // by the outward nudge applied when they are finally printed.
+            let precision = interval_precision(lo, hi, result_precision);
+            (
+                fmt_plain_decimal_cz(round_outward(lo, precision as i32, false), precision),
+                fmt_plain_decimal_cz(round_outward(hi, precision as i32, true), precision),
+            )
+        }
+    }
+}
+
+/// Decimal places `sig_digits` significant digits put `value` on. Negative for
+/// magnitudes whose last significant digit sits left of the decimal point.
+fn significant_decimals(value: f64, sig_digits: u8) -> i32 {
+    if value == 0.0 || !value.is_finite() {
+        return 0;
+    }
+    sig_digits as i32 - 1 - value.abs().log10().floor() as i32
+}
+
+/// The unit as it trails an input field in the question part. It belongs
+/// there and nowhere else: an evaluation row that carries anything but `ok`,
+/// points and feedback after the answer swallows it as feedback text, leaving
+/// the question with no row marked `ok`.
+///
+/// Two spaces because IS MU drops one space on each side of a manipulation
+/// element, so that an element can be butted straight against its text.
+fn field_unit_suffix(unit: &str) -> String {
+    let unit = format_chemical_text(unit.trim());
+    if unit.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", unit)
+    }
+}
+
+/// A single numeric input field plus the row that grades it.
+fn render_open_interval(
+    out: &mut String,
+    lo: f64,
+    hi: f64,
+    unit: &str,
+    point_value: u8,
+    result_precision: u8,
+    result_sig_digits: Option<u8>,
+) {
+    let (lo_str, hi_str) = fmt_interval_bounds(lo, hi, result_precision, result_sig_digits);
+    out.push_str(&format!(" :n{}\n", field_unit_suffix(unit)));
+    out.push_str(&format!(":n={}..{} ok {}\n", lo_str, hi_str, point_value));
+}
+
+/// One numbered input field per answer target, graded on a single row.
+///
+/// All the elements share one row on purpose: that is how IS MU expresses "the
+/// points are awarded only when every part is right", which is the rule the
+/// old single-interval row carried. A row per element would instead pay
+/// `point_value` per field.
 fn render_multi_open_intervals(
     out: &mut String,
     answers: &[crate::models::AnswerField],
     point_value: u8,
     result_precision: u8,
     result_sig_digits: Option<u8>,
-    notation: Notation,
 ) {
-    let parts: Vec<String> = answers
-        .iter()
-        .map(|a| {
-            let lo = a.interval_lo.expect("open answer field has lower bound");
-            let hi = a.interval_hi.expect("open answer field has upper bound");
-            let unit = a.unit.as_deref().unwrap_or("");
-            let mantissa_decimals = result_sig_digits
-                .map(|n| n.saturating_sub(1))
-                .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
-            let (lo_str, hi_str) = if notation == Notation::Scientific && lo != 0.0 && hi != 0.0 {
-                (
-                    fmt_scientific_cz(lo, mantissa_decimals),
-                    fmt_scientific_cz(hi, mantissa_decimals),
-                )
-            } else {
-                match result_sig_digits {
-                    Some(n) => (
-                        fmt_variable_value(lo, 0, Some(n), Notation::Auto),
-                        fmt_variable_value(hi, 0, Some(n), Notation::Auto),
-                    ),
-                    None => {
-                        let precision = interval_precision(lo, hi, result_precision);
-                        (fmt_value_cz(lo, precision), fmt_value_cz(hi, precision))
-                    }
-                }
-            };
-            if unit.is_empty() {
-                format!("\"{}..{}\"", lo_str, hi_str)
-            } else {
-                format!("\"{}..{}\" {}", lo_str, hi_str, format_chemical_text(unit))
-            }
-        })
-        .collect();
-    out.push_str(" :n\n");
-    out.push_str(&format!(":n={} {} ok\n", parts.join(", "), point_value));
+    for (idx, a) in answers.iter().enumerate() {
+        let symbol = format_chemical_text(a.symbol.trim());
+        let label = if symbol.is_empty() {
+            String::new()
+        } else {
+            format!("{} =  ", symbol)
+        };
+        out.push_str(&format!(
+            " {}:n{}{}\n",
+            label,
+            idx + 1,
+            field_unit_suffix(a.unit.as_deref().unwrap_or(""))
+        ));
+    }
+
+    let mut row = String::new();
+    for (idx, a) in answers.iter().enumerate() {
+        let lo = a.interval_lo.expect("open answer field has lower bound");
+        let hi = a.interval_hi.expect("open answer field has upper bound");
+        let (lo_str, hi_str) = fmt_interval_bounds(lo, hi, result_precision, result_sig_digits);
+        row.push_str(&format!(":n{}={}..{}", idx + 1, lo_str, hi_str));
+    }
+    out.push_str(&format!("{} ok {}\n", row, point_value));
 }
 
 /// A lightweight input for the export writer.
@@ -385,6 +573,18 @@ pub struct ExportQuestion<'a> {
     pub result_significant_digits: Option<u8>,
     pub force_scientific: bool,
     pub mode: TemplateMode,
+}
+
+/// This question's answer targets, or None when it has none.
+///
+/// `answers_data` carries `Some(vec![])` for a question whose formula uses
+/// `;` assignments but whose text has no `[symbol]` markers, which is a
+/// single-answer question however the field is shaped.
+fn multi_answer_fields<'a>(q: &'a ExportQuestion<'_>) -> Option<&'a [crate::models::AnswerField]> {
+    q.variant
+        .answers_data
+        .as_deref()
+        .filter(|fields| !fields.is_empty())
 }
 
 /// Write a full `.txt` output from a sequence of questions.
@@ -417,7 +617,12 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
 
         match q.mode {
             TemplateMode::Closed => {
-                if let Some(answers) = &q.variant.answers_data {
+                // An empty `answers_data` is not a multi-answer question: a
+                // `;`-assignment formula with no `[symbol]` markers generates
+                // `Some(vec![])`, and the multi-answer renderers index target
+                // 0. Same non-empty test the student-facing paths use
+                // (`answer_slots`, `grade_open`, `correct_answers`).
+                if let Some(answers) = multi_answer_fields(q) {
                     render_multi_closed_options(
                         &mut out,
                         answers,
@@ -432,12 +637,18 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         .numeric_options
                         .as_ref()
                         .expect("closed variant has numeric options");
+                    let precision = options_precision(
+                        numeric,
+                        q.result_precision,
+                        q.result_significant_digits,
+                        result_notation,
+                    );
                     for (idx, value) in numeric.iter().enumerate() {
                         let label = idx + 1;
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_option_value(*value, q.result_precision, q.result_significant_digits, result_notation),
+                            fmt_option_value(*value, precision, q.result_significant_digits, result_notation),
                             format_chemical_text(&q.template.result_unit)
                         ));
                     }
@@ -452,14 +663,13 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                 }
             }
             TemplateMode::Open => {
-                if let Some(answers) = &q.variant.answers_data {
+                if let Some(answers) = multi_answer_fields(q) {
                     render_multi_open_intervals(
                         &mut out,
                         answers,
                         q.template.point_value,
                         q.result_precision,
                         q.result_significant_digits,
-                        result_notation,
                     );
                 } else {
                     let lo = q
@@ -470,41 +680,15 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         .variant
                         .interval_hi
                         .expect("open variant has interval upper bound");
-                    let mantissa_decimals = q
-                        .result_significant_digits
-                        .map(|n| n.saturating_sub(1))
-                        .unwrap_or(SCIENTIFIC_MANTISSA_DECIMALS);
-                    let (lo_str, hi_str) = if q.force_scientific && lo != 0.0 && hi != 0.0 {
-                        (
-                            fmt_scientific_cz(lo, mantissa_decimals),
-                            fmt_scientific_cz(hi, mantissa_decimals),
-                        )
-                    } else {
-                        match q.result_significant_digits {
-                            Some(n) => (
-                                fmt_variable_value(lo, 0, Some(n), Notation::Auto),
-                                fmt_variable_value(hi, 0, Some(n), Notation::Auto),
-                            ),
-                            None => {
-                                let precision = interval_precision(lo, hi, q.result_precision);
-                                (fmt_value_cz(lo, precision), fmt_value_cz(hi, precision))
-                            }
-                        }
-                    };
-                    out.push_str(" :n\n");
-                    let unit_str = format_chemical_text(&q.template.result_unit);
-                    let unit_str = if unit_str.trim().is_empty() {
-                        String::new()
-                    } else {
-                        format!(" {}", unit_str)
-                    };
-                    out.push_str(&format!(
-                        ":n=\"{}..{}\"{} {} ok\n",
-                        lo_str,
-                        hi_str,
-                        unit_str,
-                        q.template.point_value
-                    ));
+                    render_open_interval(
+                        &mut out,
+                        lo,
+                        hi,
+                        &q.template.result_unit,
+                        q.template.point_value,
+                        q.result_precision,
+                        q.result_significant_digits,
+                    );
                 }
             }
         }
@@ -629,9 +813,12 @@ mod tests {
             mode: TemplateMode::Open,
         }]);
 
-        assert!(output.contains(" :n\n"), "missing open marker in:\n{output}");
         assert!(
-            output.contains(":n=\"45,1..45,9\" g 3 ok"),
+            output.contains(" :n  g\n"),
+            "missing open marker in:\n{output}"
+        );
+        assert!(
+            output.contains(":n=45,1..45,9 ok 3"),
             "missing interval in:\n{output}"
         );
         assert!(
@@ -787,8 +974,12 @@ mod tests {
         );
     }
 
+    /// A `:n` row is parsed as a number, so a molecule count has to be
+    /// written out in full — `1,05×10<sup>25</sup>` is HTML, not a bound.
+    /// The digits past what a `f64` carries must be zeros, not the binary
+    /// expansion `{:.0}` would otherwise print.
     #[test]
-    fn open_intervals_use_scientific_notation_for_molecule_counts() {
+    fn open_intervals_write_molecule_counts_as_plain_decimals() {
         let template = make_template("Jaký počet molekul?");
         let variant = Variant {
             numeric_options: None,
@@ -810,14 +1001,160 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(":n=\"1,05×10<sup>25</sup>..1,35×10<sup>25</sup>\""),
-            "expected HTML scientific interval, got:\n{output}"
+            output.contains(
+                ":n=10500000000000000000000000..13500000000000000000000000 ok 3"
+            ),
+            "expected a plain decimal interval, got:\n{output}"
+        );
+        assert!(
+            !output.contains("<sup>"),
+            "HTML markup leaked into a numeric row:\n{output}"
+        );
+    }
+
+    /// A `;`-assignment formula with no `[symbol]` markers generates
+    /// `answers_data: Some(vec![])`. That is a single-answer question: the
+    /// closed renderer used to index target 0 and panic (an "export failed"
+    /// in the app, a dropped request on the HTTP route), and the open one
+    /// wrote a question with no `:n` element at all.
+    #[test]
+    fn empty_answers_data_exports_as_a_single_answer_question() {
+        let template = make_template("Vypočítejte hmotnost.");
+
+        let mut closed = make_closed_variant();
+        closed.answers_data = Some(vec![]);
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &closed,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+        assert!(output.contains(" :r1 64,0 g"), "missing options in:\n{output}");
+        assert!(output.contains(":r1 ok 3"), "missing evaluation row in:\n{output}");
+
+        let mut open = make_closed_variant();
+        open.answers_data = Some(vec![]);
+        open.numeric_options = None;
+        open.correct_option = None;
+        open.interval_lo = Some(45.1);
+        open.interval_hi = Some(45.9);
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &open,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+        assert!(output.contains(" :n  g\n"), "missing input field in:\n{output}");
+        assert!(
+            output.contains(":n=45,1..45,9 ok 3"),
+            "missing evaluation row in:\n{output}"
+        );
+    }
+
+    /// The generator keeps options distinct on its own grid, which an
+    /// absolute SD window refines to 2*sd/(count+1) — finer than the two
+    /// decimals an export prints. Five options anchored on sd = 0,02 at 1,0
+    /// used to reach the student as `1,00 / 0,99 / 0,99 / 1,01 / 1,01`.
+    #[test]
+    fn closed_options_widen_precision_until_they_print_distinctly() {
+        let template = make_template("Vypočítejte látkové množství.");
+        let variant = Variant {
+            numeric_options: Some(vec![
+                1.0,
+                1.006_666_666_666_666_8,
+                0.986_666_666_666_666_7,
+                0.993_333_333_333_333_4,
+                1.013_333_333_333_333_4,
+            ]),
+            correct_option: Some(1),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        // Everything after the ":rN " label, i.e. the value the student reads.
+        let mut shown: Vec<&str> = output
+            .lines()
+            .filter(|l| l.starts_with(" :r"))
+            .filter_map(|l| l.trim_start().split_once(' ').map(|(_, value)| value))
+            .collect();
+        assert_eq!(shown.len(), 5, "expected five option rows in:\n{output}");
+        let total = shown.len();
+        shown.sort();
+        shown.dedup();
+        assert_eq!(
+            shown.len(),
+            total,
+            "options must print as distinct values, got:\n{output}"
+        );
+    }
+
+    /// Reproduces the export IS MU rejected with "V hodnoticí části musí být
+    /// aspoň jeden z řádků označen symbolem 'ok'": the row read
+    /// `:n="183..185" g 2 ok`, where everything after the answer — the unit
+    /// and the points — is swallowed as feedback text, so nothing on it is
+    /// marked `ok`. An evaluation row takes the element, then `ok`, then the
+    /// points, in that order and nothing else.
+    #[test]
+    fn open_evaluation_row_marks_ok_before_the_points() {
+        let template = make_template("Kolik gramů LiF bude izolováno?");
+        let variant = Variant {
+            interval_lo: Some(183.0),
+            interval_hi: Some(185.0),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 0,
+            result_significant_digits: None,
+            force_scientific: true,
+            mode: TemplateMode::Open,
+        }]);
+
+        let row = output
+            .lines()
+            .find(|l| l.starts_with(":n"))
+            .expect("evaluation row");
+        assert_eq!(row, ":n=183..185 ok 3", "malformed evaluation row: {row}");
+        // force_scientific styles the question's own numbers, never this row.
+        assert!(
+            !row.contains('<') && !row.contains('×') && !row.contains('"'),
+            "evaluation row must stay a bare number: {row}"
         );
     }
 
     /// Reproduces a reported export: a ±30 % tolerance around 0.1137 mol
     /// printed at one decimal collapsed to `"0,1..0,1"`, which accepts only
-    /// the rounded midpoint instead of the intended 0.08–0.15 band.
+    /// the rounded midpoint instead of the intended 0.0796–0.1478 band.
+    ///
+    /// The printed bounds round outward (0,07 rather than 0,08 for the lower
+    /// one), so the row can never reject an answer the generator, and the
+    /// student grading beside it, count as correct.
     #[test]
     fn small_answer_interval_does_not_collapse_to_a_single_value() {
         let template = make_template("Vypočítejte látkové množství.");
@@ -841,12 +1178,60 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(":n=\"0,08..0,15\""),
+            output.contains(":n=0,07..0,15 ok 3"),
             "interval should keep both bounds distinguishable, got:\n{output}"
         );
         assert!(
             !output.contains("0,1..0,1"),
             "interval collapsed to a single value:\n{output}"
+        );
+    }
+
+    /// Now that a tolerance is a true percentage of the answer rather than a
+    /// flat ±0,01, an atomic-scale question reaches this row with bounds far
+    /// below the printed grid. They must still come out distinct, and wide
+    /// enough to hold the band the generator computed: rounding the upper
+    /// bound of 4,472e-22 down to 4e-22 would fail a student who answered
+    /// 4,4e-22 exactly right.
+    #[test]
+    fn atomic_scale_interval_bounds_contain_the_generated_tolerance() {
+        let template = make_template("Jaká je hmotnost jedné molekuly?");
+        let variant = Variant {
+            interval_lo: Some(2.408e-22),
+            interval_hi: Some(4.472e-22),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+
+        let row = output
+            .lines()
+            .find(|l| l.starts_with(":n="))
+            .expect("evaluation row");
+        let bounds: Vec<f64> = row
+            .trim_start_matches(":n=")
+            .split(" ok")
+            .next()
+            .expect("bounds")
+            .split("..")
+            .map(|b| b.replace(',', ".").parse::<f64>().expect("numeric bound"))
+            .collect();
+        assert_eq!(bounds.len(), 2, "malformed row: {row}");
+        assert!(bounds[0] < bounds[1], "bounds collapsed in {row}");
+        assert!(
+            bounds[0] <= 2.408e-22 && bounds[1] >= 4.472e-22,
+            "printed bounds clip the generated tolerance: {row}"
         );
     }
 
@@ -878,8 +1263,8 @@ mod tests {
             .find(|l| l.starts_with(":n="))
             .expect("interval line");
         let bounds: Vec<&str> = interval
-            .trim_start_matches(":n=\"")
-            .split("\"")
+            .trim_start_matches(":n=")
+            .split(" ok")
             .next()
             .expect("bounds")
             .split("..")
@@ -910,8 +1295,8 @@ mod tests {
             mode: TemplateMode::Open,
         }]);
 
-        assert!(output.contains(" :n\n"));
-        assert!(output.contains(":n=\"45,1..45,9\" g 3 ok"));
+        assert!(output.contains(" :n  g\n"));
+        assert!(output.contains(":n=45,1..45,9 ok 3"));
     }
 
     #[test]
@@ -1179,7 +1564,20 @@ mod tests {
             mode: TemplateMode::Open,
         }]);
 
-        assert!(output.contains(":n=\"1,8..2,2\" mol, \"3,8..4,2\" g 3 ok"));
+        // One numbered field per target, each labelled and carrying its unit,
+        // then a single row so the points need every part right.
+        assert!(
+            output.contains(" n =  :n1  mol\n"),
+            "missing first labelled field in:\n{output}"
+        );
+        assert!(
+            output.contains(" m =  :n2  g\n"),
+            "missing second labelled field in:\n{output}"
+        );
+        assert!(
+            output.contains(":n1=1,8..2,2:n2=3,8..4,2 ok 3"),
+            "missing combined evaluation row in:\n{output}"
+        );
     }
 
     #[test]
@@ -1341,7 +1739,7 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(":n=\"0,0796..0,148\""),
+            output.contains(":n=0,0796..0,148 ok 3"),
             "expected 3 sig digits interval bounds, got:\n{output}"
         );
     }
@@ -1507,9 +1905,15 @@ mod tests {
             mode: TemplateMode::Open,
         }]);
 
+        // The unit rides with the input field (HTML is fine there); the
+        // evaluation row stays a bare number.
         assert!(
-            output.contains("g.mol<sup>-1</sup>"),
-            "expected HTML-formatted unit in open interval, got:\n{output}"
+            output.contains(" :n  g.mol<sup>-1</sup>\n"),
+            "expected HTML-formatted unit beside the field, got:\n{output}"
+        );
+        assert!(
+            output.contains(":n=45,1..45,9 ok 3"),
+            "evaluation row must carry nothing but the interval, ok and points, got:\n{output}"
         );
         assert!(
             !output.contains("g*mol^-1"),
@@ -1629,4 +2033,5 @@ mod tests {
             "row 3 must render 5 sig figs for both targets, got:\n{output}"
         );
     }
+
 }

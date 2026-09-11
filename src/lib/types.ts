@@ -613,6 +613,8 @@ export interface ProjektQuestion {
   forceScientific?: boolean
   numericOptions?: number[]
   correctOption?: number
+  /** The "alternace" row: a second option that also counts as correct. */
+  alternateOption?: number
   intervalLo?: number
   intervalHi?: number
   mode: TemplateMode
