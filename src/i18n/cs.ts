@@ -87,6 +87,9 @@ export const cs = {
     test: "Test",
     leaderboard: "Žebříček",
     hlaseni: "Hlášení",
+    openMenu: "Otevřít menu",
+    closeMenu: "Zavřít menu",
+    mobileNavTitle: "Navigace",
   },
 
   // Student practice generator

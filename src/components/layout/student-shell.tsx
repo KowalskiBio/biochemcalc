@@ -1,7 +1,19 @@
+import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cva } from "class-variance-authority"
-import { FlaskConical, LogOut, Moon, Settings, Sun, Target, Timer, Trophy } from "lucide-react"
+import {
+  FlaskConical,
+  LogOut,
+  Menu,
+  Moon,
+  Settings,
+  Sun,
+  Target,
+  Timer,
+  Trophy,
+  X,
+} from "lucide-react"
 import type React from "react"
-import { type ReactNode, useEffect } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import { PageTransition } from "@/components/ui/page-transition"
 import { Toaster } from "@/components/ui/toaster"
@@ -71,7 +83,13 @@ const iconButtonVariants = cva(
   "flex items-center justify-center p-2 rounded-[4px] border border-white/10 text-[hsl(var(--sidebar-foreground))]/70 transition-colors duration-100 cursor-pointer hover:bg-white/5 hover:text-[hsl(var(--sidebar-foreground))]",
 )
 
-function StudentSidebar() {
+/**
+ * `onNavigate` closes the mobile drawer this renders inside of — a route
+ * change doesn't otherwise dismiss it, since it's a plain open/closed dialog
+ * state, not tied to the router. The desktop sidebar (always visible, never
+ * inside a drawer) passes nothing.
+ */
+function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation()
   const navigate = useNavigate()
   const darkMode = useUiStore((state) => state.theme === "dark")
@@ -79,6 +97,7 @@ function StudentSidebar() {
   const username = useAuthStore((s) => s.user?.username)
 
   const handleLogout = async () => {
+    onNavigate?.()
     await logout()
     navigate("/login", { replace: true })
   }
@@ -110,6 +129,7 @@ function StudentSidebar() {
               <Link
                 key={item.path}
                 to={item.path}
+                onClick={onNavigate}
                 className={cn(navItemVariants({ variant: isActive ? "active" : "default" }))}
                 aria-current={isActive ? "page" : undefined}
               >
@@ -149,6 +169,8 @@ function StudentSidebar() {
 }
 
 export function StudentShell({ children }: { children: ReactNode }) {
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty("--sidebar-width", "232px")
@@ -156,12 +178,56 @@ export function StudentShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="relative flex min-h-screen w-full">
-      <div className="fixed left-0 top-0 z-40 h-full">
+      {/* Desktop: the permanent fixed sidebar, unchanged from before. */}
+      <div className="fixed left-0 top-0 z-40 hidden h-full md:block">
         <StudentSidebar />
       </div>
 
-      <main className="flex-1 flex flex-col ml-[var(--sidebar-width)]">
-        <div className="flex-1 p-4 sm:p-6 lg:p-8">
+      {/* Phone/tablet: the same sidebar content, but as a dismissible drawer
+          behind a hamburger button — there's no room to keep it permanently
+          on screen below `md`. */}
+      <DialogPrimitive.Root open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/50 md:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+          <DialogPrimitive.Content
+            className="fixed left-0 top-0 z-50 h-full duration-200 md:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left"
+            aria-describedby={undefined}
+          >
+            <DialogPrimitive.Title className="sr-only">
+              {cs.navigation.mobileNavTitle}
+            </DialogPrimitive.Title>
+            <DialogPrimitive.Close
+              className="absolute right-3 top-3 flex items-center justify-center p-2 rounded-[4px] text-[hsl(var(--sidebar-foreground))]/70 hover:bg-white/5 hover:text-[hsl(var(--sidebar-foreground))]"
+              aria-label={cs.navigation.closeMenu}
+            >
+              <X className="size-4" strokeWidth={1.75} />
+            </DialogPrimitive.Close>
+            <StudentSidebar onNavigate={() => setIsMobileNavOpen(false)} />
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+
+      <main className="flex flex-1 flex-col md:ml-[var(--sidebar-width)]">
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-black/20 bg-[hsl(var(--sidebar))] px-4 py-3 md:hidden">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-[4px] bg-[hsl(var(--accent))] flex items-center justify-center flex-shrink-0">
+              <FlaskConical className="size-4 text-[hsl(var(--card))]" strokeWidth={1.75} />
+            </div>
+            <span className="font-semibold text-[hsl(var(--sidebar-foreground))] tracking-tight">
+              BioCal
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsMobileNavOpen(true)}
+            className="flex items-center justify-center p-2 rounded-[4px] border border-white/10 text-[hsl(var(--sidebar-foreground))]/70 transition-colors duration-100 cursor-pointer hover:bg-white/5 hover:text-[hsl(var(--sidebar-foreground))]"
+            aria-label={cs.navigation.openMenu}
+          >
+            <Menu className="size-5" strokeWidth={1.75} />
+          </button>
+        </div>
+
+        <div className="flex flex-1 flex-col p-4 sm:p-6 lg:p-8">
           <PageTransition>{children}</PageTransition>
         </div>
       </main>
