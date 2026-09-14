@@ -168,6 +168,8 @@ export const cs = {
     footerAuthor: "BioCal vytvořil",
     footerContact: "Kontakt",
     footerTeacher: "Zodpovědný vyučující",
+    footerBugs: "V případě chyb nebo problémů prosím kontaktujte autora.",
+    footerLicense: "Licencováno pod GNU General Public License v3.0.",
   },
 
   // Student test sessions: a fixed batch of questions generated all at once,
