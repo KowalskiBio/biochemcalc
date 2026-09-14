@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FormattedResult } from "@/components/ui/formatted-result"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { cs } from "@/i18n/cs"
 import { resolveOptionsPrecision } from "@/lib/math-utils"
 import { QuestionTextRenderer } from "@/lib/render-question-text"
@@ -123,9 +124,10 @@ export function QuestionReviewCard({ index, item }: { index: number; item: TestR
                   >
                     <span>{typed || cs.test.reviewNoAnswer}</span>
                     {(slot.unit ?? question.resultUnit) && (
-                      <span className="text-muted-foreground">
-                        {slot.unit ?? question.resultUnit}
-                      </span>
+                      <UnitRenderer
+                        unit={slot.unit ?? question.resultUnit}
+                        className="text-muted-foreground"
+                      />
                     )}
                   </div>
                 )

@@ -100,9 +100,11 @@ fn format_chemical_text(text: &str) -> String {
     static SUP_RE: OnceLock<Regex> = OnceLock::new();
     static SUB_RE: OnceLock<Regex> = OnceLock::new();
     static STAR_MUL_RE: OnceLock<Regex> = OnceLock::new();
+    static SCI_MUL_RE: OnceLock<Regex> = OnceLock::new();
+    static DOT_MUL_RE: OnceLock<Regex> = OnceLock::new();
 
     let hydrate_re = HYDRATE_RE
-        .get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·.](\d*)(H[₂2_]?[_₂2]?O)\b").unwrap());
+        .get_or_init(|| Regex::new(r"([A-Za-z0-9)])[·.](\d*)(H[₂2_]?[_₂2]?O)\b").unwrap());
     let sup_re = SUP_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])").unwrap());
     // Chained compound subscripts (K_a_1 -> Ka1, one symbol, one subscript)
     // merge into a single <sub>; each "_xxx" segment stays non-greedy so
@@ -111,18 +113,116 @@ fn format_chemical_text(text: &str) -> String {
         SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])((?:_[A-Za-z0-9]+?)+)").unwrap());
     let star_mul_re =
         STAR_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·]([A-Za-z0-9(])").unwrap());
+    // Rust's regex crate has no lookahead, so the `10^` is captured and
+    // written back out rather than matched as a zero-width assertion.
+    let sci_mul_re = SCI_MUL_RE.get_or_init(|| Regex::new(r"[\*·.]10\^").unwrap());
+    let dot_mul_re = DOT_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z])\.([A-Za-z])").unwrap());
 
-    let text = hydrate_re.replace_all(text, "$1.$2$3");
+    // A hydrate separator written as a DOT is not multiplication: `FeSO4.7H2O`
+    // is iron(II) sulfate heptahydrate, not "4 times 7". Park it on a sentinel
+    // no later rule matches, then restore it as a plain dot on the way out.
+    // An asterisk is excluded on purpose: `*` always means multiplication, so
+    // `FeSO_4*7H_2O` renders `FeSO₄×7H₂O`.
+    let text = hydrate_re.replace_all(text, concat!("$1", "\u{1}", "$2$3"));
+    // Czech scientific notation writes the power of ten as `3,53.10^-4` or
+    // `1,8*10^-5`; that separator is multiplication. Runs while `^` is still
+    // present, which is what marks the `10` as a power rather than a number.
+    let text = sci_mul_re.replace_all(&text, "×10^");
+    // The multiplication passes run BEFORE sub/sup: once `FeSO_4` has become
+    // `FeSO<sub>4</sub>`, the character to the left of the `*` is `>`, which
+    // no longer matches the operand class and the operator would survive.
+    let text = star_mul_re.replace_all(&text, "$1×$2");
+    // A dot is multiplication only between two letters, which separates a
+    // unit product (`g.cm^-3`) from a sentence period (always followed by a
+    // space or the end of the text) and from a decimal (digits both sides).
+    let text = dot_mul_re.replace_all(&text, "$1×$2");
     let text = sup_re.replace_all(&text, "$1<sup>$2</sup>");
     let text = sub_re.replace_all(&text, |caps: &regex::Captures| {
         format!("{}<sub>{}</sub>", &caps[1], caps[2].replace('_', ""))
     });
-    star_mul_re.replace_all(&text, "$1.$2").into_owned()
+    text.replace('\u{1}', ".")
 }
 
 /// Apply chemical formatting so the exported static text matches the UI renderer.
 fn format_text_segment(text: &str) -> String {
-    format_chemical_text(text)
+    // Decimal commas first: `format_chemical_text` turns `·`/`*` hydrate
+    // separators into dots, and normalising afterwards could not tell those
+    // freshly created dots apart from decimal points.
+    format_chemical_text(&normalize_decimal_commas(text))
+}
+
+/// Rewrite decimal dots a teacher typed into question prose as Czech decimal
+/// commas: `"objem 1.25 l"` → `"objem 1,25 l"`.
+///
+/// Mirrors `normalizeDecimalCommasInText` in `src/lib/utils.ts`, which
+/// normalises on save; this pass is what keeps a question authored before
+/// that, or imported straight into the database, from exporting with a
+/// stray dot.
+///
+/// A dot between digits is not always a decimal point here: `FeSO4.7H2O` is
+/// a hydrate, and `format_chemical_text` deliberately produces exactly that
+/// dot from `·`/`*`. So a dot only converts when the digit run before it is
+/// not preceded by a letter *and* the digit run after it is not followed by
+/// one. The `regex` crate has no lookaround, hence the hand-rolled scan.
+fn normalize_decimal_commas(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        if !c.is_ascii_digit() {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+
+        // A run of digits, possibly followed by `.` and another run.
+        let start = i;
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        let preceded_by_letter = start > 0 && chars[start - 1].is_alphabetic();
+
+        // `.10^` is the multiplication separator of a Czech-written power of
+        // ten (`3,53.10^-4`), not a decimal point. Skipping it is what makes
+        // this function idempotent: without the check, a second pass reads
+        // the `53.10` of an already-normalised `3,53.10^-4` as a fresh
+        // decimal pair and writes `3,53,10^-4`, destroying the value.
+        let power_of_ten_separator = chars.get(i + 1) == Some(&'1')
+            && chars.get(i + 2) == Some(&'0')
+            && chars.get(i + 3) == Some(&'^');
+
+        let is_decimal = !preceded_by_letter
+            && i < chars.len()
+            && chars[i] == '.'
+            && chars.get(i + 1).is_some_and(char::is_ascii_digit)
+            && !power_of_ten_separator;
+
+        if !is_decimal {
+            out.extend(&chars[start..i]);
+            continue;
+        }
+
+        let frac_start = i + 1;
+        let mut frac_end = frac_start;
+        while frac_end < chars.len() && chars[frac_end].is_ascii_digit() {
+            frac_end += 1;
+        }
+        let followed_by_letter = chars.get(frac_end).is_some_and(|c| c.is_alphabetic());
+
+        out.extend(&chars[start..i]);
+        if followed_by_letter {
+            // A hydrate such as `FeSO4.7H2O` reached through a `(` or `)`.
+            out.push('.');
+        } else {
+            out.push(',');
+        }
+        out.extend(&chars[frac_start..frac_end]);
+        i = frac_end;
+    }
+
+    out
 }
 
 /// Format a value using significant figures, with Czech decimal comma.
@@ -1618,7 +1718,10 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("FeSO4.7H<sub>2</sub>O"));
+        // `*` always means multiplication, so the asterisk spelling of a
+        // hydrate exports as a product; the dot spelling keeps its separator
+        // (see the test above).
+        assert!(output.contains("FeSO4\u{d7}7H<sub>2</sub>O"));
         assert!(!output.contains("FeSO4*7H_2O"));
     }
 
@@ -1639,8 +1742,9 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("g.cm<sup>-3</sup>"));
-        assert!(output.contains("1.5"));
+        assert!(output.contains("g×cm<sup>-3</sup>"));
+        // The unit dot survives; the decimal beside it becomes a comma.
+        assert!(output.contains("1,5"));
     }
 
     #[test]
@@ -1660,8 +1764,9 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("g.cm<sup>-3</sup>"));
-        assert!(output.contains("1.5"));
+        assert!(output.contains("g×cm<sup>-3</sup>"));
+        // The unit dot survives; the decimal beside it becomes a comma.
+        assert!(output.contains("1,5"));
     }
 
     fn make_template_with_sig(text: &str, sig: u8) -> Template {
@@ -1861,7 +1966,7 @@ mod tests {
         }]);
 
         assert!(
-            output.contains("g.cm<sup>-3</sup>"),
+            output.contains("g×cm<sup>-3</sup>"),
             "expected HTML-formatted unit, got:\n{output}"
         );
         assert!(
@@ -1908,7 +2013,7 @@ mod tests {
         // The unit rides with the input field (HTML is fine there); the
         // evaluation row stays a bare number.
         assert!(
-            output.contains(" :n  g.mol<sup>-1</sup>\n"),
+            output.contains(" :n  g×mol<sup>-1</sup>\n"),
             "expected HTML-formatted unit beside the field, got:\n{output}"
         );
         assert!(
@@ -2034,4 +2139,94 @@ mod tests {
         );
     }
 
+    #[test]
+    fn normalize_decimal_commas_rewrites_prose_decimals() {
+        assert_eq!(normalize_decimal_commas("objem 1.25 l"), "objem 1,25 l");
+        assert_eq!(normalize_decimal_commas("pH 7.1 a 3.02"), "pH 7,1 a 3,02");
+        assert_eq!(normalize_decimal_commas("0.5%"), "0,5%");
+    }
+
+    #[test]
+    fn normalize_decimal_commas_preserves_hydrates() {
+        assert_eq!(normalize_decimal_commas("FeSO4.7H2O"), "FeSO4.7H2O");
+        assert_eq!(normalize_decimal_commas("M_FeSO4.7H2O"), "M_FeSO4.7H2O");
+        assert_eq!(normalize_decimal_commas("Ca3(PO4)2.4H2O"), "Ca3(PO4)2.4H2O");
+    }
+
+    #[test]
+    fn normalize_decimal_commas_separates_hydrate_from_decimal() {
+        assert_eq!(
+            normalize_decimal_commas("CuSO4.5H2O v 0.25 l"),
+            "CuSO4.5H2O v 0,25 l"
+        );
+    }
+
+    #[test]
+    fn normalize_decimal_commas_leaves_integers_and_formulas_alone() {
+        assert_eq!(normalize_decimal_commas("C6H12O6"), "C6H12O6");
+        assert_eq!(normalize_decimal_commas("42 g"), "42 g");
+    }
+
+    #[test]
+    fn chemical_text_renders_unit_products_as_multiplication() {
+        assert_eq!(format_chemical_text("g*cm^-3"), "g\u{d7}cm<sup>-3</sup>");
+        assert_eq!(format_chemical_text("g\u{b7}cm^-3"), "g\u{d7}cm<sup>-3</sup>");
+        assert_eq!(format_chemical_text("g.cm^-3"), "g\u{d7}cm<sup>-3</sup>");
+        assert_eq!(format_chemical_text("mol.dm^-3"), "mol\u{d7}dm<sup>-3</sup>");
+        assert_eq!(format_chemical_text("mg.ml^-1"), "mg\u{d7}ml<sup>-1</sup>");
+    }
+
+    #[test]
+    fn chemical_text_renders_czech_power_of_ten_as_multiplication() {
+        assert_eq!(format_chemical_text("3,53.10^-4"), "3,53\u{d7}10<sup>-4</sup>");
+        assert_eq!(format_chemical_text("1,8*10^-5"), "1,8\u{d7}10<sup>-5</sup>");
+    }
+
+    #[test]
+    fn chemical_text_keeps_a_dot_written_hydrate_separator() {
+        assert_eq!(format_chemical_text("FeSO4.7H2O"), "FeSO4.7H2O");
+        assert_eq!(
+            format_chemical_text("FeSO_4.7H_2O"),
+            "FeSO<sub>4</sub>.7H<sub>2</sub>O"
+        );
+    }
+
+    #[test]
+    fn chemical_text_renders_an_asterisk_as_multiplication_even_in_a_hydrate() {
+        // `*` always means multiplication, whatever it sits between.
+        assert_eq!(format_chemical_text("FeSO4*7H2O"), "FeSO4\u{d7}7H2O");
+        assert_eq!(
+            format_chemical_text("FeSO_4*7H_2O"),
+            "FeSO<sub>4</sub>\u{d7}7H<sub>2</sub>O"
+        );
+        assert_eq!(
+            format_chemical_text("NiCl_2*6H_2O"),
+            "NiCl<sub>2</sub>\u{d7}6H<sub>2</sub>O"
+        );
+        assert_eq!(format_chemical_text("2*3"), "2\u{d7}3");
+    }
+
+    #[test]
+    fn normalize_decimal_commas_is_idempotent_on_a_power_of_ten() {
+        // `.10^` is a multiplication separator, not a decimal point. Running
+        // twice must not turn `3,53.10^-4` into `3,53,10^-4`.
+        let once = normalize_decimal_commas("Ka=3.53.10^-4");
+        assert_eq!(once, "Ka=3,53.10^-4");
+        assert_eq!(normalize_decimal_commas(&once), once);
+        let b = normalize_decimal_commas("1.8.10^-5");
+        assert_eq!(b, "1,8.10^-5");
+        assert_eq!(normalize_decimal_commas(&b), b);
+        // A genuine decimal whose fraction merely starts with "10" still converts.
+        assert_eq!(normalize_decimal_commas("2.104 g"), "2,104 g");
+        assert_eq!(normalize_decimal_commas("3.10 ml"), "3,10 ml");
+    }
+
+    #[test]
+    fn chemical_text_leaves_sentence_periods_alone() {
+        assert_eq!(
+            format_chemical_text("Vypo\u{10d}\u{ed}tejte hmotnost. Jak\u{e1} je"),
+            "Vypo\u{10d}\u{ed}tejte hmotnost. Jak\u{e1} je"
+        );
+        assert_eq!(format_chemical_text("hustota je 2 g."), "hustota je 2 g.");
+    }
 }

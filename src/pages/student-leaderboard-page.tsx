@@ -29,7 +29,7 @@ import type {
   StreakLeaderboardEntry,
   StreakRunKind,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, formatDecimalComma } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
 
 function formatMinutesSeconds(totalSeconds: number): string {
@@ -262,7 +262,7 @@ function StreakLeaderboardCard({
                       {formatMinutesSeconds(entry.totalSeconds)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {entry.secondsPerAnswer.toFixed(1)} s
+                      {formatDecimalComma(entry.secondsPerAnswer.toFixed(1))} s
                     </TableCell>
                   </TableRow>
                 )

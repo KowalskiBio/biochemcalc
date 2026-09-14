@@ -63,10 +63,62 @@ export function parseCzechNumber(value: string): number | undefined {
     .replace(/,/g, ".")
     .replace(/\s+/g, "")
     .replace(/[×x*]10\^?/g, "e")
-    .replace(/\.10\^?/g, "e")
+    // A dot before `10` is only a power-of-ten separator when an exponent
+    // actually follows it, i.e. a caret or a signed number. Matching a bare
+    // `.10` swallowed ordinary decimals whose fraction happens to start with
+    // "10": `1,105` parsed as 1e5 = 100000, `0,105` as 0, `3,10` as NaN.
+    .replace(/\.10(?:\^(?=[+-]?\d)|(?=[+-]\d))/g, "e")
   if (normalized === "") return undefined
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+/**
+ * Swap the decimal dot of an already-formatted number string for the Czech
+ * decimal comma: `"7.1"` → `"7,1"`. The inverse of {@link parseCzechNumber}.
+ *
+ * Takes a *string*, not a number, so the caller keeps control of rounding and
+ * significant digits. Every numeric formatter in `math-utils` ends by handing
+ * its `toFixed`/`toString` output through here. Those outputs only ever
+ * contain a dot as the decimal separator, which is why a blanket replace is
+ * safe; never point this at free text, where dots are sentence punctuation
+ * and hydrate separators (`FeSO4.7H2O`) instead.
+ *
+ * Display only: stored formula text and API payloads keep the dot.
+ */
+export function formatDecimalComma(value: string): string {
+  return value.replace(".", ",")
+}
+
+/**
+ * Rewrite decimal dots a teacher typed into question prose as Czech decimal
+ * commas: `"objem 1.25 l"` → `"objem 1,25 l"`.
+ *
+ * A dot between digits is *not* always a decimal point in this app's content.
+ * A hydrate separator looks identical: `FeSO4.7H2O` is iron(II) sulfate
+ * heptahydrate, not "4.7", and `formatChemicalText` deliberately normalises
+ * `·` and `*` into exactly that dot. Two guards keep those intact: the digit
+ * run before the dot may not follow a letter (`FeSO4` fails it), and the
+ * digit run after it may not precede one (`7H2O` fails it). Either one alone
+ * would cover the common hydrates; both are kept so a bracketed formula like
+ * `Ca3(PO4)2.4H2O`, where the leading guard passes, is still protected.
+ *
+ * The `(?!10\^)` guard is what keeps this idempotent, and it is not
+ * optional: Czech scientific notation writes a power of ten as `3.53.10^-4`,
+ * where the first dot is a decimal and the second is multiplication. Without
+ * the guard the first pass yields `3,53.10^-4` and a second pass reads
+ * `53.10` as a fresh decimal pair, giving `3,53,10^-4` and destroying the
+ * value. `api.ts` persists this output on every save, so a non-idempotent
+ * rule corrupts a question the second time a teacher saves it.
+ *
+ * Prose only. Equation source is left to its own dots: both evaluators
+ * already fold `,` into `.` before parsing (`normalizeFormulaForEvaluation`
+ * in TS, `normalize_operators` in Rust), so rewriting a stored formula would
+ * churn the field for no gain. The equation *preview* picks up the comma at
+ * render time instead, via `numberNodeToLatex`.
+ */
+export function normalizeDecimalCommasInText(text: string): string {
+  return text.replace(/(?<![A-Za-z])(\d+)\.(?!10\^)(\d+)(?![A-Za-z])/g, "$1,$2")
 }
 
 export const PLACEHOLDER_REGEX = /\[\[([^\]=\s]+)(?:=([^\]]*))?\]\]/g

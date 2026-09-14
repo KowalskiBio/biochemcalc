@@ -5,6 +5,7 @@ import { Link } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { DecimalInput } from "@/components/ui/decimal-input"
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
 import { ApiError, projektyApi } from "@/lib/api"
@@ -442,28 +444,25 @@ export function ProjektyPage() {
                                 <span className="text-sm font-medium min-w-[2rem]">
                                   {a.symbol} =
                                 </span>
-                                <Input
-                                  type="number"
+                                <DecimalInput
                                   value={a.value}
                                   readOnly
                                   className="w-full bg-muted/50"
                                 />
                                 {a.unit && (
-                                  <span className="text-sm text-muted-foreground">{a.unit}</span>
+                                  <UnitRenderer
+                                    unit={a.unit}
+                                    className="text-sm text-muted-foreground"
+                                  />
                                 )}
                               </div>
                             ))}
                           </div>
                         ) : (
-                          <Input
-                            type="number"
+                          <DecimalInput
                             value={question.correctAnswer ?? ""}
-                            onChange={(e) =>
-                              handleQuestionChange(
-                                index,
-                                "correctAnswer",
-                                e.target.value ? Number(e.target.value) : 0,
-                              )
+                            onValueChange={(v) =>
+                              handleQuestionChange(index, "correctAnswer", v ?? 0)
                             }
                             className="w-full"
                           />
@@ -477,12 +476,11 @@ export function ProjektyPage() {
                             {Object.entries(question.assignedValues).map(([key, value]) => (
                               <div key={key} className="space-y-1">
                                 <Label className="text-xs">{key}</Label>
-                                <Input
-                                  type="number"
+                                <DecimalInput
                                   value={typeof value === "number" ? value : 0}
-                                  onChange={(e) => {
+                                  onValueChange={(v) => {
                                     const newValues = { ...question.assignedValues }
-                                    newValues[key] = Number(e.target.value)
+                                    newValues[key] = v ?? 0
                                     handleQuestionChange(index, "assignedValues", newValues)
                                   }}
                                 />

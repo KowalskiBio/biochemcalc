@@ -60,3 +60,16 @@ describe("serializePairedConstants", () => {
     expect(serializePairedConstants([])).toBe("")
   })
 })
+
+describe("paired constants round trip with decimal commas", () => {
+  it("serialises with a comma and parses back to the same numbers", () => {
+    const rows = [
+      { Ka: 1.8e-5, pKa: 4.74 },
+      { Ka: 1.75, pKa: 2 },
+    ]
+    const text = serializePairedConstants(rows)
+    expect(text).toContain("4,74")
+    expect(text).not.toContain("4.74")
+    expect(parsePairedConstantsText(text)).toEqual(rows)
+  })
+})

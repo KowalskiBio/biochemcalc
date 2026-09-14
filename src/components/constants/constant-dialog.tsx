@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority"
 import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-
+import { DecimalInput } from "@/components/ui/decimal-input"
 // Import shadcn/ui components
 import {
   Dialog,
@@ -194,14 +194,12 @@ export function ConstantDialog({
 
           <div className="space-y-2">
             <Label htmlFor="value">{cs.form.value}</Label>
-            <Input
+            <DecimalInput
               id="value"
-              type="number"
               value={formData.value ?? 0}
-              onChange={(e) => handleChange("value", parseFloat(e.target.value) || 0)}
+              onValueChange={(v) => handleChange("value", v ?? 0)}
               className={cn(formInputVariants())}
               placeholder={cs.form.valuePlaceholder}
-              step="any"
             />
             {errors.value && <p className="text-sm text-destructive">{errors.value}</p>}
           </div>

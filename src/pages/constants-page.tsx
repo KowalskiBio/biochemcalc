@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 // Import API
 import { ApiError, constantsApi } from "@/lib/api"
+import { formatNumberForText } from "@/lib/math-utils"
 import type { Constant, ConstantInput } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -241,7 +242,13 @@ export function ConstantsPage() {
                       <TableCell>
                         <Badge variant="secondary">{constant.symbol}</Badge>
                       </TableCell>
-                      <TableCell>{constant.value}</TableCell>
+                      <TableCell>
+                        {/* maxDecimals is deliberately large: the default of 2
+                            would print pi as "3,14" and throw away the
+                            precision this table exists to show. Values past
+                            the scientific threshold (N_A) become 6,02×10²³. */}
+                        {formatNumberForText(constant.value, 15)}
+                      </TableCell>
                       <TableCell>
                         <UnitRenderer unit={constant.unit} />
                       </TableCell>

@@ -8,7 +8,7 @@ import {
   formatSignificantDigits,
   scientificNotationToHtml,
 } from "@/lib/math-utils"
-import { PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
+import { normalizeDecimalCommasInText, PLACEHOLDER_REGEX, stripAnswerTargets } from "@/lib/utils"
 import { useDatabazeEntries } from "@/stores/databaze-store"
 
 import type { DatabazeEntry, Notation, VariableWithPlaceholder, Variant } from "./types"
@@ -39,11 +39,40 @@ export const VARIABLE_COLORS = [
   "text-cyan-600",
 ] as const
 
+/**
+ * Stands in for a hydrate separator while the multiplication passes run.
+ *
+ * `FeSO4.7H2O` is iron(II) sulfate heptahydrate, not "4 times 7", so its
+ * separator must not be rewritten as `×` along with the genuine
+ * multiplication dots. Parking it on a character no rule matches is simpler
+ * than teaching every later rule to recognise a hydrate; it is swapped back
+ * to a plain dot on the way out.
+ */
+const HYDRATE_SEPARATOR = "\u0001"
+
 export function formatChemicalText(text: string): string {
   return (
     text
-      // Hydrate separators → . BEFORE sub/sup so H_2O is still raw text.
-      .replace(/([A-Za-z0-9)])[*·.](\d*)(H[₂2_]?[_₂2]?O)\b/gu, "$1.$2$3")
+      // A hydrate separator written as a DOT is not multiplication, so park
+      // it before the multiplication passes (and before sub/sup, so H_2O is
+      // still raw text). An asterisk is deliberately excluded: a teacher who
+      // types `*` always means multiplication, so `FeSO_4*7H_2O` renders as
+      // `FeSO₄×7H₂O` while `FeSO4.7H2O` keeps its dot.
+      .replace(/([A-Za-z0-9)])[·.](\d*)(H[₂2_]?[_₂2]?O)\b/gu, `$1${HYDRATE_SEPARATOR}$2$3`)
+      // Czech scientific notation writes the power of ten as `3,53.10^-4` or
+      // `1,8*10^-5`. That separator is multiplication, so it renders as `×`
+      // like every other product. Runs while `^` is still present, which is
+      // what identifies the `10` as a power rather than a bare number.
+      .replace(/[*·.](?=10\^)/g, "×")
+      // Remaining `*` / `·` between formula characters is multiplication:
+      // `mol*dm^-3` renders as `mol×dm⁻³`.
+      .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1×$2")
+      // A dot is multiplication only between two letters, which is what tells
+      // a unit product (`g.cm^-3`) apart from the two things that look like
+      // it: a sentence period, which is always followed by a space or the end
+      // of the text (`...této látky. Vypočítejte`), and a decimal, which has
+      // digits on both sides.
+      .replace(/([A-Za-z])\.([A-Za-z])/gu, "$1×$2")
       // Superscripts: 10^-5, x^2, Ca^2+, PO4^3-, etc.
       // Handles: digits with optional sign prefix/suffix, or bare sign (^- / ^+).
       .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])/g, (_, base, exponent) => {
@@ -57,9 +86,7 @@ export function formatChemicalText(text: string): string {
       .replace(/([A-Za-z0-9)]|\))((?:_[A-Za-z0-9]+?)+)/g, (_, base, subscript) => {
         return `${base}<sub>${subscript.replace(/_/g, "")}</sub>`
       })
-      // Remaining * / · between formula characters → . (dot, not ×).
-      // A bare . is already the desired output, so no explicit . → . pass.
-      .replace(/([A-Za-z0-9)])[*·]([A-Za-z0-9(])/gu, "$1.$2")
+      .replace(new RegExp(HYDRATE_SEPARATOR, "g"), ".")
   )
 }
 
@@ -86,7 +113,10 @@ function getExampleStringValue(
  * authored `_`/`^` characters as plain text.
  */
 function formatTextSegment(text: string): string {
-  return formatChemicalText(text)
+  // Decimal commas first: `formatChemicalText` turns `·`/`*` hydrate
+  // separators into dots, and normalising afterwards would have to tell those
+  // freshly created dots apart from decimal points.
+  return formatChemicalText(normalizeDecimalCommasInText(text))
 }
 
 function formatNumberSegment(

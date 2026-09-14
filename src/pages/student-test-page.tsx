@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { useCountdown } from "@/hooks/use-countdown"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
@@ -139,9 +140,10 @@ function QuestionCard({
                   }}
                 />
                 {(slot.unit ?? question.resultUnit) && (
-                  <span className="text-sm font-medium text-foreground">
-                    {slot.unit ?? question.resultUnit}
-                  </span>
+                  <UnitRenderer
+                    unit={slot.unit ?? question.resultUnit}
+                    className="text-sm font-medium text-foreground"
+                  />
                 )}
               </div>
             ))}

@@ -2,6 +2,7 @@ import { cva } from "class-variance-authority"
 import { Plus, X } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { DecimalInput } from "@/components/ui/decimal-input"
 // Import shadcn/ui components
 import {
   Dialog,
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 // Czech translations
 import { cs } from "@/i18n/cs"
 // Import API
@@ -37,7 +39,7 @@ import type {
   TemplateVariableInput,
   Variable,
 } from "@/lib/types"
-import { cn, required } from "@/lib/utils"
+import { cn, formatDecimalComma, required } from "@/lib/utils"
 
 interface TemplateDialogProps {
   open: boolean
@@ -535,9 +537,17 @@ export function TemplateDialog({
                   <div className="flex-1">
                     <p className="font-medium">{getConstantName(constant.constantId)}</p>
                     <p className="text-sm text-foreground-muted">
-                      {availableConstants.find((c) => c.id === constant.constantId)?.symbol} =
-                      {availableConstants.find((c) => c.id === constant.constantId)?.value}
-                      {availableConstants.find((c) => c.id === constant.constantId)?.unit}
+                      {availableConstants.find((c) => c.id === constant.constantId)?.symbol} ={" "}
+                      {formatDecimalComma(
+                        String(
+                          availableConstants.find((c) => c.id === constant.constantId)?.value ?? "",
+                        ),
+                      )}{" "}
+                      <UnitRenderer
+                        unit={
+                          availableConstants.find((c) => c.id === constant.constantId)?.unit ?? ""
+                        }
+                      />
                     </p>
                   </div>
                   <Button
@@ -565,7 +575,8 @@ export function TemplateDialog({
                 <SelectContent>
                   {availableConstants.map((constant) => (
                     <SelectItem key={constant.id} value={constant.id}>
-                      {constant.name} ({constant.symbol}) = {constant.value} {constant.unit}
+                      {constant.name} ({constant.symbol}) ={" "}
+                      {formatDecimalComma(String(constant.value))} {constant.unit}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -609,26 +620,18 @@ export function TemplateDialog({
                 <>
                   <div className="space-y-2">
                     <Label>Min Result</Label>
-                    <Input
-                      type="number"
+                    <DecimalInput
                       value={formData.constraint?.minResult ?? ""}
-                      onChange={(e) =>
-                        handleConstraintChange("minResult", parseFloat(e.target.value) || undefined)
-                      }
+                      onValueChange={(v) => handleConstraintChange("minResult", v)}
                       placeholder="Min value"
-                      step="any"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Max Result</Label>
-                    <Input
-                      type="number"
+                    <DecimalInput
                       value={formData.constraint?.maxResult ?? ""}
-                      onChange={(e) =>
-                        handleConstraintChange("maxResult", parseFloat(e.target.value) || undefined)
-                      }
+                      onValueChange={(v) => handleConstraintChange("maxResult", v)}
                       placeholder="Max value"
-                      step="any"
                     />
                   </div>
                 </>
@@ -637,14 +640,10 @@ export function TemplateDialog({
               {formData.constraint?.constraintType === "sd" && (
                 <div className="space-y-2 col-span-2">
                   <Label>SD Allowed</Label>
-                  <Input
-                    type="number"
+                  <DecimalInput
                     value={formData.constraint?.sdAllowed ?? ""}
-                    onChange={(e) =>
-                      handleConstraintChange("sdAllowed", parseFloat(e.target.value) || undefined)
-                    }
+                    onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
                     placeholder="Standard deviation"
-                    step="any"
                   />
                 </div>
               )}
@@ -653,38 +652,26 @@ export function TemplateDialog({
                 <>
                   <div className="space-y-2">
                     <Label>Min Result</Label>
-                    <Input
-                      type="number"
+                    <DecimalInput
                       value={formData.constraint?.minResult ?? ""}
-                      onChange={(e) =>
-                        handleConstraintChange("minResult", parseFloat(e.target.value) || undefined)
-                      }
+                      onValueChange={(v) => handleConstraintChange("minResult", v)}
                       placeholder="Min value"
-                      step="any"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Max Result</Label>
-                    <Input
-                      type="number"
+                    <DecimalInput
                       value={formData.constraint?.maxResult ?? ""}
-                      onChange={(e) =>
-                        handleConstraintChange("maxResult", parseFloat(e.target.value) || undefined)
-                      }
+                      onValueChange={(v) => handleConstraintChange("maxResult", v)}
                       placeholder="Max value"
-                      step="any"
                     />
                   </div>
                   <div className="space-y-2 col-span-2">
                     <Label>SD Allowed</Label>
-                    <Input
-                      type="number"
+                    <DecimalInput
                       value={formData.constraint?.sdAllowed ?? ""}
-                      onChange={(e) =>
-                        handleConstraintChange("sdAllowed", parseFloat(e.target.value) || undefined)
-                      }
+                      onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
                       placeholder="Standard deviation"
-                      step="any"
                     />
                   </div>
                 </>

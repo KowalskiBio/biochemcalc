@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 // Import hooks
 import { useToast } from "@/hooks/use-toast"
 // Czech translations
@@ -255,7 +256,8 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
                                   <span className="font-mono tabular">
                                     {formatNumberForText(a.value)}
                                   </span>
-                                  {a.unit ? ` ${a.unit}` : ""}
+                                  {a.unit ? " " : ""}
+                                  {a.unit ? <UnitRenderer unit={a.unit} /> : null}
                                 </p>
                               ))}
                             </div>

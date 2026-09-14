@@ -4,10 +4,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { victorApi } from "@/lib/api"
 import type { VictorMessage, VictorRequest, VictorResponse } from "@/lib/types"
+import { formatDecimalComma } from "@/lib/utils"
 
 export function VictorPage() {
   const { toast } = useToast()
@@ -172,7 +174,9 @@ export function VictorPage() {
                                       variant="secondary"
                                       className="font-mono tabular"
                                     >
-                                      {variable.symbol} = {variable.value} {variable.unit}
+                                      {variable.symbol} ={" "}
+                                      {formatDecimalComma(String(variable.value))}{" "}
+                                      <UnitRenderer unit={variable.unit} />
                                     </Badge>
                                   ))}
                                 </div>

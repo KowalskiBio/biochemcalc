@@ -28,7 +28,7 @@ describe("renderEquationAsLatex", () => {
   })
 
   it("renders dot multiplication", () => {
-    expect(renderEquationAsLatex("w = a · b")).toBe("$$w = a \\cdot b$$")
+    expect(renderEquationAsLatex("w = a · b")).toBe("$$w = a \\times b$$")
   })
 
   it("renders superscript digits", () => {
@@ -122,7 +122,7 @@ describe("renderEquationAsLatex", () => {
   it("keeps multiplication after a molar mass out of the identifier", () => {
     expect(renderEquationAsLatex("m = M_NaCl*2")).toBe("$$m = M_{\\mathrm{NaCl}} \\times 2$$")
     expect(renderEquationAsLatex("m = M_H_2O·n")).toBe(
-      "$$m = M_{\\mathrm{H}_{2}\\mathrm{O}} \\cdot n$$",
+      "$$m = M_{\\mathrm{H}_{2}\\mathrm{O}} \\times n$$",
     )
     expect(renderEquationAsLatex("c = (n * M_NaCl) / V")).toBe(
       "$$c = \\frac{n \\times M_{\\mathrm{NaCl}}}{V}$$",
@@ -137,11 +137,11 @@ describe("renderEquationAsLatex", () => {
   })
 
   it("renders a bullet as multiplication outside a molar mass", () => {
-    expect(renderEquationAsLatex("V = n ∙ 22,4")).toBe("$$V = n \\cdot 22.4$$")
+    expect(renderEquationAsLatex("V = n ∙ 22,4")).toBe("$$V = n \\times 22{,}4$$")
   })
 
   it("still parses dot decimals", () => {
-    expect(renderEquationAsLatex("V = n * 22.4")).toBe("$$V = n \\times 22.4$$")
+    expect(renderEquationAsLatex("V = n * 22.4")).toBe("$$V = n \\times 22{,}4$$")
   })
 
   it("renders a monohydrate with no explicit count", () => {
@@ -162,9 +162,35 @@ describe("renderEquationAsLatex", () => {
     )
   })
 
+  it("keeps the teacher's own text in the unparseable-equation fallback", () => {
+    // The fallback used to print `normalized`, which has been folded to the
+    // evaluator's spelling (comma to dot, [ to (, × to *).
+    const out = renderEquationAsLatex("výtěžek 95,5 % a ??? (")
+    expect(out).toContain("95,5")
+    expect(out).not.toContain("95.5")
+  })
+
+  it("escapes the fallback so KaTeX can render it", async () => {
+    const katex = (await import("katex")).default
+    // No `$` here on purpose: an equation containing one is treated as
+    // teacher-authored raw LaTeX and deliberately bypasses this fallback.
+    for (const bad of ["výtěžek 95,5 % a ??? (", "x ^ ??? (", "a_b # ~ ("]) {
+      const latex = renderEquationAsLatex(bad)
+      const body = latex.replace(/^\$\$/, "").replace(/\$\$$/, "")
+      expect(() => katex.renderToString(body, { throwOnError: true })).not.toThrow()
+    }
+  })
+
+  it("renders every multiplication character as the same glyph", () => {
+    // The question text around the equation maps *, · and ∙ all to ×, so the
+    // equation must not render one of them as a different symbol.
+    expect(renderEquationAsLatex("c = n * V")).toBe("$$c = n \\times V$$")
+    expect(renderEquationAsLatex("c = n · V")).toBe("$$c = n \\times V$$")
+  })
+
   it("accepts comma decimals and square brackets", () => {
     expect(renderEquationAsLatex("N = (V / 22,4) * NA")).toBe(
-      "$$N = \\left(\\frac{V}{22.4}\\right) \\times \\mathrm{NA}$$",
+      "$$N = \\left(\\frac{V}{22{,}4}\\right) \\times \\mathrm{NA}$$",
     )
     expect(renderEquationAsLatex("N = [m / M_Fe] * NA")).toBe(
       "$$N = \\left(\\frac{m}{M_{\\mathrm{Fe}}}\\right) \\times \\mathrm{NA}$$",
@@ -239,7 +265,7 @@ describe("renderEquationAsLatex", () => {
     // String(7.2e-10) is "7.2e-10" — buildSubstitutedEquation embeds sampled
     // values with String(value), so this exact form is what a tiny/huge
     // constant (e.g. a Ka) looks like once substituted into equation text.
-    expect(renderEquationAsLatex("x = 7.2e-10 + 1")).toBe("$$x = 7.2 \\times 10^{-10} + 1$$")
+    expect(renderEquationAsLatex("x = 7.2e-10 + 1")).toBe("$$x = 7{,}2 \\times 10^{-10} + 1$$")
   })
 
   it("does not fall back to \\text{} for an equation containing scientific notation", () => {
@@ -260,7 +286,7 @@ describe("renderEquationAsLatex", () => {
     // stacked with nothing to separate them ("10^{-10}^{2}" renders as one
     // run "-10, 2" — indistinguishable from a typo).
     expect(renderEquationAsLatex("x = 7.2e-10^2")).toBe(
-      "$$x = {\\left(7.2 \\times 10^{-10}\\right)}^{2}$$",
+      "$$x = {\\left(7{,}2 \\times 10^{-10}\\right)}^{2}$$",
     )
   })
 })
@@ -649,8 +675,8 @@ describe("evaluateExpression with molar-mass references", () => {
 
 describe("formatNumberMaxDecimals", () => {
   it("rounds to a maximum of two decimals", () => {
-    expect(formatNumberMaxDecimals(Math.PI)).toBe("3.14")
-    expect(formatNumberMaxDecimals(3.1)).toBe("3.1")
+    expect(formatNumberMaxDecimals(Math.PI)).toBe("3,14")
+    expect(formatNumberMaxDecimals(3.1)).toBe("3,1")
     expect(formatNumberMaxDecimals(3)).toBe("3")
   })
 
@@ -660,19 +686,19 @@ describe("formatNumberMaxDecimals", () => {
   })
 
   it("falls back to scientific notation when a non-zero value rounds to zero", () => {
-    expect(formatNumberMaxDecimals(0.001)).toBe("1.00×10^-3")
-    expect(formatNumberMaxDecimals(-0.001)).toBe("-1.00×10^-3")
-    expect(formatNumberMaxDecimals(0.0049)).toBe("4.90×10^-3")
-    expect(formatNumberMaxDecimals(1.23e-5)).toBe("1.23×10^-5")
+    expect(formatNumberMaxDecimals(0.001)).toBe("1,00×10^-3")
+    expect(formatNumberMaxDecimals(-0.001)).toBe("-1,00×10^-3")
+    expect(formatNumberMaxDecimals(0.0049)).toBe("4,90×10^-3")
+    expect(formatNumberMaxDecimals(1.23e-5)).toBe("1,23×10^-5")
   })
 
   it("uses scientific notation for large values instead of JavaScript's e+ syntax", () => {
     // Molecule counts land here: the raw toString would be "1.5244...e+25",
     // which is neither readable nor superscriptable.
-    expect(formatNumberMaxDecimals(1.524493429448685e25)).toBe("1.52×10^25")
-    expect(formatNumberMaxDecimals(6.022e23)).toBe("6.02×10^23")
-    expect(formatNumberMaxDecimals(-1.8433287150633585e25)).toBe("-1.84×10^25")
-    expect(formatNumberMaxDecimals(5.2149e24)).toBe("5.21×10^24")
+    expect(formatNumberMaxDecimals(1.524493429448685e25)).toBe("1,52×10^25")
+    expect(formatNumberMaxDecimals(6.022e23)).toBe("6,02×10^23")
+    expect(formatNumberMaxDecimals(-1.8433287150633585e25)).toBe("-1,84×10^25")
+    expect(formatNumberMaxDecimals(5.2149e24)).toBe("5,21×10^24")
   })
 
   it("never emits raw exponential syntax", () => {
@@ -684,10 +710,10 @@ describe("formatNumberMaxDecimals", () => {
   it("never leaks a bare caret into plain-text output", () => {
     // Toasts and badges cannot render markup, so the exponent has to be real
     // superscript characters rather than "^25".
-    expect(formatNumberForText(1.524493429448685e25)).toBe("1.52×10²⁵")
-    expect(formatNumberForText(6.022e23)).toBe("6.02×10²³")
-    expect(formatNumberForText(1.23e-5)).toBe("1.23×10⁻⁵")
-    expect(formatNumberForText(2711.93)).toBe("2711.93")
+    expect(formatNumberForText(1.524493429448685e25)).toBe("1,52×10²⁵")
+    expect(formatNumberForText(6.022e23)).toBe("6,02×10²³")
+    expect(formatNumberForText(1.23e-5)).toBe("1,23×10⁻⁵")
+    expect(formatNumberForText(2711.93)).toBe("2711,93")
     for (const value of [1e6, 1.5e25, 1e-7, 12345.678]) {
       expect(formatNumberForText(value)).not.toContain("^")
       expect(formatNumberForText(value)).not.toMatch(/e[+-]/i)
@@ -701,43 +727,43 @@ describe("formatNumberMaxDecimals", () => {
   })
 
   it("keeps ordinary magnitudes in plain decimal form", () => {
-    expect(formatNumberMaxDecimals(2711.93)).toBe("2711.93")
-    expect(formatNumberMaxDecimals(1262.984)).toBe("1262.98")
-    expect(formatNumberMaxDecimals(999999.4)).toBe("999999.4")
+    expect(formatNumberMaxDecimals(2711.93)).toBe("2711,93")
+    expect(formatNumberMaxDecimals(1262.984)).toBe("1262,98")
+    expect(formatNumberMaxDecimals(999999.4)).toBe("999999,4")
   })
 
   it("keeps fixed notation when the value is representable at the requested precision", () => {
-    expect(formatNumberMaxDecimals(0.1, 3)).toBe("0.1")
+    expect(formatNumberMaxDecimals(0.1, 3)).toBe("0,1")
     expect(formatNumberMaxDecimals(0)).toBe("0")
   })
 })
 
 describe("formatSignificantDigits", () => {
   it("rounds to the requested number of significant digits in plain notation", () => {
-    expect(formatSignificantDigits(0.246806, 6)).toBe("0.246806")
-    expect(formatSignificantDigits(0.18, 6)).toBe("0.180000")
-    expect(formatSignificantDigits(123.456, 4)).toBe("123.5")
+    expect(formatSignificantDigits(0.246806, 6)).toBe("0,246806")
+    expect(formatSignificantDigits(0.18, 6)).toBe("0,180000")
+    expect(formatSignificantDigits(123.456, 4)).toBe("123,5")
   })
 
   it("uses scientific notation for very small values", () => {
-    expect(formatSignificantDigits(0.05, 6)).toBe("5.00000×10^-2")
-    expect(formatSignificantDigits(0.00123, 3)).toBe("1.23×10^-3")
+    expect(formatSignificantDigits(0.05, 6)).toBe("5,00000×10^-2")
+    expect(formatSignificantDigits(0.00123, 3)).toBe("1,23×10^-3")
   })
 
   it("uses scientific notation for very large values", () => {
-    expect(formatSignificantDigits(1.524e25, 3)).toBe("1.52×10^25")
+    expect(formatSignificantDigits(1.524e25, 3)).toBe("1,52×10^25")
   })
 
   it("forces scientific notation for ALL values when forceScientific is true", () => {
-    expect(formatSignificantDigits(0.18, 6, true)).toBe("1.80000×10^-1")
-    expect(formatSignificantDigits(0.05, 6, true)).toBe("5.00000×10^-2")
-    expect(formatSignificantDigits(722, 6, true)).toBe("7.22000×10^2")
-    expect(formatSignificantDigits(123.456, 4, true)).toBe("1.235×10^2")
+    expect(formatSignificantDigits(0.18, 6, true)).toBe("1,80000×10^-1")
+    expect(formatSignificantDigits(0.05, 6, true)).toBe("5,00000×10^-2")
+    expect(formatSignificantDigits(722, 6, true)).toBe("7,22000×10^2")
+    expect(formatSignificantDigits(123.456, 4, true)).toBe("1,235×10^2")
   })
 
   it("handles zero", () => {
-    expect(formatSignificantDigits(0, 6)).toBe("0.00000")
-    expect(formatSignificantDigits(0, 3)).toBe("0.00")
+    expect(formatSignificantDigits(0, 6)).toBe("0,00000")
+    expect(formatSignificantDigits(0, 3)).toBe("0,00")
   })
 
   it("handles null and non-finite values", () => {
@@ -752,74 +778,74 @@ describe("formatSignificantDigits", () => {
     expect(formatSignificantDigits(111554, 4)).toBe("111600")
     expect(formatSignificantDigits(111554, 5)).toBe("111550")
     expect(formatSignificantDigits(111554, 6)).toBe("111554")
-    expect(formatSignificantDigits(111554, 7)).toBe("111554.0")
+    expect(formatSignificantDigits(111554, 7)).toBe("111554,0")
   })
 })
 
 describe("notation parameter", () => {
   describe("formatNumberMaxDecimals with notation", () => {
     it("'scientific' always uses scientific notation", () => {
-      expect(formatNumberMaxDecimals(12300, 2, false, "scientific")).toBe("1.23×10^4")
-      expect(formatNumberMaxDecimals(0.01, 2, false, "scientific")).toBe("1.00×10^-2")
-      expect(formatNumberMaxDecimals(100, 2, false, "scientific")).toBe("1.00×10^2")
+      expect(formatNumberMaxDecimals(12300, 2, false, "scientific")).toBe("1,23×10^4")
+      expect(formatNumberMaxDecimals(0.01, 2, false, "scientific")).toBe("1,00×10^-2")
+      expect(formatNumberMaxDecimals(100, 2, false, "scientific")).toBe("1,00×10^2")
     })
 
     it("'normal' keeps plain decimal for moderate values", () => {
-      expect(formatNumberMaxDecimals(0.01, 2, false, "normal")).toBe("0.01")
+      expect(formatNumberMaxDecimals(0.01, 2, false, "normal")).toBe("0,01")
       expect(formatNumberMaxDecimals(12300, 2, false, "normal")).toBe("12300")
       expect(formatNumberMaxDecimals(999999, 2, false, "normal")).toBe("999999")
     })
 
     it("'normal' falls back to scientific when the value would round to zero", () => {
-      expect(formatNumberMaxDecimals(0.001, 2, false, "normal")).toBe("1.00×10^-3")
-      expect(formatNumberMaxDecimals(1e-7, 2, false, "normal")).toBe("1.00×10^-7")
+      expect(formatNumberMaxDecimals(0.001, 2, false, "normal")).toBe("1,00×10^-3")
+      expect(formatNumberMaxDecimals(1e-7, 2, false, "normal")).toBe("1,00×10^-7")
     })
 
     it("'normal' still switches to scientific for values too large to read as decimal", () => {
-      expect(formatNumberMaxDecimals(1.52e24, 2, false, "normal")).toBe("1.52×10^24")
+      expect(formatNumberMaxDecimals(1.52e24, 2, false, "normal")).toBe("1,52×10^24")
     })
 
     it("'auto' uses threshold-based behavior", () => {
-      expect(formatNumberMaxDecimals(0.01, 2, false, "auto")).toBe("1.00×10^-2")
-      expect(formatNumberMaxDecimals(0.1, 2, false, "auto")).toBe("0.1")
-      expect(formatNumberMaxDecimals(1e6, 2, false, "auto")).toBe("1.00×10^6")
+      expect(formatNumberMaxDecimals(0.01, 2, false, "auto")).toBe("1,00×10^-2")
+      expect(formatNumberMaxDecimals(0.1, 2, false, "auto")).toBe("0,1")
+      expect(formatNumberMaxDecimals(1e6, 2, false, "auto")).toBe("1,00×10^6")
     })
   })
 
   describe("formatSignificantDigits with notation", () => {
     it("'scientific' always uses scientific notation", () => {
-      expect(formatSignificantDigits(123.456, 4, false, "scientific")).toBe("1.235×10^2")
-      expect(formatSignificantDigits(0.5, 3, false, "scientific")).toBe("5.00×10^-1")
+      expect(formatSignificantDigits(123.456, 4, false, "scientific")).toBe("1,235×10^2")
+      expect(formatSignificantDigits(0.5, 3, false, "scientific")).toBe("5,00×10^-1")
     })
 
     it("'normal' keeps plain decimal for values above the lower threshold", () => {
-      expect(formatSignificantDigits(0.5, 3, false, "normal")).toBe("0.500")
-      expect(formatSignificantDigits(123.456, 4, false, "normal")).toBe("123.5")
+      expect(formatSignificantDigits(0.5, 3, false, "normal")).toBe("0,500")
+      expect(formatSignificantDigits(123.456, 4, false, "normal")).toBe("123,5")
     })
 
     it("'normal' keeps plain decimal for small values that do not round to zero", () => {
-      expect(formatSignificantDigits(1e-5, 3, false, "normal")).toBe("0.0000100")
+      expect(formatSignificantDigits(1e-5, 3, false, "normal")).toBe("0,0000100")
     })
 
     it("'normal' keeps plain decimal for the reported bug's own values (0.009-0.16 mol/l)", () => {
-      expect(formatSignificantDigits(0.013, 2, false, "normal")).toBe("0.013")
-      expect(formatSignificantDigits(0.14, 2, false, "normal")).toBe("0.14")
-      expect(formatSignificantDigits(0.009, 2, false, "normal")).toBe("0.0090")
-      expect(formatSignificantDigits(0.012, 2, false, "normal")).toBe("0.012")
-      expect(formatSignificantDigits(0.016, 2, false, "normal")).toBe("0.016")
+      expect(formatSignificantDigits(0.013, 2, false, "normal")).toBe("0,013")
+      expect(formatSignificantDigits(0.14, 2, false, "normal")).toBe("0,14")
+      expect(formatSignificantDigits(0.009, 2, false, "normal")).toBe("0,0090")
+      expect(formatSignificantDigits(0.012, 2, false, "normal")).toBe("0,012")
+      expect(formatSignificantDigits(0.016, 2, false, "normal")).toBe("0,016")
     })
 
     it("'normal' still switches to scientific for a wall-of-zeros value (atomic mass scale)", () => {
-      expect(formatSignificantDigits(3.44e-22, 4, false, "normal")).toBe("3.440×10^-22")
+      expect(formatSignificantDigits(3.44e-22, 4, false, "normal")).toBe("3,440×10^-22")
     })
 
     it("'normal' still switches to scientific for values too large to read as decimal", () => {
-      expect(formatSignificantDigits(1.524e25, 3, false, "normal")).toBe("1.52×10^25")
+      expect(formatSignificantDigits(1.524e25, 3, false, "normal")).toBe("1,52×10^25")
     })
 
     it("'auto' uses threshold-based behavior", () => {
-      expect(formatSignificantDigits(0.05, 3, false, "auto")).toBe("5.00×10^-2")
-      expect(formatSignificantDigits(0.5, 3, false, "auto")).toBe("0.500")
+      expect(formatSignificantDigits(0.05, 3, false, "auto")).toBe("5,00×10^-2")
+      expect(formatSignificantDigits(0.5, 3, false, "auto")).toBe("0,500")
     })
   })
 })

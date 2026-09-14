@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   extractPlaceholders,
   extractPlaceholderValues,
+  formatDecimalComma,
   generateId,
   isAtomPlaceholder,
+  normalizeDecimalCommasInText,
+  parseCzechNumber,
   replacePlaceholder,
   stripAnswerTargets,
 } from "@/lib/utils"
@@ -133,5 +136,89 @@ describe("isAtomPlaceholder", () => {
     expect(isAtomPlaceholder("ms")).toBe(false)
     expect(isAtomPlaceholder("rho_r")).toBe(false)
     expect(isAtomPlaceholder("atomX")).toBe(false)
+  })
+})
+
+describe("formatDecimalComma", () => {
+  it("swaps the decimal dot for a comma", () => {
+    expect(formatDecimalComma("7.1")).toBe("7,1")
+    expect(formatDecimalComma("-0.125")).toBe("-0,125")
+  })
+
+  it("leaves an integer string untouched", () => {
+    expect(formatDecimalComma("42")).toBe("42")
+  })
+
+  it("converts only the decimal point of an e-notation mantissa", () => {
+    expect(formatDecimalComma("1.52e+25")).toBe("1,52e+25")
+  })
+})
+
+describe("normalizeDecimalCommasInText", () => {
+  it("rewrites decimals a teacher typed with a dot", () => {
+    expect(normalizeDecimalCommasInText("objem 1.25 l")).toBe("objem 1,25 l")
+    expect(normalizeDecimalCommasInText("pH 7.1 a 3.02")).toBe("pH 7,1 a 3,02")
+    expect(normalizeDecimalCommasInText("0.5%")).toBe("0,5%")
+  })
+
+  it("leaves hydrate separators alone", () => {
+    expect(normalizeDecimalCommasInText("FeSO4.7H2O")).toBe("FeSO4.7H2O")
+    expect(normalizeDecimalCommasInText("M_FeSO4.7H2O")).toBe("M_FeSO4.7H2O")
+    expect(normalizeDecimalCommasInText("Ca3(PO4)2.4H2O")).toBe("Ca3(PO4)2.4H2O")
+  })
+
+  it("separates a hydrate from a decimal in the same sentence", () => {
+    expect(normalizeDecimalCommasInText("CuSO4.5H2O v 0.25 l")).toBe("CuSO4.5H2O v 0,25 l")
+  })
+
+  it("rewrites a pinned placeholder value", () => {
+    expect(normalizeDecimalCommasInText("[[rho_r=1.1296]]")).toBe("[[rho_r=1,1296]]")
+  })
+
+  it("leaves a unit dot and an e-notation exponent alone", () => {
+    expect(normalizeDecimalCommasInText("g.cm^-3")).toBe("g.cm^-3")
+    expect(normalizeDecimalCommasInText("1.5e-5")).toBe("1.5e-5")
+  })
+})
+
+describe("parseCzechNumber", () => {
+  it("reads an ordinary decimal comma", () => {
+    expect(parseCzechNumber("22,4")).toBeCloseTo(22.4)
+    expect(parseCzechNumber("0,25")).toBeCloseTo(0.25)
+  })
+
+  it("reads a decimal whose fraction starts with 10", () => {
+    // These used to be swallowed by the power-of-ten rule: "1,105" parsed as
+    // 1e5 = 100000, "0,105" as 0 and "3,10" as NaN.
+    expect(parseCzechNumber("1,105")).toBeCloseTo(1.105)
+    expect(parseCzechNumber("0,105")).toBeCloseTo(0.105)
+    expect(parseCzechNumber("2,104")).toBeCloseTo(2.104)
+    expect(parseCzechNumber("3,10")).toBeCloseTo(3.1)
+    expect(parseCzechNumber("1,1029")).toBeCloseTo(1.1029)
+  })
+
+  it("still reads every Czech spelling of a power of ten", () => {
+    expect(parseCzechNumber("1,8.10^-5")).toBeCloseTo(1.8e-5)
+    expect(parseCzechNumber("1,8.10-5")).toBeCloseTo(1.8e-5)
+    expect(parseCzechNumber("3,53.10^-4")).toBeCloseTo(3.53e-4)
+    expect(parseCzechNumber("6.76×10-5")).toBeCloseTo(6.76e-5)
+    expect(parseCzechNumber("9.95000x10-5")).toBeCloseTo(9.95e-5)
+  })
+})
+
+describe("normalizeDecimalCommasInText idempotency", () => {
+  it("is stable when applied twice to a Czech power of ten", () => {
+    // api.ts persists this output on every save, so a second save must not
+    // turn "3,53.10^-4" into "3,53,10^-4".
+    const once = normalizeDecimalCommasInText("[[Ka=3.53.10^-4]]")
+    expect(once).toBe("[[Ka=3,53.10^-4]]")
+    expect(normalizeDecimalCommasInText(once)).toBe(once)
+  })
+
+  it("is stable on ordinary prose and hydrates", () => {
+    for (const input of ["objem 1.25 l", "FeSO4.7H2O", "CuSO4.5H2O v 0.25 l", "2.104 g"]) {
+      const once = normalizeDecimalCommasInText(input)
+      expect(normalizeDecimalCommasInText(once)).toBe(once)
+    }
   })
 })

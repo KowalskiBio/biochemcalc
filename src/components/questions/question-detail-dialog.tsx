@@ -6,6 +6,7 @@ import rehypeRaw from "rehype-raw"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { DecimalInput } from "@/components/ui/decimal-input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
@@ -62,6 +63,7 @@ import {
   extractPlaceholderValues,
   generateId,
   isAtomPlaceholder,
+  normalizeDecimalCommasInText,
   parseCzechNumber,
   replacePlaceholder,
   stripAnswerTargets,
@@ -1513,7 +1515,9 @@ export function QuestionDetailDialog({
                       }}
                     >
                       {formatChemicalText(
-                        stripAnswerTargets(templateDetails.template.questionText),
+                        normalizeDecimalCommasInText(
+                          stripAnswerTargets(templateDetails.template.questionText),
+                        ),
                       )}
                     </ReactMarkdown>
                   </div>
@@ -1668,13 +1672,11 @@ export function QuestionDetailDialog({
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="answerSd">{cs.questions.sdAnswerLabel}</Label>
-                      <Input
+                      <DecimalInput
                         id="answerSd"
-                        type="number"
-                        step="any"
                         value={sdText}
-                        onChange={(e) => setSdText(e.target.value)}
-                        placeholder="např. 0.2"
+                        onValueChange={(v) => setSdText(v === undefined ? "" : String(v))}
+                        placeholder="např. 0,2"
                         disabled={isSaving}
                         className="max-w-[120px]"
                       />
@@ -1989,7 +1991,7 @@ export function QuestionDetailDialog({
                           variant={forceScientific ? "secondary" : "outline"}
                           onClick={handleToggleForceScientific}
                         >
-                          {forceScientific ? "1.23×10⁴" : "12300"}
+                          {forceScientific ? "1,23×10⁴" : "12300"}
                         </Button>
                       </div>
                       {templateDetails.template.formula && sampleVariant ? (

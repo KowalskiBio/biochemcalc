@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority"
 import { useCallback, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-
+import { DecimalInput } from "@/components/ui/decimal-input"
 // Import shadcn/ui components
 import {
   Dialog,
@@ -214,11 +214,10 @@ export function VariableDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="minValue">{cs.form.min}</Label>
-              <Input
+              <DecimalInput
                 id="minValue"
-                type="number"
                 value={formData.minValue ?? 0}
-                onChange={(e) => handleChange("minValue", parseFloat(e.target.value) || 0)}
+                onValueChange={(v) => handleChange("minValue", v ?? 0)}
                 className={cn(formInputVariants())}
                 placeholder={cs.form.minPlaceholder}
               />
@@ -226,11 +225,10 @@ export function VariableDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="maxValue">{cs.form.max}</Label>
-              <Input
+              <DecimalInput
                 id="maxValue"
-                type="number"
                 value={formData.maxValue ?? 100}
-                onChange={(e) => handleChange("maxValue", parseFloat(e.target.value) || 100)}
+                onValueChange={(v) => handleChange("maxValue", v ?? 100)}
                 className={cn(formInputVariants())}
                 placeholder={cs.form.maxPlaceholder}
               />
@@ -240,14 +238,11 @@ export function VariableDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="step">{cs.variables.validation.step}</Label>
-              <Input
+              <DecimalInput
                 id="step"
-                type="number"
                 value={formData.step ?? 1}
-                onChange={(e) => handleChange("step", parseFloat(e.target.value) || 1)}
+                onValueChange={(v) => handleChange("step", v ?? 1)}
                 className={cn(formInputVariants())}
-                min={0}
-                step={0.01}
               />
             </div>
             <div className="space-y-2">

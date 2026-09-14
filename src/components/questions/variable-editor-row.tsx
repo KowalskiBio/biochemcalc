@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { cs } from "@/i18n/cs"
 import { FIRST_THREE_ROWS_ELEMENTS, KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import type { LocalVariableEdit, Notation, VariableType } from "@/lib/types"
+import { formatDecimalComma } from "@/lib/utils"
 
 // X/Y/Z placeholder colors
 const PLACEHOLDER_COLORS: Record<string, string> = {
@@ -216,7 +217,11 @@ export function serializePairedConstants(pc: Array<Record<string, number>> | und
   return pc
     .map((row) =>
       Object.entries(row)
-        .map(([k, v]) => `${k}=${v}`)
+        // Comma decimals on the way out, matching every other numeric field.
+        // PAIRED_CONSTANT_REGEX below accepts either separator, and the pair
+        // separator is ", " (comma + space) while a decimal comma is always
+        // followed by a digit, so the two never collide.
+        .map(([k, v]) => `${k}=${formatDecimalComma(String(v))}`)
         .join(", "),
     )
     .join("\n")
@@ -539,7 +544,9 @@ export function VariableEditorRow({
             <div>
               <span className="text-foreground-secondary text-xs">{cs.form.range}</span>
               <p>
-                {variable.minValue} – {variable.maxValue} ({variable.step})
+                {formatDecimalComma(String(variable.minValue))} –{" "}
+                {formatDecimalComma(String(variable.maxValue))} (
+                {formatDecimalComma(String(variable.step))})
               </p>
             </div>
           ) : (

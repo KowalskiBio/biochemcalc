@@ -1,6 +1,6 @@
 import type { BulkImportData, BulkImportQuestion } from "@/lib/bulk-import-parser"
 import { evaluateExpression } from "@/lib/math-utils"
-import { extractPlaceholderValues } from "@/lib/utils"
+import { extractPlaceholderValues, parseCzechNumber } from "@/lib/utils"
 
 /**
  * Checking an imported formula against the answer printed in the source
@@ -67,7 +67,11 @@ function fixedValues(question: BulkImportQuestion): Record<string, number> | nul
   const values: Record<string, number> = {}
   for (const { symbol, value } of extractPlaceholderValues(question.questionText)) {
     if (value === undefined) return null
-    const numeric = Number(value.replace(",", "."))
+    // parseCzechNumber, matching the other two pinned-value readers
+    // (math-utils.ts and question-detail-dialog.tsx). A bare
+    // `replace(",", ".")` swaps only the FIRST comma and understands none of
+    // the Czech power-of-ten spellings.
+    const numeric = parseCzechNumber(value) ?? Number.NaN
     if (!Number.isFinite(numeric)) return null
     values[symbol] = numeric
   }

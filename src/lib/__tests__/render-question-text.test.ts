@@ -32,17 +32,55 @@ describe("formatChemicalText", () => {
     expect(formatChemicalText("SO_4^2-")).toBe("SO<sub>4</sub><sup>2-</sup>")
   })
 
-  it("converts multiplication asterisks to a dot", () => {
-    expect(formatChemicalText("g*cm^-3")).toBe("g.cm<sup>-3</sup>")
-    expect(formatChemicalText("2*3")).toBe("2.3")
+  it("converts multiplication asterisks to a multiplication sign", () => {
+    expect(formatChemicalText("g*cm^-3")).toBe("g×cm<sup>-3</sup>")
+    expect(formatChemicalText("2*3")).toBe("2×3")
   })
 
-  it("converts multiplication middle dots to a dot", () => {
-    expect(formatChemicalText("g·cm^-3")).toBe("g.cm<sup>-3</sup>")
+  it("converts multiplication middle dots to a multiplication sign", () => {
+    expect(formatChemicalText("g·cm^-3")).toBe("g×cm<sup>-3</sup>")
   })
 
-  it("converts hydrate dots and stars to a dot", () => {
-    expect(formatChemicalText("FeSO4*7H2O")).toBe("FeSO4.7H2O")
+  it("converts a unit-product dot to a multiplication sign", () => {
+    // Every multi-part unit in the question bank is written this way.
+    expect(formatChemicalText("g.cm^-3")).toBe("g×cm<sup>-3</sup>")
+    expect(formatChemicalText("mol.dm^-3")).toBe("mol×dm<sup>-3</sup>")
+    expect(formatChemicalText("mg.ml^-1")).toBe("mg×ml<sup>-1</sup>")
+  })
+
+  it("handles the unit spellings that actually occur in the question bank", () => {
+    // Taken verbatim from the VM snapshot: templates.result_unit,
+    // variables.unit and constants.unit respectively. "g.cm-3" is missing its
+    // caret in the stored data, so the exponent stays literal; the separator
+    // still has to render as a multiplication sign.
+    expect(formatChemicalText("g.l^-1")).toBe("g×l<sup>-1</sup>")
+    expect(formatChemicalText("g.cm-3")).toBe("g×cm-3")
+    expect(formatChemicalText("mol.dm^3")).toBe("mol×dm<sup>3</sup>")
+  })
+
+  it("converts the separator of a Czech-style power of ten", () => {
+    expect(formatChemicalText("3,53.10^-4")).toBe("3,53×10<sup>-4</sup>")
+    expect(formatChemicalText("1,8*10^-5")).toBe("1,8×10<sup>-5</sup>")
+  })
+
+  it("leaves a sentence period alone", () => {
+    expect(formatChemicalText("Vypočítejte hmotnost. Jaká je")).toBe(
+      "Vypočítejte hmotnost. Jaká je",
+    )
+    expect(formatChemicalText("hustota je 2 g.")).toBe("hustota je 2 g.")
+  })
+
+  it("renders an asterisk as multiplication even between a hydrate's digits", () => {
+    // `*` always means multiplication, whatever it sits between, so a hydrate
+    // typed with an asterisk renders as a product while the dot spelling of
+    // the same compound keeps its separator.
+    expect(formatChemicalText("FeSO4*7H2O")).toBe("FeSO4×7H2O")
+    expect(formatChemicalText("FeSO_4*7H_2O")).toBe("FeSO<sub>4</sub>×7H<sub>2</sub>O")
+    expect(formatChemicalText("NiCl_2*6H_2O")).toBe("NiCl<sub>2</sub>×6H<sub>2</sub>O")
+    expect(formatChemicalText("2*3")).toBe("2×3")
+  })
+
+  it("keeps a dot-written hydrate separator as a dot", () => {
     expect(formatChemicalText("FeSO4.7H2O")).toBe("FeSO4.7H2O")
     expect(formatChemicalText("FeSO4.7H_2O")).toBe("FeSO4.7H<sub>2</sub>O")
     expect(formatChemicalText("FeSO4.H2O")).toBe("FeSO4.H2O")
@@ -51,7 +89,7 @@ describe("formatChemicalText", () => {
 
   it("preserves decimal points in numbers", () => {
     expect(formatChemicalText("58.44 g")).toBe("58.44 g")
-    expect(formatChemicalText("Hustota 1.5 g*cm^-3")).toBe("Hustota 1.5 g.cm<sup>-3</sup>")
+    expect(formatChemicalText("Hustota 1.5 g*cm^-3")).toBe("Hustota 1.5 g×cm<sup>-3</sup>")
   })
 
   it("does not convert asterisks used for markdown emphasis", () => {
@@ -115,7 +153,7 @@ describe("renderQuestionText", () => {
 
   it("renders scientific notation from constants with real superscript markup", () => {
     const result = renderQuestionText("Disociační konstanta je [[Ka]].", [], [], { Ka: 0.000018 })
-    expect(result).toContain("1.80×10<sup>-5</sup>")
+    expect(result).toContain("1,80×10<sup>-5</sup>")
   })
 
   it("formats chemical notation typed directly into the question prose", () => {
@@ -187,7 +225,7 @@ describe("renderQuestionTextWithVariant", () => {
       ],
       makeVariant({ ms: 12.5 }),
     )
-    expect(result).toContain(">12.5<")
+    expect(result).toContain(">12,5<")
     expect(result).not.toContain(">12.5 g<")
     expect(result).not.toContain(">12.5g<")
   })
@@ -252,9 +290,9 @@ describe("renderQuestionTextWithVariant", () => {
   it("renders fixed-value placeholders without brackets", () => {
     const text = "Hustota roztoku je [[rho_r=1.1296]] g*cm^-3. [c]"
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}))
-    expect(result).toContain(">1.1296<")
+    expect(result).toContain(">1,1296<")
     expect(result).not.toContain("[[rho_r=1.1296]]")
-    expect(result).toContain("g.cm<sup>-3</sup>")
+    expect(result).toContain("g×cm<sup>-3</sup>")
   })
 
   it("preserves dots in hydrates without touching decimals in placeholders", () => {
@@ -306,7 +344,7 @@ describe("renderQuestionTextWithVariant", () => {
   it("renders constant placeholders from the constants map", () => {
     const text = "Molekulární hmotnost látky je [[M_x]] g/mol."
     const result = renderQuestionText(text, [], [], { M_x: 120.37 })
-    expect(result).toContain(">120.37<")
+    expect(result).toContain(">120,37<")
     expect(result).not.toContain("[[M_x]]")
   })
 
@@ -343,7 +381,7 @@ describe("renderQuestionTextWithVariant", () => {
   it("renders constant placeholders with variants", () => {
     const text = "Hmotnost vzorku je [[M_x]] g."
     const result = renderQuestionTextWithVariant(text, [], makeVariant({}), [], { M_x: 58.44 })
-    expect(result).toContain(">58.44<")
+    expect(result).toContain(">58,44<")
     expect(result).not.toContain("[[M_x]]")
   })
 
@@ -396,6 +434,6 @@ describe("renderQuestionTextWithVariant", () => {
       },
     ])
     // Mid-range preview of 16.1234–100, still rendered at precision 2.
-    expect(result).toContain(">58.12<")
+    expect(result).toContain(">58,12<")
   })
 })

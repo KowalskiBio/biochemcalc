@@ -2,6 +2,7 @@ import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { DecimalInput } from "@/components/ui/decimal-input"
 import {
   Dialog,
   DialogContent,
@@ -32,7 +33,7 @@ import type {
   TemplateWithDetails,
   Variant,
 } from "@/lib/types"
-import { downloadTextFile, sanitizeFilename } from "@/lib/utils"
+import { downloadTextFile, formatDecimalComma, sanitizeFilename } from "@/lib/utils"
 
 interface ExportVariantsDialogProps {
   open: boolean
@@ -192,12 +193,11 @@ export function ExportVariantsDialog({
     }))
   }, [])
 
-  const handleSpreadPercentChange = useCallback((templateId: string, value: string) => {
+  const handleSpreadPercentChange = useCallback((templateId: string, value: number | undefined) => {
     // Blank, non-finite, zero, or negative all mean "no override" — falls
     // back to the batch preset, matching the backend's own fallback logic.
-    const num = parseFloat(value)
     const validated =
-      value.trim() !== "" && Number.isFinite(num) && num > 0 ? Math.min(999, num) : undefined
+      value !== undefined && Number.isFinite(value) && value > 0 ? Math.min(999, value) : undefined
     setRowStates((prev) => ({
       ...prev,
       [templateId]: {
@@ -428,21 +428,17 @@ export function ExportVariantsDialog({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          max={999}
-                          step="any"
+                        <DecimalInput
                           value={state.customSpreadPercent ?? ""}
-                          onChange={(e) =>
-                            handleSpreadPercentChange(templateDetails.template.id, e.target.value)
+                          onValueChange={(v) =>
+                            handleSpreadPercentChange(templateDetails.template.id, v)
                           }
                           onClick={(e) => e.stopPropagation()}
                           className="w-20 text-right no-spinner"
                           disabled={!isIncluded || hasSd}
                           placeholder={
                             hasSd
-                              ? `SD ±${sdAllowed}`
+                              ? `SD ±${formatDecimalComma(String(sdAllowed))}`
                               : String(
                                   defaultSpreadPercentFor(
                                     mode,

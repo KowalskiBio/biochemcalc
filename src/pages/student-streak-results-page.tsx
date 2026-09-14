@@ -10,6 +10,7 @@ import { cs } from "@/i18n/cs"
 import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
 import type { StartStreakRunInput, StreakRunSummary } from "@/lib/types"
+import { formatDecimalComma } from "@/lib/utils"
 
 function formatMinutesSeconds(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
@@ -150,7 +151,7 @@ export function StudentStreakResultsPage() {
                 {cs.streak.resultsTimePerAnswer.replace("{time}", "")}
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {summary.secondsPerAnswer.toFixed(1)} s
+                {formatDecimalComma(summary.secondsPerAnswer.toFixed(1))} s
               </p>
             </div>
           </div>

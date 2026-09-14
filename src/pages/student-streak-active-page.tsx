@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FormattedResult } from "@/components/ui/formatted-result"
 import { Input } from "@/components/ui/input"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { extractErrorMessage } from "@/lib/http"
@@ -284,9 +285,10 @@ export function StudentStreakActivePage() {
                       }}
                     />
                     {(slot.unit ?? question.resultUnit) && (
-                      <span className="text-sm font-medium text-foreground">
-                        {slot.unit ?? question.resultUnit}
-                      </span>
+                      <UnitRenderer
+                        unit={slot.unit ?? question.resultUnit}
+                        className="text-sm font-medium text-foreground"
+                      />
                     )}
                   </div>
                 ))}

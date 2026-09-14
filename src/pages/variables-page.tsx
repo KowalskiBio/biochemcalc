@@ -25,7 +25,7 @@ import { cs } from "@/i18n/cs"
 // Import API
 import { ApiError, variablesApi } from "@/lib/api"
 import type { Variable, VariableInput } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, formatDecimalComma } from "@/lib/utils"
 
 const pageContainerVariants = cva("space-y-6")
 
@@ -235,8 +235,9 @@ export function VariablesPage() {
                         <Badge variant="secondary">{variable.symbol}</Badge>
                       </TableCell>
                       <TableCell className="font-mono tabular">
-                        {variable.minValue} - {variable.maxValue}
-                        {variable.step && ` (${variable.step})`}
+                        {formatDecimalComma(String(variable.minValue))} -{" "}
+                        {formatDecimalComma(String(variable.maxValue))}
+                        {variable.step && ` (${formatDecimalComma(String(variable.step))})`}
                       </TableCell>
                       <TableCell>
                         <UnitRenderer unit={variable.unit} />

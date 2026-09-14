@@ -41,6 +41,7 @@ import type {
   VictorResponse,
   VictorSettings,
 } from "./types"
+import { normalizeDecimalCommasInText } from "./utils"
 
 // Re-exported so existing call sites (`import { ApiError } from "@/lib/api"`)
 // don't need to change — the underlying HTTP client moved to `./http`.
@@ -205,8 +206,24 @@ export const constantsApi = {
 // Templates API
 // ============================================================================
 
+/**
+ * Rewrite decimal dots in a template's question prose as Czech decimal commas
+ * on the way to the server, so a dot a teacher typed by habit is corrected
+ * once, at the point of saving, rather than papered over at each render.
+ *
+ * Only `questionText` is touched. `formula` and `equationText` are read back
+ * by the expression parser, which folds a comma back to a dot anyway, so
+ * rewriting them would churn the field for no gain. See
+ * {@link normalizeDecimalCommasInText}.
+ */
+function withNormalizedQuestionText<T extends { questionText?: string }>(input: T): T {
+  if (input.questionText === undefined) return input
+  return { ...input, questionText: normalizeDecimalCommasInText(input.questionText) }
+}
+
 export const templatesApi = {
-  create: (input: TemplateInput): Promise<Template> => apiFetch<Template>("create_template", input),
+  create: (input: TemplateInput): Promise<Template> =>
+    apiFetch<Template>("create_template", withNormalizedQuestionText(input)),
 
   list: (): Promise<Template[]> => apiFetch<Template[]>("list_templates"),
 
@@ -225,7 +242,7 @@ export const templatesApi = {
     apiFetch<TemplateLocation | null>("get_template_location", { id }),
 
   update: (id: string, input: Partial<TemplateInput>): Promise<Template> =>
-    apiFetch<Template>("update_template", { id, ...input }),
+    apiFetch<Template>("update_template", { id, ...withNormalizedQuestionText(input) }),
 
   /**
    * Update a template together with its variables in one atomic operation.
@@ -233,7 +250,10 @@ export const templatesApi = {
   updateWithVariables: (
     payload: UpdateTemplateWithVariablesPayload,
   ): Promise<TemplateWithDetails> =>
-    apiFetch<TemplateWithDetails>("update_template_with_variables", payload),
+    apiFetch<TemplateWithDetails>(
+      "update_template_with_variables",
+      withNormalizedQuestionText(payload),
+    ),
 
   /**
    * Update formula/equationText for all templates sharing the same equation text.

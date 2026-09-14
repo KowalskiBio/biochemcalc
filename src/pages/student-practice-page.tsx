@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { UnitRenderer } from "@/components/ui/unit-renderer"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { extractErrorMessage } from "@/lib/http"
@@ -494,9 +495,10 @@ export function StudentPracticePage() {
                         }}
                       />
                       {(slot.unit ?? question.resultUnit) && (
-                        <span className="text-sm font-medium text-foreground">
-                          {slot.unit ?? question.resultUnit}
-                        </span>
+                        <UnitRenderer
+                          unit={slot.unit ?? question.resultUnit}
+                          className="text-sm font-medium text-foreground"
+                        />
                       )}
                     </div>
                   ))}

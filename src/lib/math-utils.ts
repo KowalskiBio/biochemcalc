@@ -2,7 +2,12 @@ import { normalizeFormulaForEvaluation } from "@/lib/bulk-import-parser"
 import { calculateMolarMass, parseChemicalFormula } from "@/lib/chemical-formula-parser"
 import { ATOMIC_WEIGHTS } from "@/lib/periodic-table-data"
 import type { LocalVariableEdit, Notation, VariableWithPlaceholder, Variant } from "@/lib/types"
-import { extractPlaceholders, extractPlaceholderValues } from "@/lib/utils"
+import {
+  extractPlaceholders,
+  extractPlaceholderValues,
+  formatDecimalComma,
+  parseCzechNumber,
+} from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -825,9 +830,20 @@ function stripParentheses(node: AstNode): AstNode {
 function numberNodeToLatex(value: number): string {
   const str = String(value)
   const match = str.match(/^(-?[0-9]+(?:\.[0-9]+)?)e([+-]?[0-9]+)$/)
-  if (!match) return str
+  if (!match) return latexDecimalComma(str)
   const [, mantissa, exponent] = match
-  return `${mantissa} \\times 10^{${exponent.replace(/^\+/, "")}}`
+  return `${latexDecimalComma(mantissa)} \\times 10^{${exponent.replace(/^\+/, "")}}`
+}
+
+/**
+ * The decimal comma as LaTeX: `7.1` → `7{,}1`.
+ *
+ * A bare `,` in math mode is punctuation, which KaTeX sets with a trailing
+ * space, so `7,1` would render as "7, 1". Wrapping it in a group strips that
+ * spacing and leaves a decimal separator sitting tight against both digits.
+ */
+function latexDecimalComma(numeric: string): string {
+  return numeric.replace(".", "{,}")
 }
 
 /** True for a number that renders as `m \times 10^{n}` — it already ends in
@@ -868,10 +884,12 @@ function nodeToLatex(node: AstNode): string {
       }
       const op = node.operator
       let renderedOp: string
-      if (op === "*" || op === "×") {
+      if (op === "*" || op === "×" || op === "·" || op === "∙") {
+        // One glyph for multiplication, whichever character was authored, so
+        // a rendered equation matches the surrounding question text (where
+        // `formatChemicalText` maps all of these to `×`). `\\cdot` stays
+        // reserved for the hydrate separator in `adductToLatex`.
         renderedOp = "\\times "
-      } else if (op === "·" || op === "∙") {
-        renderedOp = "\\cdot "
       } else {
         renderedOp = `${op} `
       }
@@ -944,9 +962,30 @@ function renderSingleEquationAsLatex(text: string): string {
     const node = parseExpression(normalized)
     return `$$${nodeToLatex(node)}$$`
   } catch {
-    const escaped = normalized.replace(/\\/g, "\\\\").replace(/_/g, "\\_")
-    return `$$\\text{${escaped}}$$`
+    // Show what the teacher actually wrote, not `normalized`: that has been
+    // through normalizeFormulaForEvaluation, which folds `,` into `.`, `[`
+    // into `(` and `×` into `*` for the parser's benefit. Placeholders are
+    // still unwrapped, so `[[MASS=5]]` does not reach the screen verbatim.
+    return `$$\\text{${escapeForLatexText(preprocessEquation(trimmed))}}$$`
   }
+}
+
+/**
+ * Escape a string so it is safe as the body of `\text{...}`.
+ *
+ * The previous version escaped only `\` and `_`, which left the characters
+ * that actually break KaTeX: inside `\text{}` a `^` is illegal outside math
+ * mode, and a `%` opens a LaTeX comment that swallows the rest of the line
+ * including the closing brace, so either one turns the "unparseable equation"
+ * fallback into a hard parse error. Backslash goes first, otherwise it would
+ * re-escape the backslashes introduced by the later replacements.
+ */
+function escapeForLatexText(value: string): string {
+  return value
+    .replace(/\\/g, "\\textbackslash{}")
+    .replace(/([{}$&#_%])/g, "\\$1")
+    .replace(/\^/g, "\\textasciicircum{}")
+    .replace(/~/g, "\\textasciitilde{}")
 }
 
 export function renderEquationAsLatex(text: string): string {
@@ -1010,11 +1049,12 @@ const SCIENTIFIC_UPPER_THRESHOLD = 1e6
 
 /** Render as `m×10^n`; `FormattedResult` superscripts the exponent. */
 function toScientificNotation(value: number): string {
-  return value
-    .toExponential(SCIENTIFIC_MANTISSA_DECIMALS)
-    .replace(/e([+-]?)(\d+)/, (_, sign: string, digits: string) => {
+  return formatDecimalComma(value.toExponential(SCIENTIFIC_MANTISSA_DECIMALS)).replace(
+    /e([+-]?)(\d+)/,
+    (_, sign: string, digits: string) => {
       return `×10^${sign === "-" ? "-" : ""}${digits}`
-    })
+    },
+  )
 }
 
 /** Matches the `×10^n` form that {@link formatNumberMaxDecimals} produces. */
@@ -1105,7 +1145,8 @@ const SCIENTIFIC_LOWER_THRESHOLD = 0.1
  */
 const SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD = 1e-6
 
-export function formatSignificantDigits(
+/** Dot-separated core of {@link formatSignificantDigits}. */
+function formatSignificantDigitsRaw(
   value: number | undefined | null,
   sigDigits: number,
   forceScientific = false,
@@ -1146,7 +1187,8 @@ export function formatSignificantDigits(
   return value.toFixed(decimalPlaces)
 }
 
-export function formatNumberMaxDecimals(
+/** Dot-separated core of {@link formatNumberMaxDecimals}. */
+function formatNumberMaxDecimalsRaw(
   value: number | undefined | null,
   maxDecimals = 2,
   forceScientific = false,
@@ -1173,6 +1215,34 @@ export function formatNumberMaxDecimals(
     return toScientificNotation(value)
   }
   return rounded.toString()
+}
+
+/**
+ * `value` rounded to `sigDigits` significant digits, with a Czech decimal
+ * comma. Display only: see {@link formatDecimalComma}.
+ */
+export function formatSignificantDigits(
+  value: number | undefined | null,
+  sigDigits: number,
+  forceScientific = false,
+  notation?: Notation,
+): string {
+  return formatDecimalComma(formatSignificantDigitsRaw(value, sigDigits, forceScientific, notation))
+}
+
+/**
+ * `value` at no more than `maxDecimals` decimal places, with a Czech decimal
+ * comma. Display only: see {@link formatDecimalComma}.
+ */
+export function formatNumberMaxDecimals(
+  value: number | undefined | null,
+  maxDecimals = 2,
+  forceScientific = false,
+  notation?: Notation,
+): string {
+  return formatDecimalComma(
+    formatNumberMaxDecimalsRaw(value, maxDecimals, forceScientific, notation),
+  )
 }
 
 export function substituteStringsInMolarMassReferences(
@@ -1235,8 +1305,10 @@ export function buildSubstitutedEquation(
   if (questionText) {
     for (const { symbol, value } of extractPlaceholderValues(questionText)) {
       if (value === undefined) continue
-      const numeric = Number(value)
-      if (!Number.isNaN(numeric)) {
+      // parseCzechNumber, not Number: a pinned value is authored inside the
+      // question prose, so it carries the decimal comma the prose uses.
+      const numeric = parseCzechNumber(value)
+      if (numeric !== undefined) {
         fixedMap.set(symbol, numeric)
       }
     }
