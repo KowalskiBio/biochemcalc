@@ -24,9 +24,12 @@ const SCIENTIFIC_UPPER_THRESHOLD: f64 = 1e6;
 
 /// Below this magnitude a fixed-point string has more than one leading zero
 /// after the decimal point — `0,1` is acceptable, `0,01` is not. Mirrors
-/// `SCIENTIFIC_LOWER_THRESHOLD` in `src/lib/math-utils.ts`. This is a styling
-/// preference for `Auto` mode only — see `SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD`
-/// below for the separate, unconditional correctness floor.
+/// `SCIENTIFIC_LOWER_THRESHOLD` in `src/lib/math-utils.ts`. For `fmt_option_value`
+/// this is a styling preference scoped to `Auto` mode — see
+/// `SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD` below for the separate, unconditional
+/// correctness floor. `fmt_plain_decimal_cz` reuses the same threshold
+/// unconditionally, since a `:n` evaluation row has no notation setting to
+/// respect in the first place — see its doc comment.
 const SCIENTIFIC_LOWER_THRESHOLD: f64 = 0.1;
 
 /// Below this magnitude, a sig-fig-formatted decimal has so many leading
@@ -49,11 +52,9 @@ const SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD: f64 = 1e-6;
 /// default, but `sigDigits - 1` when significant digits are configured, so
 /// e.g. 4 significant digits shows a 3-decimal mantissa here exactly as it
 /// does in `formatSignificantDigits` in `src/lib/math-utils.ts`.
-fn fmt_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
-    if value == 0.0 || !value.is_finite() {
-        return fmt_cz(value, mantissa_decimals);
-    }
-
+/// Czech-formatted mantissa and exponent, shared by the HTML scientific form
+/// (`fmt_scientific_cz`) and the bare `e`-notation form (`fmt_plain_scientific_cz`).
+fn scientific_mantissa_cz(value: f64, mantissa_decimals: u8) -> (String, i32) {
     let mut exponent = value.abs().log10().floor() as i32;
     // Rounding the mantissa can carry it up to 10,00 (e.g. 9,999×10^5), which
     // belongs in the next decade instead.
@@ -64,13 +65,29 @@ fn fmt_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
     if mantissa_rounded.abs() >= 10.0 {
         exponent += 1;
     }
-
     let mantissa = value / 10f64.powi(exponent);
-    format!(
-        "{}×10<sup>{}</sup>",
-        fmt_cz(mantissa, mantissa_decimals),
-        exponent
-    )
+    (fmt_cz(mantissa, mantissa_decimals), exponent)
+}
+
+fn fmt_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
+    if value == 0.0 || !value.is_finite() {
+        return fmt_cz(value, mantissa_decimals);
+    }
+    let (mantissa, exponent) = scientific_mantissa_cz(value, mantissa_decimals);
+    format!("{}×10<sup>{}</sup>", mantissa, exponent)
+}
+
+/// Bare `e`-notation scientific form for a `:n` evaluation row: `4e-5`, not
+/// `4×10<sup>-5</sup>`. The row is parsed as a plain number, so the HTML
+/// markup `fmt_scientific_cz` produces would not survive — but `e`-notation
+/// is itself valid number syntax, which is what makes it usable here at all.
+/// See `fmt_plain_decimal_cz` for when this applies.
+fn fmt_plain_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
+    if value == 0.0 || !value.is_finite() {
+        return fmt_cz(value, mantissa_decimals);
+    }
+    let (mantissa, exponent) = scientific_mantissa_cz(value, mantissa_decimals);
+    format!("{}e{}", mantissa, exponent)
 }
 
 /// A number as a student should see it in the exported test: plain Czech
@@ -378,9 +395,10 @@ fn render_question(
 ///
 /// Mirrors `resolveOptionsPrecision` in `src/lib/math-utils.ts`, which the
 /// on-screen option lists already use. The generator only guarantees that
-/// options are distinct on its own rounding grid, and an absolute SD window
-/// makes that grid `2*sd/(count+1)` — finer than the two decimals an export
-/// prints. A question built around `sd_allowed = 0,02` at ~1,0 then reaches
+/// options are distinct on its own rounding grid, and an SD window
+/// (a percent of the answer, converted to an absolute half-width) makes
+/// that grid `2*sd/(count+1)` — finer than the two decimals an export
+/// prints. A question built around a narrow SD percent at ~1,0 then reaches
 /// the student as `1,00 / 0,99 / 0,99 / 1,01 / 1,01`: five options, three
 /// values. Significant digits are left alone, since there the grid and the
 /// rendering are the same setting.
@@ -490,6 +508,21 @@ fn interval_precision(lo: f64, hi: f64, preferred: u8) -> u8 {
 /// A plain decimal with `decimals` places, free of the binary noise `{:.0}`
 /// exposes on large magnitudes — `1,05e25` printed in full otherwise ends
 /// `…9496683520`, digits the double never actually carried.
+///
+/// Below `SCIENTIFIC_LOWER_THRESHOLD` this switches to bare `e`-notation
+/// instead (`4e-5`, never the HTML `×10<sup>` form — see
+/// `fmt_plain_scientific_cz`). A tolerance interval reaching into that range
+/// needs `decimals` places just to show its first significant digit, and an
+/// atomic-mass-scale bound (~1e-22) with those decimals spelled out is
+/// exactly the wall of leading zeros this switch exists to avoid; unlike
+/// `fmt_option_value`'s use of the same threshold, there is no `Notation`
+/// setting to respect here — a `:n` row has no on-screen styling choice to
+/// begin with, only the constraint that it stays parseable as a number.
+/// `decimals` already carries the caller's intended precision at this
+/// magnitude, so it converts directly to mantissa decimals (`decimals +
+/// order`): the value was already rounded onto that decimal grid before
+/// reaching here, and re-expressing it in scientific form must not round it
+/// again.
 fn fmt_plain_decimal_cz(value: f64, decimals: u8) -> String {
     /// Decimal digits a `f64` can justify before its binary expansion shows.
     const EXACT_DIGITS: i32 = 15;
@@ -497,6 +530,10 @@ fn fmt_plain_decimal_cz(value: f64, decimals: u8) -> String {
         return fmt_cz(value, decimals);
     }
     let order = value.abs().log10().floor() as i32;
+    if value.abs() < SCIENTIFIC_LOWER_THRESHOLD {
+        let mantissa_decimals = (decimals as i32 + order).max(0) as u8;
+        return fmt_plain_scientific_cz(value, mantissa_decimals);
+    }
     if order < EXACT_DIGITS {
         return fmt_cz(value, decimals);
     }
@@ -555,11 +592,14 @@ fn round_outward(value: f64, decimals: i32, up: bool) -> f64 {
 /// The two bounds of an answer interval as an IS MU `:n` evaluation row needs
 /// them: a bare number or `lo..hi`, decimal comma or dot, nothing else.
 ///
-/// Scientific notation is deliberately not an option here however the
-/// question's own numbers are styled — `×10<sup>25</sup>` is HTML, and the
-/// row is parsed as a number. A magnitude that would read better in
+/// The HTML scientific form the question's own numbers use elsewhere
+/// (`×10<sup>25</sup>`) is never an option here, however those numbers are
+/// styled — the row is parsed as a number, and that markup would not parse.
+/// Bare `e`-notation is different: `fmt_plain_decimal_cz` still switches to it
+/// below `SCIENTIFIC_LOWER_THRESHOLD`, because `4e-5` parses as a number just
+/// fine. Above that threshold, a magnitude that would read better in
 /// scientific notation is the teacher's cue to ask for the answer in a
-/// different unit, not something this row can express.
+/// different unit — this row has no other way to express it.
 fn fmt_interval_bounds(
     lo: f64,
     hi: f64,
@@ -1252,9 +1292,11 @@ mod tests {
     /// printed at one decimal collapsed to `"0,1..0,1"`, which accepts only
     /// the rounded midpoint instead of the intended 0.0796–0.1478 band.
     ///
-    /// The printed bounds round outward (0,07 rather than 0,08 for the lower
+    /// The printed bounds round outward (7e-2 rather than 8e-2 for the lower
     /// one), so the row can never reject an answer the generator, and the
-    /// student grading beside it, count as correct.
+    /// student grading beside it, count as correct. The lower bound prints in
+    /// bare `e`-notation on its own: it falls under `SCIENTIFIC_LOWER_THRESHOLD`
+    /// (0,1) once rounded outward, while the upper bound does not.
     #[test]
     fn small_answer_interval_does_not_collapse_to_a_single_value() {
         let template = make_template("Vypočítejte látkové množství.");
@@ -1278,12 +1320,47 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(":n=0,07..0,15 ok 3"),
+            output.contains(":n=7e-2..0,15 ok 3"),
             "interval should keep both bounds distinguishable, got:\n{output}"
         );
         assert!(
             !output.contains("0,1..0,1"),
             "interval collapsed to a single value:\n{output}"
+        );
+    }
+
+    /// The regression report this fixes: a tiny answer (e.g. ~4×10⁻⁵) used to
+    /// export as a wall of leading decimal zeros (`0,00004`) instead of the
+    /// compact `4e-5` IS MU still parses as a number.
+    #[test]
+    fn tiny_interval_bounds_export_as_bare_e_notation() {
+        let template = make_template("Vypočítejte koncentraci.");
+        let variant = Variant {
+            interval_lo: Some(0.000_039),
+            interval_hi: Some(0.000_041),
+            numeric_options: None,
+            correct_option: None,
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(1),
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            output.contains(":n=3e-5..5e-5 ok 3"),
+            "expected bare e-notation for sub-0,1 bounds, got:\n{output}"
+        );
+        assert!(
+            !output.contains("0,00004") && !output.contains("0,00003") && !output.contains("0,00005"),
+            "tiny bound printed as a wall of decimal zeros instead of e-notation:\n{output}"
         );
     }
 
@@ -1844,7 +1921,7 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(":n=0,0796..0,148 ok 3"),
+            output.contains(":n=7,96e-2..0,148 ok 3"),
             "expected 3 sig digits interval bounds, got:\n{output}"
         );
     }

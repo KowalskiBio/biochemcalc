@@ -186,7 +186,8 @@ pub fn import_test1(state: State<'_, AppState>) -> Result<Topic, DbError> {
 }
 
 fn do_import_test1(conn: &rusqlite::Connection) -> Result<Topic, DbError> {
-    let json_path = std::path::Path::new("/Users/kowalski/plato/vypocty/test1_bulk.json");
+    let json_path =
+        std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../test1_bulk.json"));
     let raw = std::fs::read_to_string(json_path)
         .map_err(|e| DbError::Io(format!("Failed to read test1_bulk.json: {e}")))?;
     let payload: BulkImportTemplatesPayload =

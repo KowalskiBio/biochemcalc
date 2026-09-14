@@ -5,7 +5,7 @@
 use biochemcalc_lib::engine::extract_variables;
 use serde_json::Value;
 
-const JSON_PATH: &str = "/Users/kowalski/plato/vypocty/test1_parsed.json";
+const JSON_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../test1_parsed.json");
 
 fn main() {
     let raw = std::fs::read_to_string(JSON_PATH).expect("Failed to read test1_parsed.json");
