@@ -77,7 +77,9 @@ export function ResetPasswordPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword">{cs.auth.resetPassword.confirmPasswordLabel}</Label>
+                <Label htmlFor="confirmPassword">
+                  {cs.auth.resetPassword.confirmPasswordLabel}
+                </Label>
                 <Input
                   id="confirmPassword"
                   type="password"

@@ -24,7 +24,12 @@ impl SessionRepo {
     ) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
-            params![token, user_id, Utc::now().to_rfc3339(), expires_at.to_rfc3339()],
+            params![
+                token,
+                user_id,
+                Utc::now().to_rfc3339(),
+                expires_at.to_rfc3339()
+            ],
         )?;
         Ok(())
     }
@@ -52,7 +57,11 @@ impl SessionRepo {
     }
 
     /// Slide the session's expiry forward on use.
-    pub fn extend(conn: &Connection, token: &str, expires_at: DateTime<Utc>) -> Result<(), DbError> {
+    pub fn extend(
+        conn: &Connection,
+        token: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), DbError> {
         conn.execute(
             "UPDATE sessions SET expires_at = ?2 WHERE token = ?1",
             params![token, expires_at.to_rfc3339()],
@@ -138,8 +147,13 @@ mod tests {
     fn expired_session_is_not_returned() {
         let conn = setup_conn();
         let user_id = insert_user(&conn);
-        SessionRepo::create(&conn, "tok-expired", &user_id, Utc::now() - Duration::seconds(1))
-            .expect("create session");
+        SessionRepo::create(
+            &conn,
+            "tok-expired",
+            &user_id,
+            Utc::now() - Duration::seconds(1),
+        )
+        .expect("create session");
 
         let found = SessionRepo::find_valid(&conn, "tok-expired").expect("find");
         assert!(found.is_none());
@@ -166,13 +180,24 @@ mod tests {
             .expect("create session a");
         SessionRepo::create(&conn, "tok-b", &user_id, Utc::now() + Duration::days(1))
             .expect("create session b");
-        SessionRepo::create(&conn, "tok-other", &other_user_id, Utc::now() + Duration::days(1))
-            .expect("create other user's session");
+        SessionRepo::create(
+            &conn,
+            "tok-other",
+            &other_user_id,
+            Utc::now() + Duration::days(1),
+        )
+        .expect("create other user's session");
 
         SessionRepo::delete_all_for_user(&conn, &user_id).expect("delete all for user");
 
-        assert!(SessionRepo::find_valid(&conn, "tok-a").expect("find").is_none());
-        assert!(SessionRepo::find_valid(&conn, "tok-b").expect("find").is_none());
-        assert!(SessionRepo::find_valid(&conn, "tok-other").expect("find").is_some());
+        assert!(SessionRepo::find_valid(&conn, "tok-a")
+            .expect("find")
+            .is_none());
+        assert!(SessionRepo::find_valid(&conn, "tok-b")
+            .expect("find")
+            .is_none());
+        assert!(SessionRepo::find_valid(&conn, "tok-other")
+            .expect("find")
+            .is_some());
     }
 }

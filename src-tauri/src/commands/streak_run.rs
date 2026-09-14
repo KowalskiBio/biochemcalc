@@ -122,7 +122,12 @@ pub fn do_start_streak_run(
             let point_value = payload
                 .point_value
                 .ok_or_else(|| DbError::Validation("Vyberte obtížnost".into()))?;
-            (Some(topic_id), Some(point_value), payload.mode, payload.set_id)
+            (
+                Some(topic_id),
+                Some(point_value),
+                payload.mode,
+                payload.set_id,
+            )
         }
         StreakRunKind::Master => (None, None, None, None),
     };
@@ -279,16 +284,16 @@ pub fn do_streak_leaderboard(
     )?
     .into_iter()
     .map(|row| {
-            let total_answered = row.best_correct_count + 1;
-            StreakLeaderboardEntry {
-                user_id: row.user_id,
-                username: row.username,
-                best_correct_count: row.best_correct_count,
-                total_seconds: row.total_seconds,
-                seconds_per_answer: row.total_seconds as f64 / total_answered as f64,
-            }
-        })
-        .collect();
+        let total_answered = row.best_correct_count + 1;
+        StreakLeaderboardEntry {
+            user_id: row.user_id,
+            username: row.username,
+            best_correct_count: row.best_correct_count,
+            total_seconds: row.total_seconds,
+            seconds_per_answer: row.total_seconds as f64 / total_answered as f64,
+        }
+    })
+    .collect();
 
     entries.sort_by(|a, b| {
         b.best_correct_count
@@ -303,12 +308,15 @@ mod tests {
     use super::*;
     use crate::commands::practice::{do_submit_answer, SubmitAnswerPayload};
     use crate::db::repos::{CategoryRepo, SetRepo, TemplateRepo, TopicRepo, UserRecord, UserRepo};
-    use crate::models::{ConstraintType, ResultConstraint, Role, Template, TemplateVariable, Topic, Variable};
+    use crate::models::{
+        ConstraintType, ResultConstraint, Role, Template, TemplateVariable, Topic, Variable,
+    };
 
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         conn
     }
 
@@ -337,7 +345,15 @@ mod tests {
         let (_, sets) = CategoryRepo::create(conn, topic.id, 2).expect("create category");
 
         for i in 0..count {
-            let variable = Variable::new(format!("Hmotnost {i}"), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
+            let variable = Variable::new(
+                format!("Hmotnost {i}"),
+                "X".into(),
+                1.0,
+                10.0,
+                1.0,
+                "g".into(),
+                0,
+            );
             crate::db::repos::VariableRepo::insert_raw(conn, &variable).expect("insert variable");
 
             let template = Template::new(
@@ -348,8 +364,13 @@ mod tests {
                 "g".into(),
                 2,
             );
-            let constraint =
-                ResultConstraint::new(template.id, Some(0.0), Some(100.0), None, ConstraintType::Range);
+            let constraint = ResultConstraint::new(
+                template.id,
+                Some(0.0),
+                Some(100.0),
+                None,
+                ConstraintType::Range,
+            );
             let tv = TemplateVariable {
                 template_id: template.id,
                 variable_id: variable.id,
@@ -357,7 +378,8 @@ mod tests {
                 greater_than_variable_id: None,
                 less_than_variable_id: None,
             };
-            TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &[]).expect("insert template");
+            TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
+                .expect("insert template");
             SetRepo::add_template(conn, &sets[i % 3].id, &template.id).expect("add to set");
         }
 
@@ -373,11 +395,15 @@ mod tests {
                 answers: Some(vec![if correct { expected } else { -expected - 1.0 }]),
             },
             TemplateMode::Closed => {
-                let options = question.answer_slots[0].numeric_options.clone().expect("options");
+                let options = question.answer_slots[0]
+                    .numeric_options
+                    .clone()
+                    .expect("options");
                 let position = options
                     .iter()
                     .position(|o| ((*o - expected).abs() < 1e-9) == correct)
-                    .expect("an option matching the desired correctness exists") as u8;
+                    .expect("an option matching the desired correctness exists")
+                    as u8;
                 SubmitAnswerPayload {
                     attempt_id: question.attempt_id,
                     selected_option: Some(position + 1),
@@ -407,23 +433,41 @@ mod tests {
         .expect("start run");
 
         for _ in 0..3 {
-            let question = do_next_streak_question(&conn, &student, &NextStreakQuestionPayload { run_id: run.run_id })
-                .expect("next question");
-            let result = do_submit_answer(&conn, &student, &answer(&question, true)).expect("grade correct");
+            let question = do_next_streak_question(
+                &conn,
+                &student,
+                &NextStreakQuestionPayload { run_id: run.run_id },
+            )
+            .expect("next question");
+            let result =
+                do_submit_answer(&conn, &student, &answer(&question, true)).expect("grade correct");
             assert!(result.correct);
         }
 
-        let question = do_next_streak_question(&conn, &student, &NextStreakQuestionPayload { run_id: run.run_id })
-            .expect("next question");
-        let result = do_submit_answer(&conn, &student, &answer(&question, false)).expect("grade wrong");
+        let question = do_next_streak_question(
+            &conn,
+            &student,
+            &NextStreakQuestionPayload { run_id: run.run_id },
+        )
+        .expect("next question");
+        let result =
+            do_submit_answer(&conn, &student, &answer(&question, false)).expect("grade wrong");
         assert!(!result.correct);
 
         // The run is now over: no more questions, and the summary is frozen.
-        let refused = do_next_streak_question(&conn, &student, &NextStreakQuestionPayload { run_id: run.run_id });
+        let refused = do_next_streak_question(
+            &conn,
+            &student,
+            &NextStreakQuestionPayload { run_id: run.run_id },
+        );
         assert!(matches!(refused, Err(DbError::Validation(_))));
 
-        let summary = do_streak_run_summary(&conn, &student, &StreakRunSummaryPayload { run_id: run.run_id })
-            .expect("summary");
+        let summary = do_streak_run_summary(
+            &conn,
+            &student,
+            &StreakRunSummaryPayload { run_id: run.run_id },
+        )
+        .expect("summary");
         assert_eq!(summary.correct_count, 3);
         assert_eq!(summary.kind, StreakRunKind::Apprentice);
     }
@@ -447,7 +491,11 @@ mod tests {
         )
         .expect("start run");
 
-        let result = do_streak_run_summary(&conn, &student, &StreakRunSummaryPayload { run_id: run.run_id });
+        let result = do_streak_run_summary(
+            &conn,
+            &student,
+            &StreakRunSummaryPayload { run_id: run.run_id },
+        );
         assert!(matches!(result, Err(DbError::Validation(_))));
     }
 
@@ -473,13 +521,18 @@ mod tests {
 
         let mut seen_topics = std::collections::HashSet::new();
         for _ in 0..30 {
-            let question = do_next_streak_question(&conn, &student, &NextStreakQuestionPayload { run_id: run.run_id })
-                .expect("next question");
+            let question = do_next_streak_question(
+                &conn,
+                &student,
+                &NextStreakQuestionPayload { run_id: run.run_id },
+            )
+            .expect("next question");
             // Identify which topic this came from via its assigned "X"
             // value's variable name pattern is not exposed, so just answer
             // correctly and keep going — the point is exercising both topics
             // without ever erroring.
-            let result = do_submit_answer(&conn, &student, &answer(&question, true)).expect("grade");
+            let result =
+                do_submit_answer(&conn, &student, &answer(&question, true)).expect("grade");
             assert!(result.correct);
             let _ = (&topic_a, &topic_b);
             seen_topics.insert(question.question_text.clone());
@@ -508,13 +561,20 @@ mod tests {
             )
             .expect("start run");
             for _ in 0..wins {
-                let question =
-                    do_next_streak_question(&conn, &user, &NextStreakQuestionPayload { run_id: run.run_id })
-                        .expect("next question");
+                let question = do_next_streak_question(
+                    &conn,
+                    &user,
+                    &NextStreakQuestionPayload { run_id: run.run_id },
+                )
+                .expect("next question");
                 do_submit_answer(&conn, &user, &answer(&question, true)).expect("grade correct");
             }
-            let question = do_next_streak_question(&conn, &user, &NextStreakQuestionPayload { run_id: run.run_id })
-                .expect("next question");
+            let question = do_next_streak_question(
+                &conn,
+                &user,
+                &NextStreakQuestionPayload { run_id: run.run_id },
+            )
+            .expect("next question");
             do_submit_answer(&conn, &user, &answer(&question, false)).expect("grade wrong");
         };
 
@@ -571,9 +631,12 @@ mod tests {
                 .expect("next question");
                 do_submit_answer(&conn, &student, &answer(&question, true)).expect("grade correct");
             }
-            let question =
-                do_next_streak_question(&conn, &student, &NextStreakQuestionPayload { run_id: run.run_id })
-                    .expect("next question");
+            let question = do_next_streak_question(
+                &conn,
+                &student,
+                &NextStreakQuestionPayload { run_id: run.run_id },
+            )
+            .expect("next question");
             do_submit_answer(&conn, &student, &answer(&question, false)).expect("grade wrong");
         };
 

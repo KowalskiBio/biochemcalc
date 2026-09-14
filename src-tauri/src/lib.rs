@@ -53,8 +53,12 @@ fn init_file_logger(app: &tauri::App) {
         }
     };
 
-    if simplelog::WriteLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default(), file)
-        .is_ok()
+    if simplelog::WriteLogger::init(
+        simplelog::LevelFilter::Info,
+        simplelog::Config::default(),
+        file,
+    )
+    .is_ok()
     {
         log::info!("biochemcalc starting (log file: {})", log_path.display());
     }

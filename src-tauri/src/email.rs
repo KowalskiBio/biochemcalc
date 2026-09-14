@@ -71,7 +71,9 @@ impl Mailer {
     pub async fn send_reset_email(&self, to_email: &str, to_name: &str, reset_link: &str) {
         match self {
             Mailer::Disabled => {
-                log::warn!("SMTP not configured — password reset link for {to_email}: {reset_link}");
+                log::warn!(
+                    "SMTP not configured — password reset link for {to_email}: {reset_link}"
+                );
             }
             Mailer::Smtp { transport, from } => {
                 let Ok(to) = format!("{to_name} <{to_email}>").parse::<Mailbox>() else {

@@ -125,9 +125,7 @@ mod tests {
     #[test]
     fn strips_trailing_marker() {
         assert_eq!(
-            strip_answer_targets(
-                "Vypočítejte látkové množství Ca^2+ v [[m]] g Ca(HSO_3)_2. [n]"
-            ),
+            strip_answer_targets("Vypočítejte látkové množství Ca^2+ v [[m]] g Ca(HSO_3)_2. [n]"),
             "Vypočítejte látkové množství Ca^2+ v [[m]] g Ca(HSO_3)_2."
         );
     }
@@ -193,8 +191,14 @@ mod tests {
     #[test]
     fn apply_result_units_leaves_targets_beyond_the_provided_units_untouched() {
         let mut targets = vec![
-            AnswerTarget { symbol: "a".into(), unit: None },
-            AnswerTarget { symbol: "b".into(), unit: None },
+            AnswerTarget {
+                symbol: "a".into(),
+                unit: None,
+            },
+            AnswerTarget {
+                symbol: "b".into(),
+                unit: None,
+            },
             AnswerTarget {
                 symbol: "c".into(),
                 unit: Some("existing".into()),

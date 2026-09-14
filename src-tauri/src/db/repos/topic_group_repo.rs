@@ -9,7 +9,12 @@ impl TopicGroupRepo {
     pub fn insert(conn: &Connection, group: &TopicGroup) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO topic_groups (id, name, position, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![group.id, group.name, group.position, group.created_at.to_rfc3339()],
+            params![
+                group.id,
+                group.name,
+                group.position,
+                group.created_at.to_rfc3339()
+            ],
         )?;
         Ok(())
     }
@@ -89,7 +94,8 @@ mod tests {
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         conn
     }
 
@@ -139,7 +145,10 @@ mod tests {
         TopicGroupRepo::delete(&conn, &group.id).expect("delete group");
 
         let fetched = crate::db::repos::TopicRepo::get_by_id(&conn, &topic.id).expect("get topic");
-        assert_eq!(fetched.group_id, None, "topic must be ungrouped, not deleted");
+        assert_eq!(
+            fetched.group_id, None,
+            "topic must be ungrouped, not deleted"
+        );
     }
 
     #[test]
@@ -155,6 +164,9 @@ mod tests {
         TopicGroupRepo::reorder(&conn, &[c.id, a.id, b.id]).expect("reorder");
 
         let all = TopicGroupRepo::list_all(&conn).expect("list");
-        assert_eq!(all.iter().map(|g| g.id).collect::<Vec<_>>(), vec![c.id, a.id, b.id]);
+        assert_eq!(
+            all.iter().map(|g| g.id).collect::<Vec<_>>(),
+            vec![c.id, a.id, b.id]
+        );
     }
 }

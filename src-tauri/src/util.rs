@@ -97,8 +97,14 @@ mod tests {
 
         atomic_write(&path, "{\"ok\":true}").expect("write");
 
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "{\"ok\":true}");
-        assert!(!dir.join(".projekt.json.tmp").exists(), "temp file must not linger");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "{\"ok\":true}"
+        );
+        assert!(
+            !dir.join(".projekt.json.tmp").exists(),
+            "temp file must not linger"
+        );
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
@@ -119,7 +125,9 @@ mod tests {
     fn lock_db_recovers_from_poisoned_mutex() {
         use std::sync::Arc;
 
-        let db = Arc::new(Mutex::new(Connection::open_in_memory().expect("in-memory db")));
+        let db = Arc::new(Mutex::new(
+            Connection::open_in_memory().expect("in-memory db"),
+        ));
 
         // Poison the mutex by panicking in a thread while holding the lock.
         let db_clone = Arc::clone(&db);
@@ -143,9 +151,8 @@ mod tests {
         let ok: Result<i32, DbError> = guard_panic("no-op", || Ok(7));
         assert_eq!(ok.expect("ok"), 7);
 
-        let err: Result<i32, DbError> = guard_panic("no-op", || {
-            Err(DbError::Validation("bad input".into()))
-        });
+        let err: Result<i32, DbError> =
+            guard_panic("no-op", || Err(DbError::Validation("bad input".into())));
         assert!(matches!(err, Err(DbError::Validation(_))));
     }
 

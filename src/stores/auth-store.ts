@@ -15,7 +15,12 @@ interface AuthState {
   status: AuthStatus
   fetchMe: () => Promise<void>
   login: (username: string, password: string) => Promise<void>
-  register: (username: string, password: string, inviteCode: string, email?: string) => Promise<void>
+  register: (
+    username: string,
+    password: string,
+    inviteCode: string,
+    email?: string,
+  ) => Promise<void>
   logout: () => Promise<void>
 }
 

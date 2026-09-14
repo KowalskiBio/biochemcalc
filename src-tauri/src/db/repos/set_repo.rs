@@ -25,7 +25,13 @@ impl SetRepo {
         set.name = name.map(|n| n.to_string());
         conn.execute(
             "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![set.id, set.category_id, set.set_index, serde_mode(set.mode), set.name],
+            params![
+                set.id,
+                set.category_id,
+                set.set_index,
+                serde_mode(set.mode),
+                set.name
+            ],
         )?;
         Ok(set)
     }
@@ -139,7 +145,13 @@ impl SetRepo {
     pub fn insert(conn: &Connection, set: &crate::models::Set) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![set.id, set.category_id, set.set_index, serde_mode(set.mode), set.name],
+            params![
+                set.id,
+                set.category_id,
+                set.set_index,
+                serde_mode(set.mode),
+                set.name
+            ],
         )?;
         Ok(())
     }
@@ -450,10 +462,12 @@ mod tests {
         let (cat, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
         assert_eq!(sets.len(), 4);
 
-        let fifth = SetRepo::create(&conn, cat.id, TemplateMode::Closed, None).expect("create 5th set");
+        let fifth =
+            SetRepo::create(&conn, cat.id, TemplateMode::Closed, None).expect("create 5th set");
         assert_eq!(fifth.set_index, 5);
 
-        let sixth = SetRepo::create(&conn, cat.id, TemplateMode::Open, None).expect("create 6th set");
+        let sixth =
+            SetRepo::create(&conn, cat.id, TemplateMode::Open, None).expect("create 6th set");
         assert_eq!(sixth.set_index, 6);
         assert_eq!(sixth.mode, TemplateMode::Open);
 
@@ -625,7 +639,9 @@ mod tests {
 
         // Sources untouched.
         assert_eq!(
-            SetRepo::list_templates(&conn, &s1.id).expect("list s1").len(),
+            SetRepo::list_templates(&conn, &s1.id)
+                .expect("list s1")
+                .len(),
             2
         );
     }
@@ -637,7 +653,8 @@ mod tests {
         let (cat2, _) = CategoryRepo::create(&conn, topic.id, 2).expect("create 2b cat");
         let (cat4, sets4) = CategoryRepo::create(&conn, topic.id, 4).expect("create 4b cat");
 
-        let foreign = SetRepo::create_aggregate(&conn, cat2.id, TemplateMode::Closed, None, &[sets4[0].id]);
+        let foreign =
+            SetRepo::create_aggregate(&conn, cat2.id, TemplateMode::Closed, None, &[sets4[0].id]);
         assert!(matches!(foreign, Err(DbError::Validation(_))));
 
         let empty = SetRepo::create_aggregate(&conn, cat2.id, TemplateMode::Closed, None, &[]);

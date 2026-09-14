@@ -33,9 +33,14 @@ struct RevokeInviteCodeBody {
 }
 
 fn session_response(session: AuthSession) -> Response {
-    let max_age = (session.expires_at - chrono::Utc::now()).num_seconds().max(0);
+    let max_age = (session.expires_at - chrono::Utc::now())
+        .num_seconds()
+        .max(0);
     let mut response = Json(session.user).into_response();
-    set_cookie_header(&mut response, session_cookie_header(&session.token, max_age));
+    set_cookie_header(
+        &mut response,
+        session_cookie_header(&session.token, max_age),
+    );
     response
 }
 
@@ -72,7 +77,10 @@ async fn forgot_password(
         do_forgot_password(&conn, payload)?
     };
     if let Some(issued) = issued {
-        let reset_link = format!("{}/reset-password?token={}", state.public_base_url, issued.token);
+        let reset_link = format!(
+            "{}/reset-password?token={}",
+            state.public_base_url, issued.token
+        );
         state
             .mailer
             .send_reset_email(

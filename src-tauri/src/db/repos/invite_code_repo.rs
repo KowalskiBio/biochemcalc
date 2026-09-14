@@ -193,10 +193,14 @@ mod tests {
         InviteCodeRepo::create(&conn, "NEW", Role::Student, None).expect("create new");
 
         assert!(
-            InviteCodeRepo::find_valid(&conn, "OLD").expect("find").is_none(),
+            InviteCodeRepo::find_valid(&conn, "OLD")
+                .expect("find")
+                .is_none(),
             "superseded code must stop working"
         );
-        assert!(InviteCodeRepo::find_valid(&conn, "NEW").expect("find").is_some());
+        assert!(InviteCodeRepo::find_valid(&conn, "NEW")
+            .expect("find")
+            .is_some());
     }
 
     /// Roles are independent — issuing a student code leaves the teacher one alone.
@@ -206,8 +210,12 @@ mod tests {
         InviteCodeRepo::create(&conn, "TEACH", Role::Teacher, None).expect("create teacher");
         InviteCodeRepo::create(&conn, "STUD", Role::Student, None).expect("create student");
 
-        assert!(InviteCodeRepo::find_valid(&conn, "TEACH").expect("find").is_some());
-        assert!(InviteCodeRepo::find_valid(&conn, "STUD").expect("find").is_some());
+        assert!(InviteCodeRepo::find_valid(&conn, "TEACH")
+            .expect("find")
+            .is_some());
+        assert!(InviteCodeRepo::find_valid(&conn, "STUD")
+            .expect("find")
+            .is_some());
 
         let active = InviteCodeRepo::list_active(&conn).expect("list");
         assert_eq!(active.len(), 2);
@@ -219,7 +227,9 @@ mod tests {
         InviteCodeRepo::create(&conn, "KILLME", Role::Student, None).expect("create");
         InviteCodeRepo::revoke(&conn, "KILLME").expect("revoke");
 
-        assert!(InviteCodeRepo::find_valid(&conn, "KILLME").expect("find").is_none());
+        assert!(InviteCodeRepo::find_valid(&conn, "KILLME")
+            .expect("find")
+            .is_none());
         assert!(InviteCodeRepo::list_active(&conn).expect("list").is_empty());
     }
 
@@ -244,7 +254,9 @@ mod tests {
         )
         .expect("backdate");
 
-        assert!(InviteCodeRepo::find_valid(&conn, "STALE").expect("find").is_none());
+        assert!(InviteCodeRepo::find_valid(&conn, "STALE")
+            .expect("find")
+            .is_none());
         assert!(InviteCodeRepo::list_active(&conn).expect("list").is_empty());
     }
 

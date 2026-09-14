@@ -26,7 +26,9 @@ pub use invite_code_repo::InviteCodeRepo;
 pub use output_file_repo::OutputFileRepo;
 pub use password_reset_repo::PasswordResetTokenRepo;
 #[allow(unused_imports)]
-pub use practice_repo::{AnyPracticeTemplateRow, LeaderboardRow, PracticeAttemptRecord, PracticeRepo};
+pub use practice_repo::{
+    AnyPracticeTemplateRow, LeaderboardRow, PracticeAttemptRecord, PracticeRepo,
+};
 pub use projekt_repo::ProjektRepo;
 pub use question_report_repo::{QuestionReportRecord, QuestionReportRepo};
 pub use session_repo::SessionRepo;

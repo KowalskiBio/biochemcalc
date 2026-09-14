@@ -9,7 +9,9 @@
 use crate::db::repos::{InviteCodeRepo, PasswordResetTokenRepo, SessionRepo, UserRecord, UserRepo};
 use crate::db::DbError;
 use crate::models::{InviteCode, Role, User};
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
@@ -195,7 +197,11 @@ pub fn do_list_users(conn: &Connection) -> Result<Vec<User>, DbError> {
 /// to recover from) and except the protected bootstrap admin (see migration
 /// v16) — otherwise any second teacher account could delete the original
 /// admin outright, which is the surprising behavior this guards against.
-pub fn do_delete_user(conn: &Connection, requesting_user_id: &Uuid, target_id: &Uuid) -> Result<(), DbError> {
+pub fn do_delete_user(
+    conn: &Connection,
+    requesting_user_id: &Uuid,
+    target_id: &Uuid,
+) -> Result<(), DbError> {
     if requesting_user_id == target_id {
         return Err(DbError::Validation(
             "You cannot delete your own account".into(),
@@ -233,7 +239,9 @@ pub fn do_change_password(
 
     let record = UserRepo::get_by_id(conn, user_id)?;
     if !verify_password(&payload.current_password, &record.password_hash) {
-        return Err(DbError::Unauthorized("Current password is incorrect".into()));
+        return Err(DbError::Unauthorized(
+            "Current password is incorrect".into(),
+        ));
     }
 
     let new_hash = hash_password(&payload.new_password)?;
@@ -724,9 +732,10 @@ mod tests {
     #[test]
     fn second_teacher_cannot_delete_the_protected_bootstrap_admin() {
         let conn = setup_conn();
-        let bootstrap_admin = do_bootstrap_admin_if_empty(&conn, "original-admin", "teacherpassword1")
-            .expect("bootstrap")
-            .expect("created");
+        let bootstrap_admin =
+            do_bootstrap_admin_if_empty(&conn, "original-admin", "teacherpassword1")
+                .expect("bootstrap")
+                .expect("created");
         assert!(bootstrap_admin.protected);
 
         InviteCodeRepo::create(&conn, "MAKEME2ND", Role::Teacher, Some(bootstrap_admin.id))
@@ -829,7 +838,12 @@ mod tests {
         assert!(matches!(result, Err(DbError::Validation(_))));
     }
 
-    fn register_with_email(conn: &Connection, username: &str, code: &str, email: &str) -> AuthSession {
+    fn register_with_email(
+        conn: &Connection,
+        username: &str,
+        code: &str,
+        email: &str,
+    ) -> AuthSession {
         InviteCodeRepo::create(conn, code, Role::Student, None).expect("create invite");
         do_register(
             conn,
@@ -879,7 +893,12 @@ mod tests {
     #[test]
     fn requesting_a_new_reset_token_supersedes_the_previous_one() {
         let conn = setup_conn();
-        register_with_email(&conn, "resupersede", "SUPERSEDE1", "resupersede@example.com");
+        register_with_email(
+            &conn,
+            "resupersede",
+            "SUPERSEDE1",
+            "resupersede@example.com",
+        );
 
         let first = do_forgot_password(
             &conn,
@@ -955,7 +974,12 @@ mod tests {
     #[test]
     fn reset_password_with_expired_token_is_rejected() {
         let conn = setup_conn();
-        register_with_email(&conn, "expiredreset", "EXPRESET1", "expiredreset@example.com");
+        register_with_email(
+            &conn,
+            "expiredreset",
+            "EXPRESET1",
+            "expiredreset@example.com",
+        );
         let issued = do_forgot_password(
             &conn,
             ForgotPasswordPayload {
@@ -966,7 +990,10 @@ mod tests {
         .expect("email exists");
         conn.execute(
             "UPDATE password_reset_tokens SET expires_at = ?2 WHERE token = ?1",
-            rusqlite::params![issued.token, (Utc::now() - Duration::seconds(1)).to_rfc3339()],
+            rusqlite::params![
+                issued.token,
+                (Utc::now() - Duration::seconds(1)).to_rfc3339()
+            ],
         )
         .expect("backdate expiry");
 
@@ -1037,7 +1064,12 @@ mod tests {
     #[test]
     fn reset_password_invalidates_existing_sessions() {
         let conn = setup_conn();
-        let session = register_with_email(&conn, "killsessions", "KILLSESS1", "killsessions@example.com");
+        let session = register_with_email(
+            &conn,
+            "killsessions",
+            "KILLSESS1",
+            "killsessions@example.com",
+        );
         assert!(SessionRepo::find_valid(&conn, &session.token)
             .expect("find")
             .is_some());

@@ -126,8 +126,13 @@ mod tests {
     fn expired_token_not_returned() {
         let conn = setup_conn();
         let user_id = insert_user(&conn);
-        PasswordResetTokenRepo::create(&conn, "tok-expired", &user_id, Utc::now() - Duration::seconds(1))
-            .expect("create token");
+        PasswordResetTokenRepo::create(
+            &conn,
+            "tok-expired",
+            &user_id,
+            Utc::now() - Duration::seconds(1),
+        )
+        .expect("create token");
 
         let found = PasswordResetTokenRepo::find_valid(&conn, "tok-expired").expect("find");
         assert!(found.is_none());
@@ -137,8 +142,13 @@ mod tests {
     fn used_token_not_returned() {
         let conn = setup_conn();
         let user_id = insert_user(&conn);
-        PasswordResetTokenRepo::create(&conn, "tok-used", &user_id, Utc::now() + Duration::hours(1))
-            .expect("create token");
+        PasswordResetTokenRepo::create(
+            &conn,
+            "tok-used",
+            &user_id,
+            Utc::now() + Duration::hours(1),
+        )
+        .expect("create token");
         PasswordResetTokenRepo::mark_used(&conn, "tok-used").expect("mark used");
 
         let found = PasswordResetTokenRepo::find_valid(&conn, "tok-used").expect("find");

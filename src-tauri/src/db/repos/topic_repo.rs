@@ -73,7 +73,12 @@ impl TopicRepo {
     pub fn update(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         let affected = conn.execute(
             "UPDATE topics SET name=?2, created_at=?3, for_students=?4 WHERE id=?1",
-            params![topic.id, topic.name, topic.created_at.to_rfc3339(), topic.for_students as i32],
+            params![
+                topic.id,
+                topic.name,
+                topic.created_at.to_rfc3339(),
+                topic.for_students as i32
+            ],
         )?;
         if affected == 0 {
             return Err(DbError::NotFound(format!("Topic {}", topic.id)));
@@ -223,7 +228,11 @@ mod tests {
 
         let fetched = TopicRepo::get_by_id(&conn, &t.id).expect("get after rename");
         assert_eq!(fetched.name, "Renamed");
-        assert_eq!(fetched.group_id, Some(group.id), "rename must not ungroup the topic");
+        assert_eq!(
+            fetched.group_id,
+            Some(group.id),
+            "rename must not ungroup the topic"
+        );
     }
 
     #[test]

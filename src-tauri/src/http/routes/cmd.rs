@@ -15,17 +15,16 @@ use crate::commands::reports::{
 };
 use crate::commands::{
     self, BulkImportTemplatesPayload, ClearTemplateHistoryPayload, CreateAggregateSetPayload,
-    CreateCategoryPayload,
-    CreateConstantPayload, CreateSetPayload, CreateTemplatePayload, CreateTopicGroupPayload,
-    CreateTopicPayload, CreateVariablePayload, DeleteProjektPayload, ExportPayload,
-    ExportProjektToTxtPayload, ExportResult, GenerateForTemplatesPayload, GeneratedTemplate,
-    LoadProjektPayload, MergeSetsPayload, MoveSetPayload, MoveTopicToGroupPayload, OutputFileContent,
-    RegenerateVariantPayload, RenameTopicGroupPayload, ReorderTemplatesPayload,
-    ReorderTopicGroupsPayload, ReorderTopicsInGroupPayload, SaveProjektPayload,
-    SetTemplatePayload, TemplateLocation, TemplateWithDetails, UpdateConstantPayload,
-    UpdateProjektPayload, UpdateSetNamePayload, UpdateSetModePayload, UpdateTemplatePayload,
-    UpdateTemplateWithVariablesPayload, UpdateTemplatesByEquationPayload, UpdateTopicPayload,
-    UpdateVariablePayload, VictorChatPayload, VictorResponse, VictorSettings,
+    CreateCategoryPayload, CreateConstantPayload, CreateSetPayload, CreateTemplatePayload,
+    CreateTopicGroupPayload, CreateTopicPayload, CreateVariablePayload, DeleteProjektPayload,
+    ExportPayload, ExportProjektToTxtPayload, ExportResult, GenerateForTemplatesPayload,
+    GeneratedTemplate, LoadProjektPayload, MergeSetsPayload, MoveSetPayload,
+    MoveTopicToGroupPayload, OutputFileContent, RegenerateVariantPayload, RenameTopicGroupPayload,
+    ReorderTemplatesPayload, ReorderTopicGroupsPayload, ReorderTopicsInGroupPayload,
+    SaveProjektPayload, SetTemplatePayload, TemplateLocation, TemplateWithDetails,
+    UpdateConstantPayload, UpdateProjektPayload, UpdateSetModePayload, UpdateSetNamePayload,
+    UpdateTemplatePayload, UpdateTemplateWithVariablesPayload, UpdateTemplatesByEquationPayload,
+    UpdateTopicPayload, UpdateVariablePayload, VictorChatPayload, VictorResponse, VictorSettings,
     VictorSettingsPayload,
 };
 use crate::db::repos::{
@@ -34,11 +33,11 @@ use crate::db::repos::{
 };
 use crate::db::AppState;
 use crate::http::error::HttpError;
-use crate::models::{
-    Category, Constant, Projekt, ProjektContent, Set, SetTemplate, Template,
-    TemplateHistoryEntry, Topic, TopicGroup, Variable, VariableHistoryEntry, Variant,
-};
 use crate::models::OutputFile;
+use crate::models::{
+    Category, Constant, Projekt, ProjektContent, Set, SetTemplate, Template, TemplateHistoryEntry,
+    Topic, TopicGroup, Variable, VariableHistoryEntry, Variant,
+};
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
@@ -452,7 +451,9 @@ async fn list_all_variable_history(
 ) -> Result<Json<Vec<VariableHistoryEntry>>, HttpError> {
     let conn = conn!(state);
     Ok(Json(VariableHistoryRepo::list_all(
-        &conn, body.limit, body.offset,
+        &conn,
+        body.limit,
+        body.offset,
     )?))
 }
 
@@ -475,7 +476,9 @@ async fn list_all_template_history(
 ) -> Result<Json<Vec<TemplateHistoryEntry>>, HttpError> {
     let conn = conn!(state);
     Ok(Json(TemplateHistoryRepo::list_all(
-        &conn, body.limit, body.offset,
+        &conn,
+        body.limit,
+        body.offset,
     )?))
 }
 
@@ -565,7 +568,11 @@ async fn create_set(
     Json(payload): Json<CreateSetPayload>,
 ) -> Result<Json<Set>, HttpError> {
     let conn = conn!(state);
-    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    let name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
     Ok(Json(SetRepo::create(
         &conn,
         payload.category_id,
@@ -612,7 +619,11 @@ async fn create_aggregate_set(
     Json(payload): Json<CreateAggregateSetPayload>,
 ) -> Result<Json<Set>, HttpError> {
     let conn = conn!(state);
-    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    let name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
     Ok(Json(SetRepo::create_aggregate(
         &conn,
         payload.category_id,
@@ -768,8 +779,7 @@ async fn load_projekt(
     let projekt = ProjektRepo::get_by_id(&conn, &payload.projekt_id)?;
     let json = std::fs::read_to_string(&projekt.file_path)
         .map_err(|e| crate::db::DbError::Io(format!("Failed to read projekt file: {e}")))?;
-    let content: ProjektContent =
-        serde_json::from_str(&json).map_err(crate::db::DbError::Serde)?;
+    let content: ProjektContent = serde_json::from_str(&json).map_err(crate::db::DbError::Serde)?;
     Ok(Json(content))
 }
 
@@ -918,12 +928,18 @@ pub fn router() -> Router<Arc<AppState>> {
             "/list_variable_history_by_template",
             post(list_variable_history_by_template),
         )
-        .route("/list_all_variable_history", post(list_all_variable_history))
+        .route(
+            "/list_all_variable_history",
+            post(list_all_variable_history),
+        )
         .route(
             "/list_template_history_by_template",
             post(list_template_history_by_template),
         )
-        .route("/list_all_template_history", post(list_all_template_history))
+        .route(
+            "/list_all_template_history",
+            post(list_all_template_history),
+        )
         .route("/clear_template_history", post(clear_template_history))
         .route("/clear_all_history", post(clear_all_history))
         .route("/create_category", post(create_category))
@@ -940,14 +956,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/create_aggregate_set", post(create_aggregate_set))
         .route("/update_set_mode", post(update_set_mode))
         .route("/add_template_to_set", post(add_template_to_set))
-        .route(
-            "/remove_template_from_set",
-            post(remove_template_from_set),
-        )
-        .route(
-            "/reorder_templates_in_set",
-            post(reorder_templates_in_set),
-        )
+        .route("/remove_template_from_set", post(remove_template_from_set))
+        .route("/reorder_templates_in_set", post(reorder_templates_in_set))
         .route("/get_set_with_templates", post(get_set_with_templates))
         .route("/generate_for_templates", post(generate_for_templates))
         .route("/export_to_txt", post(export_to_txt))

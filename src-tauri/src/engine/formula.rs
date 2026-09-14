@@ -1024,7 +1024,10 @@ mod tests {
             &answers,
         )
         .unwrap();
-        assert!((results["n"] - 10.0).abs() < 1e-9, "n should be overwritten to 10");
+        assert!(
+            (results["n"] - 10.0).abs() < 1e-9,
+            "n should be overwritten to 10"
+        );
         assert!(
             (results["m"] - 10.0).abs() < 1e-9,
             "seeded m should still be present unchanged"

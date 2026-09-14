@@ -41,8 +41,7 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn default_data_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
-        .join(".local/share/com.kowalski.biochemcalc")
+    PathBuf::from(home).join(".local/share/com.kowalski.biochemcalc")
 }
 
 fn init_file_logger(data_dir: &std::path::Path) {
@@ -65,10 +64,17 @@ fn init_file_logger(data_dir: &std::path::Path) {
         }
     };
 
-    if simplelog::WriteLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default(), file)
-        .is_ok()
+    if simplelog::WriteLogger::init(
+        simplelog::LevelFilter::Info,
+        simplelog::Config::default(),
+        file,
+    )
+    .is_ok()
     {
-        log::info!("biochemcalc-server starting (log file: {})", log_path.display());
+        log::info!(
+            "biochemcalc-server starting (log file: {})",
+            log_path.display()
+        );
     }
 }
 

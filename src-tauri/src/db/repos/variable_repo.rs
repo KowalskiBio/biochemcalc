@@ -169,9 +169,7 @@ fn parse_string_values(s: String) -> Option<Vec<String>> {
     serde_json::from_str(&s).ok()
 }
 
-fn parse_paired_constants(
-    s: String,
-) -> Option<Vec<std::collections::HashMap<String, f64>>> {
+fn parse_paired_constants(s: String) -> Option<Vec<std::collections::HashMap<String, f64>>> {
     if s.is_empty() {
         return None;
     }

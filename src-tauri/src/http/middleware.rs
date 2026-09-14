@@ -39,9 +39,7 @@ pub fn extract_session_token(headers: &HeaderMap) -> Option<String> {
 }
 
 pub fn session_cookie_header(token: &str, max_age_secs: i64) -> String {
-    format!(
-        "{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}"
-    )
+    format!("{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}")
 }
 
 pub fn clear_session_cookie_header() -> String {
@@ -73,7 +71,9 @@ fn unauthorized() -> Response {
 fn resolve_user_for_token(state: &AppState, token: &str) -> Option<User> {
     let conn = crate::util::lock_db(&state.db);
     let session = SessionRepo::find_valid(&conn, token).ok().flatten()?;
-    let user = UserRepo::get_by_id(&conn, &session.user_id).ok()?.into_public();
+    let user = UserRepo::get_by_id(&conn, &session.user_id)
+        .ok()?
+        .into_public();
     // Best-effort: a failed slide shouldn't block the request.
     let _ = SessionRepo::extend(&conn, token, Utc::now() + Duration::days(SESSION_TTL_DAYS));
     Some(user)
@@ -104,17 +104,15 @@ pub async fn require_auth(
 pub async fn require_teacher(req: Request, next: Next) -> Response {
     match req.extensions().get::<CurrentUser>() {
         Some(CurrentUser(user)) if user.role == Role::Teacher => next.run(req).await,
-        Some(_) => error_response(
-            StatusCode::FORBIDDEN,
-            "forbidden",
-            "Teacher role required",
-        ),
+        Some(_) => error_response(StatusCode::FORBIDDEN, "forbidden", "Teacher role required"),
         None => unauthorized(),
     }
 }
 
 pub fn set_cookie_header(response: &mut Response, value: String) {
     if let Ok(header_value) = HeaderValue::from_str(&value) {
-        response.headers_mut().insert(header::SET_COOKIE, header_value);
+        response
+            .headers_mut()
+            .insert(header::SET_COOKIE, header_value);
     }
 }

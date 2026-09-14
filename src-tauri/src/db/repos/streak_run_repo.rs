@@ -218,7 +218,8 @@ mod tests {
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         conn
     }
 
@@ -360,12 +361,19 @@ mod tests {
         }
         // Deliberately never failed — must be excluded from the leaderboard.
 
-        let board = StreakRunRepo::best_finished_runs(&conn, StreakRunKind::Apprentice, None, None, None)
-            .expect("leaderboard");
+        let board =
+            StreakRunRepo::best_finished_runs(&conn, StreakRunKind::Apprentice, None, None, None)
+                .expect("leaderboard");
         assert_eq!(board.len(), 2, "one row per user, not per run");
 
-        let alice_row = board.iter().find(|r| r.user_id == alice).expect("alice row");
-        assert_eq!(alice_row.best_correct_count, 5, "the better of alice's two runs");
+        let alice_row = board
+            .iter()
+            .find(|r| r.user_id == alice)
+            .expect("alice row");
+        assert_eq!(
+            alice_row.best_correct_count, 5,
+            "the better of alice's two runs"
+        );
 
         let bob_row = board.iter().find(|r| r.user_id == bob).expect("bob row");
         assert_eq!(

@@ -173,7 +173,9 @@ pub fn get_victor_settings(state: State<'_, AppState>) -> Result<VictorSettings,
 }
 
 /// Shared by the Tauri command above and the HTTP handler in `src/http`.
-pub(crate) fn do_get_victor_settings(conn: &rusqlite::Connection) -> Result<VictorSettings, DbError> {
+pub(crate) fn do_get_victor_settings(
+    conn: &rusqlite::Connection,
+) -> Result<VictorSettings, DbError> {
     let api_base_url =
         AppSettingsRepo::get_or_default(conn, KEY_API_BASE_URL, DEFAULT_API_BASE_URL)?;
     let api_key = AppSettingsRepo::get_or_default(conn, KEY_API_KEY, DEFAULT_API_KEY)?;

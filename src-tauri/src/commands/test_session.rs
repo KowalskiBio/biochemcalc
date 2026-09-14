@@ -177,7 +177,8 @@ mod tests {
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         conn
     }
 
@@ -456,7 +457,10 @@ mod tests {
 
         assert_eq!(results.total_questions, 4);
         assert_eq!(results.answered_count, 4);
-        assert_eq!(results.correct_count, 2, "questions 0 and 2 answered correctly");
+        assert_eq!(
+            results.correct_count, 2,
+            "questions 0 and 2 answered correctly"
+        );
         assert_eq!(results.points, 4, "2 correct answers at 2 points each");
 
         let again = do_finish_test(
