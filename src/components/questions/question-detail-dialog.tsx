@@ -288,16 +288,28 @@ interface DecoyRow {
   key: string
   formula: string
   optionCount: number
+  /** String form of the optional significant-digits override; "" = inherit the per-question setting. */
+  significantDigits: string
 }
 
 function toDecoyRow(d: TemplateDecoy): DecoyRow {
-  return { key: d.id, formula: d.formula, optionCount: d.optionCount }
+  return {
+    key: d.id,
+    formula: d.formula,
+    optionCount: d.optionCount,
+    significantDigits: d.significantDigits != null ? String(d.significantDigits) : "",
+  }
 }
 
 function decoyRowsChanged(current: DecoyRow[], original: TemplateDecoy[]): boolean {
   if (current.length !== original.length) return true
   return current.some(
-    (row, i) => row.formula !== original[i].formula || row.optionCount !== original[i].optionCount,
+    (row, i) =>
+      row.formula !== original[i].formula ||
+      row.optionCount !== original[i].optionCount ||
+      (row.significantDigits === ""
+        ? original[i].significantDigits != null
+        : Number(row.significantDigits) !== original[i].significantDigits),
   )
 }
 
@@ -307,6 +319,8 @@ function buildDecoyInputs(rows: DecoyRow[]): TemplateDecoyInput[] {
     .map((r) => ({
       formula: normalizeFormulaForEvaluation(r.formula),
       optionCount: r.optionCount,
+      significantDigits:
+        r.significantDigits.trim() === "" ? undefined : Number(r.significantDigits),
     }))
 }
 
@@ -370,6 +384,11 @@ export function QuestionDetailDialog({
   )
   const [alternativeFormula, setAlternativeFormula] = useState(
     initialTemplateDetails?.template.alternativeFormula ?? "",
+  )
+  const [alternativeSignificantDigits, setAlternativeSignificantDigits] = useState(
+    initialTemplateDetails?.template.alternativeSignificantDigits != null
+      ? String(initialTemplateDetails.template.alternativeSignificantDigits)
+      : "",
   )
   const [showAlternativeFormulaInput, setShowAlternativeFormulaInput] = useState(
     !!initialTemplateDetails?.template.alternativeFormula,
@@ -435,6 +454,11 @@ export function QuestionDetailDialog({
       setForceScientific(details.template.forceScientific ?? false)
       setDecoyRows(details.decoys.map(toDecoyRow))
       setAlternativeFormula(details.template.alternativeFormula ?? "")
+      setAlternativeSignificantDigits(
+        details.template.alternativeSignificantDigits != null
+          ? String(details.template.alternativeSignificantDigits)
+          : "",
+      )
       setShowAlternativeFormulaInput(!!details.template.alternativeFormula)
       setIsEditingAnswer(false)
       setEditingVariableKey(null)
@@ -575,6 +599,13 @@ export function QuestionDetailDialog({
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
     if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
     if (alternativeFormula !== (templateDetails?.template.alternativeFormula ?? "")) return true
+    if (
+      alternativeSignificantDigits.trim() === ""
+        ? templateDetails?.template.alternativeSignificantDigits != null
+        : Number(alternativeSignificantDigits) !==
+          templateDetails?.template.alternativeSignificantDigits
+    )
+      return true
     return dirtyVariableKeys.size > 0
   }, [
     editText,
@@ -585,6 +616,7 @@ export function QuestionDetailDialog({
     forceScientific,
     decoyRows,
     alternativeFormula,
+    alternativeSignificantDigits,
     templateDetails,
     dirtyVariableKeys,
   ])
@@ -706,6 +738,10 @@ export function QuestionDetailDialog({
       forceScientific,
       decoys: buildDecoyInputs(decoyRows),
       alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
+      alternativeSignificantDigits:
+        alternativeSignificantDigits.trim() === ""
+          ? undefined
+          : Number(alternativeSignificantDigits),
       variableMutations,
       constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
       constraint: buildAnswerConstraint(),
@@ -752,6 +788,11 @@ export function QuestionDetailDialog({
     setForceScientific(templateDetails?.template.forceScientific ?? false)
     setDecoyRows((templateDetails?.decoys ?? []).map(toDecoyRow))
     setAlternativeFormula(templateDetails?.template.alternativeFormula ?? "")
+    setAlternativeSignificantDigits(
+      templateDetails?.template.alternativeSignificantDigits != null
+        ? String(templateDetails.template.alternativeSignificantDigits)
+        : "",
+    )
     setShowAlternativeFormulaInput(!!templateDetails?.template.alternativeFormula)
     setIsEditingAnswer(false)
     setLocalVariables(originalVariables.map((v) => ({ ...v })))
@@ -786,6 +827,10 @@ export function QuestionDetailDialog({
         forceScientific,
         decoys: buildDecoyInputs(decoyRows),
         alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
+        alternativeSignificantDigits:
+          alternativeSignificantDigits.trim() === ""
+            ? undefined
+            : Number(alternativeSignificantDigits),
         variableMutations,
         constants: templateDetails.constants.map((c) => ({ constantId: c.id })),
         constraint: buildAnswerConstraint(),
@@ -832,6 +877,10 @@ export function QuestionDetailDialog({
       forceScientific: newValue,
       decoys: buildDecoyInputs(decoyRows),
       alternativeFormula: buildAlternativeFormulaInput(alternativeFormula),
+      alternativeSignificantDigits:
+        alternativeSignificantDigits.trim() === ""
+          ? undefined
+          : Number(alternativeSignificantDigits),
       variableMutations: templateDetails.variables.map((vwp) => ({
         action: "keep" as const,
         variableId: vwp.variable.id,
@@ -1628,59 +1677,60 @@ export function QuestionDetailDialog({
                         disabled={isSaving}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="resultUnit">{cs.questions.resultUnit}</Label>
-                      <Input
-                        id="resultUnit"
-                        value={editResultUnit}
-                        onChange={(e) => setEditResultUnit(e.target.value)}
-                        placeholder="%"
-                        disabled={isSaving}
-                      />
-                      <p className="text-xs text-muted-foreground">{cs.form.unitFormatHint}</p>
-                      {questionTargetCount > 1 && (
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="resultUnit">{cs.questions.resultUnit}</Label>
+                        <Input
+                          id="resultUnit"
+                          value={editResultUnit}
+                          onChange={(e) => setEditResultUnit(e.target.value)}
+                          placeholder="%"
+                          disabled={isSaving}
+                        />
+                        <p className="text-xs text-muted-foreground">{cs.form.unitFormatHint}</p>
+                        {questionTargetCount > 1 && (
+                          <p className="text-xs text-muted-foreground">
+                            {cs.questions.multiTargetUnitHint}
+                          </p>
+                        )}
+                        {editResultUnit.trim() && (
+                          <p className="text-xs text-muted-foreground">
+                            Náhled:{" "}
+                            <UnitRenderer
+                              unit={editResultUnit}
+                              className="font-medium text-foreground"
+                            />
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="significantDigits">{cs.questions.significantDigits}</Label>
+                        <Input
+                          id="significantDigits"
+                          type="number"
+                          value={editSignificantDigits}
+                          onChange={(e) => setEditSignificantDigits(e.target.value)}
+                          placeholder="např. 4"
+                          min={1}
+                          max={10}
+                          disabled={isSaving}
+                          className="no-spinner"
+                        />
                         <p className="text-xs text-muted-foreground">
-                          {cs.questions.multiTargetUnitHint}
+                          {cs.questions.significantDigitsHelp}
                         </p>
-                      )}
-                      {editResultUnit.trim() && (
-                        <p className="text-xs text-muted-foreground">
-                          Náhled:{" "}
-                          <UnitRenderer
-                            unit={editResultUnit}
-                            className="font-medium text-foreground"
-                          />
-                        </p>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="significantDigits">{cs.questions.significantDigits}</Label>
-                      <Input
-                        id="significantDigits"
-                        type="number"
-                        value={editSignificantDigits}
-                        onChange={(e) => setEditSignificantDigits(e.target.value)}
-                        placeholder="např. 4"
-                        min={1}
-                        max={10}
-                        disabled={isSaving}
-                        className="max-w-[120px]"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        {cs.questions.significantDigitsHelp}
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="answerSd">{cs.questions.sdAnswerLabel}</Label>
-                      <DecimalInput
-                        id="answerSd"
-                        value={sdText}
-                        onValueChange={(v) => setSdText(v === undefined ? "" : String(v))}
-                        placeholder="např. 0,2"
-                        disabled={isSaving}
-                        className="max-w-[120px]"
-                      />
-                      <p className="text-xs text-muted-foreground">{cs.questions.sdAnswerHelp}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="answerSd">{cs.questions.sdAnswerLabel}</Label>
+                        <DecimalInput
+                          id="answerSd"
+                          value={sdText}
+                          onValueChange={(v) => setSdText(v === undefined ? "" : String(v))}
+                          placeholder="např. 5"
+                          disabled={isSaving}
+                        />
+                        <p className="text-xs text-muted-foreground">{cs.questions.sdAnswerHelp}</p>
+                      </div>
                     </div>
                     {editEquationText.trim().length > 0 && (
                       <div className="rounded-lg bg-muted/50 p-4 space-y-2">
@@ -1729,13 +1779,36 @@ export function QuestionDetailDialog({
                               {cs.questions.removeAlternative}
                             </Button>
                           </div>
-                          <Input
-                            id="alternativeFormula"
-                            value={alternativeFormula}
-                            onChange={(e) => setAlternativeFormula(e.target.value)}
-                            placeholder="X * 3 + Y"
-                            disabled={isSaving}
-                          />
+                          <div className="flex items-start gap-3">
+                            <div className="flex-1 space-y-1">
+                              <Input
+                                id="alternativeFormula"
+                                value={alternativeFormula}
+                                onChange={(e) => setAlternativeFormula(e.target.value)}
+                                placeholder="X * 3 + Y"
+                                disabled={isSaving}
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Label
+                                htmlFor="alternativeSignificantDigits"
+                                className="text-xs text-muted-foreground whitespace-nowrap"
+                              >
+                                {cs.questions.alternativeSigDigitsLabel}
+                              </Label>
+                              <Input
+                                id="alternativeSignificantDigits"
+                                type="number"
+                                min={1}
+                                value={alternativeSignificantDigits}
+                                onChange={(e) => setAlternativeSignificantDigits(e.target.value)}
+                                placeholder="auto"
+                                title={cs.questions.alternativeSigDigitsHelp}
+                                disabled={isSaving}
+                                className="no-spinner w-20"
+                              />
+                            </div>
+                          </div>
                           {alternativeFormula.trim().length > 0 && (
                             <div className="rounded-lg bg-muted/50 p-4 space-y-2">
                               <p className="text-sm font-medium text-foreground-secondary">
@@ -1837,7 +1910,40 @@ export function QuestionDetailDialog({
                                     )
                                   }}
                                   disabled={isSaving}
-                                  className="w-20"
+                                  className="no-spinner w-20"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Label
+                                  htmlFor={`decoySignificantDigits-${row.key}`}
+                                  className="text-xs text-muted-foreground whitespace-nowrap"
+                                >
+                                  {cs.questions.decoySigDigitsLabel}
+                                </Label>
+                                <Input
+                                  id={`decoySignificantDigits-${row.key}`}
+                                  type="number"
+                                  min={1}
+                                  value={row.significantDigits}
+                                  onChange={(e) =>
+                                    setDecoyRows((rows) =>
+                                      rows.map((r) =>
+                                        r.key === row.key
+                                          ? {
+                                              ...r,
+                                              significantDigits: e.target.value.replace(
+                                                /[^0-9]/g,
+                                                "",
+                                              ),
+                                            }
+                                          : r,
+                                      ),
+                                    )
+                                  }
+                                  placeholder="auto"
+                                  title={cs.questions.decoySigDigitsHelp}
+                                  disabled={isSaving}
+                                  className="no-spinner w-20"
                                 />
                               </div>
                             </div>
@@ -1877,7 +1983,12 @@ export function QuestionDetailDialog({
                         onClick={() =>
                           setDecoyRows((rows) => [
                             ...rows,
-                            { key: generateId(), formula: "", optionCount: 1 },
+                            {
+                              key: generateId(),
+                              formula: "",
+                              optionCount: 1,
+                              significantDigits: "",
+                            },
                           ])
                         }
                         disabled={isSaving}
@@ -2232,6 +2343,12 @@ export function QuestionDetailDialog({
                             )}
                             className="[&_.katex-display]:!my-0 [&_p]:!my-0"
                           />
+                          {templateDetails.template.alternativeSignificantDigits != null && (
+                            <p className="text-xs text-muted-foreground">
+                              {cs.questions.alternativeSigDigitsLabel}:{" "}
+                              {templateDetails.template.alternativeSignificantDigits}
+                            </p>
+                          )}
                         </div>
                       )}
 
@@ -2250,6 +2367,8 @@ export function QuestionDetailDialog({
                             />
                             <p className="text-xs text-muted-foreground">
                               {cs.questions.decoyOptionCountLabel}: {decoy.optionCount}
+                              {decoy.significantDigits != null &&
+                                ` • ${cs.questions.decoySigDigitsLabel}: ${decoy.significantDigits}`}
                             </p>
                           </div>
                         ))}

@@ -246,7 +246,9 @@ export function StudentStreakActivePage() {
                                 value={value}
                                 unit={slot.unit ?? question.resultUnit}
                                 precision={optionsPrecision[slotIdx]}
-                                significantDigits={slot.significantDigits}
+                                significantDigits={
+                                  slot.optionSigDigits?.[rowIdx] ?? slot.significantDigits
+                                }
                                 notation={question.forceScientific ? "scientific" : "normal"}
                               />
                             </span>

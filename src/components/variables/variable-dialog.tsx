@@ -252,7 +252,7 @@ export function VariableDialog({
                 type="number"
                 value={formData.precision ?? 2}
                 onChange={(e) => handleChange("precision", parseInt(e.target.value, 10) || 2)}
-                className={cn(formInputVariants())}
+                className={cn(formInputVariants(), "no-spinner")}
                 min={0}
               />
             </div>

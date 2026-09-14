@@ -24,8 +24,8 @@ use crate::models::{AnswerField, TemplateMode, Variant};
 use chrono::{Duration, Utc};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
-use serde::{Deserialize, Serialize};
 use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -147,6 +147,12 @@ pub struct PracticeAnswerSlot {
     /// snapshots stored before this field existed deserializable.
     #[serde(default)]
     pub significant_digits: Option<u8>,
+    /// Per-option significant-digit overrides, parallel to `numeric_options`:
+    /// an entry is Some(n) when that option belongs to a decoy (or is the
+    /// alternace) configured with its own significant digits. `None` (or a
+    /// `None` entry) falls back to `significant_digits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_sig_digits: Option<Vec<Option<u8>>>,
 }
 
 /// A question ready to be answered. Deliberately carries no correct answer,
@@ -360,6 +366,7 @@ pub(crate) fn build_question(
         false,
         None,
         template.significant_digits,
+        template.alternative_significant_digits,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -379,6 +386,7 @@ pub(crate) fn build_question(
         assigned_values: variant.assigned_values.clone(),
         assigned_strings: variant.assigned_strings.clone(),
         numeric_options: variant.numeric_options.clone(),
+        option_sig_digits: variant.option_sig_digits.clone(),
         test_session_id,
         position,
         streak_run_id,
@@ -389,10 +397,11 @@ pub(crate) fn build_question(
     // template's own variables first; anything left over (a constant symbol
     // like NA) comes from the same auto-resolved constant map the generator
     // used, so the rendered question can never show a bare `[[NA]]`.
-    let placeholder_by_variable_id: HashMap<Uuid, String> = TemplateRepo::get_variables(conn, &template.id)?
-        .into_iter()
-        .map(|tv| (tv.variable_id, tv.placeholder))
-        .collect();
+    let placeholder_by_variable_id: HashMap<Uuid, String> =
+        TemplateRepo::get_variables(conn, &template.id)?
+            .into_iter()
+            .map(|tv| (tv.variable_id, tv.placeholder))
+            .collect();
 
     let practice_variables = variables
         .into_iter()
@@ -415,7 +424,12 @@ pub(crate) fn build_question(
         assigned_values: variant.assigned_values.clone(),
         assigned_strings: variant.assigned_strings.clone(),
         constants: constants_for_rendering(conn, &constants)?,
-        answer_slots: answer_slots(&template.result_unit, mode, &variant, template.significant_digits),
+        answer_slots: answer_slots(
+            &template.result_unit,
+            mode,
+            &variant,
+            template.significant_digits,
+        ),
         force_scientific: template.force_scientific,
     })
 }
@@ -457,9 +471,14 @@ pub fn answer_slots(
                 } else {
                     None
                 },
-                // `AnswerField` carries no per-target override, so every slot
-                // inherits the template-level setting.
+                // Every slot inherits the template-level setting, plus this
+                // target's per-option decoy/alternace overrides.
                 significant_digits,
+                option_sig_digits: if closed {
+                    field.option_sig_digits.clone()
+                } else {
+                    None
+                },
             })
             .collect(),
         _ => vec![PracticeAnswerSlot {
@@ -471,6 +490,11 @@ pub fn answer_slots(
                 None
             },
             significant_digits,
+            option_sig_digits: if closed {
+                variant.option_sig_digits.clone()
+            } else {
+                None
+            },
         }],
     }
 }
@@ -487,9 +511,8 @@ pub fn do_submit_answer(
     user_id: &Uuid,
     payload: &SubmitAnswerPayload,
 ) -> Result<PracticeAnswerResult, DbError> {
-    let attempt = PracticeRepo::find_pending(conn, &payload.attempt_id, user_id)?.ok_or_else(
-        || DbError::NotFound("Tato otázka už byla vyhodnocena".into()),
-    )?;
+    let attempt = PracticeRepo::find_pending(conn, &payload.attempt_id, user_id)?
+        .ok_or_else(|| DbError::NotFound("Tato otázka už byla vyhodnocena".into()))?;
 
     // A question served as part of a test session must stop accepting
     // answers once that session is over: grading authority lives here on
@@ -524,11 +547,12 @@ pub fn do_submit_answer(
 
     let correct = match attempt.mode {
         TemplateMode::Closed => {
-            let selected = payload.selected_option.ok_or_else(|| {
-                DbError::Validation("Vyberte jednu z možností".into())
-            })?;
+            let selected = payload
+                .selected_option
+                .ok_or_else(|| DbError::Validation("Vyberte jednu z možností".into()))?;
             Some(selected) == attempt.correct_option
-                || (attempt.alternate_option.is_some() && Some(selected) == attempt.alternate_option)
+                || (attempt.alternate_option.is_some()
+                    && Some(selected) == attempt.alternate_option)
         }
         TemplateMode::Open => {
             let answers = payload.answers.as_deref().unwrap_or(&[]);
@@ -570,10 +594,11 @@ fn grade_open(attempt: &PracticeAttemptRecord, answers: &[f64]) -> Result<bool, 
     }
 
     match attempt.answers_data.as_ref() {
-        Some(fields) if !fields.is_empty() => Ok(fields
-            .iter()
-            .zip(answers)
-            .all(|(field, answer)| within(*answer, field.value, field.interval_lo, field.interval_hi))),
+        Some(fields) if !fields.is_empty() => {
+            Ok(fields.iter().zip(answers).all(|(field, answer)| {
+                within(*answer, field.value, field.interval_lo, field.interval_hi)
+            }))
+        }
         _ => Ok(within(
             answers[0],
             attempt.correct_answer,
@@ -685,15 +710,7 @@ mod tests {
 
         let (_, sets) = CategoryRepo::create(conn, topic.id, point_value).expect("create category");
 
-        let variable = Variable::new(
-            "Hmotnost".into(),
-            "X".into(),
-            1.0,
-            10.0,
-            1.0,
-            "g".into(),
-            0,
-        );
+        let variable = Variable::new("Hmotnost".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
         VariableRepo::insert_raw(conn, &variable).expect("insert variable");
 
         // Question text is globally unique (see migration v11), so vary it
@@ -784,7 +801,10 @@ mod tests {
         let topics = do_list_practice_topics(&conn).expect("list topics");
         assert_eq!(topics.len(), 2);
 
-        let roztoky = topics.iter().find(|t| t.name == "Roztoky").expect("Roztoky");
+        let roztoky = topics
+            .iter()
+            .find(|t| t.name == "Roztoky")
+            .expect("Roztoky");
         assert_eq!(roztoky.difficulties.len(), 1);
         assert_eq!(roztoky.difficulties[0].point_value, 2);
         assert_eq!(roztoky.difficulties[0].question_count, 1);
@@ -990,7 +1010,10 @@ mod tests {
             },
             TemplateMode::Closed => {
                 let expected = question.assigned_values["X"] * 2.0;
-                let options = question.answer_slots[0].numeric_options.clone().expect("options");
+                let options = question.answer_slots[0]
+                    .numeric_options
+                    .clone()
+                    .expect("options");
                 let wrong_position = options
                     .iter()
                     .position(|o| (o - expected).abs() >= 1e-9)
@@ -1056,7 +1079,10 @@ mod tests {
                 answers: None,
             };
             let result = do_submit_answer(&conn, &student, &payload).expect("grade");
-            assert!(result.correct, "selecting the alternate option should score as correct");
+            assert!(
+                result.correct,
+                "selecting the alternate option should score as correct"
+            );
             assert_eq!(result.alternate_option, Some(alt_index as u8 + 1));
             graded_the_alternate = true;
         }
@@ -1207,7 +1233,10 @@ mod tests {
         // The topics list must report each set separately, one question
         // apiece, alongside the pooled per-difficulty total.
         let topics = do_list_practice_topics(&conn).expect("list topics");
-        let roztoky = topics.iter().find(|t| t.name == "Roztoky").expect("Roztoky");
+        let roztoky = topics
+            .iter()
+            .find(|t| t.name == "Roztoky")
+            .expect("Roztoky");
         let difficulty = roztoky
             .difficulties
             .iter()

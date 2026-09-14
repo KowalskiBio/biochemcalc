@@ -478,6 +478,8 @@ export function SetDetailPage() {
           // The alternace row is a second correct option; without it the
           // projekt export marks only correctOption as ok.
           alternateOption: variant?.alternateOption,
+          // Per-option significant-digit overrides (decoy/alternace settings).
+          optionSigDigits: variant?.optionSigDigits,
           intervalLo: variant?.intervalLo,
           intervalHi: variant?.intervalHi,
           mode: generatedMode,
@@ -907,7 +909,9 @@ export function SetDetailPage() {
                                               value={value}
                                               unit={a.unit}
                                               precision={optionsPrecision[idx]}
-                                              significantDigits={sigDigits}
+                                              significantDigits={
+                                                a.optionSigDigits?.[optionIdx] ?? sigDigits
+                                              }
                                               notation={forceSci ? "scientific" : "normal"}
                                             />
                                           </span>
@@ -946,7 +950,9 @@ export function SetDetailPage() {
                                       value={value}
                                       unit={tmpl.resultUnit}
                                       precision={optionsPrecision}
-                                      significantDigits={sigDigits}
+                                      significantDigits={
+                                        variant.optionSigDigits?.[optionIdx] ?? sigDigits
+                                      }
                                       notation={forceSci ? "scientific" : "normal"}
                                     />
                                   </span>
@@ -976,8 +982,8 @@ export function SetDetailPage() {
                                     notation={forceSci ? "scientific" : "normal"}
                                   />
                                   {a.intervalLo != null && a.intervalHi != null && (
-                                    <span className="ml-1 text-xs text-muted-foreground">
-                                      (± okolí{" "}
+                                    <span className="ml-1">
+                                      (
                                       <FormattedResult
                                         value={a.intervalLo}
                                         significantDigits={sigDigits}
@@ -1004,6 +1010,23 @@ export function SetDetailPage() {
                                 significantDigits={sigDigits}
                                 notation={forceSci ? "scientific" : "normal"}
                               />
+                              {variant?.intervalLo != null && variant?.intervalHi != null && (
+                                <span className="ml-1">
+                                  (
+                                  <FormattedResult
+                                    value={variant.intervalLo}
+                                    significantDigits={sigDigits}
+                                    notation={forceSci ? "scientific" : "normal"}
+                                  />
+                                  –
+                                  <FormattedResult
+                                    value={variant.intervalHi}
+                                    significantDigits={sigDigits}
+                                    notation={forceSci ? "scientific" : "normal"}
+                                  />
+                                  )
+                                </span>
+                              )}
                               {recomputed?.ok && hasMismatch && (
                                 <span className="ml-2 text-xs text-amber-600">
                                   (backend: {formatNumberForText(variant?.correctAnswer)})

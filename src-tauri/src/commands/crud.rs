@@ -4,9 +4,9 @@ use crate::db::repos::{
 };
 use crate::db::{AppState, DbError};
 use crate::models::{
-    Category, Constant, ConstraintType, Notation, ResultConstraint, Set, Template, TemplateConstant,
-    TemplateDecoy, TemplateDecoyInput, TemplateMode, TemplateVariable, Topic, TopicGroup,
-    Variable, VariableType,
+    Category, Constant, ConstraintType, Notation, ResultConstraint, Set, Template,
+    TemplateConstant, TemplateDecoy, TemplateDecoyInput, TemplateMode, TemplateVariable, Topic,
+    TopicGroup, Variable, VariableType,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -377,6 +377,7 @@ fn clone_template(
     new_template.force_scientific = src.force_scientific;
     new_template.decoy_formula = src.decoy_formula.clone();
     new_template.alternative_formula = src.alternative_formula.clone();
+    new_template.alternative_significant_digits = src.alternative_significant_digits;
 
     let old_links = TemplateRepo::get_variables(tx, old_template_id)?;
     for link in &old_links {
@@ -423,6 +424,7 @@ fn clone_template(
             .map(|d| TemplateDecoyInput {
                 formula: d.formula,
                 option_count: d.option_count,
+                significant_digits: d.significant_digits,
             })
             .collect();
 
@@ -906,6 +908,8 @@ pub struct UpdateTemplateWithVariablesPayload {
     pub decoys: Vec<TemplateDecoyInput>,
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative_significant_digits: Option<u8>,
     pub variable_mutations: Vec<VariableMutation>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -927,6 +931,8 @@ pub struct CreateTemplatePayload {
     pub decoys: Vec<TemplateDecoyInput>,
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative_significant_digits: Option<u8>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -1039,6 +1045,7 @@ pub(crate) fn do_create_template(
     template.significant_digits = payload.significant_digits;
     template.force_scientific = payload.force_scientific;
     template.alternative_formula = payload.alternative_formula;
+    template.alternative_significant_digits = payload.alternative_significant_digits;
     let variables = build_template_variables(template.id, &payload.variables);
     let constants = build_template_constants(template.id, &payload.constants);
     let constraint = build_constraint(template.id, payload.constraint);
@@ -1186,6 +1193,8 @@ pub struct UpdateTemplatePayload {
     pub decoys: Vec<TemplateDecoyInput>,
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative_significant_digits: Option<u8>,
     pub variables: Vec<TemplateVariableInput>,
     pub constants: Vec<TemplateConstantInput>,
     pub constraint: Option<ConstraintInput>,
@@ -1228,12 +1237,13 @@ pub(crate) fn do_update_template(
         force_scientific: payload.force_scientific,
         decoy_formula: None,
         alternative_formula: payload.alternative_formula,
+        alternative_significant_digits: payload.alternative_significant_digits,
         created_at: Utc::now(),
     };
 
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, created_at=?11 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, alternative_significant_digits=?11, created_at=?12 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1245,6 +1255,7 @@ pub(crate) fn do_update_template(
             template.significant_digits,
             template.force_scientific,
             template.alternative_formula,
+            template.alternative_significant_digits,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1409,11 +1420,12 @@ pub fn apply_template_variable_mutations(
         force_scientific: payload.force_scientific,
         decoy_formula: None,
         alternative_formula: payload.alternative_formula.clone(),
+        alternative_significant_digits: payload.alternative_significant_digits,
         created_at: Utc::now(),
     };
 
     tx.execute(
-        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, created_at=?11 WHERE id=?1",
+        "UPDATE templates SET question_text=?2, formula=?3, equation_text=?4, numeric_answer=?5, result_unit=?6, point_value=?7, significant_digits=?8, force_scientific=?9, alternative_formula=?10, alternative_significant_digits=?11, created_at=?12 WHERE id=?1",
         rusqlite::params![
             template.id,
             template.question_text,
@@ -1425,6 +1437,7 @@ pub fn apply_template_variable_mutations(
             template.significant_digits,
             template.force_scientific,
             template.alternative_formula,
+            template.alternative_significant_digits,
             template.created_at.to_rfc3339(),
         ],
     )?;
@@ -1826,7 +1839,11 @@ pub fn create_set(
     payload: CreateSetPayload,
 ) -> Result<crate::models::Set, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    let name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
     SetRepo::create(&conn, payload.category_id, payload.mode, name)
 }
 
@@ -1841,10 +1858,7 @@ pub struct MergeSetsPayload {
 /// set is kept as-is (the templates are shared, not moved). Returns the
 /// number of newly linked templates.
 #[tauri::command]
-pub fn merge_sets(
-    state: State<'_, AppState>,
-    payload: MergeSetsPayload,
-) -> Result<u32, DbError> {
+pub fn merge_sets(state: State<'_, AppState>, payload: MergeSetsPayload) -> Result<u32, DbError> {
     let conn = crate::util::lock_db(&state.db);
     SetRepo::merge_into(&conn, &payload.source_set_id, &payload.target_set_id)
 }
@@ -1867,8 +1881,18 @@ pub fn create_aggregate_set(
     payload: CreateAggregateSetPayload,
 ) -> Result<crate::models::Set, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    let name = payload.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
-    SetRepo::create_aggregate(&conn, payload.category_id, payload.mode, name, &payload.source_set_ids)
+    let name = payload
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty());
+    SetRepo::create_aggregate(
+        &conn,
+        payload.category_id,
+        payload.mode,
+        name,
+        &payload.source_set_ids,
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -1895,10 +1919,7 @@ pub struct MoveSetPayload {
 }
 
 #[tauri::command]
-pub fn move_set(
-    state: State<'_, AppState>,
-    payload: MoveSetPayload,
-) -> Result<u8, DbError> {
+pub fn move_set(state: State<'_, AppState>, payload: MoveSetPayload) -> Result<u8, DbError> {
     let conn = crate::util::lock_db(&state.db);
     SetRepo::move_to_category(&conn, &payload.set_id, &payload.target_category_id)
 }
@@ -2103,6 +2124,7 @@ mod tests {
             variable_mutations: Vec::new(),
             constants: Vec::new(),
             constraint: None,
+            alternative_significant_digits: None,
         }
     }
 
@@ -2244,7 +2266,10 @@ mod tests {
         apply_template_variable_mutations(&conn, payload).expect("apply mutations");
 
         let links = TemplateRepo::get_variables(&conn, &template_id).expect("get variables");
-        let x_link = links.iter().find(|l| l.variable_id == x.id).expect("x link");
+        let x_link = links
+            .iter()
+            .find(|l| l.variable_id == x.id)
+            .expect("x link");
         assert_eq!(x_link.greater_than_variable_id, Some(y.id));
     }
 
@@ -2648,14 +2673,27 @@ mod tests {
             template_id: template1.id,
             constant_id: constant.id,
         };
-        let constraint1 =
-            ResultConstraint::new(template1.id, Some(0.0), Some(100.0), None, ConstraintType::Range);
+        let constraint1 = ResultConstraint::new(
+            template1.id,
+            Some(0.0),
+            Some(100.0),
+            None,
+            ConstraintType::Range,
+        );
         let decoys1 = vec![TemplateDecoyInput {
             formula: "X * 3".into(),
             option_count: 2,
+            significant_digits: None,
         }];
-        TemplateRepo::insert(&conn, &template1, &[tv1], &[tc1], Some(&constraint1), &decoys1)
-            .expect("insert template1");
+        TemplateRepo::insert(
+            &conn,
+            &template1,
+            &[tv1],
+            &[tc1],
+            Some(&constraint1),
+            &decoys1,
+        )
+        .expect("insert template1");
         SetRepo::add_template(&conn, &sets[0].id, &template1.id).expect("add template1 to set");
 
         let template2 = Template::new(
@@ -2689,7 +2727,11 @@ mod tests {
 
         let new_sets =
             CategoryRepo::get_sets_for_category(&conn, &new_categories[0].id).expect("list sets");
-        assert_eq!(new_sets.len(), 4, "duplicate must preserve the exact set count");
+        assert_eq!(
+            new_sets.len(),
+            4,
+            "duplicate must preserve the exact set count"
+        );
 
         let new_links1 = SetRepo::list_templates(&conn, &new_sets[0].id).expect("list links 1");
         let new_links2 = SetRepo::list_templates(&conn, &new_sets[1].id).expect("list links 2");
@@ -2715,18 +2757,20 @@ mod tests {
 
         // Editing the duplicated variable must not affect the original.
         let mut duplicated_var =
-            crate::db::repos::VariableRepo::get_by_id(&conn, &new_var1.variable_id).expect("get dup var");
+            crate::db::repos::VariableRepo::get_by_id(&conn, &new_var1.variable_id)
+                .expect("get dup var");
         duplicated_var.max_value = 5.0;
         crate::db::repos::VariableRepo::update(&conn, &duplicated_var).expect("update dup var");
-        let original_var_after =
-            crate::db::repos::VariableRepo::get_by_id(&conn, &shared_var.id).expect("get original var");
+        let original_var_after = crate::db::repos::VariableRepo::get_by_id(&conn, &shared_var.id)
+            .expect("get original var");
         assert_eq!(
             original_var_after.max_value, shared_var.max_value,
             "editing the duplicate's variable must not change the original's"
         );
 
         // Constant stays linked to the SAME row (global reference data).
-        let new_constants1 = TemplateRepo::get_constants(&conn, &new_template1_id).expect("consts1");
+        let new_constants1 =
+            TemplateRepo::get_constants(&conn, &new_template1_id).expect("consts1");
         assert_eq!(new_constants1.len(), 1);
         assert_eq!(new_constants1[0].constant_id, constant.id);
 
@@ -2769,7 +2813,8 @@ mod tests {
     fn create_template_persists_sd_constraint() {
         // Shape 1 on the create path: no min/max + sd_allowed -> constraint row
         // of type "sd" with the absolute SD persisted.
-        let state = setup();        let conn = state.db.lock().expect("lock");
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
 
         let payload = CreateTemplatePayload {
             question_text: "Vypočítej [[V00]].".into(),
@@ -2790,6 +2835,7 @@ mod tests {
                 sd_allowed: Some(0.2),
                 constraint_type: ConstraintType::Sd,
             }),
+            alternative_significant_digits: None,
         };
 
         let template = do_create_template(&conn, payload).expect("create template");
@@ -2817,6 +2863,7 @@ mod tests {
                 sd_allowed: Some(0.2),
                 constraint_type: ConstraintType::Sd,
             }),
+            alternative_significant_digits: None,
             ..build_payload(template_id)
         };
         apply_template_variable_mutations(&conn, sd_payload).expect("apply sd");
@@ -2836,6 +2883,7 @@ mod tests {
                 sd_allowed: Some(0.2),
                 constraint_type: ConstraintType::Both,
             }),
+            alternative_significant_digits: None,
             ..build_payload(template_id)
         };
         apply_template_variable_mutations(&conn, both_payload).expect("apply both");
@@ -2855,6 +2903,7 @@ mod tests {
                 sd_allowed: None,
                 constraint_type: ConstraintType::Range,
             }),
+            alternative_significant_digits: None,
             ..build_payload(template_id)
         };
         apply_template_variable_mutations(&conn, range_payload).expect("apply range");
@@ -2869,6 +2918,7 @@ mod tests {
         // Shape 4: sd-only + SD cleared, no min/max (constraint: null) -> row gone.
         let cleared_payload = UpdateTemplateWithVariablesPayload {
             constraint: None,
+            alternative_significant_digits: None,
             ..build_payload(template_id)
         };
         apply_template_variable_mutations(&conn, cleared_payload).expect("apply cleared");
@@ -2893,13 +2943,15 @@ mod tests {
                 sd_allowed: sd,
                 constraint_type: ConstraintType::Sd,
             }),
+            alternative_significant_digits: None,
             ..build_payload(template_id)
         };
 
         apply_template_variable_mutations(&conn, with_sd(Some(0.2))).expect("set sd");
         apply_template_variable_mutations(&conn, with_sd(Some(0.5))).expect("change sd");
 
-        let entries = TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
+        let entries =
+            TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
         let mut sd_entries: Vec<(Option<String>, Option<String>)> = entries
             .iter()
             .filter(|e| e.field_name == "sdAllowed")
@@ -2908,13 +2960,23 @@ mod tests {
         sd_entries.sort();
         assert_eq!(
             sd_entries,
-            vec![(None, Some("0.2".into())), (Some("0.2".into()), Some("0.5".into()))],
+            vec![
+                (None, Some("0.2".into())),
+                (Some("0.2".into()), Some("0.5".into()))
+            ],
             "unset->0.2 and 0.2->0.5 must both be recorded: {entries:?}"
         );
 
         apply_template_variable_mutations(&conn, with_sd(Some(0.5))).expect("resave same sd");
-        let entries = TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
-        let count = entries.iter().filter(|e| e.field_name == "sdAllowed").count();
-        assert_eq!(count, 2, "re-saving the same sd must not add a history entry");
+        let entries =
+            TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
+        let count = entries
+            .iter()
+            .filter(|e| e.field_name == "sdAllowed")
+            .count();
+        assert_eq!(
+            count, 2,
+            "re-saving the same sd must not add a history entry"
+        );
     }
 }

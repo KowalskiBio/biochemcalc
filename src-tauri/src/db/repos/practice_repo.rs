@@ -35,6 +35,10 @@ pub struct PracticeAttemptRecord {
     pub assigned_strings: HashMap<String, String>,
     /// Closed single-answer only: the numeric options as served.
     pub numeric_options: Option<Vec<f64>>,
+    /// Closed single-answer only: per-option significant-digit overrides
+    /// parallel to `numeric_options` (decoy/alternace-specific settings).
+    /// Multi-answer attempts carry theirs inside `answers_data`.
+    pub option_sig_digits: Option<Vec<Option<u8>>>,
     /// Set when this attempt belongs to a fixed-batch test session rather
     /// than the endless one-at-a-time practice generator.
     pub test_session_id: Option<Uuid>,
@@ -204,7 +208,9 @@ impl PracticeRepo {
     /// point value — the pool a "master" streak run
     /// (`commands::streak_run::StreakRunKind::Master`) draws from, unlike
     /// `list_template_ids` which stays scoped to one topic/point value.
-    pub fn list_all_template_ids(conn: &Connection) -> Result<Vec<AnyPracticeTemplateRow>, DbError> {
+    pub fn list_all_template_ids(
+        conn: &Connection,
+    ) -> Result<Vec<AnyPracticeTemplateRow>, DbError> {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT st.template_id, s.mode, c.topic_id
              FROM set_templates st
@@ -239,6 +245,11 @@ impl PracticeRepo {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()?;
+        let option_sig_digits = attempt
+            .option_sig_digits
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
 
         conn.execute(
             "INSERT INTO practice_attempts (
@@ -246,8 +257,8 @@ impl PracticeRepo {
                  correct_answer, correct_option, interval_lo, interval_hi,
                  answers_data, is_correct, created_at, answered_at,
                  assigned_values, assigned_strings, numeric_options, alternate_option,
-                 test_session_id, position, streak_run_id
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                 test_session_id, position, streak_run_id, option_sig_digits
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, NULL, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 attempt.id,
                 attempt.user_id,
@@ -268,6 +279,7 @@ impl PracticeRepo {
                 attempt.test_session_id,
                 attempt.position,
                 attempt.streak_run_id,
+                option_sig_digits,
             ],
         )?;
         Ok(())
@@ -287,7 +299,7 @@ impl PracticeRepo {
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
                     correct_answer, correct_option, interval_lo, interval_hi, answers_data,
                     assigned_values, assigned_strings, numeric_options, alternate_option,
-                    test_session_id, position, streak_run_id
+                    test_session_id, position, streak_run_id, option_sig_digits
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2 AND is_correct IS NULL",
             params![id, user_id],
@@ -306,7 +318,7 @@ impl PracticeRepo {
             "SELECT id, user_id, template_id, topic_id, point_value, mode,
                     correct_answer, correct_option, interval_lo, interval_hi, answers_data,
                     assigned_values, assigned_strings, numeric_options, alternate_option,
-                    test_session_id, position, streak_run_id
+                    test_session_id, position, streak_run_id, option_sig_digits
              FROM practice_attempts
              WHERE id = ?1 AND user_id = ?2",
             params![id, user_id],
@@ -324,6 +336,7 @@ impl PracticeRepo {
             let assigned_values_json: Option<String> = row.get(11)?;
             let assigned_strings_json: Option<String> = row.get(12)?;
             let numeric_options_json: Option<String> = row.get(13)?;
+            let option_sig_digits_json: Option<String> = row.get(18)?;
             Ok((
                 PracticeAttemptRecord {
                     id: row.get(0)?,
@@ -344,16 +357,18 @@ impl PracticeRepo {
                     test_session_id: row.get(15)?,
                     position: row.get(16)?,
                     streak_run_id: row.get(17)?,
+                    option_sig_digits: None,
                 },
                 answers_data_json,
                 assigned_values_json,
                 assigned_strings_json,
                 numeric_options_json,
+                option_sig_digits_json,
             ))
         });
 
         match result {
-            Ok((mut record, answers_json, av_json, as_json, no_json)) => {
+            Ok((mut record, answers_json, av_json, as_json, no_json, osd_json)) => {
                 record.answers_data = answers_json
                     .as_deref()
                     .map(serde_json::from_str)
@@ -368,10 +383,10 @@ impl PracticeRepo {
                     .map(serde_json::from_str)
                     .transpose()?
                     .unwrap_or_default();
-                record.numeric_options = no_json
-                    .as_deref()
-                    .map(serde_json::from_str)
-                    .transpose()?;
+                record.numeric_options =
+                    no_json.as_deref().map(serde_json::from_str).transpose()?;
+                record.option_sig_digits =
+                    osd_json.as_deref().map(serde_json::from_str).transpose()?;
                 Ok(Some(record))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -471,6 +486,7 @@ mod tests {
             test_session_id: None,
             position: None,
             streak_run_id: None,
+            option_sig_digits: None,
         }
     }
 
@@ -589,7 +605,10 @@ mod tests {
         assert_eq!(top.points, 6, "4 + 2 points for the two correct answers");
 
         // A student who has not practised yet still appears, on zero.
-        let idle_row = board.iter().find(|r| r.username == "idle").expect("idle row");
+        let idle_row = board
+            .iter()
+            .find(|r| r.username == "idle")
+            .expect("idle row");
         assert_eq!(idle_row.user_id, idle);
         assert_eq!(idle_row.answered_count, 0);
     }

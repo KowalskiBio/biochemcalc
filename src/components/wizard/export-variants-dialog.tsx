@@ -438,7 +438,7 @@ export function ExportVariantsDialog({
                           disabled={!isIncluded || hasSd}
                           placeholder={
                             hasSd
-                              ? `SD ±${formatDecimalComma(String(sdAllowed))}`
+                              ? `SD ±${formatDecimalComma(String(sdAllowed))} %`
                               : String(
                                   defaultSpreadPercentFor(
                                     mode,

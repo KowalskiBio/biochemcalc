@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 37;
+const CURRENT_USER_VERSION: u32 = 38;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -191,6 +191,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 37 {
         apply_migration_v37(conn)?;
         conn.pragma_update(None, "user_version", "37")?;
+    }
+
+    if user_version < 38 {
+        apply_migration_v38(conn)?;
+        conn.pragma_update(None, "user_version", "38")?;
     }
 
     Ok(())
@@ -960,9 +965,7 @@ fn apply_migration_v19(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 fn apply_migration_v20(conn: &Connection) -> Result<(), rusqlite::Error> {
-    conn.execute_batch(
-        "ALTER TABLE topics ADD COLUMN for_students INTEGER NOT NULL DEFAULT 0;",
-    )?;
+    conn.execute_batch("ALTER TABLE topics ADD COLUMN for_students INTEGER NOT NULL DEFAULT 0;")?;
     Ok(())
 }
 
@@ -1042,7 +1045,9 @@ fn apply_migration_v26(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 fn apply_migration_v27(conn: &Connection) -> Result<(), rusqlite::Error> {
-    conn.execute_batch("ALTER TABLE templates ADD COLUMN force_scientific INTEGER NOT NULL DEFAULT 0;")?;
+    conn.execute_batch(
+        "ALTER TABLE templates ADD COLUMN force_scientific INTEGER NOT NULL DEFAULT 0;",
+    )?;
     Ok(())
 }
 
@@ -1255,6 +1260,23 @@ fn apply_migration_v37(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Per-decoy and per-alternace significant digits: a decoy (or the
+/// alternace) may render its options with a different number of significant
+/// digits than the template-level `significant_digits` result setting.
+/// NULL everywhere means "inherit the template-level setting", so the
+/// migration is purely additive and every stored template keeps its
+/// current rendering.
+fn apply_migration_v38(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE template_decoys ADD COLUMN significant_digits INTEGER;
+        ALTER TABLE templates ADD COLUMN alternative_significant_digits INTEGER;
+        ALTER TABLE practice_attempts ADD COLUMN option_sig_digits TEXT;
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1267,14 +1289,16 @@ mod tests {
     #[test]
     fn v16_retroactively_protects_the_earliest_teacher_on_an_existing_v15_database() {
         let conn = Connection::open_in_memory().expect("in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
 
         // Bring the DB to exactly v15, matching the pre-v16 production
         // state. v15's users/sessions/invite_codes tables don't depend on
         // anything from v1-v14, so applying it alone reproduces the
         // users-table shape this test cares about.
         apply_migration_v15(&conn).expect("v15");
-        conn.pragma_update(None, "user_version", "15").expect("set version");
+        conn.pragma_update(None, "user_version", "15")
+            .expect("set version");
 
         // `randomblob(16)` rather than a hand-written hex literal — a 16-byte
         // UUID blob literal is easy to get subtly the wrong length by hand,
@@ -1311,7 +1335,8 @@ mod tests {
         apply_migration_v1(&conn).expect("v1");
         // This test is about one table's cleanup rule, so drop the FK to
         // templates rather than seeding a full template per constraint.
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
 
         conn.execute_batch(
             "
@@ -1339,7 +1364,9 @@ mod tests {
 
         assert_eq!(remaining.len(), 3, "only the blanket 0.1 sd rows should go");
         assert!(
-            remaining.iter().any(|(sd, t)| *sd == Some(0.25) && t == "sd"),
+            remaining
+                .iter()
+                .any(|(sd, t)| *sd == Some(0.25) && t == "sd"),
             "a deliberately different SD must survive"
         );
         assert!(
@@ -1358,7 +1385,8 @@ mod tests {
     #[test]
     fn v17_keeps_one_active_code_per_role_and_never_revives_used_ones() {
         let conn = Connection::open_in_memory().expect("in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         apply_migration_v15(&conn).expect("v15");
 
         conn.execute_batch(
@@ -1432,7 +1460,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
         // The three variant columns must exist on practice_attempts.
         conn.execute_batch(
@@ -1458,7 +1486,10 @@ mod tests {
                 "2026-08-07T12:01:00+00:00",
             ],
         );
-        assert!(duplicate.is_err(), "UNIQUE(attempt_id) must reject a second report");
+        assert!(
+            duplicate.is_err(),
+            "UNIQUE(attempt_id) must reject a second report"
+        );
     }
 
     type MigrationFn = fn(&Connection) -> Result<(), rusqlite::Error>;
@@ -1504,7 +1535,8 @@ mod tests {
         // Seed an attempt in the v19 shape (no variant columns yet). No FK
         // targets exist, so drop enforcement like the v18 test does rather
         // than seeding a full template/user graph.
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
         conn.execute_batch(
             "
             INSERT INTO practice_attempts (
@@ -1522,7 +1554,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v21 -> latest");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
         // The pre-existing row survives, with NULLs in the new columns.
         let (assigned_values, assigned_strings, numeric_options): (
             Option<String>,
@@ -1547,7 +1579,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
         conn.execute_batch("SELECT decoy_formula FROM templates LIMIT 1;")
             .expect("new decoy_formula column");
@@ -1562,18 +1594,16 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
         let columns: Vec<(String, String, i64)> = {
             let mut stmt = conn
                 .prepare("PRAGMA table_info(templates)")
                 .expect("prepare table_info");
-            stmt.query_map([], |row| {
-                Ok((row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .expect("query table_info")
-            .collect::<rusqlite::Result<_>>()
-            .expect("collect")
+            stmt.query_map([], |row| Ok((row.get(1)?, row.get(2)?, row.get(3)?)))
+                .expect("query table_info")
+                .collect::<rusqlite::Result<_>>()
+                .expect("collect")
         };
         assert!(
             !columns.iter().any(|(name, _, _)| name == "difficulty"),
@@ -1631,7 +1661,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v32 -> latest");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
         let columns: Vec<String> = {
             let mut stmt = conn
                 .prepare("PRAGMA table_info(templates)")
@@ -1697,7 +1727,8 @@ mod tests {
         }
         assert_eq!(user_version(&conn), 33);
 
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
         conn.execute(
             "INSERT INTO templates \
              (id, question_text, formula, equation_text, result_unit, point_value, topic_id, created_at, difficulty) \
@@ -1708,7 +1739,7 @@ mod tests {
 
         run_migrations(&conn).expect("migrate v33 -> v34");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
         let columns: Vec<String> = {
             let mut stmt = conn
@@ -1779,7 +1810,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
 
-        assert_eq!(user_version(&conn), 37);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
         let column_names = |table: &str| -> Vec<String> {
             let mut stmt = conn
@@ -1860,7 +1891,8 @@ mod tests {
         // v1's own migration batch turns foreign_keys back ON; this test only
         // cares about the templates/template_decoys shape, not a full
         // template/topic graph, so drop enforcement like the v18 test does.
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
 
         let template_id = uuid::Uuid::new_v4();
         conn.execute(
@@ -1899,7 +1931,8 @@ mod tests {
     fn v29_leaves_templates_without_decoy_formula_untouched() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
 
         let template_id = uuid::Uuid::new_v4();
         conn.execute(
@@ -1962,7 +1995,8 @@ mod tests {
             conn.pragma_update(None, "user_version", format!("{}", index + 1))
                 .expect("set version");
         }
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
 
         let topic_id = uuid::Uuid::new_v4();
         conn.execute(
@@ -1991,7 +2025,8 @@ mod tests {
     fn v30_group_id_is_nulled_when_its_group_is_deleted() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
 
         let group_id = uuid::Uuid::new_v4();
         conn.execute(
@@ -2007,8 +2042,11 @@ mod tests {
         )
         .expect("insert topic in group");
 
-        conn.execute("DELETE FROM topic_groups WHERE id = ?1", rusqlite::params![group_id])
-            .expect("delete group");
+        conn.execute(
+            "DELETE FROM topic_groups WHERE id = ?1",
+            rusqlite::params![group_id],
+        )
+        .expect("delete group");
 
         let remaining_group_id: Option<uuid::Uuid> = conn
             .query_row(
@@ -2017,7 +2055,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("read topic after group delete");
-        assert_eq!(remaining_group_id, None, "deleting a group must ungroup its topics, not cascade-delete them");
+        assert_eq!(
+            remaining_group_id, None,
+            "deleting a group must ungroup its topics, not cascade-delete them"
+        );
     }
 
     /// Pins the "NULL is distinct from NULL" behavior the v37 doc comment
@@ -2027,7 +2068,8 @@ mod tests {
     #[test]
     fn v37_email_is_optional_but_unique_when_present() {
         let conn = Connection::open_in_memory().expect("in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         apply_migration_v15(&conn).expect("v15");
         apply_migration_v37(&conn).expect("v37");
 
@@ -2046,7 +2088,10 @@ mod tests {
              VALUES (randomblob(16), 'dup-email', 'h', 'student', '2026-01-01T00:00:00Z', 'student@example.com')",
             [],
         );
-        assert!(dup.is_err(), "a case-insensitive duplicate email must be rejected");
+        assert!(
+            dup.is_err(),
+            "a case-insensitive duplicate email must be rejected"
+        );
 
         let user_id = uuid::Uuid::new_v4();
         conn.execute(
@@ -2060,11 +2105,70 @@ mod tests {
         )
         .expect("insert reset token");
 
-        conn.execute("DELETE FROM users WHERE id = ?1", rusqlite::params![user_id])
-            .expect("delete user");
+        conn.execute(
+            "DELETE FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+        )
+        .expect("delete user");
         let remaining: i64 = conn
-            .query_row("SELECT COUNT(*) FROM password_reset_tokens", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM password_reset_tokens", [], |row| {
+                row.get(0)
+            })
             .expect("count tokens");
-        assert_eq!(remaining, 0, "deleting the user must cascade-delete their reset tokens");
+        assert_eq!(
+            remaining, 0,
+            "deleting the user must cascade-delete their reset tokens"
+        );
+    }
+
+    #[test]
+    fn v38_adds_nullable_sig_digits_to_decoys_and_alternace() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        run_migrations(&conn).expect("migrations");
+
+        // All three new columns exist, nullable, and default to NULL
+        // (inherit the template-level setting).
+        for (table, column) in [
+            ("template_decoys", "significant_digits"),
+            ("templates", "alternative_significant_digits"),
+            ("practice_attempts", "option_sig_digits"),
+        ] {
+            let (notnull, dflt): (i64, Option<String>) = conn
+                .query_row(
+                    &format!("SELECT \"notnull\", dflt_value FROM pragma_table_info('{table}') WHERE name = '{column}'"),
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap_or_else(|e| panic!("{table}.{column} must exist after v38: {e}"));
+            assert_eq!(notnull, 0, "{table}.{column} must be nullable");
+            assert_eq!(dflt, None, "{table}.{column} must default to NULL");
+        }
+
+        // Round-trip an explicit decoy/alternace setting end to end.
+        conn.execute(
+            "INSERT INTO templates (id, question_text, formula, result_unit, point_value, topic_id, created_at, alternative_significant_digits)
+             VALUES (randomblob(16), 'Q?', 'X * 2', 'g', 2, X'00000000000000000000000000000000', '2026-01-01T00:00:00Z', 3)",
+            [],
+        )
+        .expect("insert template with alternace sig digits");
+        conn.execute(
+            "INSERT INTO template_decoys (id, template_id, formula, option_count, position, significant_digits)
+             SELECT randomblob(16), id, 'X * 3', 1, 0, 2 FROM templates",
+            [],
+        )
+        .expect("insert decoy with sig digits");
+
+        let (decoy_digits, alt_digits): (i64, i64) = conn
+            .query_row(
+                "SELECT d.significant_digits, t.alternative_significant_digits
+                 FROM template_decoys d JOIN templates t ON t.id = d.template_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("both columns readable after v38");
+        assert_eq!(decoy_digits, 2, "decoy sig digits must persist");
+        assert_eq!(alt_digits, 3, "alternace sig digits must persist");
     }
 }

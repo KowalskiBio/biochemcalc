@@ -45,13 +45,16 @@ pub fn validate_result(result: f64, constraint: &ResultConstraint) -> Result<(),
     }
 
     // When "both" is selected, the SD is also checked to ensure the open
-    // interval (correct ± sd) stays within the allowed numeric range.
+    // interval (correct ± sd percent) stays within the allowed numeric range.
     if matches!(
         constraint.constraint_type,
         ConstraintType::Both | ConstraintType::Sd
     ) {
-        if let Some(sd) = constraint.sd_allowed {
-            let half_width = sd.abs();
+        if let Some(sd) = constraint
+            .sd_allowed
+            .filter(|sd| sd.is_finite() && *sd > 0.0 && *sd < 100.0)
+        {
+            let half_width = result.abs() * sd / 100.0;
             if let Some(min) = constraint.min_result {
                 if result - half_width < min {
                     return Err(format!(
@@ -260,32 +263,31 @@ fn sd_fraction_for_difficulty(difficulty: &str) -> f64 {
 
 /// Compute the lower and upper bounds for an open answer.
 /// The half-width is driven by difficulty unless the teacher provided an
-/// explicit positive SD, which always wins. `spread_override` — a per-export
-/// custom deviation fraction, e.g. from the export dialog's per-question
-/// "Odchylka (%)" field — sits between those two: it beats the difficulty
-/// preset but never an explicit SD. Sanitized here too (not just at the call
-/// boundary): sd_allowed is only honored when finite, > 0 and narrower than
-/// the answer itself (see `usable_sd_window`), otherwise it ghosts to the
-/// spread_override/difficulty path so no caller can produce a degenerate or
-/// nonsensical interval.
+/// explicit positive SD (a percent of the answer), which always wins.
+/// `spread_override` — a per-export custom deviation fraction, e.g. from the
+/// export dialog's per-question "Odchylka (%)" field — sits between those
+/// two: it beats the difficulty preset but never an explicit SD. Sanitized
+/// here too (not just at the call boundary): sd_allowed is only honored
+/// when finite, > 0 and below 100 percent (see `usable_sd_window`),
+/// otherwise it ghosts to the spread_override/difficulty path so no caller
+/// can produce a degenerate or nonsensical interval.
 pub(crate) fn open_interval(
     correct: f64,
     constraint: &ResultConstraint,
     difficulty: &str,
     spread_override: Option<f64>,
 ) -> (f64, f64) {
-    let half_width = usable_sd_window(constraint, correct)
-        .unwrap_or_else(|| {
-            let fraction = spread_override
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .unwrap_or_else(|| sd_fraction_for_difficulty(difficulty));
-            let width = correct.abs() * fraction;
-            if width.is_finite() && width > 0.0 {
-                width
-            } else {
-                ZERO_ANSWER_HALF_WIDTH
-            }
-        });
+    let half_width = usable_sd_window(constraint, correct).unwrap_or_else(|| {
+        let fraction = spread_override
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or_else(|| sd_fraction_for_difficulty(difficulty));
+        let width = correct.abs() * fraction;
+        if width.is_finite() && width > 0.0 {
+            width
+        } else {
+            ZERO_ANSWER_HALF_WIDTH
+        }
+    });
     (correct - half_width, correct + half_width)
 }
 
@@ -385,8 +387,7 @@ fn sig_figs_unit(value: f64, sig_digits: Option<u8>) -> Option<f64> {
 }
 
 fn display_grid(value: f64, max_deviation: f64, sig_digits: Option<u8>) -> f64 {
-    sig_figs_unit(value, sig_digits)
-        .unwrap_or_else(|| display_rounding_unit(value, max_deviation))
+    sig_figs_unit(value, sig_digits).unwrap_or_else(|| display_rounding_unit(value, max_deviation))
 }
 
 fn round_to_unit(value: f64, unit: f64) -> f64 {
@@ -398,10 +399,13 @@ fn round_to_unit(value: f64, unit: f64) -> f64 {
 
 /// One decoy's already-evaluated value plus how many option slots it asked
 /// for ("počet"), before apportionment scales it down to fit the budget.
+/// `sig_digits` is the decoy's own significant-digits override, if the
+/// teacher set one; None inherits the template-level result setting.
 #[derive(Clone, Copy)]
 pub(crate) struct DecoyAnchor {
     pub value: f64,
     pub requested_count: u8,
+    pub sig_digits: Option<u8>,
 }
 
 /// Hamilton / largest-remainder apportionment: scale `requested` counts down
@@ -439,25 +443,24 @@ fn apportion_largest_remainder(requested: &[usize], budget: usize) -> Vec<usize>
     floors
 }
 
-/// The teacher's absolute SD, if it can serve as a tolerance for this
-/// particular answer. None when it is unset, not finite, not > 0, or **at
-/// least as large as the answer itself** — in which case the caller falls
-/// back to the relative difficulty spread.
+/// The teacher's SD, given in **percent of the answer**, converted to an
+/// absolute half-width for this particular answer. None when it is unset,
+/// not finite, not > 0, **at least 100**, or the answer is exactly zero —
+/// in which case the caller falls back to the relative difficulty spread.
 ///
-/// `sd_allowed` is an absolute number, so the same value a teacher reasonably
-/// reuses across a set is only meaningful next to answers of a similar
-/// magnitude. `sd = 1` is ±0.5 % on a 200 g answer and ±370 % on a mass
-/// fraction of 0.27, where it produced the reported `-0,730..1,28`: an
-/// interval that accepts negative mass fractions, values above 1, and zero.
-/// A tolerance that reaches zero carries no information about the answer at
-/// all, so it is treated as a misconfigured field rather than an intentional
-/// setting, exactly as a zero or NaN already was.
+/// A percentage is magnitude-independent, so the same value works across a
+/// set regardless of each answer's size: `sd = 10` means the accepted
+/// interval and the closed-option window span ±10 % of the correct value
+/// (answer 7 → 6,3..7,7). A percentage of 100 or more would let the
+/// interval cross zero and reach past the far side of the answer (a
+/// negative mass fraction among the options), so it is treated as a
+/// misconfigured field rather than an intentional setting, exactly as a
+/// zero or NaN already was.
 ///
-/// This deliberately does not cap or rescale the SD: one that is narrower
-/// than the answer, however narrow, is still honored in full and still wins
-/// over both the spread override and the difficulty preset. An answer of
-/// exactly zero has no magnitude to compare against and keeps the SD as
-/// given.
+/// This deliberately does not cap or rescale the SD: one below 100,
+/// however narrow, is still honored in full and still wins over both the
+/// spread override and the difficulty preset. An answer of exactly zero
+/// has no magnitude for the percentage to scale and falls back too.
 ///
 /// Decided as a pure Option before any RNG is consumed, so the paths it does
 /// not change keep their byte-identical RNG sequence.
@@ -466,7 +469,9 @@ fn usable_sd_window(constraint: &ResultConstraint, correct: f64) -> Option<f64> 
         .sd_allowed
         .filter(|sd| sd.is_finite() && *sd > 0.0)
         .map(f64::abs)
-        .filter(|sd| correct == 0.0 || *sd < correct.abs())
+        .filter(|sd| *sd < 100.0)
+        .map(|sd| correct.abs() * sd / 100.0)
+        .filter(|w| w.is_finite() && *w > 0.0)
 }
 
 /// The absolute SD window that governs CLOSED-option distractor sampling
@@ -601,7 +606,8 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     force_correct_first: bool,
     spread_override: Option<f64>,
     result_significant_digits: Option<u8>,
-) -> Result<(Vec<f64>, u8, Option<u8>), GenerationError> {
+    alternate_sig_digits: Option<u8>,
+) -> Result<(Vec<f64>, u8, Option<u8>, Option<Vec<Option<u8>>>), GenerationError> {
     let count = clamp_option_count(option_count);
     // A per-export custom deviation (e.g. the export dialog's per-question
     // "Odchylka (%)" field) overrides the difficulty preset when present and
@@ -612,25 +618,27 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
 
     // The absolute SD window for closed-option distractor sampling: when the
-    // teacher set a finite positive sd_allowed, that absolute number becomes
-    // the single per-question authority for the closed option window —
-    // unless the sig-figs grid is active and cannot fit enough distinct
-    // in-window offsets for `count` options, in which case the window is
-    // disabled and the pre-SD spread behavior takes over. Decided here,
-    // before any RNG consumption, so the unset path keeps its exact
-    // byte-identical RNG sequence (the ghost regression).
+    // teacher set a finite positive sd_allowed (a percent of the answer),
+    // that percent converted to an absolute half-width becomes the single
+    // per-question authority for the closed option window — unless the
+    // sig-figs grid is active and cannot fit enough distinct in-window
+    // offsets for `count` options, in which case the window is disabled and
+    // the pre-SD spread behavior takes over. Decided here, before any RNG
+    // consumption, so the unset path keeps its exact byte-identical RNG
+    // sequence (the ghost regression).
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
     let sig_figs_active = sig_figs_unit(correct, result_significant_digits).is_some();
     let sd_window = closed_option_sd_window(
-        // Same guard as the open interval: an SD at least as wide as the
-        // answer would let a distractor sit at zero or on the far side of it
-        // (a negative mass fraction among the options).
+        // Same guard as the open interval: a percentage of 100 or more
+        // would let a distractor sit at zero or on the far side of the
+        // answer (a negative mass fraction among the options).
         usable_sd_window(constraint, correct),
         sig_figs_active,
         base_rounding_unit,
         count,
     );
-    let rounding_unit = closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
+    let rounding_unit =
+        closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
     let rounded_correct = round_to_unit(correct, rounding_unit);
     let close = |a: f64, b: f64| (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON);
 
@@ -644,7 +652,12 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         if !value.is_finite() {
             return None;
         }
-        let rounded = round_to_unit(value, rounding_unit);
+        // The alternace's own significant-digits override, when set, also
+        // rounds its value onto that grid instead of the shared one.
+        let rounded = round_to_unit(
+            value,
+            sig_figs_unit(value, alternate_sig_digits).unwrap_or(rounding_unit),
+        );
         if validate_result(rounded, constraint).is_err() || close(rounded, rounded_correct) {
             return None;
         }
@@ -655,6 +668,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     struct ValidDecoy {
         rounded: f64,
         requested: usize,
+        sig_digits: Option<u8>,
     }
 
     // A decoy that requested at least one slot always gets one — it isn't
@@ -670,7 +684,12 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         if d.requested_count == 0 || !d.value.is_finite() {
             continue;
         }
-        let rounded = round_to_unit(d.value, rounding_unit);
+        // A decoy with its own significant digits rounds onto its own grid;
+        // otherwise it shares the option-set grid like every other value.
+        let rounded = round_to_unit(
+            d.value,
+            sig_figs_unit(d.value, d.sig_digits).unwrap_or(rounding_unit),
+        );
         if validate_result(rounded, constraint).is_err() {
             continue;
         }
@@ -685,6 +704,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         valid_decoys.push(ValidDecoy {
             rounded,
             requested: d.requested_count as usize,
+            sig_digits: d.sig_digits,
         });
     }
 
@@ -696,7 +716,11 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     let decoy_counts = apportion_largest_remainder(&requested, decoy_budget);
     let correct_cluster_size = count - decoy_counts.iter().sum::<usize>() - alt_slot;
 
+    // Parallel to `pool`: the significant-digits override for each pool
+    // value (a decoy's custom setting marks its whole cluster; correct-
+    // cluster noise inherits the template-level setting as None).
     let mut pool: Vec<f64> = Vec::with_capacity(count - 1);
+    let mut pool_sig: Vec<Option<u8>> = Vec::with_capacity(count - 1);
 
     // Fills `pool` with up to `needed` more values deviated around `anchor`
     // (the same random-deviation logic distractors have always used), unique
@@ -746,8 +770,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
             // Skip candidates that didn't actually move from the anchor in
             // floating-point. Use a relative tolerance so this works for
             // answers of any magnitude (e.g. atomic masses ~1e-24).
-            if !candidate.is_finite() || (candidate - anchor).abs() <= anchor.abs() * f64::EPSILON
-            {
+            if !candidate.is_finite() || (candidate - anchor).abs() <= anchor.abs() * f64::EPSILON {
                 continue;
             }
 
@@ -777,8 +800,10 @@ pub(crate) fn generate_numeric_options<R: Rng>(
             continue;
         }
         // The literal decoy value fills one slot; only generate more if its
-        // apportioned cluster size calls for extra perturbed values.
+        // apportioned cluster size calls for extra perturbed values. The
+        // whole cluster carries the decoy's significant-digits override.
         pool.push(vd.rounded);
+        pool_sig.push(vd.sig_digits);
         if n > 1 && !generate_around(vd.rounded, n - 1, &mut pool, rng) {
             return Err(GenerationError::Distractor(format!(
                 "only generated {} unique decoy-anchored distractors (needed {}) for decoy {}",
@@ -787,6 +812,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
                 vd.rounded,
             )));
         }
+        pool_sig.resize(pool.len(), vd.sig_digits);
     }
 
     if correct_cluster_size > 1
@@ -806,6 +832,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         };
         return Err(GenerationError::Distractor(detail));
     }
+    pool_sig.resize(pool.len(), None);
 
     let has_alternate = rounded_alternate.is_some();
 
@@ -823,11 +850,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
 
     // The alternate is always at position b) (index 1) when present. No RNG
     // is consumed, so the no-alternate path stays byte-identical to before.
-    let alternate_position_zero_based: Option<usize> = if has_alternate {
-        Some(1)
-    } else {
-        None
-    };
+    let alternate_position_zero_based: Option<usize> = if has_alternate { Some(1) } else { None };
 
     if !valid_decoys.is_empty() && !force_correct_first {
         // Shuffle so decoy-anchored options don't always land at the lowest
@@ -838,25 +861,44 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         for i in (1..pool.len()).rev() {
             let j = rng.random_range(0..=i);
             pool.swap(i, j);
+            pool_sig.swap(i, j);
         }
     }
 
     let mut numeric_options = Vec::with_capacity(count);
+    let mut option_sig: Vec<Option<u8>> = Vec::with_capacity(count);
+    let mut any_sig_override = false;
     let mut pool_iter = pool.into_iter();
+    let mut pool_sig_iter = pool_sig.into_iter();
     for position in 0..count {
         if position == correct_position_zero_based {
             numeric_options.push(rounded_correct);
+            option_sig.push(None);
         } else if Some(position) == alternate_position_zero_based {
             numeric_options.push(rounded_alternate.expect("alternate position implies a value"));
+            any_sig_override |= alternate_sig_digits.is_some();
+            option_sig.push(alternate_sig_digits);
         } else {
             numeric_options.push(pool_iter.next().expect("distractors available"));
+            let sig = pool_sig_iter.next().flatten();
+            any_sig_override |= sig.is_some();
+            option_sig.push(sig);
         }
     }
+    // Only carry the per-option vector when at least one option actually
+    // overrides the template-level significant digits, so stored variants
+    // without overrides stay byte-identical to the pre-feature shape.
+    let option_sig_digits = if any_sig_override {
+        Some(option_sig)
+    } else {
+        None
+    };
 
     Ok((
         numeric_options,
         correct_position_one_based,
         alternate_position_zero_based.map(|p| p as u8 + 1),
+        option_sig_digits,
     ))
 }
 
@@ -952,9 +994,11 @@ enum OptionRole {
 /// One decoy formula's computed value per answer target it applies to.
 /// A targeted decoy (`n = n * 2; m = m * 3`) may cover only some targets; an
 /// untargeted/bare-expression decoy applies the same value to every target.
+/// `sig_digits` is the decoy's own significant-digits override, if set.
 struct DecoyRowValues {
     requested_count: u8,
     values: HashMap<String, f64>,
+    sig_digits: Option<u8>,
 }
 
 /// Decide the shared option-row layout for a multi-answer question: which
@@ -1092,7 +1136,8 @@ fn fill_target_options<R: Rng>(
     difficulty: &str,
     spread_override: Option<f64>,
     result_significant_digits: Option<u8>,
-) -> Result<(Vec<f64>, bool), GenerationError> {
+    alternate_sig_digits: Option<u8>,
+) -> Result<(Vec<f64>, bool, Option<Vec<Option<u8>>>), GenerationError> {
     let max_deviation = spread_override
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or_else(|| max_deviation_for_difficulty(difficulty));
@@ -1105,32 +1150,39 @@ fn fill_target_options<R: Rng>(
     // to the pre-SD spread behavior) when that grid cannot fit enough
     // distinct in-window offsets for `count` options.
     let sd_window = closed_option_sd_window(
-        // Same guard as the open interval: an SD at least as wide as the
-        // answer would let a distractor sit at zero or on the far side of it
-        // (a negative mass fraction among the options).
+        // Same guard as the open interval: a percentage of 100 or more
+        // would let a distractor sit at zero or on the far side of the
+        // answer (a negative mass fraction among the options).
         usable_sd_window(constraint, correct),
         sig_figs_active,
         base_rounding_unit,
         count,
     );
-    let rounding_unit = closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
+    let rounding_unit =
+        closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
     let rounded_correct = round_to_unit(correct, rounding_unit);
 
-    let rounded_alternate: Option<f64> = alternate_values
-        .get(target_symbol)
-        .copied()
-        .and_then(|value| {
-            if !value.is_finite() {
-                return None;
-            }
-            let rounded = round_to_unit(value, rounding_unit);
-            if validate_result(rounded, constraint).is_err()
-                || close_enough(rounded, rounded_correct, rounding_unit)
-            {
-                return None;
-            }
-            Some(rounded)
-        });
+    let rounded_alternate: Option<f64> =
+        alternate_values
+            .get(target_symbol)
+            .copied()
+            .and_then(|value| {
+                if !value.is_finite() {
+                    return None;
+                }
+                // The alternace's own significant-digits override, when set,
+                // also rounds its value onto that grid instead of the shared one.
+                let rounded = round_to_unit(
+                    value,
+                    sig_figs_unit(value, alternate_sig_digits).unwrap_or(rounding_unit),
+                );
+                if validate_result(rounded, constraint).is_err()
+                    || close_enough(rounded, rounded_correct, rounding_unit)
+                {
+                    return None;
+                }
+                Some(rounded)
+            });
 
     let mut placed: Vec<f64> = vec![rounded_correct];
     if let Some(alt) = rounded_alternate {
@@ -1150,6 +1202,10 @@ fn fill_target_options<R: Rng>(
     needed_decoys.dedup();
 
     let mut decoy_anchor: HashMap<usize, f64> = HashMap::new();
+    // Whether a decoy's slot for this target holds its real evaluated value
+    // (vs a fallback distractor): only the real value carries the decoy's
+    // significant-digits override.
+    let mut decoy_real: HashMap<usize, bool> = HashMap::new();
     for k in needed_decoys {
         // A decoy's real value for this target is used as-is whenever it's
         // finite and in-constraint — even if it happens to equal the correct
@@ -1166,7 +1222,12 @@ fn fill_target_options<R: Rng>(
                 if !v.is_finite() {
                     return None;
                 }
-                let rounded = round_to_unit(v, rounding_unit);
+                // A decoy with its own significant digits rounds onto its
+                // own grid instead of the shared one.
+                let rounded = round_to_unit(
+                    v,
+                    sig_figs_unit(v, decoy_rows[k].sig_digits).unwrap_or(rounding_unit),
+                );
                 if validate_result(rounded, constraint).is_err() {
                     return None;
                 }
@@ -1177,25 +1238,31 @@ fn fill_target_options<R: Rng>(
                 }
                 Some(rounded)
             });
-        let resolved = match candidate {
-            Some(v) => v,
-            None => fallback_distractor(
-                rounded_correct,
-                &placed,
-                rng,
-                max_deviation,
-                rounding_unit,
-                rounded_correct,
-                rounded_alternate,
-                constraint,
-                sd_window,
-            )?,
+        let (resolved, real) = match candidate {
+            Some(v) => (v, true),
+            None => (
+                fallback_distractor(
+                    rounded_correct,
+                    &placed,
+                    rng,
+                    max_deviation,
+                    rounding_unit,
+                    rounded_correct,
+                    rounded_alternate,
+                    constraint,
+                    sd_window,
+                )?,
+                false,
+            ),
         };
         decoy_anchor.insert(k, resolved);
+        decoy_real.insert(k, real);
         placed.push(resolved);
     }
 
     let mut numeric_options = Vec::with_capacity(role_order.len());
+    let mut option_sig: Vec<Option<u8>> = Vec::with_capacity(role_order.len());
+    let mut any_sig_override = false;
     for role in role_order {
         let value = match *role {
             OptionRole::Correct => rounded_correct,
@@ -1242,15 +1309,50 @@ fn fill_target_options<R: Rng>(
                 sd_window,
             )?,
         };
+        // Per-role significant digits: a decoy row's own setting marks its
+        // exact value and its perturbed cluster; the alternace's setting
+        // marks its slot (only when the real alternate value resolved, not a
+        // fallback); everything else inherits the template-level setting.
+        let sig = match *role {
+            OptionRole::Correct | OptionRole::CorrectPerturb => None,
+            OptionRole::Alternate => {
+                if rounded_alternate.is_some() {
+                    alternate_sig_digits
+                } else {
+                    None
+                }
+            }
+            OptionRole::DecoyExact(k) => {
+                if decoy_real.get(&k).copied().unwrap_or(false) {
+                    decoy_rows[k].sig_digits
+                } else {
+                    None
+                }
+            }
+            OptionRole::DecoyPerturb(k) => decoy_rows[k].sig_digits,
+        };
+        any_sig_override |= sig.is_some();
         if !matches!(role, OptionRole::DecoyExact(_)) {
             // DecoyExact values are already in `placed` from the
             // precomputation pass above; avoid double-inserting them.
             placed.push(value);
         }
         numeric_options.push(value);
+        option_sig.push(sig);
     }
+    // Only carry the per-option vector when at least one option actually
+    // overrides the template-level significant digits.
+    let option_sig_digits = if any_sig_override {
+        Some(option_sig)
+    } else {
+        None
+    };
 
-    Ok((numeric_options, rounded_alternate.is_some()))
+    Ok((
+        numeric_options,
+        rounded_alternate.is_some(),
+        option_sig_digits,
+    ))
 }
 
 pub fn generate_variant(
@@ -1283,6 +1385,7 @@ pub fn generate_variant(
         false,
         None,
         result_significant_digits,
+        None,
     )
 }
 
@@ -1303,6 +1406,7 @@ pub fn generate_variant_with_targets(
     force_correct_first: bool,
     spread_override: Option<f64>,
     result_significant_digits: Option<u8>,
+    alternative_significant_digits: Option<u8>,
 ) -> Result<Variant, GenerationError> {
     let multi_answer = !targets.is_empty();
     let has_assignments = multi_answer || formula.contains(';');
@@ -1342,6 +1446,7 @@ pub fn generate_variant_with_targets(
                 force_correct_first,
                 spread_override,
                 result_significant_digits,
+                alternative_significant_digits,
             ) {
                 Ok(Some(variant)) => return Ok(variant),
                 Ok(None) => {
@@ -1357,43 +1462,63 @@ pub fn generate_variant_with_targets(
             seed += 1;
             continue;
         }
-        let (numeric_options, correct_option, alternate_option, interval_lo, interval_hi) =
-            match mode {
-                TemplateMode::Closed => {
-                    let decoy_anchors: Vec<DecoyAnchor> = decoys
-                        .iter()
-                        .filter_map(|d| {
-                            evaluate_with_strings(&d.formula, &assigned_numeric, constants, &assigned_strings)
-                                .ok()
-                                .map(|value| DecoyAnchor {
-                                    value,
-                                    requested_count: d.option_count,
-                                })
+        let (
+            numeric_options,
+            correct_option,
+            alternate_option,
+            option_sig_digits,
+            interval_lo,
+            interval_hi,
+        ) = match mode {
+            TemplateMode::Closed => {
+                let decoy_anchors: Vec<DecoyAnchor> = decoys
+                    .iter()
+                    .filter_map(|d| {
+                        evaluate_with_strings(
+                            &d.formula,
+                            &assigned_numeric,
+                            constants,
+                            &assigned_strings,
+                        )
+                        .ok()
+                        .map(|value| DecoyAnchor {
+                            value,
+                            requested_count: d.option_count,
+                            sig_digits: d.significant_digits,
                         })
-                        .collect();
-                    let alternate_value: Option<f64> = alternative_formula.and_then(|f| {
-                        evaluate_with_strings(f, &assigned_numeric, constants, &assigned_strings).ok()
-                    });
-                    let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
-                    let (options, position, alt_position) = generate_numeric_options(
-                        correct,
-                        &decoy_anchors,
-                        alternate_value,
-                        constraint,
-                        &mut rng,
-                        difficulty,
-                        option_count,
-                        force_correct_first,
-                        spread_override,
-                        result_significant_digits,
-                    )?;
-                    (Some(options), Some(position), alt_position, None, None)
-                }
-                TemplateMode::Open => {
-                    let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
-                    (None, None, None, Some(lo), Some(hi))
-                }
-            };
+                    })
+                    .collect();
+                let alternate_value: Option<f64> = alternative_formula.and_then(|f| {
+                    evaluate_with_strings(f, &assigned_numeric, constants, &assigned_strings).ok()
+                });
+                let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
+                let (options, position, alt_position, sig_digits) = generate_numeric_options(
+                    correct,
+                    &decoy_anchors,
+                    alternate_value,
+                    constraint,
+                    &mut rng,
+                    difficulty,
+                    option_count,
+                    force_correct_first,
+                    spread_override,
+                    result_significant_digits,
+                    alternative_significant_digits,
+                )?;
+                (
+                    Some(options),
+                    Some(position),
+                    alt_position,
+                    sig_digits,
+                    None,
+                    None,
+                )
+            }
+            TemplateMode::Open => {
+                let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
+                (None, None, None, None, Some(lo), Some(hi))
+            }
+        };
 
         let mut variant = Variant::new(
             template_id,
@@ -1407,6 +1532,7 @@ pub fn generate_variant_with_targets(
             base_seed,
         );
         variant.alternate_option = alternate_option;
+        variant.option_sig_digits = option_sig_digits;
         return Ok(variant);
     }
 
@@ -1433,6 +1559,7 @@ fn generate_multi_answer_variant(
     force_correct_first: bool,
     spread_override: Option<f64>,
     result_significant_digits: Option<u8>,
+    alternative_significant_digits: Option<u8>,
 ) -> Result<Option<Variant>, GenerationError> {
     let answer_values =
         evaluate_assignments(assignments, assigned_numeric, constants, assigned_strings)
@@ -1512,6 +1639,7 @@ fn generate_multi_answer_variant(
             decoy_rows.push(DecoyRowValues {
                 requested_count: d.option_count,
                 values,
+                sig_digits: d.significant_digits,
             });
         }
     } else {
@@ -1529,6 +1657,7 @@ fn generate_multi_answer_variant(
                 .map(|value| DecoyAnchor {
                     value,
                     requested_count: d.option_count,
+                    sig_digits: d.significant_digits,
                 })
             })
             .collect();
@@ -1548,15 +1677,13 @@ fn generate_multi_answer_variant(
         if !targets.is_empty() {
             match crate::engine::formula::parse_formula_assignments(alt_formula) {
                 Ok(parsed) if parsed.iter().any(|a| !a.target.is_empty()) => {
-                    if let Ok(results) =
-                        crate::engine::formula::evaluate_assignments_with_answers(
-                            &parsed,
-                            assigned_numeric,
-                            constants,
-                            assigned_strings,
-                            &answer_values,
-                        )
-                    {
+                    if let Ok(results) = crate::engine::formula::evaluate_assignments_with_answers(
+                        &parsed,
+                        assigned_numeric,
+                        constants,
+                        assigned_strings,
+                        &answer_values,
+                    ) {
                         for a in &parsed {
                             if a.target.is_empty() {
                                 continue;
@@ -1656,37 +1783,51 @@ fn generate_multi_answer_variant(
             return Ok(None);
         }
 
-        let (numeric_options, correct_option, alternate_option, interval_lo, interval_hi) =
-            match mode {
-                TemplateMode::Closed => {
-                    let mut rng = StdRng::seed_from_u64(options_seed.wrapping_add(idx as u64 + 1));
-                    let role_order = shared_role_order
-                        .as_ref()
-                        .expect("Closed mode with targets always plans a shared role order");
-                    let (options, has_alternate) = fill_target_options(
-                        role_order,
-                        correct,
-                        &decoy_rows,
-                        &alternate_values,
-                        &target.symbol,
-                        constraint,
-                        &mut rng,
-                        difficulty,
-                        spread_override,
-                        result_significant_digits,
-                    )?;
-                    let alternate_option = if has_alternate {
-                        shared_alternate_position
-                    } else {
-                        None
-                    };
-                    (Some(options), shared_correct_option, alternate_option, None, None)
-                }
-                TemplateMode::Open => {
-                    let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
-                    (None, None, None, Some(lo), Some(hi))
-                }
-            };
+        let (
+            numeric_options,
+            correct_option,
+            alternate_option,
+            option_sig_digits,
+            interval_lo,
+            interval_hi,
+        ) = match mode {
+            TemplateMode::Closed => {
+                let mut rng = StdRng::seed_from_u64(options_seed.wrapping_add(idx as u64 + 1));
+                let role_order = shared_role_order
+                    .as_ref()
+                    .expect("Closed mode with targets always plans a shared role order");
+                let (options, has_alternate, sig_digits) = fill_target_options(
+                    role_order,
+                    correct,
+                    &decoy_rows,
+                    &alternate_values,
+                    &target.symbol,
+                    constraint,
+                    &mut rng,
+                    difficulty,
+                    spread_override,
+                    result_significant_digits,
+                    alternative_significant_digits,
+                )?;
+                let alternate_option = if has_alternate {
+                    shared_alternate_position
+                } else {
+                    None
+                };
+                (
+                    Some(options),
+                    shared_correct_option,
+                    alternate_option,
+                    sig_digits,
+                    None,
+                    None,
+                )
+            }
+            TemplateMode::Open => {
+                let (lo, hi) = open_interval(correct, constraint, difficulty, spread_override);
+                (None, None, None, None, Some(lo), Some(hi))
+            }
+        };
 
         answers_data.push(AnswerField {
             symbol: target.symbol.clone(),
@@ -1697,11 +1838,18 @@ fn generate_multi_answer_variant(
             alternate_option,
             interval_lo,
             interval_hi,
+            option_sig_digits,
         });
     }
 
-    let (numeric_options, correct_option, alternate_option, interval_lo, interval_hi) = match mode
-    {
+    let (
+        numeric_options,
+        correct_option,
+        alternate_option,
+        option_sig_digits,
+        interval_lo,
+        interval_hi,
+    ) = match mode {
         TemplateMode::Closed if !targets.is_empty() => {
             // Reuse the first target's already row-aligned result for the
             // legacy top-level Variant fields instead of re-running
@@ -1711,13 +1859,14 @@ fn generate_multi_answer_variant(
                 first.numeric_options.clone(),
                 first.correct_option,
                 first.alternate_option,
+                first.option_sig_digits.clone(),
                 None,
                 None,
             )
         }
         TemplateMode::Closed => {
             let mut rng = StdRng::seed_from_u64(options_seed);
-            let (options, position, alt_position) = generate_numeric_options(
+            let (options, position, alt_position, sig_digits) = generate_numeric_options(
                 primary_correct,
                 &untargeted_decoys,
                 untargeted_alternate,
@@ -1728,12 +1877,20 @@ fn generate_multi_answer_variant(
                 force_correct_first,
                 spread_override,
                 result_significant_digits,
+                alternative_significant_digits,
             )?;
-            (Some(options), Some(position), alt_position, None, None)
+            (
+                Some(options),
+                Some(position),
+                alt_position,
+                sig_digits,
+                None,
+                None,
+            )
         }
         TemplateMode::Open => {
             let (lo, hi) = open_interval(primary_correct, constraint, difficulty, spread_override);
-            (None, None, None, Some(lo), Some(hi))
+            (None, None, None, None, Some(lo), Some(hi))
         }
     };
 
@@ -1746,6 +1903,7 @@ fn generate_multi_answer_variant(
         numeric_options,
         correct_option,
         alternate_option,
+        option_sig_digits,
         interval_lo,
         interval_hi,
         seed: base_seed,
@@ -1786,6 +1944,7 @@ pub fn generate_variants(
         false,
         None,
         result_significant_digits,
+        None,
     )
 }
 
@@ -1807,6 +1966,7 @@ pub fn generate_variants_with_targets(
     force_correct_first: bool,
     spread_override: Option<f64>,
     result_significant_digits: Option<u8>,
+    alternative_significant_digits: Option<u8>,
 ) -> Result<Vec<Variant>, GenerationError> {
     let mut variants = Vec::with_capacity(count);
     for i in 0..count {
@@ -1828,6 +1988,7 @@ pub fn generate_variants_with_targets(
             force_correct_first,
             spread_override,
             result_significant_digits,
+            alternative_significant_digits,
         )?;
         variants.push(variant);
     }
@@ -1870,6 +2031,7 @@ mod tests {
             formula: formula.to_string(),
             option_count,
             position: 0,
+            significant_digits: None,
         }
     }
 
@@ -2107,9 +2269,20 @@ mod tests {
         let constraint = make_constraint(Some(0.0), Some(1.0), None);
         let correct = 1e-6;
         let mut rng = StdRng::seed_from_u64(42);
-        let (options, _correct_pos, _alt) =
-            generate_numeric_options(correct, &[], None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, _correct_pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &[],
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         assert!(options.iter().any(|o| (o - 1e-6).abs() < 1e-12));
@@ -2122,9 +2295,20 @@ mod tests {
         let constraint = make_constraint(None, None, None);
         let correct = 1.674e-24; // mass of one H atom in grams
         let mut rng = StdRng::seed_from_u64(7);
-        let (options, correct_pos, _alt) =
-            generate_numeric_options(correct, &[], None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, correct_pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &[],
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         let correct_option = options[correct_pos as usize - 1];
@@ -2187,6 +2371,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -2231,6 +2416,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -2245,11 +2431,26 @@ mod tests {
         let constraint = make_constraint_typed(None, None, Some(0.1), ConstraintType::Sd);
         let correct = 0.01;
         let mut rng = StdRng::seed_from_u64(7);
-        let (options, _pos, _alt) =
-            generate_numeric_options(correct, &[], None, &constraint, &mut rng, "hard", 5, false, None, None)
-                .unwrap();
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &[],
+            None,
+            &constraint,
+            &mut rng,
+            "hard",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-        assert_eq!(options.len(), 5, "expected 5 options for correct answer {correct}");
+        assert_eq!(
+            options.len(),
+            5,
+            "expected 5 options for correct answer {correct}"
+        );
         assert!(options.iter().any(|o| (o - correct).abs() < 1e-12));
     }
 
@@ -2261,7 +2462,7 @@ mod tests {
         for &correct in &values {
             for seed in 0..5 {
                 let mut rng = StdRng::seed_from_u64(seed);
-                let (options, _pos, _alt) = generate_numeric_options(
+                let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
                     correct,
                     &[],
                     None,
@@ -2270,6 +2471,7 @@ mod tests {
                     "hard",
                     5,
                     false,
+                    None,
                     None,
                     None,
                 )
@@ -2317,11 +2519,16 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
         assert!(
-            variant.answers_data.as_ref().map(|v| v.is_empty()).unwrap_or(true),
+            variant
+                .answers_data
+                .as_ref()
+                .map(|v| v.is_empty())
+                .unwrap_or(true),
             "expected no answer targets when none are provided"
         );
         let v = variant.assigned_values["V"];
@@ -2334,12 +2541,16 @@ mod tests {
     /// there is no closed-mode equivalent.
     #[test]
     fn open_interval_width_follows_difficulty() {
-        let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
         let correct = 100.0;
 
-        for (difficulty, expected_half_width) in
-            [("easy", 50.0), ("medium", 30.0), ("hard", 10.0), ("very_hard", 5.0)]
-        {
+        for (difficulty, expected_half_width) in [
+            ("easy", 50.0),
+            ("medium", 30.0),
+            ("hard", 10.0),
+            ("very_hard", 5.0),
+        ] {
             let (lo, hi) = open_interval(correct, &constraint, difficulty, None);
             assert!(
                 (lo - (correct - expected_half_width)).abs() < 1e-9,
@@ -2358,12 +2569,16 @@ mod tests {
     /// narrower than `medium` anywhere below 0.1.
     #[test]
     fn open_interval_width_follows_difficulty_for_small_answers() {
-        let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
 
         for correct in [0.05_f64, 0.0025, 3.44e-22] {
-            for (difficulty, fraction) in
-                [("easy", 0.50), ("medium", 0.30), ("hard", 0.10), ("very_hard", 0.05)]
-            {
+            for (difficulty, fraction) in [
+                ("easy", 0.50),
+                ("medium", 0.30),
+                ("hard", 0.10),
+                ("very_hard", 0.05),
+            ] {
                 let (lo, hi) = open_interval(correct, &constraint, difficulty, None);
                 let expected = correct * fraction;
                 assert!(
@@ -2382,20 +2597,31 @@ mod tests {
     /// fallback width rather than a degenerate zero-wide interval.
     #[test]
     fn open_interval_falls_back_to_an_absolute_width_for_a_zero_answer() {
-        let constraint = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
         let (lo, hi) = open_interval(0.0, &constraint, "hard", None);
-        assert!((lo + ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12, "unexpected lower bound {lo}");
-        assert!((hi - ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12, "unexpected upper bound {hi}");
+        assert!(
+            (lo + ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12,
+            "unexpected lower bound {lo}"
+        );
+        assert!(
+            (hi - ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12,
+            "unexpected upper bound {hi}"
+        );
     }
 
     /// Precedence is unchanged by the floor fix: an explicit SD beats the
     /// per-question spread override, which beats the difficulty preset.
     #[test]
     fn open_interval_precedence_sd_then_override_then_difficulty() {
-        // An SD the answer can carry (2.5 against 100) outranks both.
-        let with_sd = ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
+        // A 2.5 percent SD on a 100 answer outranks both.
+        let with_sd =
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
         let (lo, hi) = open_interval(100.0, &with_sd, "hard", Some(0.40));
-        assert!((lo - 97.5).abs() < 1e-9 && (hi - 102.5).abs() < 1e-9, "SD must win: [{lo}, {hi}]");
+        assert!(
+            (lo - 97.5).abs() < 1e-9 && (hi - 102.5).abs() < 1e-9,
+            "SD must win: [{lo}, {hi}]"
+        );
 
         let plain = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
         let (lo, hi) = open_interval(0.05, &plain, "hard", Some(0.40));
@@ -2411,22 +2637,24 @@ mod tests {
         );
     }
 
-    /// A reported export: "Jaký je hmotnostní zlomek KI v roztoku..." came
-    /// out as `w = (-0,730..1,28)`. The template carries the same absolute
-    /// `sd_allowed = 1.0` that is perfectly sensible on the gram-scale
-    /// answers elsewhere in the set, but the answer here is a mass fraction
-    /// of 0.271, so ±1 accepted negative fractions, zero, and anything up to
-    /// 1.28. An SD that reaches zero is a misconfigured field, not a
-    /// tolerance, so the difficulty spread takes over.
+    /// A reported export shape: an interval like `w = (-0,730..1,28)` on a
+    /// mass fraction of 0.27 accepted negative fractions, zero, and anything
+    /// up to 1.28. Under the percent semantics that is a percentage of 100
+    /// or more, which would let the interval cross zero and reach past the
+    /// far side of the answer, so it is a misconfigured field, not a
+    /// tolerance, and the difficulty spread takes over.
     #[test]
-    fn an_sd_wider_than_the_answer_falls_back_to_the_difficulty_spread() {
+    fn an_sd_of_100_percent_or_more_falls_back_to_the_difficulty_spread() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(1.0), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(100.0), ConstraintType::Sd);
 
         // w = 317 / (317 + 854)
         let w = 317.0 / 1171.0;
         let (lo, hi) = open_interval(w, &constraint, "medium", None);
-        assert!(lo > 0.0, "a mass fraction interval must not go negative: [{lo}, {hi}]");
+        assert!(
+            lo > 0.0,
+            "a mass fraction interval must not go negative: [{lo}, {hi}]"
+        );
         assert!(
             ((hi - lo) / 2.0 - w * 0.30).abs() < 1e-9,
             "expected the medium spread, got [{lo}, {hi}]"
@@ -2435,44 +2663,61 @@ mod tests {
         // w = 29.8 / 171
         let w = 29.8 / 171.0;
         let (lo, hi) = open_interval(w, &constraint, "medium", None);
-        assert!(lo > 0.0, "a mass fraction interval must not go negative: [{lo}, {hi}]");
-        assert!(hi < 1.0, "a mass fraction interval must stay below 1: [{lo}, {hi}]");
+        assert!(
+            lo > 0.0,
+            "a mass fraction interval must not go negative: [{lo}, {hi}]"
+        );
+        assert!(
+            hi < 1.0,
+            "a mass fraction interval must stay below 1: [{lo}, {hi}]"
+        );
     }
 
-    /// The guard is about the SD being meaningless next to *this* answer, not
-    /// about its size: the very same template setting stays in force for the
-    /// gram-scale answers it was written for.
+    /// The guard is about the percentage being meaningless at 100 or more,
+    /// not about its size: any smaller percentage stays in force in full,
+    /// however narrow.
     #[test]
-    fn an_sd_narrower_than_the_answer_is_still_honored_in_full() {
+    fn an_sd_below_100_percent_is_still_honored_in_full() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(1.0), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(10.0), ConstraintType::Sd);
 
         let (lo, hi) = open_interval(213.5, &constraint, "medium", None);
         assert!(
-            (lo - 212.5).abs() < 1e-9 && (hi - 214.5).abs() < 1e-9,
-            "an absolute SD must still win for an answer it fits: [{lo}, {hi}]"
+            (lo - 192.15).abs() < 1e-9 && (hi - 234.85).abs() < 1e-9,
+            "a 10 percent SD must be honored in full: [{lo}, {hi}]"
         );
 
         // It also still beats a per-question spread override.
         let (lo, hi) = open_interval(213.5, &constraint, "medium", Some(0.40));
         assert!(
-            (lo - 212.5).abs() < 1e-9 && (hi - 214.5).abs() < 1e-9,
+            (lo - 192.15).abs() < 1e-9 && (hi - 234.85).abs() < 1e-9,
             "SD precedence changed: [{lo}, {hi}]"
         );
     }
 
-    /// The closed side reads the same window, so the same misconfiguration
-    /// used to offer a negative mass fraction as one of the options.
+    /// The closed side reads the same window, so a misconfigured percentage
+    /// of 100 or more must not offer a negative mass fraction as one of the
+    /// options.
     #[test]
     fn closed_options_for_a_fraction_stay_positive_with_an_oversized_sd() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(1.0), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(100.0), ConstraintType::Sd);
         let w = 317.0 / 1171.0;
 
         for seed in 0..8u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos, _alt) = generate_numeric_options(
-                w, &[], None, &constraint, &mut rng, "medium", 5, true, None, None,
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+                w,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                true,
+                None,
+                None,
+                None,
             )
             .expect("options");
             assert!(
@@ -2486,13 +2731,8 @@ mod tests {
     /// difficulty-derived width.
     #[test]
     fn open_interval_prefers_explicit_sd_over_difficulty() {
-        let constraint = ResultConstraint::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            Some(2.5),
-            ConstraintType::Sd,
-        );
+        let constraint =
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
         let (lo, hi) = open_interval(100.0, &constraint, "easy", None);
         assert!((lo - 97.5).abs() < 1e-9, "unexpected lower bound {lo}");
         assert!((hi - 102.5).abs() < 1e-9, "unexpected upper bound {hi}");
@@ -2507,15 +2747,30 @@ mod tests {
         let decoys = [DecoyAnchor {
             value: decoy,
             requested_count: 2,
+            sig_digits: None,
         }];
-        let (options, correct_pos, _alt) =
-            generate_numeric_options(correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, correct_pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         assert!(options.iter().any(|o| (o - decoy).abs() < 1e-9));
         assert_eq!(
-            options.iter().filter(|o| (**o - correct).abs() < 1e-9).count(),
+            options
+                .iter()
+                .filter(|o| (**o - correct).abs() < 1e-9)
+                .count(),
             1,
             "correct answer must appear exactly once"
         );
@@ -2536,10 +2791,22 @@ mod tests {
         let decoys = [DecoyAnchor {
             value: correct,
             requested_count: 2,
+            sig_digits: None,
         }];
-        let (options, _pos, _alt) =
-            generate_numeric_options(correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         assert_eq!(
@@ -2557,11 +2824,22 @@ mod tests {
         let decoys = [DecoyAnchor {
             value: decoy,
             requested_count: 2,
+            sig_digits: None,
         }];
         for seed in 0..50 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos, _alt) = generate_numeric_options(
-                correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, None,
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &decoys,
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                None,
+                None,
+                None,
             )
             .unwrap();
             let mut sorted = options.clone();
@@ -2581,7 +2859,7 @@ mod tests {
         let correct = 20.0;
         let alternate = 60.0; // far from correct and from any ±30% "medium" distractor
         let mut rng = StdRng::seed_from_u64(1);
-        let (options, correct_pos, alt_pos) = generate_numeric_options(
+        let (options, correct_pos, alt_pos, _sig_digits) = generate_numeric_options(
             correct,
             &[],
             Some(alternate),
@@ -2592,15 +2870,22 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
         assert_eq!(options.len(), 5);
         // When alternace is present the correct answer is always at a) (1)
         // and the alternate at b) (2), regardless of force_correct_first.
-        assert_eq!(correct_pos, 1, "correct must be at a) when alternace is present");
+        assert_eq!(
+            correct_pos, 1,
+            "correct must be at a) when alternace is present"
+        );
         let alt_pos = alt_pos.expect("valid alternate should get its own option slot");
-        assert_eq!(alt_pos, 2, "alternate must be at b) when alternace is present");
+        assert_eq!(
+            alt_pos, 2,
+            "alternate must be at b) when alternace is present"
+        );
         assert!((options[alt_pos as usize - 1] - alternate).abs() < 1e-9);
         assert!((options[correct_pos as usize - 1] - correct).abs() < 1e-9);
     }
@@ -2610,7 +2895,7 @@ mod tests {
         let constraint = make_constraint(Some(0.0), Some(1000.0), None);
         let correct = 20.0;
         let mut rng = StdRng::seed_from_u64(1);
-        let (options, _pos, alt_pos) = generate_numeric_options(
+        let (options, _pos, alt_pos, _sig_digits) = generate_numeric_options(
             correct,
             &[],
             Some(correct),
@@ -2621,16 +2906,199 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
         assert_eq!(options.len(), 5);
-        assert_eq!(alt_pos, None, "an alternate colliding with the correct answer must not be used");
         assert_eq!(
-            options.iter().filter(|o| (**o - correct).abs() < 1e-9).count(),
+            alt_pos, None,
+            "an alternate colliding with the correct answer must not be used"
+        );
+        assert_eq!(
+            options
+                .iter()
+                .filter(|o| (**o - correct).abs() < 1e-9)
+                .count(),
             1,
             "must not create a duplicate of the correct answer"
         );
+    }
+
+    #[test]
+    fn a_decoy_without_sig_digit_overrides_leaves_option_sig_digits_unset() {
+        // Backwards compatibility: no decoy/alternace override means the
+        // option list carries no per-option sig-digit vector at all, so
+        // stored variants keep the pre-feature shape.
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let mut rng = StdRng::seed_from_u64(1);
+        let (options, _pos, _alt, sig_digits) = generate_numeric_options(
+            20.0,
+            &[DecoyAnchor {
+                value: 60.0,
+                requested_count: 2,
+                sig_digits: None,
+            }],
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(options.len(), 5);
+        assert!(
+            sig_digits.is_none(),
+            "no overrides configured -> no per-option sig digits emitted"
+        );
+    }
+
+    #[test]
+    fn a_decoy_with_its_own_sig_digits_rounds_onto_its_grid_and_marks_its_slot() {
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let correct = 20.0;
+        let decoy_raw = 123.456;
+        let mut rng = StdRng::seed_from_u64(1);
+        let (options, _pos, _alt, sig_digits) = generate_numeric_options(
+            correct,
+            &[DecoyAnchor {
+                value: decoy_raw,
+                requested_count: 1,
+                sig_digits: Some(2),
+            }],
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // The decoy's own 2-significant-digit grid: 123.456 -> 120.
+        assert!(
+            options.iter().any(|o| (o - 120.0).abs() < 1e-9),
+            "decoy must round onto its own 2-sig-fig grid: {options:?}"
+        );
+        let sig_digits = sig_digits.expect("decoy override must activate the per-option vector");
+        assert_eq!(sig_digits.len(), options.len());
+        let marked: Vec<usize> = sig_digits
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.map(|_| i))
+            .collect();
+        assert_eq!(
+            marked.len(),
+            1,
+            "exactly one option (the decoy's) carries the override: {sig_digits:?}"
+        );
+        assert_eq!(sig_digits[marked[0]], Some(2));
+        assert!(
+            (options[marked[0]] - 120.0).abs() < 1e-9,
+            "the marked option must be the rounded decoy value"
+        );
+    }
+
+    #[test]
+    fn the_alternace_with_its_own_sig_digits_marks_its_slot() {
+        let constraint = make_constraint(Some(0.0), Some(1000.0), None);
+        let correct = 20.0;
+        let alternate = 60.0;
+        let mut rng = StdRng::seed_from_u64(1);
+        let (options, correct_pos, alt_pos, sig_digits) = generate_numeric_options(
+            correct,
+            &[],
+            Some(alternate),
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            Some(3),
+        )
+        .unwrap();
+
+        assert_eq!(correct_pos, 1);
+        let alt_pos = alt_pos.unwrap();
+        let sig_digits =
+            sig_digits.expect("alternace override must activate the per-option vector");
+        // The correct answer never carries an override; only the alternace.
+        assert_eq!(sig_digits[correct_pos as usize - 1], None);
+        assert_eq!(sig_digits[alt_pos as usize - 1], Some(3));
+        assert_eq!(
+            sig_digits.iter().filter(|s| s.is_some()).count(),
+            1,
+            "only the alternace slot is marked: {sig_digits:?}"
+        );
+        // The alternate rounds onto its own 3-sig-fig grid: 60.0 stays 60.0.
+        assert!((options[alt_pos as usize - 1] - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn variant_carries_per_option_sig_digits_for_decoy_and_alternace() {
+        let variables = vec![make_variable("X", 5.0, 5.0, 0.1, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let decoys = vec![TemplateDecoy {
+            id: Uuid::new_v4(),
+            template_id: Uuid::new_v4(),
+            formula: "X * 3".to_string(),
+            option_count: 1,
+            position: 0,
+            significant_digits: Some(2),
+        }];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "X * 2",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            777,
+            "medium",
+            5,
+            &HashMap::new(),
+            &[],
+            &decoys,
+            Some("X * 4"),
+            false,
+            None,
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        let sig = variant
+            .option_sig_digits
+            .as_ref()
+            .expect("variant must carry per-option sig digits");
+        let options = variant.numeric_options.as_ref().unwrap();
+        assert_eq!(sig.len(), options.len());
+        // Correct at a), alternace at b) with Some(1), the decoy's slot with
+        // Some(2), everything else None.
+        let alt_pos = variant.alternate_option.expect("alternace present") as usize - 1;
+        assert_eq!(sig[0], None, "correct answer never carries an override");
+        assert_eq!(sig[alt_pos], Some(1));
+        let marked: Vec<usize> = sig
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.map(|_| i))
+            .collect();
+        assert_eq!(marked.len(), 2, "decoy + alternace marked: {sig:?}");
+        let decoy_pos = *marked.iter().find(|&&i| i != alt_pos).unwrap();
+        assert_eq!(sig[decoy_pos], Some(2));
+        // X = 5: decoy X * 3 = 15, on the 2-sig-fig grid still 15.
+        assert!((options[decoy_pos] - 15.0).abs() < 1e-9);
+        assert_eq!(variant.correct_option, Some(1));
     }
 
     #[test]
@@ -2647,10 +3115,11 @@ mod tests {
         let decoys = [DecoyAnchor {
             value: alternate,
             requested_count: 2,
+            sig_digits: None,
         }];
         for seed in 0..50 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, correct_pos, alt_pos) = generate_numeric_options(
+            let (options, correct_pos, alt_pos, _sig_digits) = generate_numeric_options(
                 correct,
                 &decoys,
                 Some(alternate),
@@ -2659,6 +3128,7 @@ mod tests {
                 "medium",
                 5,
                 false,
+                None,
                 None,
                 None,
             )
@@ -2693,6 +3163,7 @@ mod tests {
             &[make_decoy("X * 3", 2)],
             None,
             false,
+            None,
             None,
             None,
         )
@@ -2733,6 +3204,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -2744,6 +3216,69 @@ mod tests {
             options.iter().any(|o| (o - decoy_value).abs() < 1e-6),
             "expected decoy value {decoy_value} (from intermediate n) among options {options:?}"
         );
+    }
+
+    #[test]
+    fn multi_answer_variant_carries_decoy_and_alternace_sig_digits_per_target() {
+        let variables = vec![make_variable("V", 10.0, 10.0, 1.0, 0)];
+        let constants = HashMap::new();
+        let constraint = make_constraint(Some(0.0), Some(10000.0), None);
+        let targets = vec![crate::engine::answer_targets::AnswerTarget {
+            symbol: "m".to_string(),
+            unit: Some("g".to_string()),
+        }];
+        let decoys = vec![TemplateDecoy {
+            id: Uuid::new_v4(),
+            template_id: Uuid::new_v4(),
+            formula: "n * 2".to_string(),
+            option_count: 1,
+            position: 0,
+            significant_digits: Some(2),
+        }];
+        let variant = generate_variant_with_targets(
+            Uuid::new_v4(),
+            "n = V / 10; m = n * 5",
+            &variables,
+            &constants,
+            &constraint,
+            TemplateMode::Closed,
+            12345,
+            "medium",
+            5,
+            &HashMap::new(),
+            &targets,
+            &decoys,
+            Some("m * 0.5"),
+            false,
+            None,
+            None,
+            Some(1),
+        )
+        .unwrap();
+
+        let answers = variant.answers_data.as_ref().expect("answers data");
+        assert_eq!(answers.len(), 1);
+        let sig = answers[0]
+            .option_sig_digits
+            .as_ref()
+            .expect("target field must carry per-option sig digits");
+        let options = answers[0].numeric_options.as_ref().unwrap();
+        assert_eq!(sig.len(), options.len());
+        // Correct row is unmarked; the alternace row carries Some(1) and the
+        // decoy's row Some(2); the rest inherit (None).
+        let alt_pos = answers[0].alternate_option.expect("alternace present") as usize - 1;
+        assert_eq!(sig[0], None);
+        assert_eq!(sig[alt_pos], Some(1));
+        let marked: Vec<usize> = sig
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.map(|_| i))
+            .collect();
+        assert_eq!(marked.len(), 2, "decoy + alternace marked: {sig:?}");
+        let decoy_pos = *marked.iter().find(|&&i| i != alt_pos).unwrap();
+        assert_eq!(sig[decoy_pos], Some(2));
+        // Top-level Variant mirrors the first (only) target's fields.
+        assert_eq!(variant.option_sig_digits, answers[0].option_sig_digits);
     }
 
     #[test]
@@ -2776,6 +3311,7 @@ mod tests {
             &[make_decoy("n * 2", 2)],
             None,
             false,
+            None,
             None,
             None,
         )
@@ -2825,6 +3361,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -2837,7 +3374,9 @@ mod tests {
             n_options.iter().any(|o| (o - alternate_value).abs() < 1e-6),
             "expected alternate value {alternate_value} among the first target's own options {n_options:?}"
         );
-        let alt_option = answers[0].alternate_option.expect("alternate should get its own slot");
+        let alt_option = answers[0]
+            .alternate_option
+            .expect("alternate should get its own slot");
         assert!((n_options[alt_option as usize - 1] - alternate_value).abs() < 1e-6);
     }
 
@@ -2874,6 +3413,7 @@ mod tests {
             &[make_decoy("n = n * 2", 2)],
             None,
             false,
+            None,
             None,
             None,
         )
@@ -2929,6 +3469,7 @@ mod tests {
             &[make_decoy("n = n * 2; m = m * 3", 2)],
             None,
             false,
+            None,
             None,
             None,
         )
@@ -2995,6 +3536,7 @@ mod tests {
                 &[make_decoy("n = n * 2; m = n * 5", 2)],
                 None,
                 false,
+                None,
                 None,
                 None,
             )
@@ -3072,6 +3614,7 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
             )
             .unwrap();
 
@@ -3143,6 +3686,7 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
             )
             .unwrap();
 
@@ -3193,6 +3737,7 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -3206,7 +3751,9 @@ mod tests {
             n_options.iter().any(|o| (o - alternate_value).abs() < 1e-6),
             "expected alternate value {alternate_value} among n's options {n_options:?}"
         );
-        let alt_option = answers[0].alternate_option.expect("n should get an alternate slot");
+        let alt_option = answers[0]
+            .alternate_option
+            .expect("n should get an alternate slot");
         assert!((n_options[alt_option as usize - 1] - alternate_value).abs() < 1e-6);
 
         assert!(
@@ -3250,18 +3797,14 @@ mod tests {
             false,
             None,
             None,
+            None,
         )
         .unwrap();
 
         let answers = variant.answers_data.as_ref().unwrap();
         for (i, answer) in answers.iter().enumerate() {
             let options = answer.numeric_options.as_ref().unwrap();
-            assert_eq!(
-                options.len(),
-                5,
-                "target {} should still get 5 options",
-                i
-            );
+            assert_eq!(options.len(), 5, "target {} should still get 5 options", i);
         }
     }
 
@@ -3285,6 +3828,7 @@ mod tests {
             &[make_decoy("this is not a valid formula (((", 2)],
             None,
             false,
+            None,
             None,
             None,
         )
@@ -3370,16 +3914,29 @@ mod tests {
             DecoyAnchor {
                 value: decoy_a,
                 requested_count: 1,
+                sig_digits: None,
             },
             DecoyAnchor {
                 value: decoy_b,
                 requested_count: 1,
+                sig_digits: None,
             },
         ];
         let mut rng = StdRng::seed_from_u64(7);
-        let (options, _pos, _alt) =
-            generate_numeric_options(correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         let in_band = |lo: f64, hi: f64| options.iter().filter(|o| **o >= lo && **o <= hi).count();
@@ -3420,16 +3977,29 @@ mod tests {
             DecoyAnchor {
                 value: decoy_a,
                 requested_count: 2,
+                sig_digits: None,
             },
             DecoyAnchor {
                 value: decoy_b,
                 requested_count: 2,
+                sig_digits: None,
             },
         ];
         let mut rng = StdRng::seed_from_u64(11);
-        let (options, _pos, _alt) =
-            generate_numeric_options(correct, &decoys, None, &constraint, &mut rng, "medium", 4, false, None, None)
-                .unwrap();
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            4,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 4);
         let in_band = |lo: f64, hi: f64| options.iter().filter(|o| **o >= lo && **o <= hi).count();
@@ -3459,23 +4029,42 @@ mod tests {
             DecoyAnchor {
                 value: f64::NAN,
                 requested_count: 2,
+                sig_digits: None,
             },
             DecoyAnchor {
                 value: valid_decoy,
                 requested_count: 1,
+                sig_digits: None,
             },
         ];
         let mut rng = StdRng::seed_from_u64(3);
-        let (options, _pos, _alt) =
-            generate_numeric_options(correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         let band = |anchor: f64| (anchor * 0.7, anchor * 1.3);
         let (v_lo, v_hi) = band(valid_decoy);
         let (c_lo, c_hi) = band(correct);
-        let valid_decoy_slots = options.iter().filter(|o| **o >= v_lo && **o <= v_hi).count();
-        let correct_slots = options.iter().filter(|o| **o >= c_lo && **o <= c_hi).count();
+        let valid_decoy_slots = options
+            .iter()
+            .filter(|o| **o >= v_lo && **o <= v_hi)
+            .count();
+        let correct_slots = options
+            .iter()
+            .filter(|o| **o >= c_lo && **o <= c_hi)
+            .count();
         assert_eq!(
             valid_decoy_slots, 1,
             "the valid decoy keeps exactly its own requested count: {options:?}"
@@ -3498,27 +4087,46 @@ mod tests {
             DecoyAnchor {
                 value: decoy_value,
                 requested_count: 2,
+                sig_digits: None,
             },
             DecoyAnchor {
                 value: decoy_value,
                 requested_count: 2,
+                sig_digits: None,
             },
         ];
         let mut rng = StdRng::seed_from_u64(5);
-        let (options, _pos, _alt) =
-            generate_numeric_options(correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, None)
-                .unwrap();
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(options.len(), 5);
         let band = |anchor: f64| (anchor * 0.7, anchor * 1.3);
         let (d_lo, d_hi) = band(decoy_value);
-        let decoy_slots = options.iter().filter(|o| **o >= d_lo && **o <= d_hi).count();
+        let decoy_slots = options
+            .iter()
+            .filter(|o| **o >= d_lo && **o <= d_hi)
+            .count();
         assert_eq!(
             decoy_slots, 4,
             "both decoys keep their full počet=2 (4 slots total), even though they collide: {options:?}"
         );
         assert_eq!(
-            options.iter().filter(|o| (**o - decoy_value).abs() < 1e-9).count(),
+            options
+                .iter()
+                .filter(|o| (**o - decoy_value).abs() < 1e-9)
+                .count(),
             2,
             "both decoys' exact anchor value should appear, once each: {options:?}"
         );
@@ -3530,9 +4138,20 @@ mod tests {
         let correct = 20.0;
         for seed in 0..20 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (_options, position, _alt) =
-                generate_numeric_options(correct, &[], None, &constraint, &mut rng, "medium", 5, true, None, None)
-                    .unwrap();
+            let (_options, position, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                true,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
             assert_eq!(
                 position, 1,
                 "force_correct_first must always place the correct answer at position 1, seed={seed}"
@@ -3571,8 +4190,18 @@ mod tests {
         let correct = 23.4759;
         for seed in 0..20 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, position, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 5, true, None, Some(5),
+            let (options, position, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                true,
+                None,
+                Some(5),
+                None,
             )
             .unwrap();
             let stored_correct = options[(position - 1) as usize];
@@ -3604,15 +4233,27 @@ mod tests {
             DecoyAnchor {
                 value: 23.4694, // rounds to 23.469 — distinct from correct
                 requested_count: 1,
+                sig_digits: None,
             },
             DecoyAnchor {
                 value: 23.4757, // rounds to 23.476 — same as correct, kept anyway
                 requested_count: 3,
+                sig_digits: None,
             },
         ];
         let mut rng = StdRng::seed_from_u64(7);
-        let (options, _pos, _alt) = generate_numeric_options(
-            correct, &decoys, None, &constraint, &mut rng, "medium", 5, false, None, Some(5),
+        let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            Some(5),
+            None,
         )
         .unwrap();
         assert!(options.iter().any(|o| (o - 23.469).abs() < 1e-9));
@@ -3634,12 +4275,24 @@ mod tests {
         let mut max_relative_deviation_without_override = 0.0_f64;
         for seed in 0..30 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos, _alt) =
-                generate_numeric_options(correct, &[], None, &constraint, &mut rng, "medium", 5, false, None, None)
-                    .unwrap();
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
             for o in &options {
                 let rel = (o - correct).abs() / correct;
-                max_relative_deviation_without_override = max_relative_deviation_without_override.max(rel);
+                max_relative_deviation_without_override =
+                    max_relative_deviation_without_override.max(rel);
             }
         }
         assert!(
@@ -3650,13 +4303,24 @@ mod tests {
         let mut max_relative_deviation_with_override = 0.0_f64;
         for seed in 0..30 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 5, false, Some(0.9), None,
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                Some(0.9),
+                None,
+                None,
             )
             .unwrap();
             for o in &options {
                 let rel = (o - correct).abs() / correct;
-                max_relative_deviation_with_override = max_relative_deviation_with_override.max(rel);
+                max_relative_deviation_with_override =
+                    max_relative_deviation_with_override.max(rel);
             }
         }
         assert!(
@@ -3669,8 +4333,14 @@ mod tests {
     fn spread_override_widens_open_interval_beyond_the_difficulty_preset() {
         let constraint = make_constraint(None, None, None);
         let (lo, hi) = open_interval(100.0, &constraint, "medium", Some(0.9));
-        assert!((lo - 10.0).abs() < 1e-9, "expected lower bound 10.0, got {lo}");
-        assert!((hi - 190.0).abs() < 1e-9, "expected upper bound 190.0, got {hi}");
+        assert!(
+            (lo - 10.0).abs() < 1e-9,
+            "expected lower bound 10.0, got {lo}"
+        );
+        assert!(
+            (hi - 190.0).abs() < 1e-9,
+            "expected upper bound 190.0, got {hi}"
+        );
     }
 
     #[test]
@@ -3709,8 +4379,18 @@ mod tests {
         let closed_constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
         for bad in [Some(0.0), Some(-0.5), Some(f64::NAN)] {
             let mut rng = StdRng::seed_from_u64(1);
-            let (options, _pos, _alt) = generate_numeric_options(
-                correct, &[], None, &closed_constraint, &mut rng, "medium", 5, false, bad, None,
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &closed_constraint,
+                &mut rng,
+                "medium",
+                5,
+                false,
+                bad,
+                None,
+                None,
             )
             .unwrap();
             for o in &options {
@@ -3773,6 +4453,7 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
             )
             .unwrap();
 
@@ -3799,7 +4480,6 @@ mod tests {
             );
         }
     }
-
 
     #[test]
     fn teacher_preview_pins_first_decoy_to_b_and_second_to_c_while_student_mode_stays_random() {
@@ -3842,6 +4522,7 @@ mod tests {
                 &decoys,
                 None,
                 true, // teacher preview
+                None,
                 None,
                 None,
             )
@@ -3893,6 +4574,7 @@ mod tests {
                 false, // student practice
                 None,
                 None,
+                None,
             )
             .unwrap();
 
@@ -3929,8 +4611,18 @@ mod tests {
         let correct = 7.0;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, correct_pos, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, None,
+            let (options, correct_pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                4,
+                false,
+                None,
+                None,
+                None,
             )
             .expect(&format!("seed={seed}: generation failed"));
 
@@ -3966,25 +4658,40 @@ mod tests {
     /// that combination is covered by the sig-figs tests above.)
     #[test]
     fn sd_even_count_shrink_binds_and_succeeds() {
-        let constraint = make_constraint_typed(None, None, Some(0.02), ConstraintType::Sd);
+        // 0.02 percent of 123.456 keeps the absolute window small enough
+        // that the closed-option SD refinement (2*window/(count+1)) shrinks
+        // the rounding grid below the default 0.01 display unit.
+        let sd_percent = 0.02;
+        let window = 123.456 * sd_percent / 100.0;
+        let constraint = make_constraint_typed(None, None, Some(sd_percent), ConstraintType::Sd);
         let correct = 123.456;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, correct_pos, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, None,
+            let (options, correct_pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                4,
+                false,
+                None,
+                None,
+                None,
             )
             .expect(&format!("seed={seed}: generation failed"));
 
-            let unit = 2.0 * 0.02 / (4.0 + 1.0);
+            let unit = 2.0 * window / (4.0 + 1.0);
             let rounded_correct = round_to_unit(correct, unit);
             assert_eq!(options.len(), 4, "seed={seed}");
             for o in &options {
                 assert!(
-                    *o >= rounded_correct - 0.02 && *o <= rounded_correct + 0.02,
-                    "seed={seed}: option {o} outside the ±0.02 window: {options:?}"
+                    *o >= rounded_correct - window && *o <= rounded_correct + window,
+                    "seed={seed}: option {o} outside the ±{window} window: {options:?}"
                 );
                 assert!(
-                    (o - rounded_correct).abs() <= 0.02,
+                    (o - rounded_correct).abs() <= window,
                     "seed={seed}: |option - rounded_correct| exceeds sd: {o}"
                 );
             }
@@ -4006,26 +4713,42 @@ mod tests {
     /// count=2 with a binding SD window must yield 2 distinct in-window
     /// options: the old 2*sd/count grid made k_span = 0.5 < 1 (generate_
     /// in_window_distractor returned None and generation failed); the fixed
-    /// 2*sd/(count+1) grid gives k_span = 1.0. Here 2*0.012/3 = 0.008 < 0.01,
-    /// so the shrink binds.
+    /// 2*sd/(count+1) grid gives k_span = 1.0. Here 0.01 percent of 123.456
+    /// gives window ≈ 0.0123 and 2*window/3 ≈ 0.0082 < 0.01, so the shrink
+    /// binds.
     #[test]
     fn sd_count_two_shrink_binds_and_succeeds() {
-        let constraint = make_constraint_typed(None, None, Some(0.012), ConstraintType::Sd);
+        // 0.01 percent of 123.456 keeps the absolute window small enough
+        // that the closed-option SD refinement (2*window/(count+1)) shrinks
+        // the rounding grid below the default 0.01 display unit.
+        let sd_percent = 0.01;
+        let window = 123.456 * sd_percent / 100.0;
+        let constraint = make_constraint_typed(None, None, Some(sd_percent), ConstraintType::Sd);
         let correct = 123.456;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, correct_pos, _alt) = generate_numeric_options(
-                correct, &[], None, &constraint, &mut rng, "medium", 2, false, None, None,
+            let (options, correct_pos, _alt, _sig_digits) = generate_numeric_options(
+                correct,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                2,
+                false,
+                None,
+                None,
+                None,
             )
             .expect(&format!("seed={seed}: generation failed"));
 
-            let unit = 2.0 * 0.012 / (2.0 + 1.0);
+            let unit = 2.0 * window / (2.0 + 1.0);
             let rounded_correct = round_to_unit(correct, unit);
             assert_eq!(options.len(), 2, "seed={seed}");
             for o in &options {
                 assert!(
-                    *o >= rounded_correct - 0.012 && *o <= rounded_correct + 0.012,
-                    "seed={seed}: option {o} outside the ±0.012 window: {options:?}"
+                    *o >= rounded_correct - window && *o <= rounded_correct + window,
+                    "seed={seed}: option {o} outside the ±{window} window: {options:?}"
                 );
             }
             assert!(
@@ -4039,13 +4762,13 @@ mod tests {
         }
     }
 
-    /// Open + SD: the accepted interval is exactly correct ± sd.
+    /// Open + SD: the accepted interval is exactly correct ± sd percent.
     #[test]
     fn open_with_sd_interval_is_exactly_correct_plus_minus_sd() {
-        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(10.0), ConstraintType::Sd);
         let (lo, hi) = open_interval(7.0, &constraint, "medium", None);
-        assert!((lo - 6.8).abs() < 1e-9, "unexpected lower bound {lo}");
-        assert!((hi - 7.2).abs() < 1e-9, "unexpected upper bound {hi}");
+        assert!((lo - 6.3).abs() < 1e-9, "unexpected lower bound {lo}");
+        assert!((hi - 7.7).abs() < 1e-9, "unexpected upper bound {hi}");
     }
 
     /// Open + invalid persisted SD (0, negative, NaN) must GHOST to the
@@ -4071,16 +4794,28 @@ mod tests {
         assert!((hi - 190.0).abs() < 1e-9, "unexpected upper bound {hi}");
     }
 
-    /// Tiny-SD float collapse (correct 1e6, sd 1e-12 rounds every in-window
-    /// grid offset back onto the correct answer) must return a Distractor
-    /// error naming the correct value, sd and option count.
+    /// Tiny-SD float collapse (correct 1e6, a percent so tiny the absolute
+    /// window is ~1e-16, which rounds every in-window grid offset back onto
+    /// the correct answer) must return a Distractor error naming the correct
+    /// value, the window and the option count.
     #[test]
     fn tiny_sd_float_collapse_returns_distractor_error() {
-        let constraint = make_constraint_typed(None, None, Some(1e-12), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(1e-20), ConstraintType::Sd);
         let correct = 1e6;
         let mut rng = StdRng::seed_from_u64(1);
-        let res =
-            generate_numeric_options(correct, &[], None, &constraint, &mut rng, "medium", 4, false, None, None);
+        let res = generate_numeric_options(
+            correct,
+            &[],
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            4,
+            false,
+            None,
+            None,
+            None,
+        );
         let err = res.expect_err("tiny sd must fail generation");
         match err {
             GenerationError::Distractor(msg) => {
@@ -4089,8 +4824,8 @@ mod tests {
                     "error must name the correct value: {msg}"
                 );
                 assert!(
-                    msg.contains("0.000000000001"),
-                    "error must name the sd: {msg}"
+                    msg.contains("0.0000000000000001"),
+                    "error must name the window: {msg}"
                 );
                 assert!(
                     msg.contains("4"),
@@ -4101,24 +4836,25 @@ mod tests {
         }
     }
 
-    /// A "both" constraint whose min/max cannot contain correct ± sd (so the
-    /// range can't even hold the open interval) fails via the existing
-    /// validate_result range-edge semantics — the sampled correct answer is
-    /// rejected and generation ultimately reports the constraint as
-    /// unsatisfiable.
+    /// A "both" constraint whose min/max cannot contain correct ± sd percent
+    /// (so the range can't even hold the open interval) fails via the
+    /// existing validate_result range-edge semantics — the sampled correct
+    /// answer is rejected and generation ultimately reports the constraint
+    /// as unsatisfiable.
     ///
     /// This documents the intended range-edge semantics: when SD is set on a
     /// range-constrained question, the teacher is responsible for a min/max
-    /// wide enough to contain correct ± sd; otherwise generation fails rather
-    /// than silently shrinking the window.
+    /// wide enough to contain correct ± sd percent; otherwise generation
+    /// fails rather than silently shrinking the window.
     #[test]
     fn both_constraint_with_sd_exceeding_range_fails_via_validate_result() {
         let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
         let constants = HashMap::new();
-        // correct = X * 2 in [2, 20]; min/max [5, 6] and sd 2 would need the
-        // open interval correct ± 2 ⊂ [5, 6], which no sampled correct can
-        // satisfy.
-        let constraint = make_constraint_typed(Some(5.0), Some(6.0), Some(2.0), ConstraintType::Both);
+        // correct = X * 2 in [2, 20]; min/max [5, 6] and sd 50 % would need
+        // the open interval correct/2..correct*1.5 ⊂ [5, 6], which no sampled
+        // correct can satisfy.
+        let constraint =
+            make_constraint_typed(Some(5.0), Some(6.0), Some(50.0), ConstraintType::Both);
         let res = generate_variant(
             Uuid::new_v4(),
             "X * 2",
@@ -4140,12 +4876,13 @@ mod tests {
 
     /// Multi-answer closed + SD: each target's window anchors on ITS OWN
     /// correct value, and every option for each target stays inside that
-    /// target's ±sd window.
+    /// target's ±sd percent window.
     #[test]
     fn multi_answer_closed_with_sd_keeps_each_target_inside_its_own_window() {
         let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
         let constants = HashMap::new();
-        let constraint = make_constraint_typed(None, None, Some(0.5), ConstraintType::Sd);
+        let sd_percent = 0.5;
+        let constraint = make_constraint_typed(None, None, Some(sd_percent), ConstraintType::Sd);
         let targets = vec![
             crate::engine::answer_targets::AnswerTarget {
                 symbol: "n".to_string(),
@@ -4175,6 +4912,7 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
             )
             .expect(&format!("seed={seed}: generation failed"));
 
@@ -4182,7 +4920,7 @@ mod tests {
             for answer in answers {
                 let options = answer.numeric_options.as_ref().unwrap();
                 let correct = answer.value;
-                let window = 0.5;
+                let window = correct.abs() * sd_percent / 100.0;
                 for o in options {
                     assert!(
                         (o - correct).abs() <= window * (1.0 + 1e-9),
@@ -4222,15 +4960,14 @@ mod tests {
     fn sig_figs_grid_wins_over_finer_sd_grid() {
         let constraint = make_constraint_typed(None, None, Some(0.0028), ConstraintType::Sd);
         let correct = 23.4759;
-        let decoys = [
-            DecoyAnchor {
-                value: 23.4779, // rounds to 23.478, inside the ±0.0028 window
-                requested_count: 1,
-            },
-        ];
+        let decoys = [DecoyAnchor {
+            value: 23.4779, // rounds to 23.478, inside the ±0.0028 window
+            requested_count: 1,
+            sig_digits: None,
+        }];
         for seed in 0..20u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos, _alt) = generate_numeric_options(
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
                 correct,
                 &decoys,
                 None,
@@ -4241,6 +4978,7 @@ mod tests {
                 false,
                 None,
                 Some(5),
+                None,
             )
             .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
             assert_eq!(options.len(), 5, "seed={seed}");
@@ -4266,7 +5004,7 @@ mod tests {
         let correct = 23.4759;
         for seed in 0..20u64 {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, _pos, _alt) = generate_numeric_options(
+            let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
                 correct,
                 &[],
                 None,
@@ -4277,6 +5015,7 @@ mod tests {
                 false,
                 None,
                 Some(5),
+                None,
             )
             .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
             assert_eq!(options.len(), 5, "seed={seed}");
@@ -4340,6 +5079,7 @@ mod tests {
                 false,
                 None,
                 Some(5),
+                None,
             )
             .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
             let answers = variant.answers_data.as_ref().unwrap();
@@ -4376,6 +5116,7 @@ mod tests {
                 false,
                 None,
                 Some(5),
+                None,
             )
             .unwrap_or_else(|e| panic!("seed={seed}: generation failed: {e}"));
             let answers = variant.answers_data.as_ref().unwrap();
@@ -4399,11 +5140,11 @@ mod tests {
 
     /// Open mode is untouched by the sig-figs clamp: with significant
     /// digits AND an sd set, the accepted interval is still exactly
-    /// correct ± sd (open_interval never sees the sig-figs setting).
+    /// correct ± sd percent (open_interval never sees the sig-figs setting).
     #[test]
     fn open_mode_sd_tolerance_unchanged_by_sig_figs_clamp() {
         let constants = HashMap::new();
-        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(10.0), ConstraintType::Sd);
         let mut fixed_values = HashMap::new();
         fixed_values.insert("X".to_string(), 3.5);
         let variant = generate_variant(
@@ -4424,11 +5165,11 @@ mod tests {
         let lo = variant.interval_lo.expect("open mode sets interval");
         let hi = variant.interval_hi.expect("open mode sets interval");
         assert!(
-            (lo - 6.8).abs() < 1e-9,
+            (lo - 6.3).abs() < 1e-9,
             "sig figs must not change the open-mode sd tolerance, got lo={lo}"
         );
         assert!(
-            (hi - 7.2).abs() < 1e-9,
+            (hi - 7.7).abs() < 1e-9,
             "sig figs must not change the open-mode sd tolerance, got hi={hi}"
         );
     }
@@ -4440,29 +5181,20 @@ mod tests {
     /// unmodified generator; any RNG-sequence drift breaks this test.
     #[test]
     fn no_sig_figs_path_byte_identical() {
-        // Single answer, SD window active (sd 0.2, decoy inside the window).
-        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
-        let decoys = [
-            DecoyAnchor {
-                value: 7.13,
-                requested_count: 1,
-            },
-        ];
+        // Single answer, SD window active (sd 4 %, decoy inside the window).
+        let constraint = make_constraint_typed(None, None, Some(4.0), ConstraintType::Sd);
+        let decoys = [DecoyAnchor {
+            value: 7.13,
+            requested_count: 1,
+            sig_digits: None,
+        }];
         for (seed, expected, expected_pos) in [
-            (
-                0u64,
-                vec![7.11, 7.09, 7.13, 7.0],
-                4u8,
-            ),
-            (7, vec![7.0, 6.92, 6.82, 7.13], 1),
-            (
-                42,
-                vec![7.13, 7.0200000000000005, 7.01, 7.0],
-                4,
-            ),
+            (0u64, vec![7.13, 6.74, 7.0, 7.15], 3u8),
+            (7, vec![7.0, 6.890000000000001, 6.74, 7.13], 1),
+            (42, vec![7.13, 7.0200000000000005, 7.01, 7.0], 4),
         ] {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, pos, alt) = generate_numeric_options(
+            let (options, pos, alt, _sig_digits) = generate_numeric_options(
                 7.0,
                 &decoys,
                 None,
@@ -4471,6 +5203,7 @@ mod tests {
                 "medium",
                 4,
                 false,
+                None,
                 None,
                 None,
             )
@@ -4482,31 +5215,18 @@ mod tests {
 
         // Single answer, no SD window (range constraint, decoy with počet 2).
         let constraint = make_constraint(Some(0.0), Some(1_000_000.0), None);
-        let decoys = [
-            DecoyAnchor {
-                value: 260.0,
-                requested_count: 2,
-            },
-        ];
+        let decoys = [DecoyAnchor {
+            value: 260.0,
+            requested_count: 2,
+            sig_digits: None,
+        }];
         for (seed, expected, expected_pos) in [
-            (
-                0u64,
-                vec![100.0, 85.42, 163.56, 96.76, 260.0],
-                1u8,
-            ),
-            (
-                7,
-                vec![268.98, 84.92, 100.0, 91.15, 260.0],
-                3,
-            ),
-            (
-                42,
-                vec![103.65, 100.0, 189.09, 260.0, 132.55],
-                2,
-            ),
+            (0u64, vec![100.0, 85.42, 163.56, 96.76, 260.0], 1u8),
+            (7, vec![268.98, 84.92, 100.0, 91.15, 260.0], 3),
+            (42, vec![103.65, 100.0, 189.09, 260.0, 132.55], 2),
         ] {
             let mut rng = StdRng::seed_from_u64(seed);
-            let (options, pos, alt) = generate_numeric_options(
+            let (options, pos, alt, _sig_digits) = generate_numeric_options(
                 100.0,
                 &decoys,
                 None,
@@ -4515,6 +5235,7 @@ mod tests {
                 "medium",
                 5,
                 false,
+                None,
                 None,
                 None,
             )
@@ -4527,7 +5248,7 @@ mod tests {
         // Multi-answer (fill_target_options), SD window active: the row
         // layout and every target's options must stay bit-identical.
         let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
-        let constraint = make_constraint_typed(None, None, Some(0.5), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(5.0), ConstraintType::Sd);
         let targets = vec![
             crate::engine::answer_targets::AnswerTarget {
                 symbol: "n".to_string(),
@@ -4541,13 +5262,13 @@ mod tests {
         for (seed, expected_n, expected_m) in [
             (
                 3u64,
-                vec![1.6400000000000001, 1.31, 1.75, 1.8, 1.95],
-                vec![8.84, 9.18, 9.3, 9.0, 9.370000000000001],
+                vec![1.77, 1.72, 1.79, 1.8, 1.83],
+                vec![8.85, 9.16, 9.27, 9.0, 9.33],
             ),
             (
                 11,
-                vec![3.54, 3.27, 3.5, 3.63, 3.5500000000000003],
-                vec![17.56, 17.86, 17.5, 17.61, 17.080000000000002],
+                vec![3.5100000000000002, 3.42, 3.5, 3.54, 3.52],
+                vec![17.61, 18.13, 17.5, 17.7, 16.76],
             ),
         ] {
             let variant = generate_variant_with_targets(
@@ -4567,6 +5288,7 @@ mod tests {
                 false,
                 None,
                 None,
+                None,
             )
             .unwrap();
             let answers = variant.answers_data.as_ref().unwrap();
@@ -4582,5 +5304,4 @@ mod tests {
             );
         }
     }
-
 }

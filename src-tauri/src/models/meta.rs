@@ -175,6 +175,10 @@ pub struct ProjektQuestion {
     /// exported before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answers_data: Option<Vec<crate::models::AnswerField>>,
+    /// Per-option significant-digit overrides, parallel to
+    /// `numeric_options`; see `AnswerField::option_sig_digits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_sig_digits: Option<Vec<Option<u8>>>,
     pub mode: TemplateMode,
     pub seed: u64,
 }

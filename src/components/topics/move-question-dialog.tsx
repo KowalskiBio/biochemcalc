@@ -112,7 +112,11 @@ export function MoveQuestionDialog({
           numericAnswer: details.template.numericAnswer,
           resultUnit: details.template.resultUnit,
           pointValue: targetCategory.category.pointValue,
-          decoys: details.decoys.map((d) => ({ formula: d.formula, optionCount: d.optionCount })),
+          decoys: details.decoys.map((d) => ({
+            formula: d.formula,
+            optionCount: d.optionCount,
+            significantDigits: d.significantDigits,
+          })),
           alternativeFormula: details.template.alternativeFormula,
           variableMutations,
           constants: details.constants.map((c) => ({ constantId: c.id })),

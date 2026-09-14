@@ -1,4 +1,6 @@
-use crate::db::repos::{ConstantRepo, OutputFileRepo, ProjektRepo, TemplateDecoyRepo, TemplateRepo};
+use crate::db::repos::{
+    ConstantRepo, OutputFileRepo, ProjektRepo, TemplateDecoyRepo, TemplateRepo,
+};
 use crate::db::{AppState, DbError};
 use crate::engine::answer_targets::{apply_result_units, extract_target_symbols};
 use crate::engine::export_writer::{write_txt, ExportQuestion};
@@ -113,6 +115,7 @@ pub fn do_generate_for_templates(
             true,
             spread_override,
             template.significant_digits,
+            template.alternative_significant_digits,
         )
         .map_err(generation_to_db_error)?;
 
@@ -293,6 +296,7 @@ pub(crate) fn do_regenerate_variant(
         true,
         None,
         template.significant_digits,
+        template.alternative_significant_digits,
     )
     .map_err(|e| DbError::Validation(e.to_string()))?;
 
@@ -306,7 +310,7 @@ pub(crate) fn do_regenerate_variant(
                 // correct value; the decoy and alternace are left out of scope
                 // here rather than evaluated against a correct answer the
                 // teacher chose.
-                let (options, position, _alt_position) = generate_numeric_options(
+                let (options, position, _alt_position, _sig_digits) = generate_numeric_options(
                     manual_answer,
                     &[],
                     None,
@@ -317,11 +321,13 @@ pub(crate) fn do_regenerate_variant(
                     true,
                     None,
                     template.significant_digits,
+                    None,
                 )
                 .map_err(|e| DbError::Validation(e.to_string()))?;
                 variant.numeric_options = Some(options);
                 variant.correct_option = Some(position);
                 variant.alternate_option = None;
+                variant.option_sig_digits = None;
             }
             TemplateMode::Open => {
                 let (lo, hi) = open_interval(manual_answer, &constraint, difficulty, None);
@@ -565,6 +571,7 @@ pub fn do_export_projekt_to_txt(
             force_scientific: pq.force_scientific,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         });
 
@@ -590,6 +597,7 @@ pub fn do_export_projekt_to_txt(
         // `ok` row, exporting differently from the same questions exported
         // straight from the set.
         variant.alternate_option = pq.alternate_option;
+        variant.option_sig_digits = pq.option_sig_digits.clone();
         variant.answers_data = pq.answers_data.clone();
         variants.push(variant);
     }
@@ -820,6 +828,7 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         };
         TemplateRepo::insert(&conn, &template, &[], &[], None, &[]).expect("insert template");
@@ -967,10 +976,18 @@ mod tests {
             .map(|(formula, option_count)| TemplateDecoyInput {
                 formula: formula.to_string(),
                 option_count: *option_count,
+                significant_digits: None,
             })
             .collect();
-        TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &decoy_inputs)
-            .expect("insert template");
+        TemplateRepo::insert(
+            conn,
+            &template,
+            &[tv],
+            &[],
+            Some(&constraint),
+            &decoy_inputs,
+        )
+        .expect("insert template");
         template.id
     }
 
@@ -1056,7 +1073,8 @@ mod tests {
                 .iter()
                 .flat_map(|v| v.numeric_options.as_ref().unwrap().iter())
                 .zip(results[0].variants.iter().flat_map(|v| {
-                    std::iter::repeat(v.correct_answer).take(v.numeric_options.as_ref().unwrap().len())
+                    std::iter::repeat(v.correct_answer)
+                        .take(v.numeric_options.as_ref().unwrap().len())
                 }))
                 .map(|(&option, correct)| (option - correct).abs() / correct)
                 .fold(0.0_f64, f64::max)
@@ -1073,7 +1091,8 @@ mod tests {
             custom_spread_percent: Some(90.0),
             ..base_payload
         };
-        let with_override = do_generate_for_templates(&conn, &with_override_payload).expect("generate");
+        let with_override =
+            do_generate_for_templates(&conn, &with_override_payload).expect("generate");
         let with_override_max = max_relative_deviation(&with_override);
         assert!(
             with_override_max > 0.55,
@@ -1167,6 +1186,7 @@ mod tests {
                     alternate_option: None,
                     interval_lo: Some(1.8),
                     interval_hi: Some(2.2),
+                    option_sig_digits: None,
                 },
                 crate::models::AnswerField {
                     symbol: "m".into(),
@@ -1177,10 +1197,12 @@ mod tests {
                     alternate_option: None,
                     interval_lo: Some(3.8),
                     interval_hi: Some(4.2),
+                    option_sig_digits: None,
                 },
             ]),
             mode,
             seed: 1,
+            option_sig_digits: None,
         }
     }
 
@@ -1262,7 +1284,8 @@ mod tests {
             "seed": 7
         }"#;
 
-        let parsed: ProjektQuestion = serde_json::from_str(legacy).expect("legacy projekt question");
+        let parsed: ProjektQuestion =
+            serde_json::from_str(legacy).expect("legacy projekt question");
         assert!(parsed.answers_data.is_none());
         assert!(parsed.alternate_option.is_none());
     }

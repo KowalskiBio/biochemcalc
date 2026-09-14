@@ -19,6 +19,12 @@ pub struct AnswerField {
     pub alternate_option: Option<u8>,
     pub interval_lo: Option<f64>,
     pub interval_hi: Option<f64>,
+    /// Per-option significant-digit overrides, parallel to `numeric_options`:
+    /// an entry is Some(n) when that option belongs to a decoy (or is the
+    /// alternace) configured with its own significant digits. None or a
+    /// None entry falls back to the template-level setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_sig_digits: Option<Vec<Option<u8>>>,
 }
 
 /// One generated student instance of a template.
@@ -43,6 +49,10 @@ pub struct Variant {
     /// `AnswerField::alternate_option` for single-answer templates.
     #[serde(default)]
     pub alternate_option: Option<u8>,
+    /// Per-option significant-digit overrides for single-answer templates,
+    /// parallel to `numeric_options`; see `AnswerField::option_sig_digits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_sig_digits: Option<Vec<Option<u8>>>,
     /// Interval bounds used in open mode.
     pub interval_lo: Option<f64>,
     pub interval_hi: Option<f64>,
@@ -76,6 +86,7 @@ impl Variant {
             numeric_options,
             correct_option,
             alternate_option: None,
+            option_sig_digits: None,
             interval_lo,
             interval_hi,
             seed,

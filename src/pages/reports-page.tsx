@@ -310,6 +310,9 @@ export function ReportsPage() {
                                     value={value}
                                     unit={slot.unit ?? selectedReport.resultUnit}
                                     precision={optionsPrecision[slotIdx]}
+                                    significantDigits={
+                                      slot.optionSigDigits?.[rowIdx] ?? slot.significantDigits
+                                    }
                                   />
                                 </span>
                               )

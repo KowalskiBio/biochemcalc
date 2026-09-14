@@ -466,7 +466,9 @@ export function StudentPracticePage() {
                                     value={value}
                                     unit={slot.unit ?? question.resultUnit}
                                     precision={optionsPrecision[slotIdx]}
-                                    significantDigits={slot.significantDigits}
+                                    significantDigits={
+                                      slot.optionSigDigits?.[rowIdx] ?? slot.significantDigits
+                                    }
                                     notation={question.forceScientific ? "scientific" : "normal"}
                                   />
                                 </span>

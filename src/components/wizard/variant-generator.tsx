@@ -170,6 +170,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
               onChange={(e) => setVariantCount(parseInt(e.target.value, 10) || 1)}
               min={1}
               max={100}
+              className="no-spinner"
             />
             <p className="text-xs text-muted-foreground">
               Total variants:{" "}
@@ -191,6 +192,7 @@ export function VariantGenerator({ templateAssignments, onNext, onBack }: Varian
               value={baseSeed}
               onChange={(e) => setBaseSeed(parseInt(e.target.value, 10) || 0)}
               placeholder="Enter seed for reproducible results"
+              className="no-spinner"
             />
             <p className="text-xs text-muted-foreground">
               Using the same seed will generate the same variants

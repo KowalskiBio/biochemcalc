@@ -11,7 +11,7 @@ impl TemplateDecoyRepo {
         template_id: &Uuid,
     ) -> Result<Vec<TemplateDecoy>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, template_id, formula, option_count, position
+            "SELECT id, template_id, formula, option_count, position, significant_digits
              FROM template_decoys WHERE template_id = ?1 ORDER BY position ASC",
         )?;
         let rows = stmt.query_map(params![template_id], |row| {
@@ -21,6 +21,7 @@ impl TemplateDecoyRepo {
                 formula: row.get(2)?,
                 option_count: row.get(3)?,
                 position: row.get(4)?,
+                significant_digits: row.get(5)?,
             })
         })?;
         let mut items = Vec::new();
@@ -44,14 +45,15 @@ impl TemplateDecoyRepo {
         )?;
         for (position, decoy) in decoys.iter().enumerate() {
             conn.execute(
-                "INSERT INTO template_decoys (id, template_id, formula, option_count, position)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO template_decoys (id, template_id, formula, option_count, position, significant_digits)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     Uuid::new_v4(),
                     template_id,
                     decoy.formula,
                     decoy.option_count,
                     position as i32,
+                    decoy.significant_digits,
                 ],
             )?;
         }
@@ -67,7 +69,8 @@ mod tests {
     fn setup_conn_with_template() -> (Connection, Uuid) {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
 
         let t = Template::new("Q?".into(), "X * 2".into(), "".into(), None, "g".into(), 2);
         crate::db::repos::TemplateRepo::insert(&conn, &t, &[], &[], None, &[])
@@ -93,10 +96,12 @@ mod tests {
                 TemplateDecoyInput {
                     formula: "X * 3".into(),
                     option_count: 1,
+                    significant_digits: None,
                 },
                 TemplateDecoyInput {
                     formula: "X * 5".into(),
                     option_count: 2,
+                    significant_digits: Some(3),
                 },
             ],
         )
@@ -108,6 +113,7 @@ mod tests {
         assert_eq!(decoys[0].position, 0);
         assert_eq!(decoys[1].formula, "X * 5");
         assert_eq!(decoys[1].position, 1);
+        assert_eq!(decoys[1].significant_digits, Some(3));
 
         // A second replace with a reordered, shorter list must fully
         // supersede the first — no leftover rows, positions renumbered.
@@ -117,6 +123,7 @@ mod tests {
             &[TemplateDecoyInput {
                 formula: "X * 7".into(),
                 option_count: 3,
+                significant_digits: None,
             }],
         )
         .expect("second replace");

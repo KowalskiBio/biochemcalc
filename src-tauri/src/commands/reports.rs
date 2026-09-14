@@ -4,12 +4,12 @@
 //! The snapshot is stored as JSON in `question_reports.snapshot` so a report
 //! remains readable even if its template or topic is later deleted.
 
+use crate::commands::crud::TemplateLocation;
 use crate::commands::generation::load_template_dependencies;
 use crate::commands::practice::{
-    correct_answers, constants_for_rendering, PracticeAnswerSlot, PracticeCorrectAnswer,
+    constants_for_rendering, correct_answers, PracticeAnswerSlot, PracticeCorrectAnswer,
     PracticeVariable,
 };
-use crate::commands::crud::TemplateLocation;
 use crate::db::repos::{
     PracticeAttemptRecord, PracticeRepo, QuestionReportRecord, QuestionReportRepo, TemplateRepo,
     TopicRepo, UserRepo,
@@ -107,24 +107,23 @@ pub fn do_report_question(
     payload: &ReportQuestionPayload,
 ) -> Result<(), DbError> {
     if payload.message.trim().is_empty() {
-        return Err(DbError::Validation("Popište, co je na otázce špatně.".into()));
+        return Err(DbError::Validation(
+            "Popište, co je na otázce špatně.".into(),
+        ));
     }
 
-    let attempt =
-        PracticeRepo::find_by_id_for_user(conn, &payload.attempt_id, user_id)?.ok_or_else(|| {
-            DbError::NotFound("Tuto otázku nahlásit nelze.".into())
-        })?;
+    let attempt = PracticeRepo::find_by_id_for_user(conn, &payload.attempt_id, user_id)?
+        .ok_or_else(|| DbError::NotFound("Tuto otázku nahlásit nelze.".into()))?;
 
     let template = TemplateRepo::get_by_id(conn, &attempt.template_id)?;
 
     let (variables, resolved_constants, _constraint, _fixed_values) =
         load_template_dependencies(conn, &template)?;
 
-    let placeholders: HashMap<Uuid, String> =
-        TemplateRepo::get_variables(conn, &template.id)?
-            .into_iter()
-            .map(|tv| (tv.variable_id, tv.placeholder))
-            .collect();
+    let placeholders: HashMap<Uuid, String> = TemplateRepo::get_variables(conn, &template.id)?
+        .into_iter()
+        .map(|tv| (tv.variable_id, tv.placeholder))
+        .collect();
 
     let practice_variables: Vec<PracticeVariable> = variables
         .into_iter()
@@ -179,7 +178,9 @@ pub fn do_report_question(
         Ok(()) => Ok(()),
         Err(DbError::Sqlite(e)) => {
             if e.to_string().contains("UNIQUE") {
-                Err(DbError::Validation("Tuto otázku jste již nahlásili.".into()))
+                Err(DbError::Validation(
+                    "Tuto otázku jste již nahlásili.".into(),
+                ))
             } else {
                 Err(DbError::Sqlite(e))
             }
@@ -189,9 +190,7 @@ pub fn do_report_question(
 }
 
 /// List all question reports with joined names.
-pub fn do_list_question_reports(
-    conn: &Connection,
-) -> Result<Vec<QuestionReportSummary>, DbError> {
+pub fn do_list_question_reports(conn: &Connection) -> Result<Vec<QuestionReportSummary>, DbError> {
     let rows = QuestionReportRepo::list_summaries(conn)?;
     Ok(rows
         .into_iter()
@@ -211,17 +210,13 @@ pub fn do_get_question_report(
     conn: &Connection,
     id: &Uuid,
 ) -> Result<QuestionReportDetail, DbError> {
-    let report =
-        QuestionReportRepo::get_by_id(conn, id)?
-            .ok_or_else(|| DbError::NotFound("Hlášení neexistuje.".into()))?;
+    let report = QuestionReportRepo::get_by_id(conn, id)?
+        .ok_or_else(|| DbError::NotFound("Hlášení neexistuje.".into()))?;
 
     let snapshot: TeacherQuestionSnapshot =
-        serde_json::from_str(&report.snapshot)
-            .map_err(|e| DbError::Serde(e))?;
+        serde_json::from_str(&report.snapshot).map_err(|e| DbError::Serde(e))?;
 
-    let is_correct =
-        QuestionReportRepo::attempt_is_correct(conn, &report.attempt_id)?
-            .flatten();  // Option<Option<bool>> -> Option<bool>
+    let is_correct = QuestionReportRepo::attempt_is_correct(conn, &report.attempt_id)?.flatten(); // Option<Option<bool>> -> Option<bool>
 
     let location = crud::do_get_template_location(conn, &snapshot.template_id)?;
 
@@ -259,10 +254,7 @@ pub fn do_get_question_report(
 }
 
 /// Delete a question report.
-pub fn do_delete_question_report(
-    conn: &Connection,
-    id: &Uuid,
-) -> Result<(), DbError> {
+pub fn do_delete_question_report(conn: &Connection, id: &Uuid) -> Result<(), DbError> {
     if !QuestionReportRepo::delete(conn, id)? {
         return Err(DbError::NotFound("Hlášení neexistuje.".into()));
     }
@@ -294,6 +286,11 @@ fn build_answer_slots_from_attempt(
                     None
                 },
                 significant_digits,
+                option_sig_digits: if closed {
+                    field.option_sig_digits.clone()
+                } else {
+                    None
+                },
             })
             .collect(),
         _ => vec![PracticeAnswerSlot {
@@ -305,15 +302,20 @@ fn build_answer_slots_from_attempt(
                 None
             },
             significant_digits,
+            option_sig_digits: if closed {
+                attempt.option_sig_digits.clone()
+            } else {
+                None
+            },
         }],
     }
 }
 
 // Re-export crud helper for template location lookup
 mod crud {
-    use crate::db::DbError;
     use crate::commands::crud::TemplateLocation;
     use crate::db::repos::{CategoryRepo, SetRepo};
+    use crate::db::DbError;
     use rusqlite::Connection;
     use uuid::Uuid;
 
@@ -339,12 +341,13 @@ mod tests {
     use super::*;
     use crate::commands::practice::PracticeQuestion;
     use crate::db::repos::{
-        CategoryRepo, SetRepo, UserRecord, UserRepo,
-        topic_repo::TopicRepo as TPR, 
-        variable_repo::VariableRepo as VPR,
-        template_repo::TemplateRepo as TR,
+        template_repo::TemplateRepo as TR, topic_repo::TopicRepo as TPR,
+        variable_repo::VariableRepo as VPR, CategoryRepo, SetRepo, UserRecord, UserRepo,
     };
-    use crate::models::{Role, TemplateMode, Topic, Variable, ConstraintType, ResultConstraint, Template, TemplateVariable};
+    use crate::models::{
+        ConstraintType, ResultConstraint, Role, Template, TemplateMode, TemplateVariable, Topic,
+        Variable,
+    };
     use chrono::Utc;
 
     fn setup_conn() -> Connection {
@@ -376,15 +379,7 @@ mod tests {
 
         let (_, sets) = CategoryRepo::create(conn, topic.id, point_value).expect("create category");
 
-        let variable = Variable::new(
-            "Hmotnost".into(),
-            "X".into(),
-            1.0,
-            10.0,
-            1.0,
-            "g".into(),
-            0,
-        );
+        let variable = Variable::new("Hmotnost".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
         VPR::insert_raw(conn, &variable).expect("insert variable");
 
         let template = Template::new(
@@ -409,8 +404,7 @@ mod tests {
             greater_than_variable_id: None,
             less_than_variable_id: None,
         };
-        TR::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
-            .expect("insert template");
+        TR::insert(conn, &template, &[tv], &[], Some(&constraint), &[]).expect("insert template");
         SetRepo::add_template(conn, &sets[0].id, &template.id).expect("add template to set");
 
         (topic.id, template.id)
@@ -427,7 +421,8 @@ mod tests {
                 mode: None,
                 set_id: None,
             },
-        ).expect("serve question")
+        )
+        .expect("serve question")
     }
 
     #[test]
@@ -515,8 +510,13 @@ mod tests {
                 answers: Some(vec![expected]),
             },
             TemplateMode::Closed => {
-                let options = question.answer_slots[0].numeric_options.clone().expect("options");
-                let position = options.iter().position(|o| (o - expected).abs() < 1e-9)
+                let options = question.answer_slots[0]
+                    .numeric_options
+                    .clone()
+                    .expect("options");
+                let position = options
+                    .iter()
+                    .position(|o| (o - expected).abs() < 1e-9)
                     .expect("correct value in options") as u8;
                 super::super::practice::SubmitAnswerPayload {
                     attempt_id: question.attempt_id,
@@ -594,16 +594,20 @@ mod tests {
         do_report_question(&conn, &student, &payload).expect("report");
 
         // Delete the template and its set_templates reference (FK may block, so disable FKs)
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
         conn.execute(
             "DELETE FROM set_templates WHERE template_id = ?1",
             rusqlite::params![template_id],
-        ).expect("delete set_templates entry");
+        )
+        .expect("delete set_templates entry");
         conn.execute(
             "DELETE FROM templates WHERE id = ?1",
             rusqlite::params![template_id],
-        ).expect("delete template");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        )
+        .expect("delete template");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
 
         let summaries = do_list_question_reports(&conn).expect("list");
         let detail = do_get_question_report(&conn, &summaries[0].id).expect("detail");

@@ -39,7 +39,7 @@ impl TemplateMode {
 pub enum ConstraintType {
     /// Keep the computed result inside [min_result, max_result].
     Range,
-    /// Keep the computed result within ±sd_allowed of the target answer.
+    /// Keep the computed result within ±sd_allowed percent of the target answer.
     Sd,
     /// Both range and SD constraints must hold.
     Both,
@@ -67,6 +67,10 @@ pub struct Template {
     /// a correct answer, becoming a second correct closed-mode option.
     #[serde(default)]
     pub alternative_formula: Option<String>,
+    /// Significant digits for the alternace option only. None means the
+    /// template-level `significant_digits` applies to it as well.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative_significant_digits: Option<u8>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -91,6 +95,7 @@ impl Template {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         }
     }
@@ -127,6 +132,10 @@ pub struct TemplateDecoy {
     pub formula: String,
     pub option_count: u8,
     pub position: i32,
+    /// Significant digits for this decoy's options only. None means the
+    /// template-level `significant_digits` applies to them as well.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub significant_digits: Option<u8>,
 }
 
 /// A decoy as submitted by the teacher, before persistence assigns it an id
@@ -136,6 +145,8 @@ pub struct TemplateDecoy {
 pub struct TemplateDecoyInput {
     pub formula: String,
     pub option_count: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub significant_digits: Option<u8>,
 }
 
 /// Constraints placed on the computed result of a template.

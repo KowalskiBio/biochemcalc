@@ -122,12 +122,12 @@ fn format_chemical_text(text: &str) -> String {
 
     let hydrate_re = HYDRATE_RE
         .get_or_init(|| Regex::new(r"([A-Za-z0-9)])[·.](\d*)(H[₂2_]?[_₂2]?O)\b").unwrap());
-    let sup_re = SUP_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])").unwrap());
+    let sup_re =
+        SUP_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])").unwrap());
     // Chained compound subscripts (K_a_1 -> Ka1, one symbol, one subscript)
     // merge into a single <sub>; each "_xxx" segment stays non-greedy so
     // H_2SO_4 splits into two subscripts instead of swallowing "SO".
-    let sub_re =
-        SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])((?:_[A-Za-z0-9]+?)+)").unwrap());
+    let sub_re = SUB_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])((?:_[A-Za-z0-9]+?)+)").unwrap());
     let star_mul_re =
         STAR_MUL_RE.get_or_init(|| Regex::new(r"([A-Za-z0-9)])[\*·]([A-Za-z0-9(])").unwrap());
     // Rust's regex crate has no lookahead, so the `10^` is captured and
@@ -290,7 +290,8 @@ fn fmt_variable_value(
         Some(n) => {
             let formatted = fmt_significant_cz(value, n);
             let rounded: f64 = formatted.replace(',', ".").parse().unwrap_or(value);
-            let degenerate = (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD;
+            let degenerate =
+                (rounded == 0.0 && value != 0.0) || rounded.abs() >= SCIENTIFIC_UPPER_THRESHOLD;
             if degenerate && value != 0.0 && value.is_finite() {
                 return fmt_scientific_cz(value, mantissa_decimals);
             }
@@ -324,7 +325,12 @@ fn fmt_variable_value(
 ///   `fmt_variable_value` would try, so its zero-collapse fallback never
 ///   fires and it would otherwise print as a wall of decimal zeros — a
 ///   correctness floor, not a style choice.
-fn fmt_option_value(value: f64, precision: u8, sig_digits: Option<u8>, notation: Notation) -> String {
+fn fmt_option_value(
+    value: f64,
+    precision: u8,
+    sig_digits: Option<u8>,
+    notation: Notation,
+) -> String {
     let auto_below_threshold =
         notation == Notation::Auto && value.abs() < SCIENTIFIC_LOWER_THRESHOLD;
     let wall_of_zeros = value.abs() < SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD;
@@ -391,6 +397,13 @@ fn render_question(
     rendered
 }
 
+/// Per-option significant-digit override for option `idx`, if this option
+/// belongs to a decoy (or is the alternace) configured with its own
+/// significant digits. `None` falls back to the template-level setting.
+fn option_sig_override(per_option: Option<&[Option<u8>]>, idx: usize) -> Option<u8> {
+    per_option.and_then(|v| v.get(idx).copied().flatten())
+}
+
 /// Decimals needed to print every option in one set as a distinct number.
 ///
 /// Mirrors `resolveOptionsPrecision` in `src/lib/math-utils.ts`, which the
@@ -401,22 +414,34 @@ fn render_question(
 /// prints. A question built around a narrow SD percent at ~1,0 then reaches
 /// the student as `1,00 / 0,99 / 0,99 / 1,01 / 1,01`: five options, three
 /// values. Significant digits are left alone, since there the grid and the
-/// rendering are the same setting.
+/// rendering are the same setting — except per-option overrides, which are
+/// honored per value so a decoy with its own setting still renders
+/// distinctly.
 fn options_precision(
     values: &[f64],
     preferred: u8,
     sig_digits: Option<u8>,
     notation: Notation,
+    per_option_sig: Option<&[Option<u8>]>,
 ) -> u8 {
     const MAX_PRECISION: u8 = 6;
-    if sig_digits.is_some() || values.len() < 2 {
+    let any_override = per_option_sig.is_some_and(|v| v.iter().any(|s| s.is_some()));
+    if (sig_digits.is_some() && !any_override) || values.len() < 2 {
         return preferred;
     }
     let mut precision = preferred;
     while precision < MAX_PRECISION {
         let mut rendered: Vec<String> = values
             .iter()
-            .map(|v| fmt_option_value(*v, precision, sig_digits, notation))
+            .enumerate()
+            .map(|(i, v)| {
+                fmt_option_value(
+                    *v,
+                    precision,
+                    option_sig_override(per_option_sig, i).or(sig_digits),
+                    notation,
+                )
+            })
             .collect();
         let total = rendered.len();
         rendered.sort();
@@ -453,6 +478,7 @@ fn render_multi_closed_options(
                 precision,
                 sig_digits,
                 notation,
+                a.option_sig_digits.as_deref(),
             )
         })
         .collect();
@@ -465,12 +491,15 @@ fn render_multi_closed_options(
             .map(|(a, &precision)| {
                 let value = a.numeric_options.as_ref().unwrap()[idx];
                 let unit = a.unit.as_deref().unwrap_or("");
+                // A decoy's (or the alternace's) own significant-digits
+                // override applies to just this option.
+                let sig = option_sig_override(a.option_sig_digits.as_deref(), idx).or(sig_digits);
                 if unit.is_empty() {
-                    fmt_option_value(value, precision, sig_digits, notation)
+                    fmt_option_value(value, precision, sig, notation)
                 } else {
                     format!(
                         "{} {}",
-                        fmt_option_value(value, precision, sig_digits, notation),
+                        fmt_option_value(value, precision, sig, notation),
                         format_chemical_text(unit)
                     )
                 }
@@ -782,13 +811,18 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         q.result_precision,
                         q.result_significant_digits,
                         result_notation,
+                        q.variant.option_sig_digits.as_deref(),
                     );
                     for (idx, value) in numeric.iter().enumerate() {
                         let label = idx + 1;
+                        // A decoy's (or the alternace's) own significant-digits
+                        // override applies to just this option.
+                        let sig = option_sig_override(q.variant.option_sig_digits.as_deref(), idx)
+                            .or(q.result_significant_digits);
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_option_value(*value, precision, q.result_significant_digits, result_notation),
+                            fmt_option_value(*value, precision, sig, result_notation),
                             format_chemical_text(&q.template.result_unit)
                         ));
                     }
@@ -857,6 +891,7 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         }
     }
@@ -969,9 +1004,15 @@ mod tests {
 
     #[test]
     fn large_values_export_as_html_scientific_notation() {
-        assert_eq!(fmt_value_cz(1.524493429448685e25, 2), "1,52×10<sup>25</sup>");
+        assert_eq!(
+            fmt_value_cz(1.524493429448685e25, 2),
+            "1,52×10<sup>25</sup>"
+        );
         assert_eq!(fmt_value_cz(6.022e23, 2), "6,02×10<sup>23</sup>");
-        assert_eq!(fmt_value_cz(-1.8433287150633585e25, 2), "-1,84×10<sup>25</sup>");
+        assert_eq!(
+            fmt_value_cz(-1.8433287150633585e25, 2),
+            "-1,84×10<sup>25</sup>"
+        );
         assert_eq!(fmt_value_cz(5.2149e24, 2), "5,21×10<sup>24</sup>");
     }
 
@@ -1141,9 +1182,7 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(
-                ":n=10500000000000000000000000..13500000000000000000000000 ok 3"
-            ),
+            output.contains(":n=10500000000000000000000000..13500000000000000000000000 ok 3"),
             "expected a plain decimal interval, got:\n{output}"
         );
         assert!(
@@ -1174,8 +1213,14 @@ mod tests {
             force_scientific: false,
             mode: TemplateMode::Closed,
         }]);
-        assert!(output.contains(" :r1 64,0 g"), "missing options in:\n{output}");
-        assert!(output.contains(":r1 ok 3"), "missing evaluation row in:\n{output}");
+        assert!(
+            output.contains(" :r1 64,0 g"),
+            "missing options in:\n{output}"
+        );
+        assert!(
+            output.contains(":r1 ok 3"),
+            "missing evaluation row in:\n{output}"
+        );
 
         let mut open = make_closed_variant();
         open.answers_data = Some(vec![]);
@@ -1194,7 +1239,10 @@ mod tests {
             force_scientific: false,
             mode: TemplateMode::Open,
         }]);
-        assert!(output.contains(" :n  g\n"), "missing input field in:\n{output}");
+        assert!(
+            output.contains(" :n  g\n"),
+            "missing input field in:\n{output}"
+        );
         assert!(
             output.contains(":n=45,1..45,9 ok 3"),
             "missing evaluation row in:\n{output}"
@@ -1359,7 +1407,9 @@ mod tests {
             "expected bare e-notation for sub-0,1 bounds, got:\n{output}"
         );
         assert!(
-            !output.contains("0,00004") && !output.contains("0,00003") && !output.contains("0,00005"),
+            !output.contains("0,00004")
+                && !output.contains("0,00003")
+                && !output.contains("0,00005"),
             "tiny bound printed as a wall of decimal zeros instead of e-notation:\n{output}"
         );
     }
@@ -1601,6 +1651,7 @@ mod tests {
                 alternate_option: None,
                 interval_lo: None,
                 interval_hi: None,
+                option_sig_digits: None,
             },
             crate::models::AnswerField {
                 symbol: "m".to_string(),
@@ -1611,6 +1662,7 @@ mod tests {
                 alternate_option: None,
                 interval_lo: None,
                 interval_hi: None,
+                option_sig_digits: None,
             },
         ]);
         let precisions = [("X".to_string(), 1)].into();
@@ -1654,8 +1706,14 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains(":r1 ok 3"), "primary correct must be marked ok");
-        assert!(output.contains(":r2 ok 3"), "alternate must also be marked ok");
+        assert!(
+            output.contains(":r1 ok 3"),
+            "primary correct must be marked ok"
+        );
+        assert!(
+            output.contains(":r2 ok 3"),
+            "alternate must also be marked ok"
+        );
     }
 
     /// Same for multi-answer closed export: when the first target carries an
@@ -1674,6 +1732,7 @@ mod tests {
                 alternate_option: Some(2),
                 interval_lo: None,
                 interval_hi: None,
+                option_sig_digits: None,
             },
             crate::models::AnswerField {
                 symbol: "m".to_string(),
@@ -1684,6 +1743,7 @@ mod tests {
                 alternate_option: Some(2),
                 interval_lo: None,
                 interval_hi: None,
+                option_sig_digits: None,
             },
         ]);
         let output = write_txt(&[ExportQuestion {
@@ -1698,8 +1758,14 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains(":r1 ok 3"), "primary correct must be marked ok");
-        assert!(output.contains(":r2 ok 3"), "alternate must also be marked ok");
+        assert!(
+            output.contains(":r1 ok 3"),
+            "primary correct must be marked ok"
+        );
+        assert!(
+            output.contains(":r2 ok 3"),
+            "alternate must also be marked ok"
+        );
     }
 
     #[test]
@@ -1716,6 +1782,7 @@ mod tests {
                 alternate_option: None,
                 interval_lo: Some(1.8),
                 interval_hi: Some(2.2),
+                option_sig_digits: None,
             },
             crate::models::AnswerField {
                 symbol: "m".to_string(),
@@ -1726,6 +1793,7 @@ mod tests {
                 alternate_option: None,
                 interval_lo: Some(3.8),
                 interval_hi: Some(4.2),
+                option_sig_digits: None,
             },
         ]);
         let precisions = [("X".to_string(), 1)].into();
@@ -1859,6 +1927,7 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         }
     }
@@ -2027,6 +2096,7 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         };
         let variant = make_closed_variant();
@@ -2066,6 +2136,7 @@ mod tests {
             force_scientific: false,
             decoy_formula: None,
             alternative_formula: None,
+            alternative_significant_digits: None,
             created_at: Utc::now(),
         };
         let variant = Variant {
@@ -2174,6 +2245,7 @@ mod tests {
                 alternate_option: None,
                 interval_lo: None,
                 interval_hi: None,
+                option_sig_digits: None,
             },
             // Target 2: m (g) — options on the 5-sig-fig grid
             crate::models::AnswerField {
@@ -2185,6 +2257,7 @@ mod tests {
                 alternate_option: None,
                 interval_lo: None,
                 interval_hi: None,
+                option_sig_digits: None,
             },
         ]);
         let precisions = [("X".to_string(), 1)].into();
@@ -2247,16 +2320,28 @@ mod tests {
     #[test]
     fn chemical_text_renders_unit_products_as_multiplication() {
         assert_eq!(format_chemical_text("g*cm^-3"), "g\u{d7}cm<sup>-3</sup>");
-        assert_eq!(format_chemical_text("g\u{b7}cm^-3"), "g\u{d7}cm<sup>-3</sup>");
+        assert_eq!(
+            format_chemical_text("g\u{b7}cm^-3"),
+            "g\u{d7}cm<sup>-3</sup>"
+        );
         assert_eq!(format_chemical_text("g.cm^-3"), "g\u{d7}cm<sup>-3</sup>");
-        assert_eq!(format_chemical_text("mol.dm^-3"), "mol\u{d7}dm<sup>-3</sup>");
+        assert_eq!(
+            format_chemical_text("mol.dm^-3"),
+            "mol\u{d7}dm<sup>-3</sup>"
+        );
         assert_eq!(format_chemical_text("mg.ml^-1"), "mg\u{d7}ml<sup>-1</sup>");
     }
 
     #[test]
     fn chemical_text_renders_czech_power_of_ten_as_multiplication() {
-        assert_eq!(format_chemical_text("3,53.10^-4"), "3,53\u{d7}10<sup>-4</sup>");
-        assert_eq!(format_chemical_text("1,8*10^-5"), "1,8\u{d7}10<sup>-5</sup>");
+        assert_eq!(
+            format_chemical_text("3,53.10^-4"),
+            "3,53\u{d7}10<sup>-4</sup>"
+        );
+        assert_eq!(
+            format_chemical_text("1,8*10^-5"),
+            "1,8\u{d7}10<sup>-5</sup>"
+        );
     }
 
     #[test]

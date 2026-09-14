@@ -144,7 +144,8 @@ mod tests {
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         conn
     }
 
@@ -210,7 +211,10 @@ mod tests {
 
         let first = TestSessionRepo::mark_finished(&conn, &record.id).expect("finish once");
         let second = TestSessionRepo::mark_finished(&conn, &record.id).expect("finish again");
-        assert_eq!(first, second, "a second call must not overwrite the first finish time");
+        assert_eq!(
+            first, second,
+            "a second call must not overwrite the first finish time"
+        );
     }
 
     #[test]
@@ -247,6 +251,7 @@ mod tests {
                     test_session_id: Some(record.id),
                     position: Some(0),
                     streak_run_id: None,
+                    option_sig_digits: None,
                 },
             )
             .expect("insert attempt");
@@ -283,6 +288,7 @@ mod tests {
                 test_session_id: Some(other_session.id),
                 position: Some(0),
                 streak_run_id: None,
+                option_sig_digits: None,
             },
         )
         .expect("insert unrelated attempt");

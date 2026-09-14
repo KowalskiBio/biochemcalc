@@ -639,11 +639,11 @@ export function TemplateDialog({
 
               {formData.constraint?.constraintType === "sd" && (
                 <div className="space-y-2 col-span-2">
-                  <Label>SD Allowed</Label>
+                  <Label>SD Allowed (%)</Label>
                   <DecimalInput
                     value={formData.constraint?.sdAllowed ?? ""}
                     onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
-                    placeholder="Standard deviation"
+                    placeholder="Percent of the answer (e.g. 10)"
                   />
                 </div>
               )}
@@ -667,11 +667,11 @@ export function TemplateDialog({
                     />
                   </div>
                   <div className="space-y-2 col-span-2">
-                    <Label>SD Allowed</Label>
+                    <Label>SD Allowed (%)</Label>
                     <DecimalInput
                       value={formData.constraint?.sdAllowed ?? ""}
                       onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
-                      placeholder="Standard deviation"
+                      placeholder="Percent of the answer (e.g. 10)"
                     />
                   </div>
                 </>

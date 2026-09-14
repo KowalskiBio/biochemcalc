@@ -166,6 +166,8 @@ export interface Template {
    * correct answer, becoming a second correct closed-mode option.
    */
   alternativeFormula?: string
+  /** Significant digits for the alternace option only; undefined inherits `significantDigits`. */
+  alternativeSignificantDigits?: number
   createdAt: string
   // Extended with related data
   variables?: TemplateVariableInput[]
@@ -190,6 +192,8 @@ export interface TemplateDecoy {
   formula: string
   optionCount: number
   position: number
+  /** Significant digits for this decoy's options only; undefined inherits the template-level setting. */
+  significantDigits?: number
 }
 
 /**
@@ -199,6 +203,7 @@ export interface TemplateDecoy {
 export interface TemplateDecoyInput {
   formula: string
   optionCount: number
+  significantDigits?: number
 }
 
 export interface TemplateWithDetails {
@@ -247,6 +252,8 @@ export interface UpdateTemplateWithVariablesPayload {
   forceScientific?: boolean
   decoys: TemplateDecoyInput[]
   alternativeFormula?: string
+  /** Significant digits for the alternace option only; undefined inherits `significantDigits`. */
+  alternativeSignificantDigits?: number
   variableMutations: VariableMutation[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -290,6 +297,8 @@ export interface TemplateInput {
   forceScientific?: boolean
   decoys?: TemplateDecoyInput[]
   alternativeFormula?: string
+  /** Significant digits for the alternace option only; undefined inherits `significantDigits`. */
+  alternativeSignificantDigits?: number
   variables: TemplateVariableInput[]
   constants: TemplateConstantInput[]
   constraint?: ConstraintInput
@@ -359,6 +368,13 @@ export interface AnswerField {
   alternateOption?: number
   intervalLo?: number
   intervalHi?: number
+  /**
+   * Per-option significant-digit overrides, parallel to `numericOptions`:
+   * an entry is a number when that option belongs to a decoy (or is the
+   * alternace) configured with its own significant digits; null/undefined
+   * inherits the template-level setting.
+   */
+  optionSigDigits?: (number | null)[]
 }
 
 // Variant model - represents a generated variant of a template
@@ -372,6 +388,11 @@ export interface Variant {
   correctOption?: number
   /** "Alternace" option, also correct alongside `correctOption`. */
   alternateOption?: number
+  /**
+   * Per-option significant-digit overrides for single-answer templates,
+   * parallel to `numericOptions`; see `AnswerField.optionSigDigits`.
+   */
+  optionSigDigits?: (number | null)[]
   intervalLo?: number
   intervalHi?: number
   seed: number
@@ -615,6 +636,8 @@ export interface ProjektQuestion {
   correctOption?: number
   /** The "alternace" row: a second option that also counts as correct. */
   alternateOption?: number
+  /** Per-option significant-digit overrides; see `AnswerField.optionSigDigits`. */
+  optionSigDigits?: (number | null)[]
   intervalLo?: number
   intervalHi?: number
   mode: TemplateMode
@@ -759,6 +782,13 @@ export interface PracticeAnswerSlot {
    * significant figures instead of precision-based rounding.
    */
   significantDigits?: number
+  /**
+   * Per-option significant-digit overrides, parallel to `numericOptions`:
+   * an entry is a number when that option belongs to a decoy (or is the
+   * alternace) configured with its own significant digits; null/undefined
+   * inherits `significantDigits`.
+   */
+  optionSigDigits?: (number | null)[]
 }
 
 /**
