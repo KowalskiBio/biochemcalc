@@ -61,6 +61,7 @@ import type {
 import {
   extractPlaceholders,
   extractPlaceholderValues,
+  formatDecimalComma,
   generateId,
   isAtomPlaceholder,
   normalizeDecimalCommasInText,
@@ -328,6 +329,14 @@ function buildAlternativeFormulaInput(formula: string): string | undefined {
   return formula.trim() === "" ? undefined : normalizeFormulaForEvaluation(formula)
 }
 
+/** Parse a teacher-typed constraint bound (comma or dot decimal); "" or garbage -> undefined. */
+function parseConstraintValue(text: string): number | undefined {
+  const trimmed = text.trim().replace(",", ".")
+  if (trimmed === "") return undefined
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 export function QuestionDetailDialog({
   templateId,
   open,
@@ -374,6 +383,16 @@ export function QuestionDetailDialog({
   const [sdText, setSdText] = useState<string>(
     initialTemplateDetails?.constraint?.sdAllowed != null
       ? String(initialTemplateDetails.constraint.sdAllowed)
+      : "",
+  )
+  const [minResultText, setMinResultText] = useState<string>(
+    initialTemplateDetails?.constraint?.minResult != null
+      ? String(initialTemplateDetails.constraint.minResult)
+      : "",
+  )
+  const [maxResultText, setMaxResultText] = useState<string>(
+    initialTemplateDetails?.constraint?.maxResult != null
+      ? String(initialTemplateDetails.constraint.maxResult)
       : "",
   )
   const [forceScientific, setForceScientific] = useState(
@@ -451,6 +470,12 @@ export function QuestionDetailDialog({
           : "",
       )
       setSdText(details.constraint?.sdAllowed != null ? String(details.constraint.sdAllowed) : "")
+      setMinResultText(
+        details.constraint?.minResult != null ? String(details.constraint.minResult) : "",
+      )
+      setMaxResultText(
+        details.constraint?.maxResult != null ? String(details.constraint.maxResult) : "",
+      )
       setForceScientific(details.template.forceScientific ?? false)
       setDecoyRows(details.decoys.map(toDecoyRow))
       setAlternativeFormula(details.template.alternativeFormula ?? "")
@@ -596,6 +621,10 @@ export function QuestionDetailDialog({
     const newSd =
       sdText.trim() === "" || Number.isNaN(parsedSd) || parsedSd <= 0 ? undefined : parsedSd
     if (newSd !== currentSd) return true
+    if (parseConstraintValue(minResultText) !== templateDetails?.constraint?.minResult)
+      return true
+    if (parseConstraintValue(maxResultText) !== templateDetails?.constraint?.maxResult)
+      return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
     if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
     if (alternativeFormula !== (templateDetails?.template.alternativeFormula ?? "")) return true
@@ -613,6 +642,8 @@ export function QuestionDetailDialog({
     editResultUnit,
     editSignificantDigits,
     sdText,
+    minResultText,
+    maxResultText,
     forceScientific,
     decoyRows,
     alternativeFormula,
@@ -624,26 +655,28 @@ export function QuestionDetailDialog({
   // The engine keys on sd_allowed presence, not constraintType; stale wizard
   // data may carry an sd with type "range", so read the effective SD regardless.
   const buildAnswerConstraint = (): ConstraintInput | undefined => {
-    const existing = templateDetails?.constraint
     const parsed = Number(sdText)
-    const hasMinMax = existing?.minResult != null || existing?.maxResult != null
-    if (sdText.trim() === "" || Number.isNaN(parsed) || parsed <= 0) {
-      if (hasMinMax) {
-        return {
-          minResult: existing?.minResult,
-          maxResult: existing?.maxResult,
-          sdAllowed: undefined,
-          constraintType: "range",
-        }
+    const hasSd = sdText.trim() !== "" && !Number.isNaN(parsed) && parsed > 0
+    const minResult = parseConstraintValue(minResultText)
+    const maxResult = parseConstraintValue(maxResultText)
+    const hasMinMax = minResult != null || maxResult != null
+    if (hasSd) {
+      return {
+        minResult,
+        maxResult,
+        sdAllowed: parsed,
+        constraintType: hasMinMax ? "both" : "sd",
       }
-      return undefined
     }
-    return {
-      minResult: existing?.minResult,
-      maxResult: existing?.maxResult,
-      sdAllowed: parsed,
-      constraintType: hasMinMax ? "both" : "sd",
+    if (hasMinMax) {
+      return {
+        minResult,
+        maxResult,
+        sdAllowed: undefined,
+        constraintType: "range",
+      }
     }
+    return undefined
   }
 
   const handleSave = async () => {
@@ -783,6 +816,16 @@ export function QuestionDetailDialog({
     setSdText(
       templateDetails?.constraint?.sdAllowed != null
         ? String(templateDetails.constraint.sdAllowed)
+        : "",
+    )
+    setMinResultText(
+      templateDetails?.constraint?.minResult != null
+        ? String(templateDetails.constraint.minResult)
+        : "",
+    )
+    setMaxResultText(
+      templateDetails?.constraint?.maxResult != null
+        ? String(templateDetails.constraint.maxResult)
         : "",
     )
     setForceScientific(templateDetails?.template.forceScientific ?? false)
@@ -1732,6 +1775,38 @@ export function QuestionDetailDialog({
                         <p className="text-xs text-muted-foreground">{cs.questions.sdAnswerHelp}</p>
                       </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="minResult">{cs.questions.minResultLabel}</Label>
+                        <DecimalInput
+                          id="minResult"
+                          value={minResultText}
+                          onValueChange={(v) =>
+                            setMinResultText(v === undefined ? "" : String(v))
+                          }
+                          placeholder="např. 0"
+                          disabled={isSaving}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {cs.questions.minResultHelp}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="maxResult">{cs.questions.maxResultLabel}</Label>
+                        <DecimalInput
+                          id="maxResult"
+                          value={maxResultText}
+                          onValueChange={(v) =>
+                            setMaxResultText(v === undefined ? "" : String(v))
+                          }
+                          placeholder="např. 100"
+                          disabled={isSaving}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {cs.questions.maxResultHelp}
+                        </p>
+                      </div>
+                    </div>
                     {editEquationText.trim().length > 0 && (
                       <div className="rounded-lg bg-muted/50 p-4 space-y-2">
                         <p className="text-sm font-medium text-foreground-secondary">
@@ -2329,6 +2404,27 @@ export function QuestionDetailDialog({
                         </div>
                       )}
                     </div>
+
+                    {/* Constraint (read-only) */}
+                    {(templateDetails.constraint?.minResult != null ||
+                      templateDetails.constraint?.maxResult != null ||
+                      templateDetails.constraint?.sdAllowed != null) && (
+                      <p className="text-xs text-muted-foreground">
+                        {[
+                          templateDetails.constraint?.minResult != null
+                            ? `${cs.questions.minResultLabel}: ${formatDecimalComma(String(templateDetails.constraint.minResult))}`
+                            : null,
+                          templateDetails.constraint?.maxResult != null
+                            ? `${cs.questions.maxResultLabel}: ${formatDecimalComma(String(templateDetails.constraint.maxResult))}`
+                            : null,
+                          templateDetails.constraint?.sdAllowed != null
+                            ? `SD: ${formatDecimalComma(String(templateDetails.constraint.sdAllowed))} %`
+                            : null,
+                        ]
+                          .filter((part) => part !== null)
+                          .join(" • ")}
+                      </p>
+                    )}
 
                     {/* Alternace (read-only) */}
                     {templateDetails.template.alternativeFormula &&

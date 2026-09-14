@@ -1407,6 +1407,8 @@ pub fn apply_template_variable_mutations(
     let old_template = TemplateRepo::get_by_id(&tx, &payload.id)?;
     let old_constraint = TemplateRepo::get_constraint(&tx, &payload.id)?;
     let new_sd = payload.constraint.as_ref().and_then(|c| c.sd_allowed);
+    let new_min = payload.constraint.as_ref().and_then(|c| c.min_result);
+    let new_max = payload.constraint.as_ref().and_then(|c| c.max_result);
 
     let mut template = Template {
         id: payload.id,
@@ -1663,6 +1665,26 @@ pub fn apply_template_variable_mutations(
             "sdAllowed",
             old_sd.map(|v| v.to_string()).as_deref(),
             new_sd.map(|v| v.to_string()).as_deref(),
+        )?;
+    }
+    let old_min = old_constraint.as_ref().and_then(|c| c.min_result);
+    if old_min != new_min {
+        TemplateHistoryRepo::record_change(
+            &tx,
+            &payload.id,
+            "minResult",
+            old_min.map(|v| v.to_string()).as_deref(),
+            new_min.map(|v| v.to_string()).as_deref(),
+        )?;
+    }
+    let old_max = old_constraint.as_ref().and_then(|c| c.max_result);
+    if old_max != new_max {
+        TemplateHistoryRepo::record_change(
+            &tx,
+            &payload.id,
+            "maxResult",
+            old_max.map(|v| v.to_string()).as_deref(),
+            new_max.map(|v| v.to_string()).as_deref(),
         )?;
     }
 
@@ -2978,5 +3000,69 @@ mod tests {
             count, 2,
             "re-saving the same sd must not add a history entry"
         );
+    }
+
+    #[test]
+    fn min_max_result_changes_are_recorded_in_history() {
+        let state = setup();
+        let conn = state.db.lock().expect("lock");
+        let (_, _, _, template_id) = create_topic_category_set_template(&conn);
+
+        let with_range = |min: Option<f64>, max: Option<f64>| UpdateTemplateWithVariablesPayload {
+            constraint: Some(ConstraintInput {
+                min_result: min,
+                max_result: max,
+                sd_allowed: None,
+                constraint_type: ConstraintType::Range,
+            }),
+            alternative_significant_digits: None,
+            ..build_payload(template_id)
+        };
+
+        apply_template_variable_mutations(&conn, with_range(Some(0.1), Some(100.0)))
+            .expect("set range");
+        // Same values again: no new entries.
+        apply_template_variable_mutations(&conn, with_range(Some(0.1), Some(100.0)))
+            .expect("resave range");
+        apply_template_variable_mutations(&conn, with_range(Some(0.2), None))
+            .expect("change range");
+
+        let entries =
+            TemplateHistoryRepo::list_by_template(&conn, &template_id, 10, 0).expect("list");
+        let min_entries: Vec<(Option<String>, Option<String>)> = entries
+            .iter()
+            .filter(|e| e.field_name == "minResult")
+            .map(|e| (e.old_value.clone(), e.new_value.clone()))
+            .collect();
+        let mut min_entries = min_entries;
+        min_entries.sort();
+        assert_eq!(
+            min_entries,
+            vec![
+                (None, Some("0.1".into())),
+                (Some("0.1".into()), Some("0.2".into()))
+            ],
+            "min result changes must be recorded once per change: {entries:?}"
+        );
+        let max_entries: Vec<(Option<String>, Option<String>)> = entries
+            .iter()
+            .filter(|e| e.field_name == "maxResult")
+            .map(|e| (e.old_value.clone(), e.new_value.clone()))
+            .collect();
+        let mut max_entries = max_entries;
+        max_entries.sort();
+        assert_eq!(
+            max_entries,
+            vec![(None, Some("100".into())), (Some("100".into()), None)],
+            "max result changes must be recorded once per change: {entries:?}"
+        );
+
+        // The range itself persists on the constraint row.
+        let rc = TemplateRepo::get_constraint(&conn, &template_id)
+            .expect("constraint query")
+            .expect("range row present");
+        assert_eq!(rc.constraint_type, ConstraintType::Range);
+        assert_eq!(rc.min_result, Some(0.2));
+        assert_eq!(rc.max_result, None);
     }
 }

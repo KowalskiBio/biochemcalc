@@ -44,40 +44,6 @@ pub fn validate_result(result: f64, constraint: &ResultConstraint) -> Result<(),
         ConstraintType::Sd => {}
     }
 
-    // When "both" is selected, the SD is also checked to ensure the open
-    // interval (correct ± sd percent) stays within the allowed numeric range.
-    if matches!(
-        constraint.constraint_type,
-        ConstraintType::Both | ConstraintType::Sd
-    ) {
-        if let Some(sd) = constraint
-            .sd_allowed
-            .filter(|sd| sd.is_finite() && *sd > 0.0 && *sd < 100.0)
-        {
-            let half_width = result.abs() * sd / 100.0;
-            if let Some(min) = constraint.min_result {
-                if result - half_width < min {
-                    return Err(format!(
-                        "open interval [{}, {}] below minimum {}",
-                        result - half_width,
-                        result + half_width,
-                        min
-                    ));
-                }
-            }
-            if let Some(max) = constraint.max_result {
-                if result + half_width > max {
-                    return Err(format!(
-                        "open interval [{}, {}] above maximum {}",
-                        result - half_width,
-                        result + half_width,
-                        max
-                    ));
-                }
-            }
-        }
-    }
-
     Ok(())
 }
 
@@ -288,7 +254,21 @@ pub(crate) fn open_interval(
             ZERO_ANSWER_HALF_WIDTH
         }
     });
-    (correct - half_width, correct + half_width)
+    let (lo, hi) = (correct - half_width, correct + half_width);
+    // When the teacher set a result range, the acceptance interval never
+    // reaches outside it: the SD (or difficulty) window is clipped to
+    // [min_result, max_result]. For results inside the range (guaranteed on
+    // generation paths via `validate_result`) the clip only tightens the
+    // near edges, so lo <= correct <= hi always holds.
+    let lo = constraint
+        .min_result
+        .filter(|min| min.is_finite())
+        .map_or(lo, |min| lo.max(min));
+    let hi = constraint
+        .max_result
+        .filter(|max| max.is_finite())
+        .map_or(hi, |max| hi.min(max));
+    (lo.min(hi), lo.max(hi))
 }
 
 /// Half-width for an answer of exactly zero, which has no magnitude for the
@@ -4836,23 +4816,17 @@ mod tests {
         }
     }
 
-    /// A "both" constraint whose min/max cannot contain correct ± sd percent
-    /// (so the range can't even hold the open interval) fails via the
-    /// existing validate_result range-edge semantics — the sampled correct
-    /// answer is rejected and generation ultimately reports the constraint
-    /// as unsatisfiable.
-    ///
-    /// This documents the intended range-edge semantics: when SD is set on a
-    /// range-constrained question, the teacher is responsible for a min/max
-    /// wide enough to contain correct ± sd percent; otherwise generation
-    /// fails rather than silently shrinking the window.
+    /// A "both" constraint whose SD window is wider than the range no longer
+    /// fails generation: the correct answer only needs to fall inside
+    /// [min, max], and the acceptance interval is the SD window clipped to
+    /// the range. Teacher-facing meaning: "answer between 10 and 11 with a
+    /// 10 % tolerance, but never accept anything outside the range".
     #[test]
-    fn both_constraint_with_sd_exceeding_range_fails_via_validate_result() {
+    fn both_constraint_with_sd_exceeding_range_clips_interval_to_range() {
         let variables = vec![make_variable("X", 1.0, 10.0, 0.1, 1)];
         let constants = HashMap::new();
-        // correct = X * 2 in [2, 20]; min/max [5, 6] and sd 50 % would need
-        // the open interval correct/2..correct*1.5 ⊂ [5, 6], which no sampled
-        // correct can satisfy.
+        // correct = X * 2 in [2, 20]; min/max [5, 6] and sd 50 % means the
+        // raw window around a correct answer pokes far outside the range.
         let constraint =
             make_constraint_typed(Some(5.0), Some(6.0), Some(50.0), ConstraintType::Both);
         let res = generate_variant(
@@ -4868,9 +4842,67 @@ mod tests {
             &HashMap::new(),
             None,
         );
-        match res {
-            Err(GenerationError::ConstraintUnsatisfiable { .. }) => {}
-            other => panic!("expected ConstraintUnsatisfiable, got {other:?}"),
+
+        let variant = res.expect("generation succeeds with a clipped window");
+        let lo = variant.interval_lo.expect("open mode sets interval");
+        let hi = variant.interval_hi.expect("open mode sets interval");
+        assert!(
+            (5.0..=6.0).contains(&variant.correct_answer),
+            "correct must be inside the range, got {}",
+            variant.correct_answer
+        );
+        assert!(
+            lo >= 5.0 && hi <= 6.0,
+            "interval [{lo}, {hi}] must be clipped to the range [5, 6]"
+        );
+        assert!(
+            lo < hi,
+            "clipped interval must stay non-empty: [{lo}, {hi}]"
+        );
+    }
+
+    /// Real-world regression: the ammonia pH question ("Vypočítejte pH
+    /// roztoku amoniaku", c sampled from 10..99.9 mmol/l, Kb = 1.77e-5)
+    /// with min 10, max 11 and SD 10 % previously failed every sample —
+    /// the old "both" semantics demanded correct ± 10 % ⊂ [10, 11],
+    /// which is mathematically empty — and regeneration reported
+    /// "Constraint unsatisfiable after 1000 attempts".
+    #[test]
+    fn ammonia_ph_with_range_narrower_than_sd_window_generates() {
+        let variables = vec![make_variable("c", 10.0, 99.9, 0.1, 1)];
+        let mut constants = HashMap::new();
+        constants.insert("Kb".to_string(), 1.77e-5);
+        let constraint =
+            make_constraint_typed(Some(10.0), Some(11.0), Some(10.0), ConstraintType::Both);
+
+        for seed in 0..10u64 {
+            let variant = generate_variant(
+                Uuid::new_v4(),
+                "pH = 14 - 0.5*(-log(Kb) - log(c/1000))",
+                &variables,
+                &constants,
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &HashMap::new(),
+                None,
+            )
+            .expect(&format!("seed={seed}: generation failed"));
+
+            assert!(
+                (10.0..=11.0).contains(&variant.correct_answer),
+                "seed={seed}: correct {} outside [10, 11]",
+                variant.correct_answer
+            );
+            let options = variant.numeric_options.expect("closed mode sets options");
+            for option in &options {
+                assert!(
+                    (10.0..=11.0).contains(option),
+                    "seed={seed}: option {option} outside [10, 11]"
+                );
+            }
         }
     }
 
