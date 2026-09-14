@@ -164,6 +164,10 @@ export const cs = {
     reportError: "Hlášení se nepodařilo odeslat",
     reportSending: "Odesílám...",
     reportSubmit: "Odeslat hlášení",
+
+    footerAuthor: "BioCal vytvořil",
+    footerContact: "Kontakt",
+    footerTeacher: "Zodpovědný vyučující",
   },
 
   // Student test sessions: a fixed batch of questions generated all at once,

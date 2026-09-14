@@ -41,6 +41,14 @@ test-results
 qa-screenshots
 .local-dev
 
+# AI assistant config and local agent state
+.agents/
+.claude/
+.opencode/
+AGENTS.md
+graphify-out/
+skills-lock.json
+
 # Syncthing conflict duplicates
 *.sync-conflict-*
 
