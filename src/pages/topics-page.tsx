@@ -125,7 +125,12 @@ export function TopicsPage() {
       if (toggling) return
       setToggling(topic.id)
       try {
-        const updated = await topicsApi.update(topic.id, topic.name, !topic.forStudents, topic.isTest)
+        const updated = await topicsApi.update(
+          topic.id,
+          topic.name,
+          !topic.forStudents,
+          topic.isTest,
+        )
         setTopics((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
       } catch (err) {
         const message = err instanceof ApiError ? err.message : String(err)
