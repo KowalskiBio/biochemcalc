@@ -933,6 +933,10 @@ export const cs = {
     decoySigDigitsHelp: "Prázdné = stejné jako platné číslice u odpovědi.",
     selectEquation: "Vybrat rovnici",
     computedAnswerLabel: "Výsledek",
+    generatedOptionsLabel: "Vygenerované možnosti",
+    generatedOptionsDescription:
+      "Ukázkové rozložení možností. Správná odpověď je a), alternace obsadí b), návnady následují v pořadí zadání.",
+    alternateOptionBadge: "Alternace",
     computingAnswer: "Probíhá výpočet...",
     formulaNotSet: "Vzorec ještě není nastaven",
     formulaNotSetDescription: "Klikněte na Upravit a zadejte rovnici se vzorcem.",

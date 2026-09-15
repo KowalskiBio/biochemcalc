@@ -45,6 +45,7 @@ import {
 import { KNOWN_ELEMENTS } from "@/lib/periodic-table-data"
 import { formatChemicalText, QuestionTextRenderer } from "@/lib/render-question-text"
 import type {
+  AnswerField,
   ConstraintInput,
   HistoryEntry,
   LocalVariableEdit,
@@ -59,6 +60,7 @@ import type {
   Variant,
 } from "@/lib/types"
 import {
+  cn,
   extractPlaceholders,
   extractPlaceholderValues,
   formatDecimalComma,
@@ -88,6 +90,8 @@ interface QuestionDetailDialogProps {
   initialTemplateDetails?: TemplateWithDetails
   initialConstants?: Record<string, number>
 }
+
+const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const
 
 function toLocalVariableEdit(vwp: VariableWithPlaceholder): LocalVariableEdit {
   return {
@@ -621,10 +625,8 @@ export function QuestionDetailDialog({
     const newSd =
       sdText.trim() === "" || Number.isNaN(parsedSd) || parsedSd <= 0 ? undefined : parsedSd
     if (newSd !== currentSd) return true
-    if (parseConstraintValue(minResultText) !== templateDetails?.constraint?.minResult)
-      return true
-    if (parseConstraintValue(maxResultText) !== templateDetails?.constraint?.maxResult)
-      return true
+    if (parseConstraintValue(minResultText) !== templateDetails?.constraint?.minResult) return true
+    if (parseConstraintValue(maxResultText) !== templateDetails?.constraint?.maxResult) return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
     if (decoyRowsChanged(decoyRows, templateDetails?.decoys ?? [])) return true
     if (alternativeFormula !== (templateDetails?.template.alternativeFormula ?? "")) return true
@@ -1501,6 +1503,183 @@ export function QuestionDetailDialog({
     editResultUnit,
   ])
 
+  /**
+   * The variable values the answer preview is built from: the generated sample
+   * variant when there is one, otherwise the locally mocked values. Alternace
+   * and decoys are evaluated from this same assignment so their results match
+   * the result shown for the main equation instead of a second random draw.
+   */
+  const previewAssignment = useMemo(() => {
+    if (sampleVariant) {
+      return {
+        values: sampleVariant.assignedValues,
+        strings: sampleVariant.assignedStrings ?? {},
+      }
+    }
+    if (mockResult && mockResult.type !== "string") {
+      return { values: mockResult.mockValues, strings: mockResult.mockStrings }
+    }
+    return null
+  }, [sampleVariant, mockResult])
+
+  /**
+   * Intermediates solved by the main equation, seeded into every alternace and
+   * decoy evaluation below so one that chains off them (a decoy `n = n * 2` on
+   * top of `n = V / M`) resolves the way the backend resolves it.
+   */
+  const mainEquationResults = useMemo(() => {
+    if (!previewAssignment) return {}
+    const substituted = buildSubstitutedEquation(
+      activeEquationText,
+      previewAssignment.values,
+      previewAssignment.strings,
+    )
+    if (substituted.trim().length === 0) return {}
+    try {
+      const results: Record<string, number> = {}
+      for (const { symbol, value } of evaluateAllAssignments(
+        normalizeFormulaForEvaluation(substituted),
+        {},
+        constants,
+      )) {
+        results[symbol] = value
+      }
+      return results
+    } catch {
+      return {}
+    }
+  }, [previewAssignment, activeEquationText, buildSubstitutedEquation, constants])
+
+  /**
+   * Substitutes and evaluates an alternace/decoy equation against the same
+   * values as the answer preview, so the teacher sees the number each one
+   * actually contributes to the options and not only its formula.
+   */
+  const evaluateSecondaryEquation = useCallback(
+    (formula: string) => {
+      if (!previewAssignment) return null
+      const substituted = buildSubstitutedEquation(
+        formula,
+        previewAssignment.values,
+        previewAssignment.strings,
+      )
+      if (substituted.trim().length === 0) return null
+      const normalized = normalizeFormulaForEvaluation(substituted)
+      try {
+        const named = evaluateAllAssignments(normalized, mainEquationResults, constants)
+        const results =
+          named.length > 0
+            ? named
+            : [
+                {
+                  symbol: "",
+                  value: evaluateExpression(normalized, mainEquationResults, constants),
+                },
+              ]
+        return { substituted, results, error: null as string | null }
+      } catch (err) {
+        return {
+          substituted,
+          results: [],
+          error: err instanceof Error ? err.message : String(err),
+        }
+      }
+    },
+    [previewAssignment, buildSubstitutedEquation, mainEquationResults, constants],
+  )
+
+  /** Per-target result units, so a multi-answer preview labels each line. */
+  const previewTargetUnits = useMemo(() => {
+    if (!templateDetails) return []
+    return applyResultUnits(
+      extractTargets(templateDetails.template.questionText),
+      templateDetails.template.resultUnit,
+    )
+  }, [templateDetails])
+
+  /**
+   * The sample variant's option layout: one row per option letter, each row
+   * carrying every answer target's value. Teacher-facing generation puts the
+   * correct answer at a), the alternace at b) when there is one, and then the
+   * decoys in authored order, so this is where a decoy's value turns up.
+   */
+  const previewOptionRows = useMemo(() => {
+    if (!sampleVariant) return []
+    const slots: AnswerField[] =
+      sampleVariant.answersData && sampleVariant.answersData.length > 1
+        ? sampleVariant.answersData
+        : [
+            {
+              symbol: "",
+              value: sampleVariant.correctAnswer,
+              numericOptions: sampleVariant.numericOptions,
+              optionSigDigits: sampleVariant.optionSigDigits,
+            },
+          ]
+    const rowCount = slots[0]?.numericOptions?.length ?? 0
+    return Array.from({ length: rowCount }, (_, rowIndex) => ({
+      option: rowIndex + 1,
+      label: OPTION_LABELS[rowIndex] ?? String(rowIndex + 1),
+      values: slots.map((slot) => ({
+        symbol: slot.symbol,
+        unit: slot.unit,
+        value: slot.numericOptions?.[rowIndex],
+        significantDigits: slot.optionSigDigits?.[rowIndex] ?? undefined,
+      })),
+    }))
+  }, [sampleVariant])
+
+  /**
+   * The substituted equation and computed value of an alternace/decoy, shown
+   * under its formula in the read-only answer preview.
+   */
+  const renderSecondaryEvaluation = (formula: string, significantDigits?: number) => {
+    const evaluated = evaluateSecondaryEquation(formula)
+    if (!evaluated || !templateDetails) return null
+
+    return (
+      <div className="space-y-2">
+        {evaluated.substituted.trim().length > 0 && (
+          <div className="rounded-lg bg-muted/30 p-3">
+            <p className="text-xs font-medium text-foreground-secondary mb-1">
+              {cs.questions.equationLabel}
+            </p>
+            <MathRenderer text={renderEquationAsLatex(evaluated.substituted)} />
+          </div>
+        )}
+        {evaluated.error ? (
+          <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-3 text-sm text-red-800 dark:text-red-200">
+            <p className="font-medium">{cs.questions.equationError}</p>
+            <p className="text-sm font-mono break-words">{evaluated.error}</p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-foreground-secondary">
+              {cs.questions.computedAnswerLabel}
+            </p>
+            {evaluated.results.map((result, index) => (
+              <p key={result.symbol || index} className="text-xl font-bold">
+                {result.symbol ? `${result.symbol} = ` : null}
+                <FormattedResult
+                  value={result.value}
+                  precision={displayPrecision}
+                  notation={forceScientific ? "scientific" : "normal"}
+                  significantDigits={
+                    significantDigits ?? templateDetails.template.significantDigits
+                  }
+                  unit={
+                    previewTargetUnits.find((target) => target.symbol === result.symbol)?.unit ??
+                    templateDetails.template.resultUnit
+                  }
+                />
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1781,9 +1960,7 @@ export function QuestionDetailDialog({
                         <DecimalInput
                           id="minResult"
                           value={minResultText}
-                          onValueChange={(v) =>
-                            setMinResultText(v === undefined ? "" : String(v))
-                          }
+                          onValueChange={(v) => setMinResultText(v === undefined ? "" : String(v))}
                           placeholder="např. 0"
                           disabled={isSaving}
                         />
@@ -1796,9 +1973,7 @@ export function QuestionDetailDialog({
                         <DecimalInput
                           id="maxResult"
                           value={maxResultText}
-                          onValueChange={(v) =>
-                            setMaxResultText(v === undefined ? "" : String(v))
-                          }
+                          onValueChange={(v) => setMaxResultText(v === undefined ? "" : String(v))}
                           placeholder="např. 100"
                           disabled={isSaving}
                         />
@@ -2426,6 +2601,65 @@ export function QuestionDetailDialog({
                       </p>
                     )}
 
+                    {/* Generated options (read-only) */}
+                    {previewOptionRows.length > 0 && (
+                      <div className="rounded-lg border p-4 space-y-3">
+                        <div>
+                          <p className="text-sm font-medium text-foreground-secondary">
+                            {cs.questions.generatedOptionsLabel}
+                          </p>
+                          <p className="text-xs text-foreground-secondary">
+                            {cs.questions.generatedOptionsDescription}
+                          </p>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {previewOptionRows.map((row) => {
+                            const isCorrect = sampleVariant?.correctOption === row.option
+                            const isAlternate = sampleVariant?.alternateOption === row.option
+                            return (
+                              <div
+                                key={row.label}
+                                className={cn(
+                                  "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                                  (isCorrect || isAlternate) &&
+                                    "border-green-500 bg-green-50 dark:bg-green-950/30",
+                                )}
+                              >
+                                <span className="font-semibold">{row.label})</span>
+                                <span>
+                                  {row.values.map((slot, slotIndex) => {
+                                    if (slot.value == null) return null
+                                    return (
+                                      <span key={slot.symbol || slotIndex}>
+                                        {slotIndex > 0 && ", "}
+                                        <FormattedResult
+                                          value={slot.value}
+                                          precision={displayPrecision}
+                                          notation={forceScientific ? "scientific" : "normal"}
+                                          significantDigits={
+                                            slot.significantDigits ??
+                                            templateDetails.template.significantDigits
+                                          }
+                                          unit={slot.unit ?? templateDetails.template.resultUnit}
+                                        />
+                                      </span>
+                                    )
+                                  })}
+                                </span>
+                                {(isCorrect || isAlternate) && (
+                                  <span className="ml-auto text-xs font-medium text-green-700 dark:text-green-400">
+                                    {isCorrect
+                                      ? cs.questions.correctAnswer
+                                      : cs.questions.alternateOptionBadge}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Alternace (read-only) */}
                     {templateDetails.template.alternativeFormula &&
                       templateDetails.template.alternativeFormula.trim() !== "" && (
@@ -2439,6 +2673,10 @@ export function QuestionDetailDialog({
                             )}
                             className="[&_.katex-display]:!my-0 [&_p]:!my-0"
                           />
+                          {renderSecondaryEvaluation(
+                            templateDetails.template.alternativeFormula,
+                            templateDetails.template.alternativeSignificantDigits,
+                          )}
                           {templateDetails.template.alternativeSignificantDigits != null && (
                             <p className="text-xs text-muted-foreground">
                               {cs.questions.alternativeSigDigitsLabel}:{" "}
@@ -2461,6 +2699,7 @@ export function QuestionDetailDialog({
                               text={renderEquationAsLatex(decoy.formula)}
                               className="[&_.katex-display]:!my-0 [&_p]:!my-0"
                             />
+                            {renderSecondaryEvaluation(decoy.formula, decoy.significantDigits)}
                             <p className="text-xs text-muted-foreground">
                               {cs.questions.decoyOptionCountLabel}: {decoy.optionCount}
                               {decoy.significantDigits != null &&
