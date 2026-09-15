@@ -624,10 +624,11 @@ pub(crate) fn generate_numeric_options<R: Rng>(
 
     // "Alternace": an optional second equation that also evaluates to a
     // correct answer, becoming a second guaranteed-slot option that's also
-    // marked correct. Falls back to no alternate (rather than failing
-    // generation) exactly like an invalid decoy would, if it doesn't survive
-    // the same sanity checks: finite, within the constraint, and far enough
-    // from the correct answer once rounded.
+    // marked correct. The teacher authored this value, so it always claims
+    // its slot: neither a Min/Max result constraint nor the SD window can
+    // push it out. Only two things can, and neither is a policy drop: a
+    // value that isn't a real number, and one that rounds onto the correct
+    // answer itself (which would put the same number in two option slots).
     let rounded_alternate: Option<f64> = alternate.and_then(|value| {
         if !value.is_finite() {
             return None;
@@ -638,7 +639,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
             value,
             sig_figs_unit(value, alternate_sig_digits).unwrap_or(rounding_unit),
         );
-        if validate_result(rounded, constraint).is_err() || close(rounded, rounded_correct) {
+        if close(rounded, rounded_correct) {
             return None;
         }
         Some(rounded)
@@ -651,14 +652,15 @@ pub(crate) fn generate_numeric_options<R: Rng>(
         sig_digits: Option<u8>,
     }
 
-    // A decoy that requested at least one slot always gets one — it isn't
-    // second-guessed against the correct answer, the alternate, or another
-    // decoy here. If a teacher's decoy formula happens to compute the same
-    // number as the correct equation (or the alternate, or another decoy),
-    // that's their mistake to notice and fix, not something generation
-    // silently reinterprets or drops. Only a formula that failed to
-    // evaluate to a real, in-range number falls back to a normal random
-    // distractor.
+    // A decoy that requested at least one slot always gets one, and always
+    // with its own authored value. It isn't second-guessed against the
+    // correct answer, the alternate, another decoy, a Min/Max result
+    // constraint, or the SD window. If a teacher's decoy formula computes a
+    // number that coincides with another option or sits outside the answer
+    // window, that's theirs to notice and fix; generation showing something
+    // else in its place would hide the very thing they need to see. Only a
+    // formula that failed to evaluate to a real number falls back to a
+    // normal random distractor.
     let mut valid_decoys: Vec<ValidDecoy> = Vec::new();
     for d in decoys {
         if d.requested_count == 0 || !d.value.is_finite() {
@@ -670,17 +672,6 @@ pub(crate) fn generate_numeric_options<R: Rng>(
             d.value,
             sig_figs_unit(d.value, d.sig_digits).unwrap_or(rounding_unit),
         );
-        if validate_result(rounded, constraint).is_err() {
-            continue;
-        }
-        // When an SD window is active, a decoy anchored outside that window
-        // can't earn its slot (it would break the window guarantee for the
-        // whole option set); its slots flow to the correct-answer cluster.
-        // Without an SD window, a decoy always claims its requested slot,
-        // coincidental value matches included.
-        if sd_window.is_some_and(|sd| (rounded - rounded_correct).abs() > sd) {
-            continue;
-        }
         valid_decoys.push(ValidDecoy {
             rounded,
             requested: d.requested_count as usize,
@@ -1156,9 +1147,11 @@ fn fill_target_options<R: Rng>(
                     value,
                     sig_figs_unit(value, alternate_sig_digits).unwrap_or(rounding_unit),
                 );
-                if validate_result(rounded, constraint).is_err()
-                    || close_enough(rounded, rounded_correct, rounding_unit)
-                {
+                // Authored by the teacher, so it always claims its slot:
+                // no constraint or SD window drop. Only a value that rounds
+                // onto the correct answer is refused, since that would put
+                // the same number in two option slots.
+                if close_enough(rounded, rounded_correct, rounding_unit) {
                     return None;
                 }
                 Some(rounded)
@@ -1188,12 +1181,13 @@ fn fill_target_options<R: Rng>(
     let mut decoy_real: HashMap<usize, bool> = HashMap::new();
     for k in needed_decoys {
         // A decoy's real value for this target is used as-is whenever it's
-        // finite and in-constraint — even if it happens to equal the correct
-        // answer, the alternate, or another decoy's value for this same
-        // target. That coincidence is often the entire point of the decoy
-        // (e.g. one target's formula is unchanged, only another target's is
-        // wrong), so it isn't second-guessed here; only a genuinely
-        // unusable value falls back to a random distractor.
+        // a real number, even if it happens to equal the correct answer, the
+        // alternate, or another decoy's value for this same target, and even
+        // if it sits outside a Min/Max constraint or the SD window. That
+        // coincidence is often the entire point of the decoy (e.g. one
+        // target's formula is unchanged, only another target's is wrong), so
+        // it isn't second-guessed here; only a genuinely unusable value
+        // falls back to a random distractor.
         let candidate = decoy_rows[k]
             .values
             .get(target_symbol)
@@ -1208,14 +1202,6 @@ fn fill_target_options<R: Rng>(
                     v,
                     sig_figs_unit(v, decoy_rows[k].sig_digits).unwrap_or(rounding_unit),
                 );
-                if validate_result(rounded, constraint).is_err() {
-                    return None;
-                }
-                // The SD window overrides the always-earns-slot rule: a decoy
-                // outside the window falls back to an in-window distractor.
-                if sd_window.is_some_and(|sd| (rounded - rounded_correct).abs() > sd) {
-                    return None;
-                }
                 Some(rounded)
             });
         let (resolved, real) = match candidate {
@@ -2756,6 +2742,107 @@ mod tests {
         );
         let correct_option = options[correct_pos as usize - 1];
         assert!((correct_option - correct).abs() < 1e-9);
+    }
+
+    #[test]
+    fn decoy_outside_the_sd_window_still_earns_its_slot() {
+        // The SD window governs the random distractors, never the teacher's
+        // own decoy: an authored value is always shown, however far out it
+        // sits, so the teacher can see what their formula actually produces.
+        let constraint = make_constraint(Some(0.0), Some(10_000.0), Some(10.0));
+        let correct = 100.0;
+        let decoy = 500.0; // way outside the +-10% window around 100
+        let decoys = [DecoyAnchor {
+            value: decoy,
+            requested_count: 1,
+            sig_digits: None,
+        }];
+        let mut rng = StdRng::seed_from_u64(7);
+        let (options, correct_pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            true,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(options.len(), 5);
+        assert!(
+            options.iter().any(|o| (o - decoy).abs() < 1e-9),
+            "an out-of-window decoy must still appear among the options: {options:?}"
+        );
+        assert_eq!(correct_pos, 1);
+        assert!((options[0] - correct).abs() < 1e-9);
+    }
+
+    #[test]
+    fn decoy_outside_the_result_constraint_still_earns_its_slot() {
+        // Same rule for a Min/Max result range: it bounds generated
+        // distractors, not the value the teacher's decoy formula computes.
+        let constraint = make_constraint(Some(0.0), Some(100.0), None);
+        let correct = 50.0;
+        let decoy = 500.0; // above max_result
+        let decoys = [DecoyAnchor {
+            value: decoy,
+            requested_count: 1,
+            sig_digits: None,
+        }];
+        let mut rng = StdRng::seed_from_u64(11);
+        let (options, _correct_pos, _alt, _sig_digits) = generate_numeric_options(
+            correct,
+            &decoys,
+            None,
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            true,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(options.len(), 5);
+        assert!(
+            options.iter().any(|o| (o - decoy).abs() < 1e-9),
+            "an out-of-range decoy must still appear among the options: {options:?}"
+        );
+    }
+
+    #[test]
+    fn alternate_outside_the_sd_window_and_constraint_still_earns_its_slot() {
+        let constraint = make_constraint(Some(0.0), Some(100.0), Some(10.0));
+        let correct = 50.0;
+        let alternate = 500.0; // outside both the +-10% window and max_result
+        let mut rng = StdRng::seed_from_u64(13);
+        let (options, correct_pos, alt_pos, _sig_digits) = generate_numeric_options(
+            correct,
+            &[],
+            Some(alternate),
+            &constraint,
+            &mut rng,
+            "medium",
+            5,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(options.len(), 5);
+        assert_eq!(correct_pos, 1);
+        let alt_pos = alt_pos.expect("an authored alternace always gets its own option slot");
+        assert_eq!(alt_pos, 2);
+        assert!((options[alt_pos as usize - 1] - alternate).abs() < 1e-9);
     }
 
     #[test]
