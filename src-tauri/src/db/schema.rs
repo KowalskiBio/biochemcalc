@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 39;
+const CURRENT_USER_VERSION: u32 = 40;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -201,6 +201,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 39 {
         apply_migration_v39(conn)?;
         conn.pragma_update(None, "user_version", "39")?;
+    }
+
+    if user_version < 40 {
+        apply_migration_v40(conn)?;
+        conn.pragma_update(None, "user_version", "40")?;
     }
 
     Ok(())
@@ -1291,6 +1296,36 @@ fn apply_migration_v39(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Typographic cleanup of already-stored names: every "word - word" in a
+/// topic or set name becomes "word \u{2013} word" (en dash), matching what
+/// `crate::util::normalize_name_dashes` now enforces on every new write.
+/// Rows are rewritten through that exact helper rather than SQL REPLACE so
+/// the migration and the write path can never disagree about the pattern.
+fn apply_migration_v40(conn: &Connection) -> Result<(), rusqlite::Error> {
+    for table in ["topics", "sets"] {
+        // ids are stored as 16-byte BLOBs, never text.
+        let rows: Vec<(Vec<u8>, String)> = {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT id, name FROM {table} WHERE name LIKE '% - %'"
+            ))?;
+            let mapped = stmt
+                .query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            mapped
+        };
+        for (id, name) in rows {
+            let normalized = crate::util::normalize_name_dashes(&name);
+            if normalized != name {
+                conn.execute(
+                    &format!("UPDATE {table} SET name = ?1 WHERE id = ?2"),
+                    rusqlite::params![normalized, id],
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1817,6 +1852,67 @@ mod tests {
         let practice_attempts = column_names("practice_attempts");
         assert!(practice_attempts.iter().any(|c| c == "test_session_id"));
         assert!(practice_attempts.iter().any(|c| c == "position"));
+    }
+
+    /// v40 rewrites stored topic/set names so "word - word" becomes
+    /// "word \u{2013} word" (en dash), exactly like the write path does for
+    /// new names, and leaves every other hyphen shape untouched.
+    #[test]
+    fn v40_rewrites_spaced_hyphens_in_stored_topic_and_set_names() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        // Simulate pre-v40 data: names inserted with plain spaced hyphens.
+        conn.execute(
+            "INSERT INTO topics (id, name, created_at, for_students, is_test)
+             VALUES (randomblob(16), 'Úvodní test - látkové množství', '2026-09-15T10:00:00+00:00', 1, 0)",
+            [],
+        )
+        .expect("seed topic");
+        conn.execute(
+            "INSERT INTO topics (id, name, created_at, for_students, is_test)
+             VALUES (randomblob(16), 'Hmotnostní zlomek', '2026-09-15T10:00:00+00:00', 1, 0)",
+            [],
+        )
+        .expect("seed untouched topic");
+        let category_id = uuid::Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO categories (id, topic_id, point_value, created_at)
+             SELECT ?1, id, 2, '2026-09-15T10:00:00+00:00' FROM topics WHERE name LIKE 'Úvodní%'",
+            rusqlite::params![category_id],
+        )
+        .expect("seed category");
+        conn.execute(
+            "INSERT INTO sets (id, category_id, set_index, mode, name)
+             VALUES (randomblob(16), ?1, 1, 'closed', 'Sada 1 - směsi')",
+            rusqlite::params![category_id],
+        )
+        .expect("seed set");
+
+        apply_migration_v40(&conn).expect("apply v40");
+
+        let topic_name: String = conn
+            .query_row(
+                "SELECT name FROM topics WHERE name LIKE 'Úvodní%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fetch topic");
+        assert_eq!(topic_name, "Úvodní test \u{2013} látkové množství");
+
+        let set_name: String = conn
+            .query_row("SELECT name FROM sets", [], |row| row.get(0))
+            .expect("fetch set");
+        assert_eq!(set_name, "Sada 1 \u{2013} směsi");
+
+        let untouched: String = conn
+            .query_row(
+                "SELECT name FROM topics WHERE name = 'Hmotnostní zlomek'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("fetch untouched topic");
+        assert_eq!(untouched, "Hmotnostní zlomek");
     }
 
     #[test]

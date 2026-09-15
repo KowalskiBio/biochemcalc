@@ -223,7 +223,7 @@ pub fn create_topic(
     payload: CreateTopicPayload,
 ) -> Result<Topic, DbError> {
     let conn = crate::util::lock_db(&state.db);
-    let mut topic = Topic::new(payload.name);
+    let mut topic = Topic::new(crate::util::normalize_name_dashes(&payload.name));
     topic.for_students = payload.for_students;
     topic.is_test = payload.is_test;
     TopicRepo::insert(&conn, &topic)?;
@@ -264,7 +264,7 @@ pub fn update_topic(
     let existing = TopicRepo::get_by_id(&conn, &payload.id)?;
     let topic = Topic {
         id: payload.id,
-        name: payload.name,
+        name: crate::util::normalize_name_dashes(&payload.name),
         created_at: Utc::now(),
         for_students: payload.for_students,
         is_test: payload.is_test,

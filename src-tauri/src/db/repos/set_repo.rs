@@ -22,7 +22,7 @@ impl SetRepo {
             .unwrap_or(1);
 
         let mut set = crate::models::Set::new(category_id, next_index, mode);
-        set.name = name.map(|n| n.to_string());
+        set.name = name.map(|n| crate::util::normalize_name_dashes(n));
         conn.execute(
             "INSERT INTO sets (id, category_id, set_index, mode, name) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -289,9 +289,10 @@ impl SetRepo {
         set_id: &Uuid,
         name: Option<&str>,
     ) -> Result<(), DbError> {
+        let normalized = name.map(crate::util::normalize_name_dashes);
         let affected = conn.execute(
             "UPDATE sets SET name = ?1 WHERE id = ?2",
-            params![name, set_id],
+            params![normalized, set_id],
         )?;
         if affected == 0 {
             return Err(DbError::NotFound(format!("Set {set_id}")));
@@ -399,6 +400,51 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].sort_order, 0);
         assert_eq!(items[1].sort_order, 1);
+    }
+
+    /// A spaced hyphen in a set name becomes an en dash on the way in, both
+    /// when the set is created and when it is later renamed; other hyphen
+    /// shapes pass through untouched.
+    #[test]
+    fn set_names_normalize_spaced_hyphens_to_en_dashes() {
+        let conn = setup_conn();
+        let topic = seed_topic(&conn);
+        let (category, _sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
+
+        let created =
+            SetRepo::create(&conn, category.id, TemplateMode::Closed, Some("Sada 1 - směsi"))
+                .expect("create set");
+        assert_eq!(created.name.as_deref(), Some("Sada 1 \u{2013} směsi"));
+
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT name FROM sets WHERE id = ?1",
+                params![created.id],
+                |row| row.get(0),
+            )
+            .expect("fetch set");
+        assert_eq!(stored.as_deref(), Some("Sada 1 \u{2013} směsi"));
+
+        SetRepo::update_name(&conn, &created.id, Some("Přejmenovaná - sada")).expect("rename");
+        let renamed: Option<String> = conn
+            .query_row(
+                "SELECT name FROM sets WHERE id = ?1",
+                params![created.id],
+                |row| row.get(0),
+            )
+            .expect("fetch set");
+        assert_eq!(renamed.as_deref(), Some("Přejmenovaná \u{2013} sada"));
+
+        // Compound words and uns spaced hyphens stay as typed.
+        SetRepo::update_name(&conn, &created.id, Some("x-y")).expect("rename plain");
+        let plain: Option<String> = conn
+            .query_row(
+                "SELECT name FROM sets WHERE id = ?1",
+                params![created.id],
+                |row| row.get(0),
+            )
+            .expect("fetch set");
+        assert_eq!(plain.as_deref(), Some("x-y"));
     }
 
     #[test]

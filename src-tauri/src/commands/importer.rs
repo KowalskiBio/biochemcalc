@@ -78,7 +78,7 @@ pub fn do_import_bulk_templates(
     conn: &rusqlite::Connection,
     payload: BulkImportTemplatesPayload,
 ) -> Result<Topic, DbError> {
-    let topic = Topic::new(payload.topic_name);
+    let topic = Topic::new(crate::util::normalize_name_dashes(&payload.topic_name));
     TopicRepo::insert(conn, &topic)?;
 
     for category_payload in payload.categories {

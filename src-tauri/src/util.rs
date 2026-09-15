@@ -85,6 +85,30 @@ where
     }
 }
 
+/// Typographic normalization for teacher-entered names (topics, sets): a
+/// hyphen wrapped in single spaces between two words ("x - y") becomes an
+/// en dash ("x \u{2013} y"), the Czech typographic convention. Hyphens
+/// without spaces on both sides ("x-y", "-1" ranges, leading/trailing
+/// hyphens) are left alone, as is anything with more than one space.
+pub fn normalize_name_dashes(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::with_capacity(name.len());
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '-'
+            && i >= 2
+            && chars[i - 1] == ' '
+            && !chars[i - 2].is_whitespace()
+            && chars.get(i + 1) == Some(&' ')
+            && chars.get(i + 2).is_some_and(|c| !c.is_whitespace())
+        {
+            out.push('\u{2013}');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +190,34 @@ mod tests {
             }
             other => panic!("expected Internal error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn normalize_name_dashes_converts_spaced_hyphens_between_words() {
+        assert_eq!(
+            normalize_name_dashes("Úvodní test - látkové množství"),
+            "Úvodní test \u{2013} látkové množství"
+        );
+        assert_eq!(
+            normalize_name_dashes("a - b - c"),
+            "a \u{2013} b \u{2013} c",
+            "every occurrence converts, not just the first"
+        );
+    }
+
+    #[test]
+    fn normalize_name_dashes_leaves_other_hyphens_alone() {
+        assert_eq!(normalize_name_dashes("Hmotnostní zlomek"), "Hmotnostní zlomek");
+        assert_eq!(normalize_name_dashes("x-y"), "x-y", "no spaces, no dash");
+        assert_eq!(normalize_name_dashes("x  -  y"), "x  -  y", "double spaces stay");
+        assert_eq!(normalize_name_dashes("- x"), "- x", "leading hyphen stays");
+        assert_eq!(normalize_name_dashes("x -"), "x -", "trailing hyphen stays");
+        assert_eq!(normalize_name_dashes("x - "), "x - ", "hyphen before the end stays");
+        assert_eq!(
+            normalize_name_dashes("a \u{2013} b"),
+            "a \u{2013} b",
+            "already an en dash: idempotent"
+        );
+        assert_eq!(normalize_name_dashes(""), "");
     }
 }
