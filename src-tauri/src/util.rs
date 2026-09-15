@@ -207,12 +207,23 @@ mod tests {
 
     #[test]
     fn normalize_name_dashes_leaves_other_hyphens_alone() {
-        assert_eq!(normalize_name_dashes("Hmotnostní zlomek"), "Hmotnostní zlomek");
+        assert_eq!(
+            normalize_name_dashes("Hmotnostní zlomek"),
+            "Hmotnostní zlomek"
+        );
         assert_eq!(normalize_name_dashes("x-y"), "x-y", "no spaces, no dash");
-        assert_eq!(normalize_name_dashes("x  -  y"), "x  -  y", "double spaces stay");
+        assert_eq!(
+            normalize_name_dashes("x  -  y"),
+            "x  -  y",
+            "double spaces stay"
+        );
         assert_eq!(normalize_name_dashes("- x"), "- x", "leading hyphen stays");
         assert_eq!(normalize_name_dashes("x -"), "x -", "trailing hyphen stays");
-        assert_eq!(normalize_name_dashes("x - "), "x - ", "hyphen before the end stays");
+        assert_eq!(
+            normalize_name_dashes("x - "),
+            "x - ",
+            "hyphen before the end stays"
+        );
         assert_eq!(
             normalize_name_dashes("a \u{2013} b"),
             "a \u{2013} b",

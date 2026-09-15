@@ -67,7 +67,9 @@ pub struct TestResults {
 /// A template eligible for one band, deduplicated to a single (id, mode)
 /// pair: a template linked into both an open and a closed set is one
 /// question, drawn once, in one of those modes.
-fn dedupe_templates(pairs: Vec<(Uuid, crate::models::TemplateMode)>) -> Vec<(Uuid, crate::models::TemplateMode)> {
+fn dedupe_templates(
+    pairs: Vec<(Uuid, crate::models::TemplateMode)>,
+) -> Vec<(Uuid, crate::models::TemplateMode)> {
     let mut seen = std::collections::HashSet::new();
     pairs
         .into_iter()

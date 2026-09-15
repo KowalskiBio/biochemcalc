@@ -226,7 +226,10 @@ mod tests {
         TopicRepo::insert(&conn, &t).expect("insert");
         let fetched = TopicRepo::get_by_id(&conn, &t.id).expect("get");
         assert!(fetched.is_test);
-        assert!(!fetched.for_students, "a test-only topic stays teacher-only");
+        assert!(
+            !fetched.for_students,
+            "a test-only topic stays teacher-only"
+        );
 
         // Updating with for_students explicitly false keeps both flags as
         // sent: the two toggles never imply each other.

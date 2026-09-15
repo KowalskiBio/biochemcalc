@@ -1309,7 +1309,9 @@ fn apply_migration_v40(conn: &Connection) -> Result<(), rusqlite::Error> {
                 "SELECT id, name FROM {table} WHERE name LIKE '% - %'"
             ))?;
             let mapped = stmt
-                .query_map([], |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?)))?
+                .query_map([], |row| {
+                    Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             mapped
         };

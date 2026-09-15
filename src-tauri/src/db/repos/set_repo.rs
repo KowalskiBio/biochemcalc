@@ -411,9 +411,13 @@ mod tests {
         let topic = seed_topic(&conn);
         let (category, _sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create cat");
 
-        let created =
-            SetRepo::create(&conn, category.id, TemplateMode::Closed, Some("Sada 1 - směsi"))
-                .expect("create set");
+        let created = SetRepo::create(
+            &conn,
+            category.id,
+            TemplateMode::Closed,
+            Some("Sada 1 - směsi"),
+        )
+        .expect("create set");
         assert_eq!(created.name.as_deref(), Some("Sada 1 \u{2013} směsi"));
 
         let stored: Option<String> = conn
