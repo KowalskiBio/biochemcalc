@@ -343,6 +343,77 @@ fn fmt_option_value(
     fmt_variable_value(value, precision, sig_digits, notation)
 }
 
+/// Decimal places for a symbol the template has no precision setting for.
+/// Kept as the historical fallback so a value that would collapse to "0" at
+/// one decimal place still reaches `fmt_variable_value`'s zero-collapse
+/// escape into scientific notation.
+const DEFAULT_VARIABLE_PRECISION: u8 = 1;
+
+/// Cap on decimal places derived from a literal or a value, mirroring the
+/// `precision <= 10` limit `Variable::validate` enforces.
+const MAX_DERIVED_DECIMALS: u8 = 10;
+
+/// Fractional digits written in a fixed placeholder literal: `[[rho=1.3083]]`
+/// -> 4, `[[X=2]]` -> 0, `[[Ka=1.8x10^-5]]` -> 1 (the mantissa's). The digits
+/// come from the text rather than the parsed `f64` so a literal's trailing
+/// zeros survive: `[[rho=1,3000]]` is a five-significant-digit density, not
+/// `1,3`.
+///
+/// `None` when the right-hand side is not a number at all, i.e. the linked
+/// form `[[Ka=wac]]`, whose value comes from a string variable's paired
+/// constants.
+fn literal_decimals(literal: &str) -> Option<u8> {
+    let mantissa = literal
+        .trim()
+        .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == ','))
+        .next()
+        .unwrap_or("");
+    if !mantissa.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let decimals = match mantissa.find(['.', ',']) {
+        Some(pos) => mantissa[pos + 1..]
+            .chars()
+            .filter(char::is_ascii_digit)
+            .count(),
+        None => 0,
+    };
+    Some(decimals.min(MAX_DERIVED_DECIMALS as usize) as u8)
+}
+
+/// Decimal places a value carries on its own, for a symbol with neither a
+/// configured precision nor a literal to read them from, i.e. a databáze
+/// paired constant, which arrives already rounded to the digits the teacher
+/// entered.
+/// The tolerance keeps float noise (`0.30000000000000004`) from asking for
+/// all ten decimals.
+///
+/// Values too small to survive one decimal place keep
+/// `DEFAULT_VARIABLE_PRECISION`, so an equilibrium constant still exports as
+/// `1,80×10<sup>-5</sup>` rather than a wall of leading zeros.
+fn natural_decimals(value: f64) -> u8 {
+    if !value.is_finite() || value == 0.0 {
+        return DEFAULT_VARIABLE_PRECISION;
+    }
+    let collapses_to_zero = fmt_cz(value, DEFAULT_VARIABLE_PRECISION)
+        .replace(',', ".")
+        .parse::<f64>()
+        == Ok(0.0);
+    if collapses_to_zero {
+        return DEFAULT_VARIABLE_PRECISION;
+    }
+    let tolerance = value.abs() * 1e-12;
+    for decimals in 0..=MAX_DERIVED_DECIMALS {
+        let formatted = format!("{:.*}", decimals as usize, value);
+        if let Ok(parsed) = formatted.parse::<f64>() {
+            if (parsed - value).abs() <= tolerance {
+                return decimals.max(DEFAULT_VARIABLE_PRECISION);
+            }
+        }
+    }
+    MAX_DERIVED_DECIMALS
+}
+
 fn render_question(
     text: &str,
     assigned: &HashMap<String, f64>,
@@ -372,12 +443,24 @@ fn render_question(
             .as_str();
         // Handle "Ka=wac" (linked) and "Ka=1.8e-5" (fixed) placeholder forms.
         // The left side of "=" is the symbol to look up in numeric assignments.
-        let (lookup_key, has_eq) = match symbol.find('=') {
-            Some(pos) => (&symbol[..pos], true),
-            None => (symbol, false),
+        let (lookup_key, fixed_literal) = match symbol.find('=') {
+            Some(pos) => (&symbol[..pos], Some(&symbol[pos + 1..])),
+            None => (symbol, None),
         };
+        let has_eq = fixed_literal.is_some();
         if let Some(&value) = assigned.get(lookup_key) {
-            let precision = precisions.get(lookup_key).copied().unwrap_or(1);
+            // What the teacher wrote in the question text outranks any
+            // precision stored for the symbol: a fixed `[[rho_r=1.3083]]`
+            // reaches the generator as a value, but the bulk importer files
+            // its variable row with `precision: 0`, and the old one-decimal
+            // fallback covered every symbol that has no row at all (a
+            // databáze paired constant). Either way a five-significant-digit
+            // density used to export as `1,3`, while the on-screen preview,
+            // which prints the literal verbatim, showed all five.
+            let precision = fixed_literal
+                .and_then(literal_decimals)
+                .or_else(|| precisions.get(lookup_key).copied())
+                .unwrap_or_else(|| natural_decimals(value));
             let sig_digits = significant_digits.get(lookup_key).copied();
             let notation = notations.get(lookup_key).copied().unwrap_or(Notation::Auto);
             rendered.push_str(&fmt_variable_value(value, precision, sig_digits, notation));
@@ -931,6 +1014,113 @@ mod tests {
         assert!(output.contains(" :r1 64,0 g"));
         assert!(output.contains(":r1 ok 3"));
         assert!(!output.contains("Žádná možnost"));
+    }
+
+    fn make_fixed_variant(values: [(String, f64); 2]) -> Variant {
+        Variant::new(
+            Uuid::new_v4(),
+            values.into(),
+            HashMap::new(),
+            64.0,
+            Some(vec![64.0, 70.0, 58.0, 80.0, 60.0]),
+            Some(1),
+            None,
+            None,
+            1,
+        )
+    }
+
+    fn export_question_text(
+        template: &Template,
+        variant: &Variant,
+        precisions: HashMap<String, u8>,
+    ) -> String {
+        write_txt(&[ExportQuestion {
+            template,
+            variant,
+            variable_precisions: precisions,
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }])
+    }
+
+    /// A fixed `[[rho_r=1.3083]]` literal is the teacher's own text: every
+    /// digit written there belongs in the exported test. The old one-decimal
+    /// fallback cut a five-significant-digit density down to `1,3`.
+    #[test]
+    fn fixed_placeholder_keeps_every_digit_the_teacher_typed() {
+        let template = make_template("Hustota roztoku je [[rho_r=1.3083]] g a [[wperc=21.1]] %.");
+        let variant =
+            make_fixed_variant([("rho_r".to_string(), 1.3083), ("wperc".to_string(), 21.1)]);
+        let output = export_question_text(&template, &variant, HashMap::new());
+
+        assert!(
+            output.contains("Hustota roztoku je 1,3083 g a 21,1 %."),
+            "fixed literal lost digits in:\n{output}"
+        );
+    }
+
+    /// The bulk importer files a fixed placeholder's variable row with
+    /// `precision: 0`, which must not override the digits in the text.
+    #[test]
+    fn fixed_placeholder_outranks_a_stored_precision() {
+        let template = make_template("Hustota roztoku je [[rho_r=1.3083]] g a [[wperc=21.1]] %.");
+        let variant =
+            make_fixed_variant([("rho_r".to_string(), 1.3083), ("wperc".to_string(), 21.1)]);
+        let precisions = [("rho_r".to_string(), 0), ("wperc".to_string(), 0)].into();
+        let output = export_question_text(&template, &variant, precisions);
+
+        assert!(
+            output.contains("Hustota roztoku je 1,3083 g a 21,1 %."),
+            "stored precision overrode the literal in:\n{output}"
+        );
+    }
+
+    /// Trailing zeros are significant figures: `1,3000` is a five-digit
+    /// density, and reading the digit count off the parsed `f64` would print
+    /// it as `1,3`.
+    #[test]
+    fn fixed_placeholder_keeps_trailing_zeros() {
+        let template = make_template("Hustota je [[rho=1.3000]] g a [[wperc=20]] %.");
+        let variant = make_fixed_variant([("rho".to_string(), 1.3), ("wperc".to_string(), 20.0)]);
+        let output = export_question_text(&template, &variant, HashMap::new());
+
+        assert!(
+            output.contains("Hustota je 1,3000 g a 20 %."),
+            "trailing zeros lost in:\n{output}"
+        );
+    }
+
+    /// A databáze paired constant has no variable row and no literal, so its
+    /// own digits are all there is to go on.
+    #[test]
+    fn unconfigured_constant_keeps_its_own_digits() {
+        let template = make_template("Hustota je [[rho]] g.");
+        let variant = make_fixed_variant([("rho".to_string(), 1.0287), ("X".to_string(), 32.0)]);
+        let output = export_question_text(&template, &variant, HashMap::new());
+
+        assert!(
+            output.contains("Hustota je 1,0287 g."),
+            "paired constant lost digits in:\n{output}"
+        );
+    }
+
+    /// An unconfigured constant too small for a plain decimal still escapes
+    /// to scientific notation instead of printing leading zeros.
+    #[test]
+    fn unconfigured_tiny_constant_stays_scientific() {
+        let template = make_template("Disociační konstanta je [[Ka]].");
+        let variant = make_fixed_variant([("Ka".to_string(), 1.8e-5), ("X".to_string(), 32.0)]);
+        let output = export_question_text(&template, &variant, HashMap::new());
+
+        assert!(
+            output.contains("1,80×10<sup>-5</sup>"),
+            "tiny constant did not stay scientific in:\n{output}"
+        );
     }
 
     /// The trailing `[X]` answer-target marker is an instruction to the
