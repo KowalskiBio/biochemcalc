@@ -13,6 +13,24 @@ fn fmt_cz(value: f64, precision: u8) -> String {
     s.replace('.', ",")
 }
 
+/// The real minus sign (U+2212) a student reads, in place of the ASCII
+/// hyphen-minus (U+002D) a keyboard types. A hyphen is a hyphen; raised to a
+/// superscript or set before a negative number it is typographically the wrong
+/// glyph, exactly like the hyphen-as-minus the teacher's units arrive with
+/// (`mol.dm^-3`).
+///
+/// Scoped to strings this module itself formatted for display: placeholder
+/// values, option values, superscript exponents and charges. Never applied to
+/// raw teacher prose (a hyphen there can be a range `1-5` or a compound word)
+/// and never to the `:n` evaluation rows or the bare `e`-notation inside them,
+/// which IS MU parses back as numbers and would stop recognising.
+///
+/// A formatted number's only hyphen is its sign, so a blanket replace is
+/// unambiguous here.
+fn display_minus(s: &str) -> String {
+    s.replace('-', "\u{2212}")
+}
+
 /// Mantissa precision for scientific notation, e.g. `5,21×10<sup>24</sup>`.
 const SCIENTIFIC_MANTISSA_DECIMALS: u8 = 2;
 
@@ -71,10 +89,18 @@ fn scientific_mantissa_cz(value: f64, mantissa_decimals: u8) -> (String, i32) {
 
 fn fmt_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
     if value == 0.0 || !value.is_finite() {
-        return fmt_cz(value, mantissa_decimals);
+        return display_minus(&fmt_cz(value, mantissa_decimals));
     }
     let (mantissa, exponent) = scientific_mantissa_cz(value, mantissa_decimals);
-    format!("{}×10<sup>{}</sup>", mantissa, exponent)
+    // Both minus positions render with the real minus sign: the negative
+    // mantissa and the negative exponent. Only the HTML display form does
+    // this; the bare `e`-notation sibling (`4e-5`) must stay parseable.
+    format!(
+        "{}×10<sup>{}{}</sup>",
+        display_minus(&mantissa),
+        if exponent < 0 { "\u{2212}" } else { "" },
+        exponent.abs()
+    )
 }
 
 /// Bare `e`-notation scientific form for a `:n` evaluation row: `4e-5`, not
@@ -153,7 +179,15 @@ fn format_chemical_text(text: &str) -> String {
     // unit product (`g.cm^-3`) from a sentence period (always followed by a
     // space or the end of the text) and from a decimal (digits both sides).
     let text = dot_mul_re.replace_all(&text, "$1×$2");
-    let text = sup_re.replace_all(&text, "$1<sup>$2</sup>");
+    // A `-` inside the superscript is a minus (an exponent like `-3`, a charge
+    // like `2-`), so it takes the real minus sign; a `+` stays as typed.
+    let text = sup_re.replace_all(&text, |caps: &regex::Captures| {
+        format!(
+            "{}<sup>{}</sup>",
+            &caps[1],
+            caps[2].replace('-', "\u{2212}")
+        )
+    });
     let text = sub_re.replace_all(&text, |caps: &regex::Captures| {
         format!("{}<sub>{}</sub>", &caps[1], caps[2].replace('_', ""))
     });
@@ -390,7 +424,8 @@ fn literal_decimals(literal: &str) -> Option<u8> {
 ///
 /// Values too small to survive one decimal place keep
 /// `DEFAULT_VARIABLE_PRECISION`, so an equilibrium constant still exports as
-/// `1,80×10<sup>-5</sup>` rather than a wall of leading zeros.
+/// `1,80×10<sup>−5</sup>` (with the real minus sign, U+2212) rather than a
+/// wall of leading zeros.
 fn natural_decimals(value: f64) -> u8 {
     if !value.is_finite() || value == 0.0 {
         return DEFAULT_VARIABLE_PRECISION;
@@ -463,7 +498,9 @@ fn render_question(
                 .unwrap_or_else(|| natural_decimals(value));
             let sig_digits = significant_digits.get(lookup_key).copied();
             let notation = notations.get(lookup_key).copied().unwrap_or(Notation::Auto);
-            rendered.push_str(&fmt_variable_value(value, precision, sig_digits, notation));
+            rendered.push_str(&display_minus(&fmt_variable_value(
+                value, precision, sig_digits, notation,
+            )));
         } else if !has_eq {
             if let Some(value) = assigned_strings.get(symbol) {
                 rendered.push_str(&format_chemical_text(value));
@@ -578,11 +615,11 @@ fn render_multi_closed_options(
                 // override applies to just this option.
                 let sig = option_sig_override(a.option_sig_digits.as_deref(), idx).or(sig_digits);
                 if unit.is_empty() {
-                    fmt_option_value(value, precision, sig, notation)
+                    display_minus(&fmt_option_value(value, precision, sig, notation))
                 } else {
                     format!(
                         "{} {}",
-                        fmt_option_value(value, precision, sig, notation),
+                        display_minus(&fmt_option_value(value, precision, sig, notation)),
                         format_chemical_text(unit)
                     )
                 }
@@ -905,7 +942,12 @@ pub fn write_txt(questions: &[ExportQuestion<'_>]) -> String {
                         out.push_str(&format!(
                             " :r{} {} {}\n",
                             label,
-                            fmt_option_value(*value, precision, sig, result_notation),
+                            display_minus(&fmt_option_value(
+                                *value,
+                                precision,
+                                sig,
+                                result_notation
+                            )),
                             format_chemical_text(&q.template.result_unit)
                         ));
                     }
@@ -1118,7 +1160,7 @@ mod tests {
         let output = export_question_text(&template, &variant, HashMap::new());
 
         assert!(
-            output.contains("1,80×10<sup>-5</sup>"),
+            output.contains("1,80×10<sup>\u{2212}5</sup>"),
             "tiny constant did not stay scientific in:\n{output}"
         );
     }
@@ -1201,14 +1243,14 @@ mod tests {
         assert_eq!(fmt_value_cz(6.022e23, 2), "6,02×10<sup>23</sup>");
         assert_eq!(
             fmt_value_cz(-1.8433287150633585e25, 2),
-            "-1,84×10<sup>25</sup>"
+            "\u{2212}1,84×10<sup>25</sup>"
         );
         assert_eq!(fmt_value_cz(5.2149e24, 2), "5,21×10<sup>24</sup>");
     }
 
     #[test]
     fn tiny_values_export_as_html_scientific_notation() {
-        assert_eq!(fmt_value_cz(0.0000123, 2), "1,23×10<sup>-5</sup>");
+        assert_eq!(fmt_value_cz(0.0000123, 2), "1,23×10<sup>\u{2212}5</sup>");
     }
 
     /// A mantissa that rounds up to 10,00 belongs in the next decade.
@@ -1296,7 +1338,7 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(" :r1 3,440×10<sup>-22</sup>"),
+            output.contains(" :r1 3,440×10<sup>\u{2212}22</sup>"),
             "expected 4-sig-digit HTML scientific notation, got:\n{output}"
         );
         assert!(
@@ -2077,7 +2119,7 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("g×cm<sup>-3</sup>"));
+        assert!(output.contains("g×cm<sup>\u{2212}3</sup>"));
         // The unit dot survives; the decimal beside it becomes a comma.
         assert!(output.contains("1,5"));
     }
@@ -2099,7 +2141,7 @@ mod tests {
             mode: TemplateMode::Closed,
         }]);
 
-        assert!(output.contains("g×cm<sup>-3</sup>"));
+        assert!(output.contains("g×cm<sup>\u{2212}3</sup>"));
         // The unit dot survives; the decimal beside it becomes a comma.
         assert!(output.contains("1,5"));
     }
@@ -2303,7 +2345,7 @@ mod tests {
         }]);
 
         assert!(
-            output.contains("g×cm<sup>-3</sup>"),
+            output.contains("g×cm<sup>\u{2212}3</sup>"),
             "expected HTML-formatted unit, got:\n{output}"
         );
         assert!(
@@ -2351,7 +2393,7 @@ mod tests {
         // The unit rides with the input field (HTML is fine there); the
         // evaluation row stays a bare number.
         assert!(
-            output.contains(" :n  g×mol<sup>-1</sup>\n"),
+            output.contains(" :n  g×mol<sup>\u{2212}1</sup>\n"),
             "expected HTML-formatted unit beside the field, got:\n{output}"
         );
         assert!(
@@ -2509,28 +2551,37 @@ mod tests {
 
     #[test]
     fn chemical_text_renders_unit_products_as_multiplication() {
-        assert_eq!(format_chemical_text("g*cm^-3"), "g\u{d7}cm<sup>-3</sup>");
+        assert_eq!(
+            format_chemical_text("g*cm^-3"),
+            "g\u{d7}cm<sup>\u{2212}3</sup>"
+        );
         assert_eq!(
             format_chemical_text("g\u{b7}cm^-3"),
-            "g\u{d7}cm<sup>-3</sup>"
+            "g\u{d7}cm<sup>\u{2212}3</sup>"
         );
-        assert_eq!(format_chemical_text("g.cm^-3"), "g\u{d7}cm<sup>-3</sup>");
+        assert_eq!(
+            format_chemical_text("g.cm^-3"),
+            "g\u{d7}cm<sup>\u{2212}3</sup>"
+        );
         assert_eq!(
             format_chemical_text("mol.dm^-3"),
-            "mol\u{d7}dm<sup>-3</sup>"
+            "mol\u{d7}dm<sup>\u{2212}3</sup>"
         );
-        assert_eq!(format_chemical_text("mg.ml^-1"), "mg\u{d7}ml<sup>-1</sup>");
+        assert_eq!(
+            format_chemical_text("mg.ml^-1"),
+            "mg\u{d7}ml<sup>\u{2212}1</sup>"
+        );
     }
 
     #[test]
     fn chemical_text_renders_czech_power_of_ten_as_multiplication() {
         assert_eq!(
             format_chemical_text("3,53.10^-4"),
-            "3,53\u{d7}10<sup>-4</sup>"
+            "3,53\u{d7}10<sup>\u{2212}4</sup>"
         );
         assert_eq!(
             format_chemical_text("1,8*10^-5"),
-            "1,8\u{d7}10<sup>-5</sup>"
+            "1,8\u{d7}10<sup>\u{2212}5</sup>"
         );
     }
 
@@ -2580,5 +2631,114 @@ mod tests {
             "Vypo\u{10d}\u{ed}tejte hmotnost. Jak\u{e1} je"
         );
         assert_eq!(format_chemical_text("hustota je 2 g."), "hustota je 2 g.");
+    }
+
+    /// An ionic charge is a minus too: `SO4^2-` must not export its charge as
+    /// a hyphen.
+    #[test]
+    fn chemical_text_renders_a_charge_with_the_real_minus_sign() {
+        assert_eq!(format_chemical_text("SO4^2-"), "SO4<sup>2\u{2212}</sup>");
+    }
+
+    /// A negative option value the app itself formatted carries the real
+    /// minus sign, not the keyboard hyphen.
+    #[test]
+    fn negative_option_values_use_the_real_minus_sign() {
+        let template = make_template("Vypočítejte entalpii.");
+        let variant = Variant {
+            numeric_options: Some(vec![-5.2, -3.1, -8.4, -2.0, -6.7]),
+            correct_option: Some(1),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Closed,
+        }]);
+
+        assert!(
+            output.contains(" :r1 \u{2212}5,2 g"),
+            "negative option must use the real minus sign, got:\n{output}"
+        );
+        assert!(
+            !output.contains(" :r1 -5,2"),
+            "ASCII hyphen minus leaked into an option, got:\n{output}"
+        );
+    }
+
+    /// Same for a negative value substituted into the question text.
+    #[test]
+    fn negative_placeholder_value_uses_the_real_minus_sign() {
+        let template = make_template("Teplota klesla na [[t]] \u{b0}C.");
+        let variant = make_fixed_variant([("t".to_string(), -5.0), ("X".to_string(), 32.0)]);
+        let precisions = [("t".to_string(), 1)].into();
+        let output = export_question_text(&template, &variant, precisions);
+
+        assert!(
+            output.contains("Teplota klesla na \u{2212}5,0 \u{b0}C."),
+            "negative placeholder must use the real minus sign, got:\n{output}"
+        );
+    }
+
+    /// A hyphen the teacher typed in prose is ambiguous (a range `1-5`, a
+    /// compound word), so it is never converted.
+    #[test]
+    fn prose_hyphens_are_left_alone() {
+        let template = make_template("Teplota klesla na -5 \u{b0}C v rozsahu 1-5.");
+        let variant = make_closed_variant();
+        let output = export_question_text(&template, &variant, HashMap::new());
+
+        assert!(
+            output.contains("klesla na -5 \u{b0}C") && output.contains("rozsahu 1-5."),
+            "prose hyphens must stay as typed, got:\n{output}"
+        );
+        assert!(
+            !output.contains('\u{2212}'),
+            "nothing in this prose should carry the real minus sign:\n{output}"
+        );
+    }
+
+    /// The `:n` evaluation row is parsed by IS MU as a number, so even a
+    /// negative bound keeps the ASCII hyphen there.
+    #[test]
+    fn negative_interval_bounds_keep_the_ascii_hyphen() {
+        let template = make_template("Vypočítejte teplotní rozdíl.");
+        let variant = Variant {
+            numeric_options: None,
+            correct_option: None,
+            interval_lo: Some(-5.0),
+            interval_hi: Some(-3.0),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 1,
+            result_significant_digits: None,
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+
+        let row = output
+            .lines()
+            .find(|l| l.starts_with(":n="))
+            .expect("evaluation row");
+        assert!(
+            row.contains(":n=-5,0..-3,0 ok 3"),
+            "negative bounds must keep the ASCII hyphen, got: {row}"
+        );
+        assert!(
+            !row.contains('\u{2212}'),
+            "real minus sign leaked into a machine-parsed row: {row}"
+        );
     }
 }
