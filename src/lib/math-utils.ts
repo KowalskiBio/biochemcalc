@@ -1063,10 +1063,13 @@ const SCIENTIFIC_EXPONENT_REGEX = /×10\^([+-]?\d+)/g
 /**
  * `1.52×10^25` → `1.52×10<sup>25</sup>`, for the places that render markup
  * (question text, answer chips, units). Only for in-app rendering — the
- * exported `.txt` builds its own HTML in the Rust writer.
+ * exported `.txt` builds its own HTML in the Rust writer. A negative exponent
+ * carries the real minus sign (U+2212), not the ASCII hyphen-minus.
  */
 export function scientificNotationToHtml(text: string): string {
-  return text.replace(SCIENTIFIC_EXPONENT_REGEX, "×10<sup>$1</sup>")
+  return text.replace(SCIENTIFIC_EXPONENT_REGEX, (_, exponent: string) => {
+    return `×10<sup>${exponent.replace(/-/g, "\u2212")}</sup>`
+  })
 }
 
 const SUPERSCRIPT_CHARS: Record<string, string> = {
@@ -1218,6 +1221,17 @@ function formatNumberMaxDecimalsRaw(
 }
 
 /**
+ * The leading sign of a formatted negative number as the real minus sign
+ * (U+2212), matching what the exported `.txt` already writes. Only the first
+ * character: the `×10^n` exponent further in the string must stay ASCII so
+ * `SCIENTIFIC_EXPONENT_REGEX` (and its Unicode sibling) can still find and
+ * superscript it — those passes write their own real-minus exponent.
+ */
+function displayMinus(formatted: string): string {
+  return formatted.startsWith("-") ? `\u2212${formatted.slice(1)}` : formatted
+}
+
+/**
  * `value` rounded to `sigDigits` significant digits, with a Czech decimal
  * comma. Display only: see {@link formatDecimalComma}.
  */
@@ -1227,7 +1241,9 @@ export function formatSignificantDigits(
   forceScientific = false,
   notation?: Notation,
 ): string {
-  return formatDecimalComma(formatSignificantDigitsRaw(value, sigDigits, forceScientific, notation))
+  return displayMinus(
+    formatDecimalComma(formatSignificantDigitsRaw(value, sigDigits, forceScientific, notation)),
+  )
 }
 
 /**
@@ -1240,8 +1256,8 @@ export function formatNumberMaxDecimals(
   forceScientific = false,
   notation?: Notation,
 ): string {
-  return formatDecimalComma(
-    formatNumberMaxDecimalsRaw(value, maxDecimals, forceScientific, notation),
+  return displayMinus(
+    formatDecimalComma(formatNumberMaxDecimalsRaw(value, maxDecimals, forceScientific, notation)),
   )
 }
 

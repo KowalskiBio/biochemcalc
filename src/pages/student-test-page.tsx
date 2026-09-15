@@ -213,7 +213,15 @@ export function StudentTestPage() {
               })
               return { attemptId: question.attemptId, result }
             }
-            const parsed = (answer.answers ?? []).map((v) => Number(v.trim().replace(",", ".")))
+            // `\u2212`: a real minus sign pasted from a rendered value.
+            const parsed = (answer.answers ?? []).map((v) =>
+              Number(
+                v
+                  .trim()
+                  .replace(/\u2212/g, "-")
+                  .replace(",", "."),
+              ),
+            )
             if (parsed.length === 0 || parsed.some((v) => !Number.isFinite(v))) {
               return null
             }

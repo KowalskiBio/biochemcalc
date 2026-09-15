@@ -39,7 +39,12 @@ const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const
  * refuse to submit rather than send a `NaN` the server would reject.
  */
 function parseAnswer(raw: string): number | null {
-  const normalized = raw.trim().replace(",", ".")
+  // `\u2212`: the real minus sign rendered values carry, so a pasted `−5,2`
+  // still parses instead of silently becoming NaN.
+  const normalized = raw
+    .trim()
+    .replace(/\u2212/g, "-")
+    .replace(",", ".")
   if (normalized.length === 0) return null
   const value = Number(normalized)
   return Number.isFinite(value) ? value : null

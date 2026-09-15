@@ -204,6 +204,13 @@ describe("parseCzechNumber", () => {
     expect(parseCzechNumber("6.76×10-5")).toBeCloseTo(6.76e-5)
     expect(parseCzechNumber("9.95000x10-5")).toBeCloseTo(9.95e-5)
   })
+
+  it("accepts the real minus sign a rendered value carries", () => {
+    // A student pasting `−5,2` back out of a question must not lose the
+    // answer to the typographic minus.
+    expect(parseCzechNumber("\u22125,2")).toBeCloseTo(-5.2)
+    expect(parseCzechNumber("\u22121,23×10^-5")).toBeCloseTo(-1.23e-5)
+  })
 })
 
 describe("normalizeDecimalCommasInText idempotency", () => {

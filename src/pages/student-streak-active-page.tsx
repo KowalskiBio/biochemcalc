@@ -104,7 +104,11 @@ export function StudentStreakActivePage() {
     let answers: number[] | undefined
     if (!isClosed) {
       const parsed = openAnswers.map((raw) => {
-        const normalized = raw.trim().replace(",", ".")
+        // `\u2212`: a real minus sign pasted from a rendered value.
+        const normalized = raw
+          .trim()
+          .replace(/\u2212/g, "-")
+          .replace(",", ".")
         if (normalized.length === 0) return null
         const value = Number(normalized)
         return Number.isFinite(value) ? value : null

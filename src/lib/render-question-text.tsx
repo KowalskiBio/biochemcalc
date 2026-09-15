@@ -75,8 +75,11 @@ export function formatChemicalText(text: string): string {
       .replace(/([A-Za-z])\.([A-Za-z])/gu, "$1×$2")
       // Superscripts: 10^-5, x^2, Ca^2+, PO4^3-, etc.
       // Handles: digits with optional sign prefix/suffix, or bare sign (^- / ^+).
+      // A `-` inside the superscript is a minus (an exponent like `-3`, a
+      // charge like `2-`), so it takes the real minus sign (U+2212), same as
+      // the exported `.txt`; a `+` stays as typed.
       .replace(/([A-Za-z0-9)(])\^([+-]?\d+[+-]?|[+-])/g, (_, base, exponent) => {
-        return `${base}<sup>${exponent}</sup>`
+        return `${base}<sup>${exponent.replace(/-/g, "\u2212")}</sup>`
       })
       // Subscripts: numeric (H_2, SO_4) AND letter (K_a, K_b, pK_a, n_e), plus
       // chained compound subscripts (K_a_1 → Ka1, one symbol, one subscript).

@@ -687,7 +687,7 @@ describe("formatNumberMaxDecimals", () => {
 
   it("falls back to scientific notation when a non-zero value rounds to zero", () => {
     expect(formatNumberMaxDecimals(0.001)).toBe("1,00×10^-3")
-    expect(formatNumberMaxDecimals(-0.001)).toBe("-1,00×10^-3")
+    expect(formatNumberMaxDecimals(-0.001)).toBe("\u22121,00×10^-3")
     expect(formatNumberMaxDecimals(0.0049)).toBe("4,90×10^-3")
     expect(formatNumberMaxDecimals(1.23e-5)).toBe("1,23×10^-5")
   })
@@ -697,7 +697,7 @@ describe("formatNumberMaxDecimals", () => {
     // which is neither readable nor superscriptable.
     expect(formatNumberMaxDecimals(1.524493429448685e25)).toBe("1,52×10^25")
     expect(formatNumberMaxDecimals(6.022e23)).toBe("6,02×10^23")
-    expect(formatNumberMaxDecimals(-1.8433287150633585e25)).toBe("-1,84×10^25")
+    expect(formatNumberMaxDecimals(-1.8433287150633585e25)).toBe("\u22121,84×10^25")
     expect(formatNumberMaxDecimals(5.2149e24)).toBe("5,21×10^24")
   })
 
@@ -722,8 +722,23 @@ describe("formatNumberMaxDecimals", () => {
 
   it("converts scientific notation to superscript markup for rendered contexts", () => {
     expect(scientificNotationToHtml("1.52×10^25")).toBe("1.52×10<sup>25</sup>")
-    expect(scientificNotationToHtml("1.23×10^-5")).toBe("1.23×10<sup>-5</sup>")
+    expect(scientificNotationToHtml("1.23×10^-5")).toBe("1.23×10<sup>\u22125</sup>")
     expect(scientificNotationToHtml("2711.93")).toBe("2711.93")
+  })
+
+  it("renders a negative plain value with the real minus sign", () => {
+    expect(formatNumberMaxDecimals(-5.2, 1)).toBe("\u22125,2")
+    expect(formatSignificantDigits(-5.2, 3)).toBe("\u22125,20")
+  })
+
+  it("keeps the scientific exponent ASCII in the formatted string for the sup pass to convert", () => {
+    // The wrapper converts only the leading sign; the `×10^n` exponent stays
+    // ASCII so SCIENTIFIC_EXPONENT_REGEX can still superscript it, where the
+    // real minus sign is written.
+    expect(formatNumberMaxDecimals(-1.23e-5)).toBe("\u22121,23×10^-5")
+    expect(scientificNotationToHtml(formatNumberMaxDecimals(-1.23e-5))).toBe(
+      "\u22121,23×10<sup>\u22125</sup>",
+    )
   })
 
   it("keeps ordinary magnitudes in plain decimal form", () => {

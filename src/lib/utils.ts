@@ -56,10 +56,14 @@ export interface PlaceholderMatch {
  * Read a number as it is written in Czech teaching materials: a decimal comma,
  * and a power of ten spelled `1,8.10-5`, `6.76×10-5` or `9.95000x10-5` rather
  * than `1.8e-5`. Returns undefined for anything that is not a single number.
+ *
+ * The real minus sign (U+2212) is accepted: rendered values carry it, and a
+ * student pasting one back into an input must not lose the answer to it.
  */
 export function parseCzechNumber(value: string): number | undefined {
   const normalized = value
     .trim()
+    .replace(/\u2212/g, "-")
     .replace(/,/g, ".")
     .replace(/\s+/g, "")
     .replace(/[×x*]10\^?/g, "e")
