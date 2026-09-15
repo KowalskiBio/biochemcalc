@@ -13,6 +13,7 @@
 //! numbers each time.
 
 use crate::commands::generation::load_template_dependencies;
+use crate::commands::test_session::{QUESTIONS_PER_BAND, TEST_POINT_VALUE_BANDS};
 use crate::db::repos::{
     ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, StreakRunRepo,
     TemplateDecoyRepo, TemplateRepo, TestSessionRepo,
@@ -89,7 +90,19 @@ pub struct SubmitAnswerPayload {
 pub struct PracticeTopic {
     pub id: Uuid,
     pub name: String,
+    /// The teacher's "Test" flag: the topic doubles as a timed test in the
+    /// test generator, on top of being practisable here.
+    pub is_test: bool,
     pub difficulties: Vec<PracticeDifficulty>,
+}
+
+/// A topic offered in the student test generator: the teacher flagged it as
+/// a test AND it has enough questions to fill all three point-value bands.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestTopicOption {
+    pub id: Uuid,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -220,8 +233,9 @@ pub struct LeaderboardEntry {
 // Topics
 // ---------------------------------------------------------------------------
 
-/// Topics with at least one question, each listing the difficulties it can
-/// actually serve.
+/// Student-visible topics (for_students) with at least one question, each
+/// listing the difficulties it can actually serve. Teacher-only topics are
+/// skipped here even when they are tests: the test picker has its own list.
 pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, DbError> {
     let rows = PracticeRepo::list_practice_topics(conn)?;
     let set_rows = PracticeRepo::list_practice_sets(conn)?;
@@ -230,6 +244,9 @@ pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, 
     // for one topic fold into a single entry without a lookup map.
     let mut topics: Vec<PracticeTopic> = Vec::new();
     for row in rows {
+        if !row.for_students {
+            continue;
+        }
         let sets = set_rows
             .iter()
             .filter(|s| s.topic_id == row.topic_id && s.point_value == row.point_value)
@@ -253,6 +270,7 @@ pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, 
             _ => topics.push(PracticeTopic {
                 id: row.topic_id,
                 name: row.name,
+                is_test: row.is_test,
                 difficulties: vec![PracticeDifficulty {
                     point_value: row.point_value,
                     question_count: row.question_count,
@@ -263,6 +281,42 @@ pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, 
     }
 
     Ok(topics)
+}
+
+/// Topics offered as timed tests in the student test generator: flagged as
+/// a test by the teacher (independently of practice visibility, so a
+/// test-only topic is offered here even though it never shows up in the
+/// endless generator), and holding at least `QUESTIONS_PER_BAND` questions
+/// at each of the three point values (2/3/4), so every test can always be
+/// filled to its full 12-question shape. A flagged topic that does not meet
+/// the bar is simply not offered yet: it becomes available the moment the
+/// teacher adds enough questions.
+pub fn do_list_test_topics(conn: &Connection) -> Result<Vec<TestTopicOption>, DbError> {
+    let rows = PracticeRepo::list_practice_topics(conn)?;
+
+    // Rows arrive ordered by (topic name, point value), so consecutive rows
+    // for one flagged topic fold into a single candidate, remembering each
+    // band's question count.
+    let mut candidates: Vec<(Uuid, String, Vec<(u8, i64)>)> = Vec::new();
+    for row in rows.into_iter().filter(|row| row.is_test) {
+        let band = (row.point_value, row.question_count);
+        match candidates.last_mut() {
+            Some(candidate) if candidate.0 == row.topic_id => candidate.2.push(band),
+            _ => candidates.push((row.topic_id, row.name, vec![band])),
+        }
+    }
+
+    Ok(candidates
+        .into_iter()
+        .filter(|(_, _, bands)| {
+            TEST_POINT_VALUE_BANDS.iter().all(|band| {
+                bands
+                    .iter()
+                    .any(|(pv, count)| *pv == *band && *count >= QUESTIONS_PER_BAND as i64)
+            })
+        })
+        .map(|(id, name, _)| TestTopicOption { id, name })
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +862,86 @@ mod tests {
         assert_eq!(roztoky.difficulties.len(), 1);
         assert_eq!(roztoky.difficulties[0].point_value, 2);
         assert_eq!(roztoky.difficulties[0].question_count, 1);
+    }
+
+    /// Seeds a topic with `questions_per_band` questions at each of the 2/3/4
+    /// point values, carrying exactly the visibility flags passed in.
+    fn seed_topic_full(
+        conn: &Connection,
+        name: &str,
+        for_students: bool,
+        is_test: bool,
+        questions_per_band: usize,
+    ) -> Uuid {
+        let mut topic = Topic::new(name.to_string());
+        topic.for_students = for_students;
+        topic.is_test = is_test;
+        crate::db::repos::TopicRepo::insert(conn, &topic).expect("insert topic");
+
+        for point_value in crate::commands::test_session::TEST_POINT_VALUE_BANDS {
+            let (_, sets) =
+                CategoryRepo::create(conn, topic.id, point_value).expect("create category");
+            for i in 0..questions_per_band {
+                let variable = Variable::new(
+                    format!("{name} {point_value} {i}"),
+                    "X".into(),
+                    1.0,
+                    10.0,
+                    1.0,
+                    "g".into(),
+                    0,
+                );
+                VariableRepo::insert_raw(conn, &variable).expect("insert variable");
+                let template = Template::new(
+                    format!("{name} {point_value} {i}: kolik je dvojnásobek [[X]] g? [Y]"),
+                    "Y = X * 2".into(),
+                    "Y = X × 2".into(),
+                    None,
+                    "g".into(),
+                    point_value,
+                );
+                let constraint = ResultConstraint::new(
+                    template.id,
+                    Some(0.0),
+                    Some(100.0),
+                    None,
+                    ConstraintType::Range,
+                );
+                let tv = TemplateVariable {
+                    template_id: template.id,
+                    variable_id: variable.id,
+                    placeholder: "X".into(),
+                    greater_than_variable_id: None,
+                    less_than_variable_id: None,
+                };
+                TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
+                    .expect("insert template");
+                SetRepo::add_template(conn, &sets[i % 3].id, &template.id).expect("add to set");
+            }
+        }
+
+        topic.id
+    }
+
+    /// The two visibility flags are independent: a test-only topic
+    /// (for_students = 0, is_test = 1) must be offered in the test picker
+    /// even though it never shows up in the endless practice generator, and
+    /// an underfilled test stays hidden until every band has its 4 questions.
+    #[test]
+    fn test_topics_listing_is_independent_of_practice_visibility() {
+        let conn = setup_conn();
+        seed_topic_full(&conn, "TestOnly", false, true, 4);
+        seed_topic_full(&conn, "Practice", true, false, 4);
+        seed_topic_full(&conn, "Underfilled", false, true, 3);
+        seed_topic_full(&conn, "Both", true, true, 5);
+
+        let tests = do_list_test_topics(&conn).expect("list test topics");
+        let names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, vec!["Both", "TestOnly"]);
+
+        let practice = do_list_practice_topics(&conn).expect("list practice topics");
+        let pnames: Vec<&str> = practice.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(pnames, vec!["Both", "Practice"]);
     }
 
     /// A template linked only into an open set must never be served closed,

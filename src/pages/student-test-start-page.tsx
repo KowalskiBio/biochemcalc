@@ -1,5 +1,5 @@
 import { Loader2, Timer } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
@@ -18,61 +18,41 @@ import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
-import type { PracticeTopic, StartTestInput, TemplateMode } from "@/lib/types"
+import type { StartTestInput, TestTopicOption } from "@/lib/types"
 
 const DEFAULT_TIME_LIMIT_MINUTES = 20
 
 /**
- * Where a student configures and launches a fixed-batch test session: every
- * question in a topic/point value (optionally narrowed to one set and/or
- * question type, same filters as the practice generator) at once, always
- * timed. The generated session is handed to `/test/active` via router state
- * rather than a refetchable id — there is deliberately no "resume a session"
- * endpoint yet, so reloading the in-progress or results page loses it.
+ * Where a student launches a timed test: they pick one of the tests the
+ * teacher prepared (a topic flagged as a test), and the backend draws its
+ * 12 questions (4 at each of 2/3/4 points, from all of the topic's sets)
+ * at once. The generated session is handed to `/test/active` via router
+ * state rather than a refetchable id: there is deliberately no "resume a
+ * session" endpoint yet, so reloading the in-progress or results page
+ * loses it.
  */
 export function StudentTestStartPage() {
   const { toast } = useToast()
   const navigate = useNavigate()
 
-  const [topics, setTopics] = useState<PracticeTopic[]>([])
+  const [testTopics, setTestTopics] = useState<TestTopicOption[]>([])
   const [isLoadingTopics, setIsLoadingTopics] = useState(true)
   const [topicId, setTopicId] = useState<string>("")
-  const [pointValue, setPointValue] = useState<string>("")
-  /** Empty string means "any set": drawn from all of them. */
-  const [setId, setSetId] = useState<string>("")
-  /** Empty string means "either": mixed at random. */
-  const [modeFilter, setModeFilter] = useState<"" | TemplateMode>("")
   const [timeLimitMinutes, setTimeLimitMinutes] = useState(String(DEFAULT_TIME_LIMIT_MINUTES))
   const [isStarting, setIsStarting] = useState(false)
-
-  const selectedTopic = useMemo(
-    () => topics.find((t) => t.id === topicId) ?? null,
-    [topics, topicId],
-  )
-
-  const selectedDifficulty = useMemo(
-    () => selectedTopic?.difficulties.find((d) => String(d.pointValue) === pointValue) ?? null,
-    [selectedTopic, pointValue],
-  )
-
-  /** A specific set's mode is fixed by the teacher; see the same guard on the practice page. */
-  const selectedSet = useMemo(
-    () => selectedDifficulty?.sets.find((s) => s.id === setId) ?? null,
-    [selectedDifficulty, setId],
-  )
 
   useEffect(() => {
     let cancelled = false
     studentApi
-      .topics()
+      .testTopics()
       .then((loaded) => {
         if (cancelled) return
-        setTopics(loaded)
+        setTestTopics(loaded)
       })
       .catch((error) => {
         if (cancelled) return
         toast({
-          title: extractErrorMessage(error, cs.student.generationError),
+          title: extractErrorMessage(error, cs.test.startError),
           variant: "destructive",
         })
       })
@@ -84,19 +64,8 @@ export function StudentTestStartPage() {
     }
   }, [toast])
 
-  const handleTopicChange = useCallback(
-    (nextTopicId: string) => {
-      setTopicId(nextTopicId)
-      const next = topics.find((t) => t.id === nextTopicId)
-      const stillAvailable = next?.difficulties.some((d) => String(d.pointValue) === pointValue)
-      if (!stillAvailable) setPointValue("")
-      setSetId("")
-    },
-    [topics, pointValue],
-  )
-
   const handleStart = useCallback(async () => {
-    if (!topicId || !pointValue) return
+    if (!topicId) return
     const minutes = Number(timeLimitMinutes)
     if (!Number.isFinite(minutes) || minutes <= 0) {
       toast({ title: cs.test.startError, variant: "destructive" })
@@ -107,12 +76,7 @@ export function StudentTestStartPage() {
     try {
       const input: StartTestInput = {
         topicId,
-        pointValue: Number(pointValue),
         timeLimitSeconds: Math.round(minutes * 60),
-        // A specific set's mode is already fixed; only "any set" leaves the
-        // question-type filter something to actually restrict.
-        mode: setId ? undefined : modeFilter || undefined,
-        setId: setId || undefined,
       }
       const session = await studentApi.startTest(input)
       // `input` travels alongside the session so the results page can offer
@@ -124,7 +88,7 @@ export function StudentTestStartPage() {
     } finally {
       setIsStarting(false)
     }
-  }, [topicId, pointValue, setId, modeFilter, timeLimitMinutes, navigate, toast])
+  }, [topicId, timeLimitMinutes, navigate, toast])
 
   if (isLoadingTopics) {
     return (
@@ -140,13 +104,13 @@ export function StudentTestStartPage() {
     )
   }
 
-  if (topics.length === 0) {
+  if (testTopics.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>{cs.test.startTitle}</CardTitle>
         </CardHeader>
-        <CardContent className="text-muted-foreground">{cs.student.noTopics}</CardContent>
+        <CardContent className="text-muted-foreground">{cs.test.noTestTopics}</CardContent>
       </Card>
     )
   }
@@ -161,87 +125,19 @@ export function StudentTestStartPage() {
       </div>
 
       <Card>
-        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_140px_auto] lg:items-end">
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-[1fr_180px_auto] lg:items-end">
           <div className="space-y-2">
-            <Label htmlFor="test-topic">{cs.student.topicLabel}</Label>
-            <Select value={topicId} onValueChange={handleTopicChange}>
+            <Label htmlFor="test-topic">{cs.test.testTopicLabel}</Label>
+            <Select value={topicId} onValueChange={setTopicId}>
               <SelectTrigger id="test-topic">
-                <SelectValue placeholder={cs.student.topicPlaceholder} />
+                <SelectValue placeholder={cs.test.testTopicPlaceholder} />
               </SelectTrigger>
               <SelectContent>
-                {topics.map((topic) => (
+                {testTopics.map((topic) => (
                   <SelectItem key={topic.id} value={topic.id}>
-                    {topic.name}
+                    Test - {topic.name}
                   </SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="test-difficulty">{cs.student.difficultyLabel}</Label>
-            <Select
-              value={pointValue}
-              onValueChange={(value) => {
-                setPointValue(value)
-                setSetId("")
-              }}
-              disabled={!selectedTopic}
-            >
-              <SelectTrigger id="test-difficulty">
-                <SelectValue placeholder={cs.student.difficultyPlaceholder} />
-              </SelectTrigger>
-              <SelectContent>
-                {(selectedTopic?.difficulties ?? []).map((difficulty) => (
-                  <SelectItem key={difficulty.pointValue} value={String(difficulty.pointValue)}>
-                    {cs.student.difficultyPoints.replace("{value}", String(difficulty.pointValue))}
-                    {" · "}
-                    {cs.student.questionCount.replace("{count}", String(difficulty.questionCount))}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="test-set">{cs.student.setLabel}</Label>
-            <Select
-              value={setId || "any"}
-              onValueChange={(value) => setSetId(value === "any" ? "" : value)}
-              disabled={!selectedDifficulty}
-            >
-              <SelectTrigger id="test-set">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="any">{cs.student.setAny}</SelectItem>
-                {(selectedDifficulty?.sets ?? []).map((set) => (
-                  <SelectItem key={set.id} value={set.id}>
-                    {set.name || cs.student.setIndex.replace("{index}", String(set.setIndex))}
-                    {" · "}
-                    {cs.student.questionCount.replace("{count}", String(set.questionCount))}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="test-question-type">{cs.student.questionTypeLabel}</Label>
-            <Select
-              value={selectedSet ? selectedSet.mode : modeFilter || "either"}
-              onValueChange={(value) =>
-                setModeFilter(value === "either" ? "" : (value as TemplateMode))
-              }
-              disabled={!!selectedSet}
-            >
-              <SelectTrigger id="test-question-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="either">{cs.student.questionTypeEither}</SelectItem>
-                <SelectItem value="closed">{cs.student.questionTypeClosed}</SelectItem>
-                <SelectItem value="open">{cs.student.questionTypeOpen}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -258,11 +154,7 @@ export function StudentTestStartPage() {
             />
           </div>
 
-          <Button
-            onClick={handleStart}
-            disabled={!topicId || !pointValue || isStarting}
-            className="lg:mb-0"
-          >
+          <Button onClick={handleStart} disabled={!topicId || isStarting} className="lg:mb-0">
             {isStarting ? (
               <Loader2 className="size-4 mr-2 animate-spin" />
             ) : (

@@ -12,6 +12,12 @@ pub struct Topic {
     /// When true the topic is visible to students in the practice generator.
     /// When false it is teacher-only (not shown to students).
     pub for_students: bool,
+    /// When true the topic doubles as a timed test in the student test
+    /// generator (12 questions: 4 at each of 2/3/4 points), regardless of
+    /// `for_students`: a test-only topic is reachable in the test generator
+    /// but not in the endless practice generator.
+    #[serde(default)]
+    pub is_test: bool,
     /// The "Skupina" (group) this topic is organized under on the topics
     /// list page, if any — unrelated to `Category`/"Kategorie" (the fixed
     /// 2/3/4-point-value bucket nested under a topic).
@@ -31,6 +37,7 @@ impl Topic {
             name,
             created_at: Utc::now(),
             for_students: false,
+            is_test: false,
             group_id: None,
             position: 0,
         }

@@ -213,6 +213,8 @@ pub struct CreateTopicPayload {
     pub name: String,
     #[serde(default)]
     pub for_students: bool,
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 #[tauri::command]
@@ -223,6 +225,7 @@ pub fn create_topic(
     let conn = crate::util::lock_db(&state.db);
     let mut topic = Topic::new(payload.name);
     topic.for_students = payload.for_students;
+    topic.is_test = payload.is_test;
     TopicRepo::insert(&conn, &topic)?;
     Ok(topic)
 }
@@ -245,6 +248,8 @@ pub struct UpdateTopicPayload {
     pub id: Uuid,
     pub name: String,
     pub for_students: bool,
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 #[tauri::command]
@@ -262,6 +267,7 @@ pub fn update_topic(
         name: payload.name,
         created_at: Utc::now(),
         for_students: payload.for_students,
+        is_test: payload.is_test,
         group_id: existing.group_id,
         position: existing.position,
     };
@@ -303,6 +309,7 @@ pub(crate) fn do_duplicate_topic(
     let source_topic = TopicRepo::get_by_id(&tx, source_topic_id)?;
     let mut new_topic = Topic::new(format!("{} (kopie)", source_topic.name));
     new_topic.for_students = source_topic.for_students;
+    new_topic.is_test = source_topic.is_test;
     new_topic.group_id = source_topic.group_id;
     new_topic.position = tx
         .query_row(

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 38;
+const CURRENT_USER_VERSION: u32 = 39;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -196,6 +196,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 38 {
         apply_migration_v38(conn)?;
         conn.pragma_update(None, "user_version", "38")?;
+    }
+
+    if user_version < 39 {
+        apply_migration_v39(conn)?;
+        conn.pragma_update(None, "user_version", "39")?;
     }
 
     Ok(())
@@ -1274,6 +1279,15 @@ fn apply_migration_v38(conn: &Connection) -> Result<(), rusqlite::Error> {
         ALTER TABLE practice_attempts ADD COLUMN option_sig_digits TEXT;
         ",
     )?;
+    Ok(())
+}
+
+/// The "Test" flag: a topic marked as a test is offered in the student
+/// test generator as a timed 12-question exam (4 questions at each of 2/3/4
+/// points), independently of `for_students` — a test-only topic stays out of
+/// the endless practice generator. Purely additive: 0 keeps today's behavior.
+fn apply_migration_v39(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE topics ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0;")?;
     Ok(())
 }
 

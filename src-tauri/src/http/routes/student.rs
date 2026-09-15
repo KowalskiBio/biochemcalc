@@ -6,9 +6,9 @@
 //! request body, so no client can practise, score, or grade as someone else.
 
 use crate::commands::practice::{
-    do_leaderboard, do_list_practice_topics, do_next_question, do_submit_answer, LeaderboardEntry,
-    NextQuestionPayload, PracticeAnswerResult, PracticeQuestion, PracticeTopic,
-    SubmitAnswerPayload,
+    do_leaderboard, do_list_practice_topics, do_list_test_topics, do_next_question,
+    do_submit_answer, LeaderboardEntry, NextQuestionPayload, PracticeAnswerResult,
+    PracticeQuestion, PracticeTopic, SubmitAnswerPayload, TestTopicOption,
 };
 use crate::commands::reports::{do_report_question, ReportQuestionPayload};
 use crate::commands::streak_run::{
@@ -31,6 +31,13 @@ use std::sync::Arc;
 async fn topics(State(state): State<Arc<AppState>>) -> Result<Json<Vec<PracticeTopic>>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
     Ok(Json(do_list_practice_topics(&conn)?))
+}
+
+async fn test_topics(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<TestTopicOption>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_list_test_topics(&conn)?))
 }
 
 async fn next_question(
@@ -124,6 +131,7 @@ async fn streak_leaderboard(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/topics", post(topics))
+        .route("/test-topics", post(test_topics))
         .route("/next-question", post(next_question))
         .route("/submit-answer", post(submit_answer))
         .route("/leaderboard", post(leaderboard))

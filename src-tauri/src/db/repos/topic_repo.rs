@@ -8,12 +8,13 @@ pub struct TopicRepo;
 impl TopicRepo {
     pub fn insert(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO topics (id, name, created_at, for_students, group_id, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO topics (id, name, created_at, for_students, is_test, group_id, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 topic.id,
                 topic.name,
                 topic.created_at.to_rfc3339(),
                 topic.for_students as i32,
+                topic.is_test as i32,
                 topic.group_id,
                 topic.position,
             ],
@@ -23,7 +24,7 @@ impl TopicRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Topic>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, name, created_at, for_students, group_id, position FROM topics
+            "SELECT id, name, created_at, for_students, is_test, group_id, position FROM topics
              ORDER BY position ASC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -32,8 +33,9 @@ impl TopicRepo {
                 name: row.get(1)?,
                 created_at: parse_dt(row.get::<_, String>(2)?),
                 for_students: row.get::<_, i32>(3)? != 0,
-                group_id: row.get(4)?,
-                position: row.get(5)?,
+                is_test: row.get::<_, i32>(4)? != 0,
+                group_id: row.get(5)?,
+                position: row.get(6)?,
             })
         })?;
         let mut items = Vec::new();
@@ -48,7 +50,7 @@ impl TopicRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Topic, DbError> {
         conn.query_row(
-            "SELECT id, name, created_at, for_students, group_id, position FROM topics WHERE id = ?1",
+            "SELECT id, name, created_at, for_students, is_test, group_id, position FROM topics WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Topic {
@@ -56,8 +58,9 @@ impl TopicRepo {
                     name: row.get(1)?,
                     created_at: parse_dt(row.get::<_, String>(2)?),
                     for_students: row.get::<_, i32>(3)? != 0,
-                    group_id: row.get(4)?,
-                    position: row.get(5)?,
+                    is_test: row.get::<_, i32>(4)? != 0,
+                    group_id: row.get(5)?,
+                    position: row.get(6)?,
                 })
             },
         )
@@ -69,15 +72,18 @@ impl TopicRepo {
 
     /// Deliberately never touches `group_id`/`position` — those are managed
     /// exclusively by `move_to_group`/`reorder_within_group`, so a plain
-    /// rename (or `for_students` toggle) never clobbers group membership.
+    /// rename (or either flag toggle) never clobbers group membership.
+    /// `for_students` and `is_test` are independent: a test-only topic is
+    /// not visible in the practice generator.
     pub fn update(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         let affected = conn.execute(
-            "UPDATE topics SET name=?2, created_at=?3, for_students=?4 WHERE id=?1",
+            "UPDATE topics SET name=?2, created_at=?3, for_students=?4, is_test=?5 WHERE id=?1",
             params![
                 topic.id,
                 topic.name,
                 topic.created_at.to_rfc3339(),
-                topic.for_students as i32
+                topic.for_students as i32,
+                topic.is_test as i32
             ],
         )?;
         if affected == 0 {
@@ -210,6 +216,24 @@ mod tests {
         TopicRepo::insert(&conn, &t).expect("insert");
         let fetched = TopicRepo::get_by_id(&conn, &t.id).expect("get");
         assert!(fetched.for_students);
+    }
+
+    #[test]
+    fn is_test_flag_persists_independently_of_for_students() {
+        let conn = setup_conn();
+        let mut t = Topic::new("Test Topic".into());
+        t.is_test = true;
+        TopicRepo::insert(&conn, &t).expect("insert");
+        let fetched = TopicRepo::get_by_id(&conn, &t.id).expect("get");
+        assert!(fetched.is_test);
+        assert!(!fetched.for_students, "a test-only topic stays teacher-only");
+
+        // Updating with for_students explicitly false keeps both flags as
+        // sent: the two toggles never imply each other.
+        TopicRepo::update(&conn, &t).expect("update");
+        let fetched = TopicRepo::get_by_id(&conn, &t.id).expect("get again");
+        assert!(!fetched.for_students);
+        assert!(fetched.is_test);
     }
 
     #[test]

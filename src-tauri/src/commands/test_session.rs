@@ -1,6 +1,8 @@
-//! Fixed-batch test sessions: every question in a topic/point value
-//! generated all at once, one variant each, and answered together, as
-//! opposed to `commands::practice`'s endless one-at-a-time generator.
+//! Fixed-batch test sessions: a timed 12-question exam drawn from a topic
+//! the teacher flagged as a test (4 random questions at each of the 2/3/4
+//! point values, mixed across all of the topic's sets, open or closed),
+//! generated all at once and answered together, as opposed to
+//! `commands::practice`'s endless one-at-a-time generator.
 //!
 //! Grading is not reimplemented here. A session's questions are ordinary
 //! `practice_attempts` rows (tagged with `test_session_id`/`position`), so
@@ -8,35 +10,33 @@
 //! count toward the same leaderboard as regular practice.
 
 use crate::commands::practice::{build_question, entropy_seed, PracticeQuestion};
-use crate::db::repos::{PracticeRepo, TestSessionRecord, TestSessionRepo};
+use crate::db::repos::{PracticeRepo, TestSessionRecord, TestSessionRepo, TopicRepo};
 use crate::db::DbError;
-use crate::models::TemplateMode;
 use chrono::{DateTime, Utc};
 use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// The point-value bands every test draws from, mirroring the fixed
+/// `CHECK (point_value IN (2, 3, 4))` buckets a topic is filed under.
+pub const TEST_POINT_VALUE_BANDS: [u8; 3] = [2, 3, 4];
+
+/// How many questions each band contributes: 3 bands x 4 = 12 questions.
+pub const QUESTIONS_PER_BAND: usize = 4;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartTestPayload {
     pub topic_id: Uuid,
-    pub point_value: u8,
     /// `None` starts an untimed test: no deadline is ever enforced. The
     /// student-facing test start page always sends a value now, but this
     /// stays optional so a session started before that UI change keeps
     /// meaning what it always did.
     #[serde(default)]
     pub time_limit_seconds: Option<u32>,
-    /// Restrict the test to this mode; `None` mixes both, same as
-    /// `commands::practice::NextQuestionPayload::mode`.
-    #[serde(default)]
-    pub mode: Option<TemplateMode>,
-    /// Restrict the test to this one set (sada); `None` draws from every set
-    /// at the topic/difficulty, same as `NextQuestionPayload::set_id`.
-    #[serde(default)]
-    pub set_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,50 +64,79 @@ pub struct TestResults {
     pub elapsed_seconds: i64,
 }
 
-/// Generate every question in `topic_id` at `point_value` (optionally
-/// narrowed to one `mode` and/or one `set_id`, same semantics as
-/// `commands::practice::do_next_question`), one variant each, and bundle
-/// them into a new session.
+/// A template eligible for one band, deduplicated to a single (id, mode)
+/// pair: a template linked into both an open and a closed set is one
+/// question, drawn once, in one of those modes.
+fn dedupe_templates(pairs: Vec<(Uuid, crate::models::TemplateMode)>) -> Vec<(Uuid, crate::models::TemplateMode)> {
+    let mut seen = std::collections::HashSet::new();
+    pairs
+        .into_iter()
+        .filter(|(id, _)| seen.insert(*id))
+        .collect()
+}
+
+/// Sample `QUESTIONS_PER_BAND` templates at each of `TEST_POINT_VALUE_BANDS`
+/// from the topic's whole pool (every set at that point value, open or
+/// closed), then shuffle the combined 12 so the bands are interleaved rather
+/// than served as three consecutive blocks.
 ///
 /// A template that fails to generate (its constraints are unsatisfiable for
 /// the sampled values) is skipped rather than failing the whole test, the
 /// same tolerance `commands::practice` already has for one-off generation
 /// failures: one bad template must not read as "this whole test is broken."
-/// The test fails outright only if every template failed.
+/// The test fails outright only if every template failed. Unfilled bands
+/// (fewer eligible templates than `QUESTIONS_PER_BAND`) are a hard error:
+/// `do_list_test_topics` only offers topics whose bands are all full, so a
+/// student reaching this means the teacher emptied a band in the meantime.
 pub fn do_start_test(
     conn: &Connection,
     user_id: &Uuid,
     payload: &StartTestPayload,
 ) -> Result<TestSessionView, DbError> {
-    let mut template_ids = PracticeRepo::list_template_ids(
-        conn,
-        &payload.topic_id,
-        payload.point_value,
-        payload.set_id.as_ref(),
-    )?;
-    if let Some(wanted) = payload.mode {
-        template_ids.retain(|(_, mode)| *mode == wanted);
-    }
-    if template_ids.is_empty() {
-        return Err(DbError::NotFound(
-            "Pro toto téma, obtížnost a typ otázek zatím nejsou žádné otázky".into(),
+    let topic = TopicRepo::get_by_id(conn, &payload.topic_id)?;
+    if !topic.is_test {
+        return Err(DbError::Validation(
+            "Toto téma není označeno jako test".into(),
         ));
     }
+
+    let mut rng = StdRng::seed_from_u64(entropy_seed());
+    let mut selected: Vec<(Uuid, crate::models::TemplateMode)> = Vec::new();
+    for band in TEST_POINT_VALUE_BANDS {
+        let pool = dedupe_templates(PracticeRepo::list_template_ids(
+            conn,
+            &payload.topic_id,
+            band,
+            None,
+        )?);
+        if pool.len() < QUESTIONS_PER_BAND {
+            return Err(DbError::Validation(format!(
+                "Test potřebuje alespoň {QUESTIONS_PER_BAND} otázky za {} bodů, téma jich má jen {}",
+                band,
+                pool.len()
+            )));
+        }
+        let mut band_pool = pool;
+        band_pool.shuffle(&mut rng);
+        selected.extend(band_pool.into_iter().take(QUESTIONS_PER_BAND));
+    }
+    selected.shuffle(&mut rng);
 
     let session = TestSessionRecord {
         id: Uuid::new_v4(),
         user_id: *user_id,
         topic_id: payload.topic_id,
-        point_value: payload.point_value,
+        // Sentinel: a test spans all three point-value bands, and each
+        // question's real point value lives on its own practice_attempt.
+        point_value: 0,
         time_limit_seconds: payload.time_limit_seconds,
         started_at: Utc::now(),
         finished_at: None,
     };
     TestSessionRepo::insert(conn, &session)?;
 
-    let mut rng = StdRng::seed_from_u64(entropy_seed());
-    let mut questions = Vec::with_capacity(template_ids.len());
-    for (position, (template_id, mode)) in template_ids.into_iter().enumerate() {
+    let mut questions = Vec::with_capacity(selected.len());
+    for (position, (template_id, mode)) in selected.into_iter().enumerate() {
         // Interactive tests (like interactive practice) keep the correct
         // answer's position random; `build_question` already handles that
         // via `force_correct_first = false` internally.
@@ -170,8 +199,8 @@ mod tests {
     use crate::commands::practice::{do_submit_answer, SubmitAnswerPayload};
     use crate::db::repos::{CategoryRepo, SetRepo, TemplateRepo, TopicRepo, UserRecord, UserRepo};
     use crate::models::{
-        ConstraintType, ResultConstraint, Role, Template, TemplateMode, TemplateVariable, Topic,
-        Variable,
+        ConstraintType, ResultConstraint, Role, Set, Template, TemplateMode, TemplateVariable,
+        Topic, Variable,
     };
 
     fn setup_conn() -> Connection {
@@ -196,19 +225,21 @@ mod tests {
         user.id
     }
 
-    /// A topic with `count` distinct 2-point "double X" questions, each in
-    /// its own closed set, following the same wiring `commands::practice`'s
-    /// own tests use.
-    fn seed_topic_with_questions(conn: &Connection, name: &str, count: usize) -> Uuid {
-        let mut topic = Topic::new(name.to_string());
-        topic.for_students = true;
-        TopicRepo::insert(conn, &topic).expect("insert topic");
-
-        let (_, sets) = CategoryRepo::create(conn, topic.id, 2).expect("create category");
+    /// Seed `count` distinct "double X" questions at one point value,
+    /// spread round-robin across the category's closed sets, and return
+    /// those sets so a test can add more templates to them.
+    fn seed_band(
+        conn: &Connection,
+        name: &str,
+        topic_id: Uuid,
+        point_value: u8,
+        count: usize,
+    ) -> Vec<Set> {
+        let (_, sets) = CategoryRepo::create(conn, topic_id, point_value).expect("create category");
 
         for i in 0..count {
             let variable = Variable::new(
-                format!("Hmotnost {i}"),
+                format!("Hmotnost {point_value}-{i}"),
                 "X".into(),
                 1.0,
                 10.0,
@@ -219,12 +250,12 @@ mod tests {
             crate::db::repos::VariableRepo::insert_raw(conn, &variable).expect("insert variable");
 
             let template = Template::new(
-                format!("{name} {i}: kolik je dvojnásobek [[X]] g? [Y]"),
+                format!("{name} {point_value}-{i}: kolik je dvojnásobek [[X]] g? [Y]"),
                 "Y = X * 2".into(),
                 "Y = X × 2".into(),
                 None,
                 "g".into(),
-                2,
+                point_value,
             );
             let constraint = ResultConstraint::new(
                 template.id,
@@ -242,18 +273,41 @@ mod tests {
             };
             TemplateRepo::insert(conn, &template, &[tv], &[], Some(&constraint), &[])
                 .expect("insert template");
-            // Spread across the 3 closed sets round-robin, just to exercise
-            // more than one set feeding the same test.
+            // Spread across the 3 closed sets round-robin, just to
+            // exercise more than one set feeding the same band.
             SetRepo::add_template(conn, &sets[i % 3].id, &template.id).expect("add to set");
+        }
+
+        sets
+    }
+
+    /// A test-flagged topic with the given number of distinct questions at
+    /// each of the given point values, all served closed (answerable by
+    /// option index), following the same wiring `commands::practice`'s own
+    /// tests use.
+    fn seed_test_topic(conn: &Connection, name: &str, bands: &[(u8, usize)]) -> Uuid {
+        let mut topic = Topic::new(name.to_string());
+        topic.is_test = true;
+        TopicRepo::insert(conn, &topic).expect("insert topic");
+
+        for &(point_value, count) in bands {
+            seed_band(conn, name, topic.id, point_value, count);
         }
 
         topic.id
     }
 
+    /// A full 12-question test topic: 5/6/4 templates at 2/3/4 points, so
+    /// every band is over the 4-question minimum (and two of them are over
+    /// it, exercising the random draw actually picking a subset).
+    fn seed_full_test_topic(conn: &Connection, name: &str) -> Uuid {
+        seed_test_topic(conn, name, &[(2, 5), (3, 6), (4, 4)])
+    }
+
     #[test]
-    fn start_test_generates_one_question_per_template_in_the_topic() {
+    fn start_test_draws_four_questions_per_band_shuffled() {
         let conn = setup_conn();
-        let topic_id = seed_topic_with_questions(&conn, "Roztoky", 5);
+        let topic_id = seed_full_test_topic(&conn, "Roztoky");
         let student = insert_student(&conn, "student");
 
         let view = do_start_test(
@@ -261,16 +315,21 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
-                point_value: 2,
-                time_limit_seconds: Some(600),
-                mode: None,
-                set_id: None,
+                time_limit_seconds: Some(1200),
             },
         )
         .expect("start test");
 
-        assert_eq!(view.questions.len(), 5);
-        assert_eq!(view.time_limit_seconds, Some(600));
+        assert_eq!(view.questions.len(), 12);
+        assert_eq!(view.time_limit_seconds, Some(1200));
+
+        let mut per_band = std::collections::HashMap::new();
+        for question in &view.questions {
+            *per_band.entry(question.point_value).or_insert(0usize) += 1;
+        }
+        assert_eq!(per_band.get(&2), Some(&4));
+        assert_eq!(per_band.get(&3), Some(&4));
+        assert_eq!(per_band.get(&4), Some(&4));
 
         // Every question landed in the same session with distinct positions.
         let positions: std::collections::HashSet<i64> = {
@@ -282,11 +341,11 @@ mod tests {
                 .collect::<rusqlite::Result<_>>()
                 .expect("collect")
         };
-        assert_eq!(positions, (0..5i64).collect());
+        assert_eq!(positions, (0..12i64).collect());
     }
 
     #[test]
-    fn start_test_on_an_empty_topic_reports_no_questions() {
+    fn start_test_on_an_unknown_topic_is_not_found() {
         let conn = setup_conn();
         let student = insert_student(&conn, "student");
 
@@ -295,109 +354,141 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id: Uuid::new_v4(),
-                point_value: 2,
                 time_limit_seconds: None,
-                mode: None,
-                set_id: None,
             },
         );
         assert!(matches!(result, Err(DbError::NotFound(_))));
     }
 
-    /// A test restricted to one mode or one set (sada) must only ever draw
-    /// from templates actually eligible under that restriction — the same
-    /// guarantee `commands::practice::do_next_question` already has for
-    /// interactive practice, now exercised for the fixed-batch test path.
     #[test]
-    fn start_test_honors_an_explicit_mode_and_set_restriction() {
+    fn start_test_refuses_a_topic_not_flagged_as_test() {
         let conn = setup_conn();
-        let mut topic = Topic::new("Roztoky".into());
-        topic.for_students = true;
-        TopicRepo::insert(&conn, &topic).expect("insert topic");
-        let (_, sets) = CategoryRepo::create(&conn, topic.id, 2).expect("create category");
-
-        let variable = Variable::new("Hmotnost".into(), "X".into(), 1.0, 10.0, 1.0, "g".into(), 0);
-        crate::db::repos::VariableRepo::insert_raw(&conn, &variable).expect("insert variable");
-
-        let make_template = |question_text: &str| {
-            let template = Template::new(
-                question_text.into(),
-                "Y = X * 2".into(),
-                "Y = X × 2".into(),
-                None,
-                "g".into(),
-                2,
-            );
-            let constraint = ResultConstraint::new(
-                template.id,
-                Some(0.0),
-                Some(100.0),
-                None,
-                ConstraintType::Range,
-            );
-            let tv = TemplateVariable {
-                template_id: template.id,
-                variable_id: variable.id,
-                placeholder: "X".into(),
-                greater_than_variable_id: None,
-                less_than_variable_id: None,
-            };
-            TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint), &[])
-                .expect("insert template");
-            template.id
-        };
-
-        // sets[0] is closed, sets[3] is open (see `CategoryRepo::create`).
-        let closed_template = make_template("Closed-only: kolik je dvojnásobek [[X]] g? [Y]");
-        SetRepo::add_template(&conn, &sets[0].id, &closed_template).expect("add to closed set");
-        let open_template = make_template("Open-only: kolik je dvojnásobek [[X]] g? [Y]");
-        SetRepo::add_template(&conn, &sets[3].id, &open_template).expect("add to open set");
-
+        let topic_id = seed_full_test_topic(&conn, "Roztoky");
         let student = insert_student(&conn, "student");
 
-        let open_only = do_start_test(
-            &conn,
-            &student,
-            &StartTestPayload {
-                topic_id: topic.id,
-                point_value: 2,
-                time_limit_seconds: Some(600),
-                mode: Some(TemplateMode::Open),
-                set_id: None,
-            },
-        )
-        .expect("open-mode test");
-        assert_eq!(open_only.questions.len(), 1);
-        assert_eq!(open_only.questions[0].mode, TemplateMode::Open);
+        // Unflag the topic without touching its questions.
+        let mut topic = TopicRepo::get_by_id(&conn, &topic_id).expect("get topic");
+        topic.is_test = false;
+        TopicRepo::update(&conn, &topic).expect("update topic");
 
-        let closed_set_only = do_start_test(
+        let result = do_start_test(
             &conn,
             &student,
             &StartTestPayload {
-                topic_id: topic.id,
-                point_value: 2,
-                time_limit_seconds: Some(600),
-                mode: None,
-                set_id: Some(sets[0].id),
-            },
-        )
-        .expect("set-restricted test");
-        assert_eq!(closed_set_only.questions.len(), 1);
-        assert_eq!(closed_set_only.questions[0].mode, TemplateMode::Closed);
-
-        // The combination this category has no questions for at all.
-        let impossible = do_start_test(
-            &conn,
-            &student,
-            &StartTestPayload {
-                topic_id: topic.id,
-                point_value: 2,
-                time_limit_seconds: Some(600),
-                mode: Some(TemplateMode::Open),
-                set_id: Some(sets[0].id),
+                topic_id,
+                time_limit_seconds: None,
             },
         );
-        assert!(matches!(impossible, Err(DbError::NotFound(_))));
+        assert!(matches!(result, Err(DbError::Validation(_))));
+    }
+
+    #[test]
+    fn start_test_refuses_an_underfilled_band() {
+        let conn = setup_conn();
+        let topic_id = seed_test_topic(&conn, "Roztoky", &[(2, 5), (3, 6), (4, 3)]);
+        let student = insert_student(&conn, "student");
+
+        let result = do_start_test(
+            &conn,
+            &student,
+            &StartTestPayload {
+                topic_id,
+                time_limit_seconds: None,
+            },
+        );
+        assert!(
+            matches!(result, Err(DbError::Validation(_))),
+            "a band with only 3 questions cannot fill a 4-question slot"
+        );
+    }
+
+    /// A template linked into both a closed and an open set is one question:
+    /// it must be drawn once (in one of its modes), never twice.
+    #[test]
+    fn start_test_counts_a_dual_mode_template_only_once() {
+        let conn = setup_conn();
+        let mut topic = Topic::new("Roztoky".into());
+        topic.is_test = true;
+        TopicRepo::insert(&conn, &topic).expect("insert topic");
+
+        // 3 plain closed templates + 1 dual-mode template at 2 points (the
+        // dual one links into both a closed and the open set), full bands
+        // at 3 and 4 points.
+        let two_point_sets = seed_band(&conn, "Roztoky", topic.id, 2, 3);
+        seed_band(&conn, "Roztoky", topic.id, 3, 4);
+        seed_band(&conn, "Roztoky", topic.id, 4, 4);
+        let student = insert_student(&conn, "student");
+
+        let variable = Variable::new(
+            "Hmotnost dual".into(),
+            "X".into(),
+            1.0,
+            10.0,
+            1.0,
+            "g".into(),
+            0,
+        );
+        crate::db::repos::VariableRepo::insert_raw(&conn, &variable).expect("insert variable");
+        let template = Template::new(
+            "Dual-mode: kolik je dvojnásobek [[X]] g? [Y]".into(),
+            "Y = X * 2".into(),
+            "Y = X × 2".into(),
+            None,
+            "g".into(),
+            2,
+        );
+        let constraint = ResultConstraint::new(
+            template.id,
+            Some(0.0),
+            Some(100.0),
+            None,
+            ConstraintType::Range,
+        );
+        let tv = TemplateVariable {
+            template_id: template.id,
+            variable_id: variable.id,
+            placeholder: "X".into(),
+            greater_than_variable_id: None,
+            less_than_variable_id: None,
+        };
+        TemplateRepo::insert(&conn, &template, &[tv], &[], Some(&constraint), &[])
+            .expect("insert template");
+        let closed_set = two_point_sets
+            .iter()
+            .find(|s| s.mode == TemplateMode::Closed)
+            .expect("closed set");
+        let open_set = two_point_sets
+            .iter()
+            .find(|s| s.mode == TemplateMode::Open)
+            .expect("open set");
+        SetRepo::add_template(&conn, &closed_set.id, &template.id).expect("add to closed set");
+        SetRepo::add_template(&conn, &open_set.id, &template.id).expect("add to open set");
+
+        let view = do_start_test(
+            &conn,
+            &student,
+            &StartTestPayload {
+                topic_id: topic.id,
+                time_limit_seconds: None,
+            },
+        )
+        .expect("start test");
+
+        let two_point_texts: Vec<&str> = view
+            .questions
+            .iter()
+            .filter(|q| q.point_value == 2)
+            .map(|q| q.question_text.as_str())
+            .collect();
+        assert_eq!(two_point_texts.len(), 4);
+        assert_eq!(
+            two_point_texts
+                .iter()
+                .filter(|t| t.contains("Dual-mode"))
+                .count(),
+            1,
+            "the dual-mode template must appear at most once"
+        );
     }
 
     /// The full loop: start a test, answer every question (mixing correct and
@@ -405,7 +496,7 @@ mod tests {
     #[test]
     fn finish_test_summarizes_answers_and_freezes_on_a_second_call() {
         let conn = setup_conn();
-        let topic_id = seed_topic_with_questions(&conn, "Roztoky", 4);
+        let topic_id = seed_full_test_topic(&conn, "Roztoky");
         let student = insert_student(&conn, "student");
 
         let view = do_start_test(
@@ -413,18 +504,16 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
-                point_value: 2,
                 time_limit_seconds: None,
-                mode: None,
-                set_id: None,
             },
         )
         .expect("start test");
-        assert_eq!(view.questions.len(), 4);
+        assert_eq!(view.questions.len(), 12);
 
         // Every seeded template lives in a closed set (see
-        // `seed_topic_with_questions`), so every served question is closed
+        // `seed_test_topic`), so every served question is closed
         // mode: answer by option index rather than a free-form value.
+        let mut expected_points = 0i64;
         for (i, question) in view.questions.iter().enumerate() {
             assert_eq!(question.mode, TemplateMode::Closed);
             let expected = question.assigned_values["X"] * 2.0;
@@ -433,6 +522,9 @@ mod tests {
                 .clone()
                 .expect("closed question carries options");
             let want_correct = i % 2 == 0;
+            if want_correct {
+                expected_points += question.point_value as i64;
+            }
             let position = options
                 .iter()
                 .position(|o| ((*o - expected).abs() < 1e-9) == want_correct)
@@ -455,13 +547,13 @@ mod tests {
         )
         .expect("finish");
 
-        assert_eq!(results.total_questions, 4);
-        assert_eq!(results.answered_count, 4);
+        assert_eq!(results.total_questions, 12);
+        assert_eq!(results.answered_count, 12);
         assert_eq!(
-            results.correct_count, 2,
-            "questions 0 and 2 answered correctly"
+            results.correct_count, 6,
+            "every other question answered correctly"
         );
-        assert_eq!(results.points, 4, "2 correct answers at 2 points each");
+        assert_eq!(results.points, expected_points);
 
         let again = do_finish_test(
             &conn,
@@ -482,7 +574,7 @@ mod tests {
     #[test]
     fn submit_answer_is_refused_once_the_session_is_finished() {
         let conn = setup_conn();
-        let topic_id = seed_topic_with_questions(&conn, "Roztoky", 1);
+        let topic_id = seed_full_test_topic(&conn, "Roztoky");
         let student = insert_student(&conn, "student");
 
         let view = do_start_test(
@@ -490,10 +582,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
-                point_value: 2,
                 time_limit_seconds: None,
-                mode: None,
-                set_id: None,
             },
         )
         .expect("start test");
@@ -525,7 +614,7 @@ mod tests {
     #[test]
     fn submit_answer_is_refused_after_the_timed_deadline_passes() {
         let conn = setup_conn();
-        let topic_id = seed_topic_with_questions(&conn, "Roztoky", 1);
+        let topic_id = seed_full_test_topic(&conn, "Roztoky");
         let student = insert_student(&conn, "student");
 
         let view = do_start_test(
@@ -533,10 +622,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
-                point_value: 2,
                 time_limit_seconds: Some(60),
-                mode: None,
-                set_id: None,
             },
         )
         .expect("start test");
@@ -567,7 +653,7 @@ mod tests {
     #[test]
     fn finish_test_refuses_a_session_belonging_to_someone_else() {
         let conn = setup_conn();
-        let topic_id = seed_topic_with_questions(&conn, "Roztoky", 1);
+        let topic_id = seed_full_test_topic(&conn, "Roztoky");
         let owner = insert_student(&conn, "owner");
         let other = insert_student(&conn, "other");
 
@@ -576,10 +662,7 @@ mod tests {
             &owner,
             &StartTestPayload {
                 topic_id,
-                point_value: 2,
                 time_limit_seconds: None,
-                mode: None,
-                set_id: None,
             },
         )
         .expect("start test");

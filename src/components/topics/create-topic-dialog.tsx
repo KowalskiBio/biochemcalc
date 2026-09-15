@@ -28,11 +28,13 @@ export function CreateTopicDialog({ open, onOpenChange, onCreated }: CreateTopic
   const { toast } = useToast()
   const [name, setName] = useState("")
   const [forStudents, setForStudents] = useState(false)
+  const [isTest, setIsTest] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
 
   const reset = useCallback(() => {
     setName("")
     setForStudents(false)
+    setIsTest(false)
   }, [])
 
   const handleClose = useCallback(
@@ -47,7 +49,11 @@ export function CreateTopicDialog({ open, onOpenChange, onCreated }: CreateTopic
     if (!name.trim()) return
     try {
       setIsCreating(true)
-      const topic = await topicsApi.create({ name: name.trim(), forStudents })
+      const topic = await topicsApi.create({
+        name: name.trim(),
+        forStudents,
+        isTest,
+      })
       await Promise.all(
         [2, 3, 4].map((pv) => categoriesApi.create({ topicId: topic.id, pointValue: pv })),
       )
@@ -60,7 +66,7 @@ export function CreateTopicDialog({ open, onOpenChange, onCreated }: CreateTopic
     } finally {
       setIsCreating(false)
     }
-  }, [name, forStudents, toast, handleClose, onCreated])
+  }, [name, forStudents, isTest, toast, handleClose, onCreated])
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -106,6 +112,25 @@ export function CreateTopicDialog({ open, onOpenChange, onCreated }: CreateTopic
             >
               {forStudents ? "✓ " : ""}
               {cs.topics.forStudentsHelp}
+            </button>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="is-test" className="text-right">
+              {cs.topics.testLabelOn}
+            </Label>
+            <button
+              type="button"
+              id="is-test"
+              disabled={isCreating}
+              onClick={() => setIsTest((v) => !v)}
+              className={`col-span-3 flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border transition-colors w-fit ${
+                isTest
+                  ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {isTest ? "✓ " : ""}
+              {cs.topics.testHelp}
             </button>
           </div>
         </div>

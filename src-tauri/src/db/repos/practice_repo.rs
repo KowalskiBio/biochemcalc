@@ -61,12 +61,17 @@ pub struct LeaderboardRow {
     pub points: i64,
 }
 
-/// A topic a student can practise, with the difficulties it actually has
-/// questions for.
+/// A topic a student can practise or sit a test on, with the difficulties
+/// it actually has questions for.
 #[derive(Debug, Clone)]
 pub struct PracticeTopicRow {
     pub topic_id: Uuid,
     pub name: String,
+    /// Student visibility in the endless practice generator.
+    pub for_students: bool,
+    /// The teacher's "Test" flag: the topic doubles as a timed test in the
+    /// test generator, independently of `for_students`.
+    pub is_test: bool,
     pub point_value: u8,
     pub question_count: i64,
 }
@@ -99,7 +104,11 @@ pub struct PracticeRepo;
 
 impl PracticeRepo {
     /// Every (topic, point value) pair that has at least one question, with
-    /// its question count.
+    /// its question count, across ALL topics — the visibility split between
+    /// the practice and test generators happens one layer up, in
+    /// `commands::practice`, because a test-only topic (for_students = 0,
+    /// is_test = 1) still needs its bands counted for the test picker even
+    /// though the practice list must skip it.
     ///
     /// Questions are reachable as topic → category (one per point value) →
     /// set → template. `templates.topic_id`/`point_value` are *not* used:
@@ -108,12 +117,11 @@ impl PracticeRepo {
     /// which topic a question belongs to.
     pub fn list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopicRow>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT tp.id, tp.name, c.point_value, COUNT(DISTINCT st.template_id)
+            "SELECT tp.id, tp.name, tp.for_students, tp.is_test, c.point_value, COUNT(DISTINCT st.template_id)
              FROM topics tp
              JOIN categories c ON c.topic_id = tp.id
              JOIN sets s ON s.category_id = c.id
              JOIN set_templates st ON st.set_id = s.id
-             WHERE tp.for_students = 1
              GROUP BY tp.id, c.point_value
              HAVING COUNT(DISTINCT st.template_id) > 0
              ORDER BY tp.name COLLATE NOCASE, c.point_value",
@@ -123,8 +131,10 @@ impl PracticeRepo {
                 Ok(PracticeTopicRow {
                     topic_id: row.get(0)?,
                     name: row.get(1)?,
-                    point_value: row.get(2)?,
-                    question_count: row.get(3)?,
+                    for_students: row.get::<_, i32>(2)? != 0,
+                    is_test: row.get::<_, i32>(3)? != 0,
+                    point_value: row.get(4)?,
+                    question_count: row.get(5)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;

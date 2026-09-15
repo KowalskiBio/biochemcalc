@@ -131,7 +131,7 @@ export function TopicDetailPage() {
     }
     try {
       setSavingName(true)
-      const updated = await topicsApi.update(topicId, trimmed, topic.forStudents)
+      const updated = await topicsApi.update(topicId, trimmed, topic.forStudents, topic.isTest)
       setTopic(updated)
       toast({ title: cs.topics.renameSuccess })
     } catch (err) {

@@ -180,7 +180,10 @@ export const cs = {
   test: {
     startTitle: "Test",
     startDescription:
-      "Test obsahuje všechny otázky z vybraného tématu a obtížnosti, každou jednou.",
+      "Test obsahuje 12 otázek z vybraného tématu: 4 dvoubodové, 4 tříbodové a 4 čtyřbodové, vylosované náhodně ze všech sad.",
+    testTopicLabel: "Test",
+    testTopicPlaceholder: "Vyberte test",
+    noTestTopics: "Žádné testy zatím nejsou k dispozici.",
     timeLimitLabel: "Časový limit (minuty)",
     startButton: "Zahájit test",
     startError: "Test se nepodařilo zahájit",
@@ -220,7 +223,7 @@ export const cs = {
     modePickerDescription: "Vyberte režim testu.",
     modeCvicnyTitle: "Cvičný test",
     modeCvicnyDescription:
-      "Klasický test s časovým limitem. Vyberte téma, obtížnost a sadu, zodpovězte všechny otázky najednou.",
+      "Klasický test s časovým limitem. Vyberte test a zodpovězte všech 12 otázek najednou.",
     modeUcenTitle: "Učeň",
     modeUcenDescription:
       "Nekonečná série otázek z vybraného tématu. Série končí první špatnou odpovědí.",
@@ -662,6 +665,10 @@ export const cs = {
     topicNamePlaceholder: "např. Hmotnostní procento, ředění",
     forStudentsLabel: "Dostupné studentům",
     forStudentsHelp: "Zaškrtněte, pokud mají studenti k tématu přístup v tréninku.",
+    testLabelOn: "Test",
+    testLabelOff: "Není test",
+    testHelp:
+      "Zaškrtněte, pokud má téma studentům sloužit jako časovaný test (12 otázek napříč body 2/3/4). Funguje i samostatně bez přístupu v tréninku.",
     creatingTopic: "Vytvářím...",
     createTopicSuccess: "Téma vytvořeno",
     createTopicError: "Nepodařilo se vytvořit téma",

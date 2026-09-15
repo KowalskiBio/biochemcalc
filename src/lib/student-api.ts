@@ -18,6 +18,7 @@ import type {
   SubmitAnswerInput,
   TestResults,
   TestSessionView,
+  TestTopicOption,
 } from "./types"
 
 /**
@@ -28,6 +29,13 @@ import type {
 export const studentApi = {
   /** Topics that have questions, each with the difficulties it can serve. */
   topics: (): Promise<PracticeTopic[]> => httpRequest<PracticeTopic[]>("/api/student/topics"),
+
+  /**
+   * Topics offered as timed tests: flagged by the teacher and holding at
+   * least 4 questions at each of 2/3/4 points.
+   */
+  testTopics: (): Promise<TestTopicOption[]> =>
+    httpRequest<TestTopicOption[]>("/api/student/test-topics"),
 
   /**
    * A fresh question — new random values every call, so a topic never runs
@@ -51,7 +59,10 @@ export const studentApi = {
   leaderboard: (): Promise<LeaderboardEntry[]> =>
     httpRequest<LeaderboardEntry[]>("/api/student/leaderboard"),
 
-  /** Generate every question in a topic/point value at once, timed or not. */
+  /**
+   * Generate a 12-question test session (4 questions at each of 2/3/4
+   * points, drawn from all of the topic's sets) at once, timed or not.
+   */
   startTest: (input: StartTestInput): Promise<TestSessionView> =>
     httpRequest<TestSessionView>("/api/student/start-test", input),
 

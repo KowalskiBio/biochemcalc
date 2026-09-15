@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  ClipboardCheck,
   Copy,
   FolderPlus,
   GraduationCap,
@@ -124,7 +125,32 @@ export function TopicsPage() {
       if (toggling) return
       setToggling(topic.id)
       try {
-        const updated = await topicsApi.update(topic.id, topic.name, !topic.forStudents)
+        const updated = await topicsApi.update(topic.id, topic.name, !topic.forStudents, topic.isTest)
+        setTopics((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : String(err)
+        toast({ title: "Chyba", description: message, variant: "destructive" })
+      } finally {
+        setToggling(null)
+      }
+    },
+    [toggling, toast],
+  )
+
+  /** Toggling the Test flag: independent of practice visibility. */
+  const handleToggleTest = useCallback(
+    async (topic: Topic, e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (toggling) return
+      setToggling(topic.id)
+      try {
+        const updated = await topicsApi.update(
+          topic.id,
+          topic.name,
+          topic.forStudents,
+          !topic.isTest,
+        )
         setTopics((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
       } catch (err) {
         const message = err instanceof ApiError ? err.message : String(err)
@@ -377,28 +403,43 @@ export function TopicsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <button
-              type="button"
-              disabled={toggling === topic.id}
-              onClick={(e) => handleToggle(topic, e)}
-              className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border transition-colors w-full justify-center ${
-                topic.forStudents
-                  ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
-                  : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {topic.forStudents ? (
-                <>
-                  <GraduationCap className="size-4" />
-                  Pro studenty
-                </>
-              ) : (
-                <>
-                  <Lock className="size-4" />
-                  Pouze pro učitele
-                </>
-              )}
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={toggling === topic.id}
+                onClick={(e) => handleToggle(topic, e)}
+                className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border transition-colors w-full justify-center ${
+                  topic.forStudents
+                    ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                    : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {topic.forStudents ? (
+                  <>
+                    <GraduationCap className="size-4" />
+                    Pro studenty
+                  </>
+                ) : (
+                  <>
+                    <Lock className="size-4" />
+                    Pouze pro učitele
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={toggling === topic.id}
+                onClick={(e) => handleToggleTest(topic, e)}
+                className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border transition-colors w-full justify-center ${
+                  topic.isTest
+                    ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                    : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                <ClipboardCheck className="size-4" />
+                {topic.isTest ? cs.topics.testLabelOn : cs.topics.testLabelOff}
+              </button>
+            </div>
           </CardContent>
         </Card>
       )
@@ -415,6 +456,7 @@ export function TopicsPage() {
       handleTopicMouseLeave,
       handleTopicMouseDown,
       handleToggle,
+      handleToggleTest,
       handleDuplicate,
       navigate,
     ],

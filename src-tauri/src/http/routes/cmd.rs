@@ -98,7 +98,9 @@ async fn create_topic(
     Json(payload): Json<CreateTopicPayload>,
 ) -> Result<Json<Topic>, HttpError> {
     let conn = conn!(state);
-    let topic = Topic::new(payload.name);
+    let mut topic = Topic::new(payload.name);
+    topic.for_students = payload.for_students;
+    topic.is_test = payload.is_test;
     TopicRepo::insert(&conn, &topic)?;
     Ok(Json(topic))
 }
@@ -130,6 +132,7 @@ async fn update_topic(
         name: payload.name,
         created_at: chrono::Utc::now(),
         for_students: payload.for_students,
+        is_test: payload.is_test,
         group_id: existing.group_id,
         position: existing.position,
     };

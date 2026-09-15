@@ -23,12 +23,13 @@ def backup(db_path, out_dir, label):
         backup_data["constants"].append(c)
 
     # Topics with categories, sets, templates, variables, equations, constraints
-    for topic in conn.execute("SELECT id, name, created_at, for_students FROM topics WHERE name != 'Default' ORDER BY name"):
+    for topic in conn.execute("SELECT id, name, created_at, for_students, is_test FROM topics WHERE name != 'Default' ORDER BY name"):
         topic_id = topic["id"]
         topic_data = {
             "name": topic["name"],
             "createdAt": topic["created_at"],
             "forStudents": bool(topic["for_students"]),
+            "isTest": bool(topic["is_test"]),
             "categories": [],
         }
 

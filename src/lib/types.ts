@@ -13,6 +13,13 @@ export interface Topic {
   name: string
   createdAt: string
   forStudents: boolean
+  /**
+   * The topic doubles as a timed test in the student test generator
+   * (12 questions: 4 at each of 2/3/4 points), independently of
+   * `forStudents`: a test-only topic is reachable in tests but not in the
+   * endless practice generator.
+   */
+  isTest: boolean
   groupId: string | null
   position: number
 }
@@ -23,6 +30,7 @@ export interface Topic {
 export interface TopicInput {
   name: string
   forStudents?: boolean
+  isTest?: boolean
 }
 
 /**
@@ -742,7 +750,15 @@ export interface ResetPasswordInput {
 export interface PracticeTopic {
   id: string
   name: string
+  /** The teacher's "Test" flag: the topic doubles as a timed test. */
+  isTest: boolean
   difficulties: PracticeDifficulty[]
+}
+
+/** A topic offered in the student test generator (teacher-flagged, all bands full). */
+export interface TestTopicOption {
+  id: string
+  name: string
 }
 
 export interface PracticeDifficulty {
@@ -860,13 +876,8 @@ export interface LeaderboardEntry {
 
 export interface StartTestInput {
   topicId: string
-  pointValue: number
   /** Omitted starts an untimed test: no deadline is ever enforced. */
   timeLimitSeconds?: number
-  /** Restrict the test to this mode; omitted mixes both. */
-  mode?: TemplateMode
-  /** Restrict the test to this one set (sada); omitted draws from all of them. */
-  setId?: string
 }
 
 export interface TestSessionView {

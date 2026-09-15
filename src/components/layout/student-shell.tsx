@@ -15,6 +15,7 @@ import {
 import type React from "react"
 import { type ReactNode, useEffect, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
+import { StudentFooter } from "@/components/layout/student-footer"
 import { PageTransition } from "@/components/ui/page-transition"
 import { Toaster } from "@/components/ui/toaster"
 import { cs } from "@/i18n/cs"
@@ -229,6 +230,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
 
         <div className="flex flex-1 flex-col p-4 sm:p-6 lg:p-8">
           <PageTransition>{children}</PageTransition>
+          <StudentFooter />
         </div>
       </main>
       <Toaster />
