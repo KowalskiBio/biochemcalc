@@ -108,12 +108,17 @@ fn fmt_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
 /// markup `fmt_scientific_cz` produces would not survive — but `e`-notation
 /// is itself valid number syntax, which is what makes it usable here at all.
 /// See `fmt_plain_decimal_cz` for when this applies.
+///
+/// The mantissa's trailing zeros carry no information and are trimmed, so
+/// the large-magnitude escape prints `2,072e26`, matching the significant
+/// digits the teacher configured, instead of `2,072000000000e26`.
 fn fmt_plain_scientific_cz(value: f64, mantissa_decimals: u8) -> String {
     if value == 0.0 || !value.is_finite() {
         return fmt_cz(value, mantissa_decimals);
     }
     let (mantissa, exponent) = scientific_mantissa_cz(value, mantissa_decimals);
-    format!("{}e{}", mantissa, exponent)
+    let mantissa = mantissa.trim_end_matches('0').trim_end_matches(',');
+    format!("{mantissa}e{exponent}")
 }
 
 /// A number as a student should see it in the exported test: plain Czech
@@ -654,27 +659,46 @@ fn interval_precision(lo: f64, hi: f64, preferred: u8) -> u8 {
     precision
 }
 
-/// A plain decimal with `decimals` places, free of the binary noise `{:.0}`
-/// exposes on large magnitudes — `1,05e25` printed in full otherwise ends
-/// `…9496683520`, digits the double never actually carried.
-///
-/// Below `SCIENTIFIC_LOWER_THRESHOLD` this switches to bare `e`-notation
-/// instead (`4e-5`, never the HTML `×10<sup>` form — see
-/// `fmt_plain_scientific_cz`). A tolerance interval reaching into that range
-/// needs `decimals` places just to show its first significant digit, and an
-/// atomic-mass-scale bound (~1e-22) with those decimals spelled out is
-/// exactly the wall of leading zeros this switch exists to avoid; unlike
-/// `fmt_option_value`'s use of the same threshold, there is no `Notation`
-/// setting to respect here — a `:n` row has no on-screen styling choice to
-/// begin with, only the constraint that it stays parseable as a number.
-/// `decimals` already carries the caller's intended precision at this
-/// magnitude, so it converts directly to mantissa decimals (`decimals +
-/// order`): the value was already rounded onto that decimal grid before
-/// reaching here, and re-expressing it in scientific form must not round it
-/// again.
-fn fmt_plain_decimal_cz(value: f64, decimals: u8) -> String {
+/// IS MU caps a `:n` evaluation value at 15 digits: the reported rejection
+/// reads "Hodnota musí být číslo, které může obsahovat maximálně 15 číslic."
+/// A plain rendering that would run wider (a molecule count of ~2×10^26
+/// spelled out is 27 digits) switches to e-notation instead, which IS MU
+/// parses the same way it already parses the sub-0,1 bounds (`7,96e-2`,
+/// `3e-5`).
+const IS_MU_MAX_DIGITS: i32 = 15;
+
+/// Mantissa decimals for the large-magnitude e-notation escape of
+/// `fmt_plain_decimal_cz`: everything an `f64` actually justifies (its
+/// binary expansion shows noise past ~15 significant digits) and IS MU's
+/// digit cap leaves room for, once the exponent's own digits are counted.
+fn large_mantissa_decimals(order: i32) -> u8 {
     /// Decimal digits a `f64` can justify before its binary expansion shows.
     const EXACT_DIGITS: i32 = 15;
+    let exponent_digits = order.unsigned_abs().to_string().len() as i32;
+    (EXACT_DIGITS.min(IS_MU_MAX_DIGITS - exponent_digits) - 1).clamp(0, 14) as u8
+}
+
+/// A plain decimal with `decimals` places for a `:n` evaluation row: a bare
+/// number IS MU parses back, never the HTML `×10<sup>` form (see
+/// `fmt_plain_scientific_cz`).
+///
+/// Two escapes keep the row readable as a number: below
+/// `SCIENTIFIC_LOWER_THRESHOLD` (a wall of leading zeros) and above whatever
+/// magnitude makes the plain rendering wider than IS MU's 15-digit cap, the
+/// value switches to bare `e`-notation (`4e-5`, `2,072e26`). Unlike
+/// `fmt_option_value`'s use of the same threshold, there is no `Notation`
+/// setting to respect here: a `:n` row has no styling choice to begin with,
+/// only the constraint that IS MU can read it back as a number.
+///
+/// In the small-value escape, `decimals` already carries the caller's
+/// intended precision at that magnitude, so it converts directly to mantissa
+/// decimals (`decimals + order`): the value was already rounded onto that
+/// decimal grid before reaching here, and re-expressing it in scientific
+/// form must not round it again. The large-value escape takes as many
+/// mantissa digits as the cap leaves room for (see
+/// `large_mantissa_decimals`), which on the significant-digit grids this
+/// generator produces is every digit the value carries.
+fn fmt_plain_decimal_cz(value: f64, decimals: u8) -> String {
     if value == 0.0 || !value.is_finite() {
         return fmt_cz(value, decimals);
     }
@@ -683,20 +707,19 @@ fn fmt_plain_decimal_cz(value: f64, decimals: u8) -> String {
         let mantissa_decimals = (decimals as i32 + order).max(0) as u8;
         return fmt_plain_scientific_cz(value, mantissa_decimals);
     }
-    if order < EXACT_DIGITS {
-        return fmt_cz(value, decimals);
+    if order + 1 + decimals as i32 > IS_MU_MAX_DIGITS {
+        return fmt_plain_scientific_cz(value, large_mantissa_decimals(order));
     }
-    // Keep the digits the double justifies, pad the rest of the magnitude
-    // with zeros. The scaled head stays well inside 2^53, so it prints exact.
-    let shift = order - (EXACT_DIGITS - 1);
-    let head = (value / 10f64.powi(shift)).round();
-    format!("{:.0}{}", head, "0".repeat(shift as usize))
+    fmt_cz(value, decimals)
 }
 
-/// `fmt_significant_cz` without the scientific escape hatch, for numbers that
-/// have to reach IS MU as bare decimals. Rounding to a whole magnitude goes
-/// through digit padding rather than a `f64` multiply, which would print the
-/// same binary noise `fmt_plain_decimal_cz` exists to avoid.
+/// `fmt_significant_cz` without the scientific escape hatch, for numbers
+/// that have to reach IS MU as bare decimals or e-notation. Rounding to a
+/// whole magnitude goes through digit padding while the result stays inside
+/// IS MU's 15-digit cap, and past it through e-notation with the teacher's
+/// own significant digits in the mantissa, so `2,072×10^26` at 4 significant
+/// digits exports as `2,072e26` instead of the 27-digit plain form IS MU
+/// rejects outright.
 fn fmt_plain_significant_cz(value: f64, sig_digits: u8) -> String {
     if value == 0.0 || !value.is_finite() {
         return fmt_significant_cz(value, sig_digits);
@@ -704,6 +727,11 @@ fn fmt_plain_significant_cz(value: f64, sig_digits: u8) -> String {
     let order = value.abs().log10().floor() as i32;
     let decimals = sig_digits as i32 - 1 - order;
     if decimals <= 0 {
+        if order + 1 > IS_MU_MAX_DIGITS {
+            let exponent_digits = order.unsigned_abs().to_string().len() as i32;
+            let cap = (IS_MU_MAX_DIGITS - exponent_digits - 1).clamp(0, 14) as u8;
+            return fmt_plain_scientific_cz(value, sig_digits.min(cap));
+        }
         let shift = -decimals;
         let head = (value / 10f64.powi(shift)).round();
         return format!("{:.0}{}", head, "0".repeat(shift as usize));
@@ -744,11 +772,9 @@ fn round_outward(value: f64, decimals: i32, up: bool) -> f64 {
 /// The HTML scientific form the question's own numbers use elsewhere
 /// (`×10<sup>25</sup>`) is never an option here, however those numbers are
 /// styled — the row is parsed as a number, and that markup would not parse.
-/// Bare `e`-notation is different: `fmt_plain_decimal_cz` still switches to it
-/// below `SCIENTIFIC_LOWER_THRESHOLD`, because `4e-5` parses as a number just
-/// fine. Above that threshold, a magnitude that would read better in
-/// scientific notation is the teacher's cue to ask for the answer in a
-/// different unit — this row has no other way to express it.
+/// Bare `e`-notation is different: `fmt_plain_decimal_cz` switches to it both
+/// below `SCIENTIFIC_LOWER_THRESHOLD` and above IS MU's 15-digit cap, because
+/// `4e-5` and `2,072e26` parse as numbers just fine.
 fn fmt_interval_bounds(
     lo: f64,
     hi: f64,
@@ -1387,12 +1413,14 @@ mod tests {
         );
     }
 
-    /// A `:n` row is parsed as a number, so a molecule count has to be
-    /// written out in full — `1,05×10<sup>25</sup>` is HTML, not a bound.
-    /// The digits past what a `f64` carries must be zeros, not the binary
-    /// expansion `{:.0}` would otherwise print.
+    /// A `:n` row is parsed as a number, so a molecule count has to stay a
+    /// bare number, and IS MU caps those at 15 digits: `1,05×10^25` written
+    /// out in full is 26 digits and gets the whole file rejected. It exports
+    /// as e-notation instead, which IS MU already parses for the sub-0,1
+    /// bounds. The digits past what an `f64` carries must be zeros, not the
+    /// binary expansion `{:.0}` would otherwise print.
     #[test]
-    fn open_intervals_write_molecule_counts_as_plain_decimals() {
+    fn open_intervals_write_molecule_counts_as_e_notation() {
         let template = make_template("Jaký počet molekul?");
         let variant = Variant {
             numeric_options: None,
@@ -1414,13 +1442,79 @@ mod tests {
         }]);
 
         assert!(
-            output.contains(":n=10500000000000000000000000..13500000000000000000000000 ok 3"),
-            "expected a plain decimal interval, got:\n{output}"
+            output.contains(":n=1,05e25..1,35e25 ok 3"),
+            "expected an e-notation interval, got:\n{output}"
         );
         assert!(
             !output.contains("<sup>"),
             "HTML markup leaked into a numeric row:\n{output}"
         );
+        assert!(
+            !output.contains("10500000000000000000000000"),
+            "a plain digit run longer than IS MU's cap leaked into the export:\n{output}"
+        );
+    }
+
+    /// The reported IS MU rejection: "Odpověď „number" obsahuje nepodporovanou
+    /// hodnotu … Hodnota musí být číslo, které může obsahovat maximálně 15
+    /// číslic." A molecule-count tolerance at ~2×10^26 with 4 significant
+    /// digits used to export as 27-digit plain bounds. The significant-digit
+    /// path must switch to e-notation too, keeping the teacher's 4 digits in
+    /// the mantissa.
+    #[test]
+    fn huge_significant_digit_bounds_export_as_e_notation_within_the_digit_cap() {
+        let template = make_template("Jaký počet molekul obsahuje za normálních podmínek chlor?");
+        let variant = Variant {
+            numeric_options: None,
+            correct_option: None,
+            interval_lo: Some(2.072e26),
+            interval_hi: Some(2.094e26),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(4),
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            output.contains(":n=2,072e26..2,094e26 ok 3"),
+            "expected the teacher's 4 significant digits as e-notation, got:\n{output}"
+        );
+        assert!(
+            !output.contains("207200000000000000000000000"),
+            "a 27-digit plain bound leaked into the export:\n{output}"
+        );
+
+        // Every bound stays within IS MU's 15-digit cap and parses as a
+        // number, exactly what IS MU does with the row.
+        let row = output
+            .lines()
+            .find(|l| l.starts_with(":n="))
+            .expect("evaluation row");
+        for bound in row
+            .trim_start_matches(":n=")
+            .split(" ok")
+            .next()
+            .expect("bounds")
+            .split("..")
+        {
+            let digits = bound.chars().filter(|c| c.is_ascii_digit()).count();
+            assert!(
+                digits <= IS_MU_MAX_DIGITS as usize,
+                "bound {bound} exceeds IS MU's 15-digit cap"
+            );
+            bound
+                .replace(',', ".")
+                .parse::<f64>()
+                .unwrap_or_else(|_| panic!("bound {bound} does not parse as a number"));
+        }
     }
 
     /// A `;`-assignment formula with no `[symbol]` markers generates
