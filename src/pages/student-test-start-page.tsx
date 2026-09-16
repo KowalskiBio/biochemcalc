@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -20,7 +19,8 @@ import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
 import type { StartTestInput, TestTopicOption } from "@/lib/types"
 
-const DEFAULT_TIME_LIMIT_MINUTES = 20
+// Fixed for every student — there is deliberately no UI to change it.
+const TIME_LIMIT_MINUTES = 50
 
 /**
  * Where a student launches a timed test: they pick one of the tests the
@@ -38,7 +38,6 @@ export function StudentTestStartPage() {
   const [testTopics, setTestTopics] = useState<TestTopicOption[]>([])
   const [isLoadingTopics, setIsLoadingTopics] = useState(true)
   const [topicId, setTopicId] = useState<string>("")
-  const [timeLimitMinutes, setTimeLimitMinutes] = useState(String(DEFAULT_TIME_LIMIT_MINUTES))
   const [isStarting, setIsStarting] = useState(false)
 
   useEffect(() => {
@@ -66,17 +65,12 @@ export function StudentTestStartPage() {
 
   const handleStart = useCallback(async () => {
     if (!topicId) return
-    const minutes = Number(timeLimitMinutes)
-    if (!Number.isFinite(minutes) || minutes <= 0) {
-      toast({ title: cs.test.startError, variant: "destructive" })
-      return
-    }
 
     setIsStarting(true)
     try {
       const input: StartTestInput = {
         topicId,
-        timeLimitSeconds: Math.round(minutes * 60),
+        timeLimitSeconds: TIME_LIMIT_MINUTES * 60,
       }
       const session = await studentApi.startTest(input)
       // `input` travels alongside the session so the results page can offer
@@ -88,7 +82,7 @@ export function StudentTestStartPage() {
     } finally {
       setIsStarting(false)
     }
-  }, [topicId, timeLimitMinutes, navigate, toast])
+  }, [topicId, navigate, toast])
 
   if (isLoadingTopics) {
     return (
@@ -125,7 +119,7 @@ export function StudentTestStartPage() {
       </div>
 
       <Card>
-        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-[1fr_180px_auto] lg:items-end">
+        <CardContent className="grid gap-4 pt-6 sm:grid-cols-2 lg:grid-cols-[1fr_auto] lg:items-end">
           <div className="space-y-2">
             <Label htmlFor="test-topic">{cs.test.testTopicLabel}</Label>
             <Select value={topicId} onValueChange={setTopicId}>
@@ -140,18 +134,9 @@ export function StudentTestStartPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="test-time-limit">{cs.test.timeLimitLabel}</Label>
-            <Input
-              id="test-time-limit"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              value={timeLimitMinutes}
-              onChange={(e) => setTimeLimitMinutes(e.target.value)}
-            />
+            <p className="text-muted-foreground text-sm">
+              {cs.test.timeLimitFixedLabel(TIME_LIMIT_MINUTES)}
+            </p>
           </div>
 
           <Button onClick={handleStart} disabled={!topicId || isStarting} className="lg:mb-0">

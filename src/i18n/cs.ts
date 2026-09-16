@@ -184,7 +184,7 @@ export const cs = {
     testTopicLabel: "Test",
     testTopicPlaceholder: "Vyberte test",
     noTestTopics: "Žádné testy zatím nejsou k dispozici.",
-    timeLimitLabel: "Časový limit (minuty)",
+    timeLimitFixedLabel: (minutes: number) => `Časový limit: ${minutes} minut`,
     startButton: "Zahájit test",
     startError: "Test se nepodařilo zahájit",
     starting: "Zahajuji test...",
