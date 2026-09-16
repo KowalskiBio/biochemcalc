@@ -730,7 +730,13 @@ fn fmt_plain_significant_cz(value: f64, sig_digits: u8) -> String {
         if order + 1 > IS_MU_MAX_DIGITS {
             let exponent_digits = order.unsigned_abs().to_string().len() as i32;
             let cap = (IS_MU_MAX_DIGITS - exponent_digits - 1).clamp(0, 14) as u8;
-            return fmt_plain_scientific_cz(value, sig_digits.min(cap));
+            // `sig_digits` significant digits means `sig_digits - 1` mantissa
+            // decimals (one digit sits before the decimal point in normalized
+            // scientific notation) — passing `sig_digits` itself here printed
+            // one extra digit, e.g. `2,0723e26` instead of `2,072e26` for 4
+            // significant digits, whenever the true 4th digit wasn't a
+            // trailing zero that `fmt_plain_scientific_cz` trims away.
+            return fmt_plain_scientific_cz(value, sig_digits.saturating_sub(1).min(cap));
         }
         let shift = -decimals;
         let head = (value / 10f64.powi(shift)).round();
@@ -1515,6 +1521,45 @@ mod tests {
                 .parse::<f64>()
                 .unwrap_or_else(|_| panic!("bound {bound} does not parse as a number"));
         }
+    }
+
+    /// `huge_significant_digit_bounds_export_as_e_notation_within_the_digit_cap`
+    /// picked a mantissa (2,072) that happens to round to a trailing zero at
+    /// one extra decimal, which masked an off-by-one: the e-notation escape
+    /// for over-cap significant-digit bounds passed `sig_digits` itself as
+    /// the mantissa's decimal-digit count instead of `sig_digits - 1` (one
+    /// digit sits before the decimal point in `m×10^n`), printing one
+    /// significant digit too many whenever that extra digit wasn't zero.
+    #[test]
+    fn huge_significant_digit_bounds_keep_exact_digit_count_in_e_notation() {
+        let template = make_template("Jaký počet molekul obsahuje za normálních podmínek chlor?");
+        let variant = Variant {
+            numeric_options: None,
+            correct_option: None,
+            interval_lo: Some(2.0723e26),
+            interval_hi: Some(2.0723e26),
+            ..make_closed_variant()
+        };
+        let output = write_txt(&[ExportQuestion {
+            template: &template,
+            variant: &variant,
+            variable_precisions: HashMap::new(),
+            variable_significant_digits: HashMap::new(),
+            variable_notations: HashMap::new(),
+            result_precision: 2,
+            result_significant_digits: Some(4),
+            force_scientific: false,
+            mode: TemplateMode::Open,
+        }]);
+
+        assert!(
+            !output.contains("2,0723e26"),
+            "expected 4 significant digits (2,072e26), got a 5th leaking through:\n{output}"
+        );
+        assert!(
+            output.contains("2,072e26"),
+            "expected the teacher's 4 significant digits as e-notation, got:\n{output}"
+        );
     }
 
     /// A `;`-assignment formula with no `[symbol]` markers generates
