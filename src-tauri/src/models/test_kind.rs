@@ -7,10 +7,15 @@ use serde::{Deserialize, Serialize};
 /// "Úvodní" is the first test of a topic and takes 5 per band (15 in all);
 /// "průběžný" is the recurring one and takes 4 (12) — the shape every test
 /// had before the split, which is why existing topics default to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TestKind {
     Uvodni,
+    /// The default, and deliberately so: it is the 12-question test that
+    /// existed before the split, so a client too old to send a kind — a
+    /// browser still running a cached bundle — keeps getting exactly the
+    /// test it always got instead of an error.
+    #[default]
     Prubezny,
 }
 

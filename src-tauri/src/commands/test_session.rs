@@ -40,6 +40,11 @@ pub struct StartTestPayload {
     pub topic_id: Uuid,
     /// Which of the two tests to sit. The topic must offer it; the student
     /// reaches this through a per-kind start page listing only those that do.
+    ///
+    /// Defaulted, and it has to stay that way: a browser running a cached
+    /// bundle from before the split sends no kind at all, and must keep
+    /// getting the průběžný test it always got rather than an error.
+    #[serde(default)]
     pub kind: TestKind,
     /// `None` starts an untimed test: no deadline is ever enforced. The
     /// student-facing test start page always sends a value now, but this
@@ -333,6 +338,27 @@ mod tests {
     /// it, exercising the random draw actually picking a subset).
     fn seed_full_test_topic(conn: &Connection, name: &str) -> Uuid {
         seed_test_topic(conn, name, &[(2, 5), (3, 6), (4, 4)])
+    }
+
+    /// A browser running a cached bundle from before the split sends no
+    /// kind. It must keep getting the 12-question test it always got — this
+    /// is the regression that took the student test down in production once.
+    #[test]
+    fn a_payload_without_a_kind_is_the_prubezny_test() {
+        let payload: StartTestPayload = serde_json::from_str(
+            r#"{"topicId":"a69662ad-66b6-4d57-a441-a98180c76722","timeLimitSeconds":3000}"#,
+        )
+        .expect("a pre-split payload must still parse");
+        assert_eq!(payload.kind, TestKind::Prubezny);
+
+        // The oldest shape of all carried filters that no longer exist;
+        // serde ignores them, so it parses too rather than 400-ing.
+        let ancient: StartTestPayload = serde_json::from_str(
+            r#"{"topicId":"a69662ad-66b6-4d57-a441-a98180c76722","pointValue":2,
+                "timeLimitSeconds":1200,"mode":"closed","setId":null}"#,
+        )
+        .expect("an even older payload must still parse");
+        assert_eq!(ancient.kind, TestKind::Prubezny);
     }
 
     /// The úvodní test is the průběžný one plus a question in every band:

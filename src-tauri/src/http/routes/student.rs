@@ -33,18 +33,31 @@ async fn topics(State(state): State<Arc<AppState>>) -> Result<Json<Vec<PracticeT
     Ok(Json(do_list_practice_topics(&conn)?))
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct TestTopicsPayload {
     /// Which test the student is about to sit — the bar for being listed
     /// differs, since the úvodní test needs a bigger band than the průběžný.
     kind: crate::models::TestKind,
 }
 
+/// Taken as raw bytes rather than through the `Json` extractor on purpose:
+/// a browser running a cached bundle from before the split calls this with
+/// no body and no `Content-Type` at all, which `Json` rejects outright. Such
+/// a client gets the průběžný list, which is the list it always got.
 async fn test_topics(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<TestTopicsPayload>,
+    body: axum::body::Bytes,
 ) -> Result<Json<Vec<TestTopicOption>>, HttpError> {
+    let payload: TestTopicsPayload = if body.is_empty() {
+        TestTopicsPayload::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|e| {
+            HttpError::from(crate::db::DbError::Validation(format!(
+                "Neplatný požadavek: {e}"
+            )))
+        })?
+    };
     let conn = crate::util::lock_db(&state.db);
     Ok(Json(do_list_test_topics(&conn, payload.kind)?))
 }
