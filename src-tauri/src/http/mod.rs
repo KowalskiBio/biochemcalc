@@ -9,8 +9,10 @@ pub mod routes;
 use crate::db::repos::ConstantRepo;
 use crate::db::{open_and_migrate, AppState};
 use crate::email::{Mailer, SmtpConfig};
-use axum::http::StatusCode;
-use axum::middleware::{from_fn, from_fn_with_state, map_response};
+use axum::extract::Request;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::Response;
 use axum::Router;
 use std::net::SocketAddr;
@@ -90,15 +92,15 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
     // react-router-dom takes over. `ServeDir::not_found_service` is
     // documented to always answer `404` regardless of what its fallback
     // service returns — correct for "asset truly missing", wrong for "this
-    // is a valid client-side route" — so the `map_response` layer below
-    // rewrites that 404 back to 200 for exactly this fallback branch (it
-    // never touches `/api/*`, which isn't part of this service at all).
+    // is a valid client-side route" — so the layer below rewrites that 404
+    // back to 200 for exactly this fallback branch (it never touches
+    // `/api/*`, which isn't part of this service at all).
     let static_service = Router::new()
         .fallback_service(
             ServeDir::new(&config.dist_dir)
                 .not_found_service(ServeFile::new(config.dist_dir.join("index.html"))),
         )
-        .layer(map_response(spa_fallback_ok));
+        .layer(from_fn(spa_fallback_and_cache));
 
     let app = Router::new()
         .nest("/api", api_router)
@@ -111,9 +113,39 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-async fn spa_fallback_ok(mut response: Response) -> Response {
+/// Decides, per request, whether a miss is a client-side route or a genuinely
+/// missing file, and sets the caching rules that keep a deploy from blanking
+/// out a browser mid-session.
+///
+/// `/assets/*` is content-hashed by Vite, so each file is immutable and may be
+/// cached forever — but a miss there must stay a `404`. Answering it with the
+/// SPA shell hands the browser HTML where it expects JavaScript, which fails
+/// silently and renders a blank page; that is what a student sees when their
+/// cached `index.html` still points at the previous deploy's bundle.
+///
+/// Everything else is a client-side route and gets the shell with `no-cache`,
+/// so the browser revalidates it on every visit and can never go on asking
+/// for a bundle that a deploy has already replaced.
+async fn spa_fallback_and_cache(req: Request, next: Next) -> Response {
+    let is_hashed_asset = req.uri().path().starts_with("/assets/");
+    let mut response = next.run(req).await;
+
+    if is_hashed_asset {
+        if response.status() == StatusCode::NOT_FOUND {
+            return response;
+        }
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+        return response;
+    }
+
     if response.status() == StatusCode::NOT_FOUND {
         *response.status_mut() = StatusCode::OK;
     }
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
 }
