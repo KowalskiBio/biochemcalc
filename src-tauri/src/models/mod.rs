@@ -4,6 +4,7 @@ pub mod constant;
 pub mod meta;
 pub mod streak_run;
 pub mod template;
+pub mod test_kind;
 pub mod topic;
 pub mod topic_group;
 pub mod user;
@@ -24,6 +25,7 @@ pub use template::{
     ConstraintType, ResultConstraint, Template, TemplateConstant, TemplateDecoy,
     TemplateDecoyInput, TemplateMode, TemplateVariable,
 };
+pub use test_kind::{TestKind, TestOffer};
 pub use topic::Topic;
 pub use topic_group::TopicGroup;
 pub use user::{InviteCode, Role, User};

@@ -1,4 +1,4 @@
-import { Loader2, Timer } from "lucide-react"
+import { Flag, Loader2, Timer } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
@@ -17,21 +17,28 @@ import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
-import type { StartTestInput, TestTopicOption } from "@/lib/types"
+import type { StartTestInput, TestKind, TestTopicOption } from "@/lib/types"
 
 // Fixed for every student — there is deliberately no UI to change it.
 const TIME_LIMIT_MINUTES = 50
 
+interface StudentTestStartPageProps {
+  kind: TestKind
+}
+
 /**
  * Where a student launches a timed test: they pick one of the tests the
- * teacher prepared (a topic flagged as a test), and the backend draws its
- * 12 questions (4 at each of 2/3/4 points, from all of the topic's sets)
- * at once. The generated session is handed to `/test/active` via router
- * state rather than a refetchable id: there is deliberately no "resume a
- * session" endpoint yet, so reloading the in-progress or results page
- * loses it.
+ * teacher prepared for this kind (a topic flagged as a test that offers it),
+ * and the backend draws its questions at each of 2/3/4 points from all of
+ * the topic's sets at once — 5 per band for the úvodní test (15), 4 for the
+ * průběžný one (12).
+ *
+ * Both kinds share this component, one route pair each. The generated
+ * session is handed to `/test/{kind}/active` via router state rather than a
+ * refetchable id: there is deliberately no "resume a session" endpoint yet,
+ * so reloading the in-progress or results page loses it.
  */
-export function StudentTestStartPage() {
+export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
   const { toast } = useToast()
   const navigate = useNavigate()
 
@@ -40,10 +47,14 @@ export function StudentTestStartPage() {
   const [topicId, setTopicId] = useState<string>("")
   const [isStarting, setIsStarting] = useState(false)
 
+  const isUvodni = kind === "uvodni"
+  const title = isUvodni ? cs.test.modeUvodniTitle : cs.test.modePrubeznyTitle
+  const description = isUvodni ? cs.test.startDescriptionUvodni : cs.test.startDescriptionPrubezny
+
   useEffect(() => {
     let cancelled = false
     studentApi
-      .testTopics()
+      .testTopics(kind)
       .then((loaded) => {
         if (cancelled) return
         setTestTopics(loaded)
@@ -61,7 +72,7 @@ export function StudentTestStartPage() {
     return () => {
       cancelled = true
     }
-  }, [toast])
+  }, [kind, toast])
 
   const handleStart = useCallback(async () => {
     if (!topicId) return
@@ -70,19 +81,21 @@ export function StudentTestStartPage() {
     try {
       const input: StartTestInput = {
         topicId,
+        kind,
         timeLimitSeconds: TIME_LIMIT_MINUTES * 60,
       }
       const session = await studentApi.startTest(input)
-      // `input` travels alongside the session so the results page can offer
-      // an instant "Znovu" that repeats this exact configuration, rather
-      // than sending the student back through the whole setup form.
-      navigate("/test/cvicny/active", { state: { session, input } })
+      // `input` travels alongside the session so the in-progress and results
+      // pages know which kind they belong to (they share one component per
+      // route pair), and so the results page can offer an instant "Znovu"
+      // that repeats this exact configuration.
+      navigate(`/test/${kind}/active`, { state: { session, input } })
     } catch (error) {
       toast({ title: extractErrorMessage(error, cs.test.startError), variant: "destructive" })
     } finally {
       setIsStarting(false)
     }
-  }, [topicId, navigate, toast])
+  }, [topicId, kind, navigate, toast])
 
   if (isLoadingTopics) {
     return (
@@ -102,7 +115,7 @@ export function StudentTestStartPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{cs.test.startTitle}</CardTitle>
+          <CardTitle>{title}</CardTitle>
         </CardHeader>
         <CardContent className="text-muted-foreground">{cs.test.noTestTopics}</CardContent>
       </Card>
@@ -112,10 +125,14 @@ export function StudentTestStartPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {cs.test.startTitle}
-        </h1>
-        <p className="text-muted-foreground text-sm">{cs.test.startDescription}</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+        <p className="text-muted-foreground text-sm">{description}</p>
+        {isUvodni && (
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-primary">
+            <Flag className="size-4 shrink-0" />
+            {cs.test.uvodniDisclosure}
+          </p>
+        )}
       </div>
 
       <Card>

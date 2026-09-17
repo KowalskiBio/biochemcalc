@@ -1,4 +1,4 @@
-import { Crown, Swords, Timer } from "lucide-react"
+import { Crown, Flag, Swords, Timer } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -6,10 +6,16 @@ import { cs } from "@/i18n/cs"
 
 const MODES = [
   {
-    to: "/test/cvicny",
+    to: "/test/uvodni",
+    icon: Flag,
+    title: cs.test.modeUvodniTitle,
+    description: cs.test.modeUvodniDescription,
+  },
+  {
+    to: "/test/prubezny",
     icon: Timer,
-    title: cs.test.modeCvicnyTitle,
-    description: cs.test.modeCvicnyDescription,
+    title: cs.test.modePrubeznyTitle,
+    description: cs.test.modePrubeznyDescription,
   },
   {
     to: "/test/ucen",
@@ -26,8 +32,9 @@ const MODES = [
 ] as const
 
 /**
- * The first choice a student makes before testing themselves: a classic
- * timed batch ("Cvičný test"), an endless scoped run that ends on the first
+ * The first choice a student makes before testing themselves: one of the two
+ * timed batches ("Úvodní cvičný test", a topic's first, and "Průběžný
+ * cvičný test", the recurring one), an endless scoped run that ends on the first
  * mistake ("Učeň"), or the same but drawing from every topic ("Mistr").
  */
 export function StudentTestModePage() {
@@ -40,7 +47,7 @@ export function StudentTestModePage() {
         <p className="text-muted-foreground text-sm">{cs.test.modePickerDescription}</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {MODES.map(({ to, icon: Icon, title, description }) => (
           <Link key={to} to={to} className="block h-full">
             <Card className="h-full cursor-pointer transition-colors hover:border-primary hover:bg-primary/5">

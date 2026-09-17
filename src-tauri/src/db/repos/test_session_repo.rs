@@ -5,6 +5,7 @@
 //! repo only owns the `test_sessions` row itself and its score summary.
 
 use crate::db::DbError;
+use crate::models::TestKind;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -14,6 +15,9 @@ pub struct TestSessionRecord {
     pub id: Uuid,
     pub user_id: Uuid,
     pub topic_id: Uuid,
+    /// Which of the two tests this session is — it decides the question
+    /// count, so an old session still reads as the test it actually was.
+    pub kind: TestKind,
     pub point_value: u8,
     /// `None` means untimed: no deadline is ever enforced for this session.
     pub time_limit_seconds: Option<u32>,
@@ -37,12 +41,13 @@ impl TestSessionRepo {
     pub fn insert(conn: &Connection, session: &TestSessionRecord) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO test_sessions (
-                 id, user_id, topic_id, point_value, time_limit_seconds, started_at, finished_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+                 id, user_id, topic_id, kind, point_value, time_limit_seconds, started_at, finished_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
             params![
                 session.id,
                 session.user_id,
                 session.topic_id,
+                session.kind.as_str(),
                 session.point_value,
                 session.time_limit_seconds,
                 session.started_at.to_rfc3339(),
@@ -59,19 +64,21 @@ impl TestSessionRepo {
         user_id: &Uuid,
     ) -> Result<Option<TestSessionRecord>, DbError> {
         let result = conn.query_row(
-            "SELECT id, user_id, topic_id, point_value, time_limit_seconds, started_at, finished_at
+            "SELECT id, user_id, topic_id, kind, point_value, time_limit_seconds, started_at, finished_at
              FROM test_sessions
              WHERE id = ?1 AND user_id = ?2",
             params![id, user_id],
             |row| {
-                let started_at: String = row.get(5)?;
-                let finished_at: Option<String> = row.get(6)?;
+                let kind: String = row.get(3)?;
+                let started_at: String = row.get(6)?;
+                let finished_at: Option<String> = row.get(7)?;
                 Ok(TestSessionRecord {
                     id: row.get(0)?,
                     user_id: row.get(1)?,
                     topic_id: row.get(2)?,
-                    point_value: row.get(3)?,
-                    time_limit_seconds: row.get(4)?,
+                    kind: TestKind::parse(&kind).unwrap_or(TestKind::Prubezny),
+                    point_value: row.get(4)?,
+                    time_limit_seconds: row.get(5)?,
                     started_at: parse_rfc3339(&started_at),
                     finished_at: finished_at.as_deref().map(parse_rfc3339),
                 })
@@ -168,6 +175,7 @@ mod tests {
             id: Uuid::new_v4(),
             user_id,
             topic_id: Uuid::new_v4(),
+            kind: TestKind::Prubezny,
             point_value: 2,
             time_limit_seconds,
             started_at: Utc::now(),

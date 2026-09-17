@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 40;
+const CURRENT_USER_VERSION: u32 = 41;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -206,6 +206,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 40 {
         apply_migration_v40(conn)?;
         conn.pragma_update(None, "user_version", "40")?;
+    }
+
+    if user_version < 41 {
+        apply_migration_v41(conn)?;
+        conn.pragma_update(None, "user_version", "41")?;
     }
 
     Ok(())
@@ -1328,6 +1333,23 @@ fn apply_migration_v40(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Splitting the test in two (`models::TestKind`): a topic flagged `is_test`
+/// now says *which* test it is — "úvodní" (5 questions per band), "průběžný"
+/// (4, the shape every test had until now), or "both".
+///
+/// Every existing test topic becomes "průběžný" so its size does not change
+/// under the teacher, and `test_sessions` records which test each session
+/// was, so an old session still reads as the 12-question test it actually was.
+fn apply_migration_v41(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE topics ADD COLUMN test_kind TEXT NOT NULL DEFAULT 'prubezny';
+        ALTER TABLE test_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'prubezny';
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2282,5 +2304,42 @@ mod tests {
             .expect("both columns readable after v38");
         assert_eq!(decoy_digits, 2, "decoy sig digits must persist");
         assert_eq!(alt_digits, 3, "alternace sig digits must persist");
+    }
+
+    /// Topics and sessions that predate the split must land on "průběžný":
+    /// that is the 12-question test they already were, so nothing changes
+    /// size under a teacher or re-reads an old session as the wrong exam.
+    #[test]
+    fn v41_designates_existing_test_topics_and_sessions_as_prubezny() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        for (table, column) in [("topics", "test_kind"), ("test_sessions", "kind")] {
+            let (notnull, dflt): (i64, Option<String>) = conn
+                .query_row(
+                    &format!("SELECT \"notnull\", dflt_value FROM pragma_table_info('{table}') WHERE name = '{column}'"),
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap_or_else(|e| panic!("{table}.{column} must exist after v41: {e}"));
+            assert_eq!(notnull, 1, "{table}.{column} must be NOT NULL");
+            assert_eq!(dflt.as_deref(), Some("'prubezny'"));
+        }
+
+        // A row written without the column gets the default, which is what
+        // every pre-v41 row effectively did.
+        conn.execute(
+            "INSERT INTO topics (id, name, created_at, for_students, is_test)
+             VALUES (randomblob(16), 'Roztoky', '2026-01-01T00:00:00Z', 0, 1)",
+            [],
+        )
+        .expect("insert topic");
+        let kind: String = conn
+            .query_row("SELECT test_kind FROM topics", [], |row| row.get(0))
+            .expect("test_kind readable");
+        assert_eq!(kind, "prubezny");
     }
 }

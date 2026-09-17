@@ -5,7 +5,7 @@
 //! the question — see the migration v19 comment in `db::schema`.
 
 use crate::db::DbError;
-use crate::models::{AnswerField, TemplateMode};
+use crate::models::{AnswerField, TemplateMode, TestOffer};
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
@@ -72,6 +72,8 @@ pub struct PracticeTopicRow {
     /// The teacher's "Test" flag: the topic doubles as a timed test in the
     /// test generator, independently of `for_students`.
     pub is_test: bool,
+    /// Which test the topic offers; meaningless unless `is_test`.
+    pub test_kind: TestOffer,
     pub point_value: u8,
     pub question_count: i64,
 }
@@ -117,7 +119,7 @@ impl PracticeRepo {
     /// which topic a question belongs to.
     pub fn list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopicRow>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT tp.id, tp.name, tp.for_students, tp.is_test, c.point_value, COUNT(DISTINCT st.template_id)
+            "SELECT tp.id, tp.name, tp.for_students, tp.is_test, tp.test_kind, c.point_value, COUNT(DISTINCT st.template_id)
              FROM topics tp
              JOIN categories c ON c.topic_id = tp.id
              JOIN sets s ON s.category_id = c.id
@@ -128,13 +130,15 @@ impl PracticeRepo {
         )?;
         let rows = stmt
             .query_map([], |row| {
+                let test_kind: String = row.get(4)?;
                 Ok(PracticeTopicRow {
                     topic_id: row.get(0)?,
                     name: row.get(1)?,
                     for_students: row.get::<_, i32>(2)? != 0,
                     is_test: row.get::<_, i32>(3)? != 0,
-                    point_value: row.get(4)?,
-                    question_count: row.get(5)?,
+                    test_kind: TestOffer::parse(&test_kind).unwrap_or(TestOffer::Prubezny),
+                    point_value: row.get(5)?,
+                    question_count: row.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;

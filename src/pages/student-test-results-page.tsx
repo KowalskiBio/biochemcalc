@@ -37,6 +37,13 @@ export function StudentTestResultsPage() {
   const results = state?.results
   const review = state?.review
   const input = state?.input
+  /**
+   * Both test kinds share this component, one route pair each. The kind
+   * comes from the start input that travelled here; without it (a reload
+   * that lost the router state) there is nothing to go back to but the mode
+   * picker.
+   */
+  const backToStart = input ? `/test/${input.kind}` : "/test"
 
   const [isRetrying, setIsRetrying] = useState(false)
 
@@ -45,13 +52,13 @@ export function StudentTestResultsPage() {
     setIsRetrying(true)
     try {
       const session = await studentApi.startTest(input)
-      navigate("/test/cvicny/active", { state: { session, input } })
+      navigate(`${backToStart}/active`, { state: { session, input } })
     } catch (error) {
       toast({ title: extractErrorMessage(error, cs.test.tryAgainError), variant: "destructive" })
     } finally {
       setIsRetrying(false)
     }
-  }, [input, isRetrying, navigate, toast])
+  }, [input, isRetrying, backToStart, navigate, toast])
 
   if (!results) {
     return (
@@ -61,7 +68,7 @@ export function StudentTestResultsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground">{cs.test.noActiveTest}</p>
-          <Button onClick={() => navigate("/test/cvicny")}>{cs.test.startAnother}</Button>
+          <Button onClick={() => navigate(backToStart)}>{cs.test.startAnother}</Button>
         </CardContent>
       </Card>
     )
@@ -124,7 +131,7 @@ export function StudentTestResultsPage() {
               {isRetrying ? cs.test.starting : cs.test.tryAgain}
             </Button>
           )}
-          <Button variant="outline" onClick={() => navigate("/test/cvicny")}>
+          <Button variant="outline" onClick={() => navigate(backToStart)}>
             <Repeat className="size-4 mr-2" />
             {cs.test.startAnother}
           </Button>

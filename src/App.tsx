@@ -73,9 +73,12 @@ function StudentRoutes() {
       <Routes>
         <Route path="/" element={<StudentPracticePage />} />
         <Route path="/test" element={<StudentTestModePage />} />
-        <Route path="/test/cvicny" element={<StudentTestStartPage />} />
-        <Route path="/test/cvicny/active" element={<StudentTestPage />} />
-        <Route path="/test/cvicny/results" element={<StudentTestResultsPage />} />
+        <Route path="/test/uvodni" element={<StudentTestStartPage kind="uvodni" />} />
+        <Route path="/test/uvodni/active" element={<StudentTestPage />} />
+        <Route path="/test/uvodni/results" element={<StudentTestResultsPage />} />
+        <Route path="/test/prubezny" element={<StudentTestStartPage kind="prubezny" />} />
+        <Route path="/test/prubezny/active" element={<StudentTestPage />} />
+        <Route path="/test/prubezny/results" element={<StudentTestResultsPage />} />
         <Route path="/test/ucen" element={<StudentStreakSetupPage kind="apprentice" />} />
         <Route path="/test/mistr" element={<StudentStreakSetupPage kind="master" />} />
         <Route path="/test/streak/active" element={<StudentStreakActivePage />} />

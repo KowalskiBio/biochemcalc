@@ -179,8 +179,12 @@ export const cs = {
   // as opposed to the endless one-at-a-time practice generator above.
   test: {
     startTitle: "Test",
-    startDescription:
-      "Test obsahuje 12 otázek z vybraného tématu: 4 dvoubodové, 4 tříbodové a 4 čtyřbodové, vylosované náhodně ze všech sad.",
+    startDescriptionUvodni:
+      "Úvodní test obsahuje 15 otázek z vybraného tématu: 5 dvoubodových, 5 tříbodových a 5 čtyřbodových, vylosovaných náhodně ze všech sad.",
+    startDescriptionPrubezny:
+      "Průběžný test obsahuje 12 otázek z vybraného tématu: 4 dvoubodové, 4 tříbodové a 4 čtyřbodové, vylosované náhodně ze všech sad.",
+    /** Shown under the heading on the úvodní start page only. */
+    uvodniDisclosure: "Toto je pouze první, úvodní test.",
     testTopicLabel: "Test",
     testTopicPlaceholder: "Vyberte test",
     noTestTopics: "Žádné testy zatím nejsou k dispozici.",
@@ -221,8 +225,11 @@ export const cs = {
     reviewIncorrect: "Špatně",
 
     modePickerDescription: "Vyberte režim testu.",
-    modeCvicnyTitle: "Cvičný test",
-    modeCvicnyDescription:
+    modeUvodniTitle: "Úvodní cvičný test",
+    modeUvodniDescription:
+      "První test z tématu. Vyberte test a zodpovězte všech 15 otázek najednou.",
+    modePrubeznyTitle: "Průběžný cvičný test",
+    modePrubeznyDescription:
       "Klasický test s časovým limitem. Vyberte test a zodpovězte všech 12 otázek najednou.",
     modeUcenTitle: "Učeň",
     modeUcenDescription:
@@ -665,8 +672,16 @@ export const cs = {
     topicNamePlaceholder: "např. Hmotnostní procento, ředění",
     forStudentsLabel: "Dostupné studentům",
     forStudentsHelp: "Zaškrtněte, pokud mají studenti k tématu přístup v tréninku.",
-    testLabelOn: "Test",
+    // The Test pill cycles through these four states: off → úvodní →
+    // průběžný → obojí. Úvodní draws 5 questions per bodové ohodnocení,
+    // průběžný 4.
+    /** Field label in the create dialog, where a test is just on/off — a
+     *  new test topic starts as průběžný and the teacher cycles it on the card. */
+    testFieldLabel: "Test",
     testLabelOff: "Není test",
+    testLabelUvodni: "Úvodní test",
+    testLabelPrubezny: "Průběžný test",
+    testLabelBoth: "Úvodní i průběžný test",
     testHelp:
       "Zaškrtněte, pokud má téma studentům sloužit jako časovaný test (12 otázek napříč body 2/3/4). Funguje i samostatně bez přístupu v tréninku.",
     creatingTopic: "Vytvářím...",

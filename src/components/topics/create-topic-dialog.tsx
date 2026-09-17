@@ -116,7 +116,7 @@ export function CreateTopicDialog({ open, onOpenChange, onCreated }: CreateTopic
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="is-test" className="text-right">
-              {cs.topics.testLabelOn}
+              {cs.topics.testFieldLabel}
             </Label>
             <button
               type="button"

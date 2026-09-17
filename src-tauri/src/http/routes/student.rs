@@ -33,11 +33,20 @@ async fn topics(State(state): State<Arc<AppState>>) -> Result<Json<Vec<PracticeT
     Ok(Json(do_list_practice_topics(&conn)?))
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TestTopicsPayload {
+    /// Which test the student is about to sit — the bar for being listed
+    /// differs, since the úvodní test needs a bigger band than the průběžný.
+    kind: crate::models::TestKind,
+}
+
 async fn test_topics(
     State(state): State<Arc<AppState>>,
+    Json(payload): Json<TestTopicsPayload>,
 ) -> Result<Json<Vec<TestTopicOption>>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_list_test_topics(&conn)?))
+    Ok(Json(do_list_test_topics(&conn, payload.kind)?))
 }
 
 async fn next_question(

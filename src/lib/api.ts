@@ -28,6 +28,7 @@ import type {
   TemplateMode,
   TemplateVariantResult,
   TemplateWithDetails,
+  TestOffer,
   Topic,
   TopicGroup,
   TopicInput,
@@ -71,8 +72,18 @@ export const topicsApi = {
 
   get: (id: string): Promise<Topic> => apiFetch<Topic>("get_topic", { id }),
 
-  update: (id: string, name: string, forStudents: boolean, isTest: boolean): Promise<Topic> =>
-    apiFetch<Topic>("update_topic", { id, name, forStudents, isTest }),
+  /**
+   * Full replacement of a topic's editable fields — pass every one, including
+   * the ones you are not changing. `groupId`/`position` are the exception:
+   * the server preserves those from the existing row.
+   */
+  update: (
+    id: string,
+    name: string,
+    forStudents: boolean,
+    isTest: boolean,
+    testKind: TestOffer,
+  ): Promise<Topic> => apiFetch<Topic>("update_topic", { id, name, forStudents, isTest, testKind }),
 
   delete: (id: string): Promise<void> => apiFetch<void>("delete_topic", { id }),
 

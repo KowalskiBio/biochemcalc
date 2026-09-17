@@ -1,5 +1,5 @@
 use crate::db::DbError;
-use crate::models::Topic;
+use crate::models::{TestOffer, Topic};
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
@@ -8,13 +8,14 @@ pub struct TopicRepo;
 impl TopicRepo {
     pub fn insert(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO topics (id, name, created_at, for_students, is_test, group_id, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO topics (id, name, created_at, for_students, is_test, test_kind, group_id, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 topic.id,
                 topic.name,
                 topic.created_at.to_rfc3339(),
                 topic.for_students as i32,
                 topic.is_test as i32,
+                topic.test_kind.as_str(),
                 topic.group_id,
                 topic.position,
             ],
@@ -24,7 +25,7 @@ impl TopicRepo {
 
     pub fn list_all(conn: &Connection) -> Result<Vec<Topic>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, name, created_at, for_students, is_test, group_id, position FROM topics
+            "SELECT id, name, created_at, for_students, is_test, test_kind, group_id, position FROM topics
              ORDER BY position ASC, created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -34,8 +35,9 @@ impl TopicRepo {
                 created_at: parse_dt(row.get::<_, String>(2)?),
                 for_students: row.get::<_, i32>(3)? != 0,
                 is_test: row.get::<_, i32>(4)? != 0,
-                group_id: row.get(5)?,
-                position: row.get(6)?,
+                test_kind: parse_test_kind(row.get::<_, String>(5)?),
+                group_id: row.get(6)?,
+                position: row.get(7)?,
             })
         })?;
         let mut items = Vec::new();
@@ -50,7 +52,7 @@ impl TopicRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<Topic, DbError> {
         conn.query_row(
-            "SELECT id, name, created_at, for_students, is_test, group_id, position FROM topics WHERE id = ?1",
+            "SELECT id, name, created_at, for_students, is_test, test_kind, group_id, position FROM topics WHERE id = ?1",
             params![id],
             |row| {
                 Ok(Topic {
@@ -59,8 +61,9 @@ impl TopicRepo {
                     created_at: parse_dt(row.get::<_, String>(2)?),
                     for_students: row.get::<_, i32>(3)? != 0,
                     is_test: row.get::<_, i32>(4)? != 0,
-                    group_id: row.get(5)?,
-                    position: row.get(6)?,
+                    test_kind: parse_test_kind(row.get::<_, String>(5)?),
+                    group_id: row.get(6)?,
+                    position: row.get(7)?,
                 })
             },
         )
@@ -77,13 +80,14 @@ impl TopicRepo {
     /// not visible in the practice generator.
     pub fn update(conn: &Connection, topic: &Topic) -> Result<(), DbError> {
         let affected = conn.execute(
-            "UPDATE topics SET name=?2, created_at=?3, for_students=?4, is_test=?5 WHERE id=?1",
+            "UPDATE topics SET name=?2, created_at=?3, for_students=?4, is_test=?5, test_kind=?6 WHERE id=?1",
             params![
                 topic.id,
                 topic.name,
                 topic.created_at.to_rfc3339(),
                 topic.for_students as i32,
-                topic.is_test as i32
+                topic.is_test as i32,
+                topic.test_kind.as_str(),
             ],
         )?;
         if affected == 0 {
@@ -143,6 +147,13 @@ impl TopicRepo {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// An unrecognized spelling falls back to "průběžný", the default every row
+/// got in migration v41 — a topic that somehow lost its designation still
+/// offers the test it offered before the split.
+fn parse_test_kind(s: String) -> TestOffer {
+    TestOffer::parse(&s).unwrap_or(TestOffer::Prubezny)
 }
 
 fn parse_dt(s: String) -> chrono::DateTime<chrono::Utc> {

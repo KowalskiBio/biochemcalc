@@ -13,7 +13,7 @@
 //! numbers each time.
 
 use crate::commands::generation::load_template_dependencies;
-use crate::commands::test_session::{QUESTIONS_PER_BAND, TEST_POINT_VALUE_BANDS};
+use crate::commands::test_session::TEST_POINT_VALUE_BANDS;
 use crate::db::repos::{
     ConstantRepo, LeaderboardRow, PracticeAttemptRecord, PracticeRepo, StreakRunRepo,
     TemplateDecoyRepo, TemplateRepo, TestSessionRepo,
@@ -21,7 +21,7 @@ use crate::db::repos::{
 use crate::db::DbError;
 use crate::engine::answer_targets::{apply_result_units, extract_target_symbols};
 use crate::engine::generator::generate_variant_with_targets;
-use crate::models::{AnswerField, TemplateMode, Variant};
+use crate::models::{AnswerField, TemplateMode, TestKind, Variant};
 use chrono::{Duration, Utc};
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
@@ -283,22 +283,33 @@ pub fn do_list_practice_topics(conn: &Connection) -> Result<Vec<PracticeTopic>, 
     Ok(topics)
 }
 
-/// Topics offered as timed tests in the student test generator: flagged as
-/// a test by the teacher (independently of practice visibility, so a
+/// Topics offered as `kind` in the student test generator: flagged as a
+/// test by the teacher (independently of practice visibility, so a
 /// test-only topic is offered here even though it never shows up in the
-/// endless generator), and holding at least `QUESTIONS_PER_BAND` questions
-/// at each of the three point values (2/3/4), so every test can always be
-/// filled to its full 12-question shape. A flagged topic that does not meet
-/// the bar is simply not offered yet: it becomes available the moment the
-/// teacher adds enough questions.
-pub fn do_list_test_topics(conn: &Connection) -> Result<Vec<TestTopicOption>, DbError> {
+/// endless generator), offering that kind, and holding at least
+/// `kind.questions_per_band()` questions at each of the three point values
+/// (2/3/4), so every test can always be filled to its full shape.
+///
+/// The bar therefore differs by kind: a topic with 4 questions in a band
+/// can serve as a průběžný test but not as an úvodní one, even when it is
+/// marked as offering both. A flagged topic that does not meet the bar is
+/// simply not offered yet — it becomes available the moment the teacher
+/// adds enough questions.
+pub fn do_list_test_topics(
+    conn: &Connection,
+    kind: TestKind,
+) -> Result<Vec<TestTopicOption>, DbError> {
     let rows = PracticeRepo::list_practice_topics(conn)?;
+    let per_band = kind.questions_per_band() as i64;
 
     // Rows arrive ordered by (topic name, point value), so consecutive rows
     // for one flagged topic fold into a single candidate, remembering each
     // band's question count.
     let mut candidates: Vec<(Uuid, String, Vec<(u8, i64)>)> = Vec::new();
-    for row in rows.into_iter().filter(|row| row.is_test) {
+    for row in rows
+        .into_iter()
+        .filter(|row| row.is_test && row.test_kind.offers(kind))
+    {
         let band = (row.point_value, row.question_count);
         match candidates.last_mut() {
             Some(candidate) if candidate.0 == row.topic_id => candidate.2.push(band),
@@ -312,7 +323,7 @@ pub fn do_list_test_topics(conn: &Connection) -> Result<Vec<TestTopicOption>, Db
             TEST_POINT_VALUE_BANDS.iter().all(|band| {
                 bands
                     .iter()
-                    .any(|(pv, count)| *pv == *band && *count >= QUESTIONS_PER_BAND as i64)
+                    .any(|(pv, count)| *pv == *band && *count >= per_band)
             })
         })
         .map(|(id, name, _)| TestTopicOption { id, name })
@@ -725,9 +736,10 @@ pub(crate) fn entropy_seed() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::repos::{CategoryRepo, SetRepo, UserRecord, UserRepo, VariableRepo};
+    use crate::db::repos::{CategoryRepo, SetRepo, TopicRepo, UserRecord, UserRepo, VariableRepo};
     use crate::models::{
-        ConstraintType, ResultConstraint, Role, Template, TemplateVariable, Topic, Variable,
+        ConstraintType, ResultConstraint, Role, Template, TemplateVariable, TestOffer, Topic,
+        Variable,
     };
     use chrono::Utc;
 
@@ -935,13 +947,60 @@ mod tests {
         seed_topic_full(&conn, "Underfilled", false, true, 3);
         seed_topic_full(&conn, "Both", true, true, 5);
 
-        let tests = do_list_test_topics(&conn).expect("list test topics");
+        let tests = do_list_test_topics(&conn, TestKind::Prubezny).expect("list test topics");
         let names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["Both", "TestOnly"]);
 
         let practice = do_list_practice_topics(&conn).expect("list practice topics");
         let pnames: Vec<&str> = practice.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(pnames, vec!["Both", "Practice"]);
+    }
+
+    /// The picker is per kind twice over: a topic only offers the kind(s)
+    /// the teacher chose, and the band bar is the kind's own — 5 questions
+    /// for úvodní, 4 for průběžný — so a topic can be listed for one and
+    /// not the other even when it is marked as offering both.
+    #[test]
+    fn test_topics_listing_is_filtered_by_kind_and_its_band_size() {
+        let conn = setup_conn();
+        let set_offer = |id: Uuid, offer: TestOffer| {
+            let mut topic = TopicRepo::get_by_id(&conn, &id).expect("get topic");
+            topic.test_kind = offer;
+            TopicRepo::update(&conn, &topic).expect("update topic");
+        };
+
+        // Big enough for either kind, but offered as one only.
+        set_offer(
+            seed_topic_full(&conn, "JenUvodni", false, true, 5),
+            TestOffer::Uvodni,
+        );
+        set_offer(
+            seed_topic_full(&conn, "JenPrubezny", false, true, 5),
+            TestOffer::Prubezny,
+        );
+        // Offers both, but its bands only reach the průběžný bar.
+        set_offer(
+            seed_topic_full(&conn, "ObojiMale", false, true, 4),
+            TestOffer::Both,
+        );
+        set_offer(
+            seed_topic_full(&conn, "ObojiVelke", false, true, 5),
+            TestOffer::Both,
+        );
+
+        let names = |kind| -> Vec<String> {
+            do_list_test_topics(&conn, kind)
+                .expect("list")
+                .into_iter()
+                .map(|t| t.name)
+                .collect()
+        };
+
+        assert_eq!(names(TestKind::Uvodni), vec!["JenUvodni", "ObojiVelke"]);
+        assert_eq!(
+            names(TestKind::Prubezny),
+            vec!["JenPrubezny", "ObojiMale", "ObojiVelke"]
+        );
     }
 
     /// A template linked only into an open set must never be served closed,

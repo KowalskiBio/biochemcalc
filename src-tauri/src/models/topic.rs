@@ -1,3 +1,4 @@
+use crate::models::TestOffer;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,6 +19,12 @@ pub struct Topic {
     /// but not in the endless practice generator.
     #[serde(default)]
     pub is_test: bool,
+    /// Which of the two tests this topic offers when `is_test` is set:
+    /// úvodní (5 questions per band), průběžný (4), or both. Meaningless
+    /// while `is_test` is false, and left alone then so unflagging and
+    /// reflagging a topic does not lose the teacher's choice.
+    #[serde(default)]
+    pub test_kind: TestOffer,
     /// The "Skupina" (group) this topic is organized under on the topics
     /// list page, if any — unrelated to `Category`/"Kategorie" (the fixed
     /// 2/3/4-point-value bucket nested under a topic).
@@ -38,6 +45,7 @@ impl Topic {
             created_at: Utc::now(),
             for_students: false,
             is_test: false,
+            test_kind: TestOffer::Prubezny,
             group_id: None,
             position: 0,
         }

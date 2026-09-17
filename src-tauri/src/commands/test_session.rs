@@ -1,8 +1,13 @@
-//! Fixed-batch test sessions: a timed 12-question exam drawn from a topic
-//! the teacher flagged as a test (4 random questions at each of the 2/3/4
-//! point values, mixed across all of the topic's sets, open or closed),
-//! generated all at once and answered together, as opposed to
-//! `commands::practice`'s endless one-at-a-time generator.
+//! Fixed-batch test sessions: a timed exam drawn from a topic the teacher
+//! flagged as a test — random questions at each of the 2/3/4 point values,
+//! mixed across all of the topic's sets, open or closed — generated all at
+//! once and answered together, as opposed to `commands::practice`'s endless
+//! one-at-a-time generator.
+//!
+//! There are two of them (`models::TestKind`), differing only in how many
+//! questions each band contributes: the úvodní test, a topic's first, takes
+//! 5 per band (15 in all), and the průběžný one takes 4 (12). A topic says
+//! which it offers — either, or both — through `Topic::test_kind`.
 //!
 //! Grading is not reimplemented here. A session's questions are ordinary
 //! `practice_attempts` rows (tagged with `test_session_id`/`position`), so
@@ -12,6 +17,7 @@
 use crate::commands::practice::{build_question, entropy_seed, PracticeQuestion};
 use crate::db::repos::{PracticeRepo, TestSessionRecord, TestSessionRepo, TopicRepo};
 use crate::db::DbError;
+use crate::models::TestKind;
 use chrono::{DateTime, Utc};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -24,13 +30,17 @@ use uuid::Uuid;
 /// `CHECK (point_value IN (2, 3, 4))` buckets a topic is filed under.
 pub const TEST_POINT_VALUE_BANDS: [u8; 3] = [2, 3, 4];
 
-/// How many questions each band contributes: 3 bands x 4 = 12 questions.
-pub const QUESTIONS_PER_BAND: usize = 4;
+/// How many questions each band contributes, per test kind: 3 bands x 5 =
+/// 15 questions for the úvodní test, 3 x 4 = 12 for the průběžný one. Read
+/// it off the kind rather than from here — `TestKind::questions_per_band`.
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartTestPayload {
     pub topic_id: Uuid,
+    /// Which of the two tests to sit. The topic must offer it; the student
+    /// reaches this through a per-kind start page listing only those that do.
+    pub kind: TestKind,
     /// `None` starts an untimed test: no deadline is ever enforced. The
     /// student-facing test start page always sends a value now, but this
     /// stays optional so a session started before that UI change keeps
@@ -77,19 +87,21 @@ fn dedupe_templates(
         .collect()
 }
 
-/// Sample `QUESTIONS_PER_BAND` templates at each of `TEST_POINT_VALUE_BANDS`
-/// from the topic's whole pool (every set at that point value, open or
-/// closed), then shuffle the combined 12 so the bands are interleaved rather
-/// than served as three consecutive blocks.
+/// Sample `payload.kind.questions_per_band()` templates at each of
+/// `TEST_POINT_VALUE_BANDS` from the topic's whole pool (every set at that
+/// point value, open or closed), then shuffle the combined 15 (úvodní) or
+/// 12 (průběžný) so the bands are interleaved rather than served as three
+/// consecutive blocks.
 ///
 /// A template that fails to generate (its constraints are unsatisfiable for
 /// the sampled values) is skipped rather than failing the whole test, the
 /// same tolerance `commands::practice` already has for one-off generation
 /// failures: one bad template must not read as "this whole test is broken."
 /// The test fails outright only if every template failed. Unfilled bands
-/// (fewer eligible templates than `QUESTIONS_PER_BAND`) are a hard error:
-/// `do_list_test_topics` only offers topics whose bands are all full, so a
-/// student reaching this means the teacher emptied a band in the meantime.
+/// (fewer eligible templates than the kind wants) are a hard error:
+/// `do_list_test_topics` only offers topics whose bands are all full for
+/// that kind, so a student reaching this means the teacher emptied a band
+/// in the meantime.
 pub fn do_start_test(
     conn: &Connection,
     user_id: &Uuid,
@@ -101,6 +113,12 @@ pub fn do_start_test(
             "Toto téma není označeno jako test".into(),
         ));
     }
+    if !topic.test_kind.offers(payload.kind) {
+        return Err(DbError::Validation(
+            "Toto téma nenabízí tento typ testu".into(),
+        ));
+    }
+    let per_band = payload.kind.questions_per_band();
 
     let mut rng = StdRng::seed_from_u64(entropy_seed());
     let mut selected: Vec<(Uuid, crate::models::TemplateMode)> = Vec::new();
@@ -111,16 +129,16 @@ pub fn do_start_test(
             band,
             None,
         )?);
-        if pool.len() < QUESTIONS_PER_BAND {
+        if pool.len() < per_band {
             return Err(DbError::Validation(format!(
-                "Test potřebuje alespoň {QUESTIONS_PER_BAND} otázky za {} bodů, téma jich má jen {}",
+                "Test potřebuje alespoň {per_band} otázky za {} bodů, téma jich má jen {}",
                 band,
                 pool.len()
             )));
         }
         let mut band_pool = pool;
         band_pool.shuffle(&mut rng);
-        selected.extend(band_pool.into_iter().take(QUESTIONS_PER_BAND));
+        selected.extend(band_pool.into_iter().take(per_band));
     }
     selected.shuffle(&mut rng);
 
@@ -128,6 +146,7 @@ pub fn do_start_test(
         id: Uuid::new_v4(),
         user_id: *user_id,
         topic_id: payload.topic_id,
+        kind: payload.kind,
         // Sentinel: a test spans all three point-value bands, and each
         // question's real point value lives on its own practice_attempt.
         point_value: 0,
@@ -202,7 +221,7 @@ mod tests {
     use crate::db::repos::{CategoryRepo, SetRepo, TemplateRepo, TopicRepo, UserRecord, UserRepo};
     use crate::models::{
         ConstraintType, ResultConstraint, Role, Set, Template, TemplateMode, TemplateVariable,
-        Topic, Variable,
+        TestOffer, Topic, Variable,
     };
 
     fn setup_conn() -> Connection {
@@ -288,8 +307,18 @@ mod tests {
     /// option index), following the same wiring `commands::practice`'s own
     /// tests use.
     fn seed_test_topic(conn: &Connection, name: &str, bands: &[(u8, usize)]) -> Uuid {
+        seed_test_topic_offering(conn, name, TestOffer::Both, bands)
+    }
+
+    fn seed_test_topic_offering(
+        conn: &Connection,
+        name: &str,
+        offer: TestOffer,
+        bands: &[(u8, usize)],
+    ) -> Uuid {
         let mut topic = Topic::new(name.to_string());
         topic.is_test = true;
+        topic.test_kind = offer;
         TopicRepo::insert(conn, &topic).expect("insert topic");
 
         for &(point_value, count) in bands {
@@ -306,6 +335,122 @@ mod tests {
         seed_test_topic(conn, name, &[(2, 5), (3, 6), (4, 4)])
     }
 
+    /// The úvodní test is the průběžný one plus a question in every band:
+    /// 5 x 3 = 15 rather than 4 x 3 = 12.
+    #[test]
+    fn uvodni_test_draws_five_questions_per_band() {
+        let conn = setup_conn();
+        let topic_id = seed_test_topic(&conn, "Roztoky", &[(2, 6), (3, 6), (4, 6)]);
+        let student = insert_student(&conn, "student");
+
+        let view = do_start_test(
+            &conn,
+            &student,
+            &StartTestPayload {
+                topic_id,
+                kind: TestKind::Uvodni,
+                time_limit_seconds: Some(1200),
+            },
+        )
+        .expect("start test");
+
+        assert_eq!(view.questions.len(), 15);
+        let mut per_band = std::collections::HashMap::new();
+        for question in &view.questions {
+            *per_band.entry(question.point_value).or_insert(0usize) += 1;
+        }
+        assert_eq!(per_band.get(&2), Some(&5));
+        assert_eq!(per_band.get(&3), Some(&5));
+        assert_eq!(per_band.get(&4), Some(&5));
+    }
+
+    /// A topic offers one kind, or both. Sitting a kind it does not offer is
+    /// refused: it would silently be a differently-sized test.
+    #[test]
+    fn start_test_refuses_a_kind_the_topic_does_not_offer() {
+        let conn = setup_conn();
+        let prubezny_only = seed_test_topic_offering(
+            &conn,
+            "Jen průběžný",
+            TestOffer::Prubezny,
+            &[(2, 6), (3, 6), (4, 6)],
+        );
+        let uvodni_only = seed_test_topic_offering(
+            &conn,
+            "Jen úvodní",
+            TestOffer::Uvodni,
+            &[(2, 6), (3, 6), (4, 6)],
+        );
+        let student = insert_student(&conn, "student");
+
+        let start = |topic_id, kind| {
+            do_start_test(
+                &conn,
+                &student,
+                &StartTestPayload {
+                    topic_id,
+                    kind,
+                    time_limit_seconds: None,
+                },
+            )
+        };
+
+        assert!(matches!(
+            start(prubezny_only, TestKind::Uvodni),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            start(uvodni_only, TestKind::Prubezny),
+            Err(DbError::Validation(_))
+        ));
+
+        // The kind each one does offer still works.
+        assert_eq!(
+            start(prubezny_only, TestKind::Prubezny)
+                .expect("průběžný")
+                .questions
+                .len(),
+            12
+        );
+        assert_eq!(
+            start(uvodni_only, TestKind::Uvodni)
+                .expect("úvodní")
+                .questions
+                .len(),
+            15
+        );
+    }
+
+    /// A band big enough for the průběžný test can still be too small for the
+    /// úvodní one, which wants a fifth question from it.
+    #[test]
+    fn a_band_of_four_serves_prubezny_but_not_uvodni() {
+        let conn = setup_conn();
+        let topic_id = seed_test_topic(&conn, "Roztoky", &[(2, 4), (3, 6), (4, 6)]);
+        let student = insert_student(&conn, "student");
+
+        let start = |kind| {
+            do_start_test(
+                &conn,
+                &student,
+                &StartTestPayload {
+                    topic_id,
+                    kind,
+                    time_limit_seconds: None,
+                },
+            )
+        };
+
+        assert_eq!(
+            start(TestKind::Prubezny).expect("průběžný").questions.len(),
+            12
+        );
+        assert!(matches!(
+            start(TestKind::Uvodni),
+            Err(DbError::Validation(_))
+        ));
+    }
+
     #[test]
     fn start_test_draws_four_questions_per_band_shuffled() {
         let conn = setup_conn();
@@ -317,6 +462,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: Some(1200),
             },
         )
@@ -356,6 +502,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id: Uuid::new_v4(),
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         );
@@ -378,6 +525,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         );
@@ -395,6 +543,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         );
@@ -471,6 +620,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id: topic.id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         )
@@ -506,6 +656,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         )
@@ -584,6 +735,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         )
@@ -624,6 +776,7 @@ mod tests {
             &student,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: Some(60),
             },
         )
@@ -664,6 +817,7 @@ mod tests {
             &owner,
             &StartTestPayload {
                 topic_id,
+                kind: TestKind::Prubezny,
                 time_limit_seconds: None,
             },
         )

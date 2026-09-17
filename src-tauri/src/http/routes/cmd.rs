@@ -133,6 +133,7 @@ async fn update_topic(
         created_at: chrono::Utc::now(),
         for_students: payload.for_students,
         is_test: payload.is_test,
+        test_kind: payload.test_kind,
         group_id: existing.group_id,
         position: existing.position,
     };

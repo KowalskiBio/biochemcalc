@@ -5,8 +5,8 @@ use crate::db::repos::{
 use crate::db::{AppState, DbError};
 use crate::models::{
     Category, Constant, ConstraintType, Notation, ResultConstraint, Set, Template,
-    TemplateConstant, TemplateDecoy, TemplateDecoyInput, TemplateMode, TemplateVariable, Topic,
-    TopicGroup, Variable, VariableType,
+    TemplateConstant, TemplateDecoy, TemplateDecoyInput, TemplateMode, TemplateVariable, TestOffer,
+    Topic, TopicGroup, Variable, VariableType,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -250,6 +250,10 @@ pub struct UpdateTopicPayload {
     pub for_students: bool,
     #[serde(default)]
     pub is_test: bool,
+    /// Which test the topic offers. Defaulted so a caller that only means to
+    /// rename or re-share a topic need not know about it.
+    #[serde(default)]
+    pub test_kind: TestOffer,
 }
 
 #[tauri::command]
@@ -268,6 +272,7 @@ pub fn update_topic(
         created_at: Utc::now(),
         for_students: payload.for_students,
         is_test: payload.is_test,
+        test_kind: payload.test_kind,
         group_id: existing.group_id,
         position: existing.position,
     };
@@ -310,6 +315,7 @@ pub(crate) fn do_duplicate_topic(
     let mut new_topic = Topic::new(format!("{} (kopie)", source_topic.name));
     new_topic.for_students = source_topic.for_students;
     new_topic.is_test = source_topic.is_test;
+    new_topic.test_kind = source_topic.test_kind;
     new_topic.group_id = source_topic.group_id;
     new_topic.position = tx
         .query_row(

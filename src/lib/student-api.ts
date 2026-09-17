@@ -16,6 +16,7 @@ import type {
   StreakRunSummaryInput,
   StreakRunView,
   SubmitAnswerInput,
+  TestKind,
   TestResults,
   TestSessionView,
   TestTopicOption,
@@ -34,8 +35,9 @@ export const studentApi = {
    * Topics offered as timed tests: flagged by the teacher and holding at
    * least 4 questions at each of 2/3/4 points.
    */
-  testTopics: (): Promise<TestTopicOption[]> =>
-    httpRequest<TestTopicOption[]>("/api/student/test-topics"),
+  /** The tests of `kind` a student can sit right now. */
+  testTopics: (kind: TestKind): Promise<TestTopicOption[]> =>
+    httpRequest<TestTopicOption[]>("/api/student/test-topics", { kind }),
 
   /**
    * A fresh question — new random values every call, so a topic never runs

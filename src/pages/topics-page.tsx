@@ -30,8 +30,48 @@ import { DeleteConfirmDialog } from "@/components/variables/delete-confirm-dialo
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError, topicGroupsApi, topicsApi } from "@/lib/api"
-import type { Topic, TopicGroup } from "@/lib/types"
+import type { TestOffer, Topic, TopicGroup } from "@/lib/types"
 import { useCarryStore } from "@/stores/drag-store"
+
+/**
+ * The Test pill cycles rather than toggles, because a topic has two things
+ * to say: whether it is a test at all, and which of the two it is. `isTest`
+ * stays the gate the backend already filters on, and `testKind` rides along.
+ */
+const TEST_CYCLE: readonly { isTest: boolean; testKind: TestOffer }[] = [
+  { isTest: false, testKind: "prubezny" },
+  { isTest: true, testKind: "uvodni" },
+  { isTest: true, testKind: "prubezny" },
+  { isTest: true, testKind: "both" },
+]
+
+function nextTestState(topic: Topic) {
+  const current = topic.isTest
+    ? TEST_CYCLE.findIndex((step) => step.isTest && step.testKind === topic.testKind)
+    : 0
+  // An unrecognized combination restarts the cycle rather than sticking.
+  return TEST_CYCLE[(current < 0 ? 0 : current + 1) % TEST_CYCLE.length]
+}
+
+/** How each step of the cycle paints itself: úvodní blue, průběžný green. */
+const TEST_PILL: Record<TestOffer | "off", { className: string; label: string }> = {
+  off: {
+    className: "border-border bg-muted/40 text-muted-foreground hover:bg-muted",
+    label: cs.topics.testLabelOff,
+  },
+  uvodni: {
+    className: "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100",
+    label: cs.topics.testLabelUvodni,
+  },
+  prubezny: {
+    className: "border-green-300 bg-green-50 text-green-700 hover:bg-green-100",
+    label: cs.topics.testLabelPrubezny,
+  },
+  both: {
+    className: "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100",
+    label: cs.topics.testLabelBoth,
+  },
+}
 
 export function TopicsPage() {
   const { toast } = useToast()
@@ -130,6 +170,7 @@ export function TopicsPage() {
           topic.name,
           !topic.forStudents,
           topic.isTest,
+          topic.testKind,
         )
         setTopics((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
       } catch (err) {
@@ -142,7 +183,10 @@ export function TopicsPage() {
     [toggling, toast],
   )
 
-  /** Toggling the Test flag: independent of practice visibility. */
+  /**
+   * Cycling the Test designation: off → úvodní → průběžný → obojí → off.
+   * Independent of practice visibility, same as the flag it replaces.
+   */
   const handleToggleTest = useCallback(
     async (topic: Topic, e: React.MouseEvent) => {
       e.preventDefault()
@@ -150,11 +194,13 @@ export function TopicsPage() {
       if (toggling) return
       setToggling(topic.id)
       try {
+        const next = nextTestState(topic)
         const updated = await topicsApi.update(
           topic.id,
           topic.name,
           topic.forStudents,
-          !topic.isTest,
+          next.isTest,
+          next.testKind,
         )
         setTopics((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)))
       } catch (err) {
@@ -436,13 +482,11 @@ export function TopicsPage() {
                 disabled={toggling === topic.id}
                 onClick={(e) => handleToggleTest(topic, e)}
                 className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border transition-colors w-full justify-center ${
-                  topic.isTest
-                    ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"
-                    : "border-border bg-muted/40 text-muted-foreground hover:bg-muted"
+                  TEST_PILL[topic.isTest ? topic.testKind : "off"].className
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 <ClipboardCheck className="size-4" />
-                {topic.isTest ? cs.topics.testLabelOn : cs.topics.testLabelOff}
+                {TEST_PILL[topic.isTest ? topic.testKind : "off"].label}
               </button>
             </div>
           </CardContent>

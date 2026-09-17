@@ -14,12 +14,13 @@ export interface Topic {
   createdAt: string
   forStudents: boolean
   /**
-   * The topic doubles as a timed test in the student test generator
-   * (12 questions: 4 at each of 2/3/4 points), independently of
-   * `forStudents`: a test-only topic is reachable in tests but not in the
-   * endless practice generator.
+   * The topic doubles as a timed test in the student test generator,
+   * independently of `forStudents`: a test-only topic is reachable in tests
+   * but not in the endless practice generator.
    */
   isTest: boolean
+  /** Which test it is; meaningless while `isTest` is false. */
+  testKind: TestOffer
   groupId: string | null
   position: number
 }
@@ -31,7 +32,18 @@ export interface TopicInput {
   name: string
   forStudents?: boolean
   isTest?: boolean
+  testKind?: TestOffer
 }
+
+/**
+ * Which of the two timed tests a student is sitting. They differ only in how
+ * many questions each 2/3/4-point band contributes: 5 for the úvodní test, a
+ * topic's first (15 in all), and 4 for the recurring průběžný one (12).
+ */
+export type TestKind = "uvodni" | "prubezny"
+
+/** Which test(s) a topic flagged `isTest` offers — either, or both. */
+export type TestOffer = TestKind | "both"
 
 /**
  * TopicGroup model - a teacher-defined bucket ("Skupina") for organizing
@@ -876,6 +888,8 @@ export interface LeaderboardEntry {
 
 export interface StartTestInput {
   topicId: string
+  /** Which test to sit; the topic must offer it or the server refuses. */
+  kind: TestKind
   /** Omitted starts an untimed test: no deadline is ever enforced. */
   timeLimitSeconds?: number
 }

@@ -169,6 +169,13 @@ export function StudentTestPage() {
   const state = location.state as { session?: TestSessionView; input?: StartTestInput } | null
   const session = state?.session
   const startInput = state?.input
+  /**
+   * Both test kinds share this component, one route pair each. The kind
+   * comes from the start input that travelled here; without it (a reload
+   * that lost the router state) there is nothing to go back to but the mode
+   * picker.
+   */
+  const backToStart = startInput ? `/test/${startInput.kind}` : "/test"
 
   const [answersByAttempt, setAnswersByAttempt] = useState<Record<string, TestAnswer>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -248,7 +255,7 @@ export function StudentTestPage() {
       }))
 
       const results = await studentApi.finishTest({ sessionId: session.sessionId })
-      navigate("/test/cvicny/results", {
+      navigate(`${backToStart}/results`, {
         state: { results, review, input: startInput },
         replace: true,
       })
@@ -257,7 +264,7 @@ export function StudentTestPage() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [session, answersByAttempt, isSubmitting, startInput, navigate, toast])
+  }, [session, answersByAttempt, isSubmitting, startInput, backToStart, navigate, toast])
 
   useEffect(() => {
     if (!expired || autoSubmitted.current || !session) return
@@ -274,7 +281,7 @@ export function StudentTestPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground">{cs.test.noActiveTest}</p>
-          <Button onClick={() => navigate("/test/cvicny")}>{cs.test.startButton}</Button>
+          <Button onClick={() => navigate(backToStart)}>{cs.test.startButton}</Button>
         </CardContent>
       </Card>
     )
