@@ -227,10 +227,10 @@ export const cs = {
     modePickerDescription: "Vyberte režim testu.",
     modeUvodniTitle: "Úvodní cvičný test",
     modeUvodniDescription:
-      "První test z tématu. Vyberte test a zodpovězte všech 15 otázek najednou.",
+      "Úvodní test do semestru, obsahuje 15 otázek. Prověřuje znalosti ze střední školy.",
     modePrubeznyTitle: "Průběžný cvičný test",
     modePrubeznyDescription:
-      "Klasický test s časovým limitem. Vyberte test a zodpovězte všech 12 otázek najednou.",
+      "Průběžný test, se kterým se budete setkávat během semestru na různá témata, obsahuje 12 otázek.",
     modeUcenTitle: "Učeň",
     modeUcenDescription:
       "Nekonečná série otázek z vybraného tématu. Série končí první špatnou odpovědí.",
