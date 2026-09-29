@@ -19,6 +19,13 @@
 
 [**Features**](#features) · [**How it works**](#how-it-works) · [**Architecture**](#architecture) · [**Development**](#development) · [**Deployment**](#deployment)
 
+<br />
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/topics-dark.png" />
+  <img src="docs/images/topics-light.png" alt="The teacher's topic list: topics such as pH, molar concentration and mass and volume percent, each marked for teachers only or for students, and as an entry test or not" width="100%" />
+</picture>
+
 </div>
 
 <br />
@@ -62,6 +69,16 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 
 ### Write templates
 
+<table>
+  <tr>
+    <td width="45%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/question-dark.png" />
+        <img src="docs/images/question-light.png" alt="A question template: text with a [[c]] variable, its range, a filled-in sample, the pH formula rendered with KaTeX, the result 2,74, the generated options a) to e), and two decoy equations for typical mistakes" width="100%" />
+      </picture>
+    </td>
+    <td valign="top">
+
 - **Topics** (*témata*) hold the questions, organised into named **groups**. A topic can be marked as visible to students.
 - **Question templates**: write the question text with variables such as `[[X]]`, then give each variable a range, its **significant digits** and a **notation** (automatic, scientific or plain).
 - **Formulas** compute the answer. A question can have **several answers**, each with its own unit, and results can be clipped to a min/max range.
@@ -70,7 +87,16 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 - Units and chemical formulas are written with `^` and `_` and shown as real super- and subscripts; equations render with KaTeX.
 - **Bulk import** creates many questions at once from a prepared file.
 
+    </td>
+  </tr>
+</table>
+
 ### Generate and export
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/export-dark.png" />
+  <img src="docs/images/export-light.png" alt="The export dialog: a file name, and for each question of the set its sample text, the number of variants and the allowed deviation" width="100%" />
+</picture>
 
 - **Sets** (*sady*) collect questions for a test. Reorder them, merge sets by drag and drop, rename them and choose their mode.
 - **Variant generator**: as many variants of each question as you need, each with fresh values and a correctly rounded result.
@@ -82,6 +108,11 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 - **Preview** every generated question with its options and decoy results before exporting.
 
 ### Practise and test
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/practice-dark.png" />
+  <img src="docs/images/practice-light.png" alt="Student practice: topic, difficulty, set and question-type pickers, a generated closed question about the number of chlorine molecules, and the answer marked correct" width="100%" />
+</picture>
 
 - **Practice**: students pick a topic and solve generated questions, open or multiple choice, with instant feedback.
 - **Tests**:
@@ -144,7 +175,8 @@ biochemcalc/
 ├── design-system/     design system reference
 ├── deploy/            server deployment files
 ├── scripts/           local dev against a snapshot, DB pull
-└── public/            logo and icons
+├── public/            logo and icons
+└── docs/images/       README screenshots
 ```
 
 </details>
