@@ -21,7 +21,10 @@
 
 <br />
 
-<img src="docs/images/topics-dark.png" alt="The teacher's topic list: topics such as pH, molar concentration and mass and volume percent, each marked for teachers only or for students, and as an entry test or not" width="100%" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/topics-dark.png" />
+  <img src="docs/images/topics-light.png" alt="The teacher's topic list: topics such as pH, molar concentration and mass and volume percent, each marked for teachers only or for students, and as an entry test or not" width="100%" />
+</picture>
 
 </div>
 
@@ -69,7 +72,10 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 <table>
   <tr>
     <td width="45%" valign="top">
-      <img src="docs/images/question-dark.png" alt="A question template: text with a [[c]] variable, its range, a filled-in sample, the pH formula rendered with KaTeX, the result 2,74, the generated options a) to e), and two decoy equations for typical mistakes" width="100%" />
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/question-dark.png" />
+        <img src="docs/images/question-light.png" alt="A question template: text with a [[c]] variable, its range, a filled-in sample, the pH formula rendered with KaTeX, the result 2,74, the generated options a) to e), and two decoy equations for typical mistakes" width="100%" />
+      </picture>
     </td>
     <td valign="top">
 
@@ -87,7 +93,10 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 
 ### Generate and export
 
-<img src="docs/images/export-dark.png" alt="The export dialog: a file name, and for each question of the set its sample text, the number of variants and the allowed deviation" width="100%" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/export-dark.png" />
+  <img src="docs/images/export-light.png" alt="The export dialog: a file name, and for each question of the set its sample text, the number of variants and the allowed deviation" width="100%" />
+</picture>
 
 - **Sets** (*sady*) collect questions for a test. Reorder them, merge sets by drag and drop, rename them and choose their mode.
 - **Variant generator**: as many variants of each question as you need, each with fresh values and a correctly rounded result.
@@ -100,7 +109,10 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 
 ### Practise and test
 
-<img src="docs/images/practice-dark.png" alt="Student practice: topic, difficulty, set and question-type pickers, a generated closed question about the number of chlorine molecules, and the answer marked correct" width="100%" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/practice-dark.png" />
+  <img src="docs/images/practice-light.png" alt="Student practice: topic, difficulty, set and question-type pickers, a generated closed question about the number of chlorine molecules, and the answer marked correct" width="100%" />
+</picture>
 
 - **Practice**: students pick a topic and solve generated questions, open or multiple choice, with instant feedback.
 - **Tests**:
