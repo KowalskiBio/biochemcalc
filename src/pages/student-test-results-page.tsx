@@ -1,5 +1,5 @@
 import { CheckCircle2, Loader2, Repeat, RotateCcw, Target } from "lucide-react"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 
 import { QuestionReviewCard } from "@/components/practice/question-review-card"
@@ -46,6 +46,13 @@ export function StudentTestResultsPage() {
   const backToStart = input ? `/test/${input.kind}` : "/test"
 
   const [isRetrying, setIsRetrying] = useState(false)
+
+  // The router keeps the window's scroll position across navigation, and a
+  // student usually submits from the bottom of a long test, so without this
+  // they would land partway down the review instead of on their score.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
 
   const handleRetry = useCallback(async () => {
     if (!input || isRetrying) return
