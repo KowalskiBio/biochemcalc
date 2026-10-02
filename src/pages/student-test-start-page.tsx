@@ -19,8 +19,11 @@ import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
 import type { StartTestInput, TestKind, TestTopicOption } from "@/lib/types"
 
-// Fixed for every student — there is deliberately no UI to change it.
-const TIME_LIMIT_MINUTES = 50
+// Fixed per test kind for every student; there is deliberately no UI to change it.
+const TIME_LIMIT_MINUTES: Record<TestKind, number> = {
+  uvodni: 50,
+  prubezny: 40,
+}
 
 interface StudentTestStartPageProps {
   kind: TestKind
@@ -50,6 +53,7 @@ export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
   const isUvodni = kind === "uvodni"
   const title = isUvodni ? cs.test.modeUvodniTitle : cs.test.modePrubeznyTitle
   const description = isUvodni ? cs.test.startDescriptionUvodni : cs.test.startDescriptionPrubezny
+  const timeLimitMinutes = TIME_LIMIT_MINUTES[kind]
 
   useEffect(() => {
     let cancelled = false
@@ -82,7 +86,7 @@ export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
       const input: StartTestInput = {
         topicId,
         kind,
-        timeLimitSeconds: TIME_LIMIT_MINUTES * 60,
+        timeLimitSeconds: timeLimitMinutes * 60,
       }
       const session = await studentApi.startTest(input)
       // `input` travels alongside the session so the in-progress and results
@@ -95,7 +99,7 @@ export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
     } finally {
       setIsStarting(false)
     }
-  }, [topicId, kind, navigate, toast])
+  }, [topicId, kind, timeLimitMinutes, navigate, toast])
 
   if (isLoadingTopics) {
     return (
@@ -152,7 +156,7 @@ export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-sm">
-              {cs.test.timeLimitFixedLabel(TIME_LIMIT_MINUTES)}
+              {cs.test.timeLimitFixedLabel(timeLimitMinutes)}
             </p>
           </div>
 
