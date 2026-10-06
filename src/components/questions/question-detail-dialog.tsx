@@ -389,6 +389,11 @@ export function QuestionDetailDialog({
       ? String(initialTemplateDetails.constraint.sdAllowed)
       : "",
   )
+  const [sdNoGoText, setSdNoGoText] = useState<string>(
+    initialTemplateDetails?.constraint?.sdNoGo != null
+      ? String(initialTemplateDetails.constraint.sdNoGo)
+      : "",
+  )
   const [minResultText, setMinResultText] = useState<string>(
     initialTemplateDetails?.constraint?.minResult != null
       ? String(initialTemplateDetails.constraint.minResult)
@@ -474,6 +479,7 @@ export function QuestionDetailDialog({
           : "",
       )
       setSdText(details.constraint?.sdAllowed != null ? String(details.constraint.sdAllowed) : "")
+      setSdNoGoText(details.constraint?.sdNoGo != null ? String(details.constraint.sdNoGo) : "")
       setMinResultText(
         details.constraint?.minResult != null ? String(details.constraint.minResult) : "",
       )
@@ -625,6 +631,13 @@ export function QuestionDetailDialog({
     const newSd =
       sdText.trim() === "" || Number.isNaN(parsedSd) || parsedSd <= 0 ? undefined : parsedSd
     if (newSd !== currentSd) return true
+    const currentSdNoGo = templateDetails?.constraint?.sdNoGo
+    const parsedSdNoGo = Number(sdNoGoText)
+    const newSdNoGo =
+      sdNoGoText.trim() === "" || Number.isNaN(parsedSdNoGo) || parsedSdNoGo <= 0
+        ? undefined
+        : parsedSdNoGo
+    if (newSdNoGo !== currentSdNoGo) return true
     if (parseConstraintValue(minResultText) !== templateDetails?.constraint?.minResult) return true
     if (parseConstraintValue(maxResultText) !== templateDetails?.constraint?.maxResult) return true
     if (forceScientific !== (templateDetails?.template.forceScientific ?? false)) return true
@@ -644,6 +657,7 @@ export function QuestionDetailDialog({
     editResultUnit,
     editSignificantDigits,
     sdText,
+    sdNoGoText,
     minResultText,
     maxResultText,
     forceScientific,
@@ -659,6 +673,11 @@ export function QuestionDetailDialog({
   const buildAnswerConstraint = (): ConstraintInput | undefined => {
     const parsed = Number(sdText)
     const hasSd = sdText.trim() !== "" && !Number.isNaN(parsed) && parsed > 0
+    const parsedNoGo = Number(sdNoGoText)
+    const sdNoGo =
+      sdNoGoText.trim() === "" || Number.isNaN(parsedNoGo) || parsedNoGo <= 0
+        ? undefined
+        : parsedNoGo
     const minResult = parseConstraintValue(minResultText)
     const maxResult = parseConstraintValue(maxResultText)
     const hasMinMax = minResult != null || maxResult != null
@@ -667,6 +686,7 @@ export function QuestionDetailDialog({
         minResult,
         maxResult,
         sdAllowed: parsed,
+        sdNoGo,
         constraintType: hasMinMax ? "both" : "sd",
       }
     }
@@ -675,14 +695,34 @@ export function QuestionDetailDialog({
         minResult,
         maxResult,
         sdAllowed: undefined,
+        sdNoGo: undefined,
         constraintType: "range",
       }
     }
     return undefined
   }
 
+  const sdNoGoValidationError = useMemo((): string | null => {
+    const parsedSd = Number(sdText)
+    const hasSd = sdText.trim() !== "" && !Number.isNaN(parsedSd) && parsedSd > 0
+    const parsedNoGo = Number(sdNoGoText)
+    const hasNoGo = sdNoGoText.trim() !== "" && !Number.isNaN(parsedNoGo) && parsedNoGo > 0
+    if (hasNoGo && !hasSd) return cs.questions.validation.sdNoGoRequiresSd
+    if (hasSd && hasNoGo && parsedNoGo >= parsedSd) return cs.questions.validation.sdNoGoLessThanSd
+    return null
+  }, [sdText, sdNoGoText])
+
   const handleSave = async () => {
     if (!templateDetails) return
+
+    if (sdNoGoValidationError) {
+      toast({
+        title: cs.questions.saveError,
+        description: sdNoGoValidationError,
+        variant: "destructive",
+      })
+      return
+    }
 
     const allErrors: Record<string, Record<string, string>> = {}
     let hasError = false
@@ -820,6 +860,9 @@ export function QuestionDetailDialog({
         ? String(templateDetails.constraint.sdAllowed)
         : "",
     )
+    setSdNoGoText(
+      templateDetails?.constraint?.sdNoGo != null ? String(templateDetails.constraint.sdNoGo) : "",
+    )
     setMinResultText(
       templateDetails?.constraint?.minResult != null
         ? String(templateDetails.constraint.minResult)
@@ -848,6 +891,15 @@ export function QuestionDetailDialog({
 
   const handleSaveAnswer = async () => {
     if (!templateDetails) return
+
+    if (sdNoGoValidationError) {
+      toast({
+        title: cs.questions.saveError,
+        description: sdNoGoValidationError,
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsSaving(true)
     try {
@@ -1899,7 +1951,7 @@ export function QuestionDetailDialog({
                         disabled={isSaving}
                       />
                     </div>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="resultUnit">{cs.questions.resultUnit}</Label>
                         <Input
@@ -1952,6 +2004,20 @@ export function QuestionDetailDialog({
                           disabled={isSaving}
                         />
                         <p className="text-xs text-muted-foreground">{cs.questions.sdAnswerHelp}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="answerSdNoGo">{cs.questions.sdNoGoLabel}</Label>
+                        <DecimalInput
+                          id="answerSdNoGo"
+                          value={sdNoGoText}
+                          onValueChange={(v) => setSdNoGoText(v === undefined ? "" : String(v))}
+                          placeholder="např. 2"
+                          disabled={isSaving}
+                        />
+                        <p className="text-xs text-muted-foreground">{cs.questions.sdNoGoHelp}</p>
+                        {sdNoGoValidationError && (
+                          <p className="text-sm text-destructive">{sdNoGoValidationError}</p>
+                        )}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">

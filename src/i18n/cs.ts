@@ -919,6 +919,9 @@ export const cs = {
     sdAnswerLabel: "Odpověď ± (SD %)",
     sdAnswerHelp:
       "Hodnota v procentech z odpovědi: 10 znamená ±10 % (odpověď 7 -> 6,3 až 7,7). Větší číslo = širší tolerance a rozprostřenější možnosti = snazší otázka. Prázdné = dle obtížnosti sady.",
+    sdNoGoLabel: "No-go SD (%)",
+    sdNoGoHelp:
+      "Bezpečné pásmo kolem správné odpovědi, ve kterém se nikdy negenerují špatné možnosti (např. SD 20 % a no-go 10 % u odpovědi 10: možnosti 8–12, ale nikdy 9–11). Funguje jen spolu se SD a musí být menší než SD. Prázdné = bez bezpečného pásma.",
     minResultLabel: "Min. výsledek",
     minResultHelp: "Nejnižší přijatelný vypočtený výsledek. Prázdné = bez omezení.",
     maxResultLabel: "Max. výsledek",
@@ -1042,6 +1045,8 @@ export const cs = {
       precisionMax: "Přesnost musí být ≤ 10",
       stringValuesRequired: "Zadejte alespoň dvě neprázdné hodnoty oddělené čárkou.",
       checkHighlighted: "Zkontrolujte zvýrazněná pole.",
+      sdNoGoRequiresSd: "No-go SD funguje jen spolu se SD — nejprve zadejte povolenou SD.",
+      sdNoGoLessThanSd: "No-go SD musí být menší než povolená SD.",
     },
   },
 

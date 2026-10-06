@@ -157,6 +157,7 @@ export interface ConstraintInput {
   minResult?: number
   maxResult?: number
   sdAllowed?: number
+  sdNoGo?: number
   constraintType: ConstraintType
 }
 
