@@ -445,13 +445,89 @@ fn apportion_largest_remainder(requested: &[usize], budget: usize) -> Vec<usize>
 /// Decided as a pure Option before any RNG is consumed, so the paths it does
 /// not change keep their byte-identical RNG sequence.
 fn usable_sd_window(constraint: &ResultConstraint, correct: f64) -> Option<f64> {
+    usable_sd_percent(constraint)
+        .map(|sd| correct.abs() * sd / 100.0)
+        .filter(|w| w.is_finite() && *w > 0.0)
+}
+
+/// The teacher's SD percent after the same sanitization `usable_sd_window`
+/// applies: None when unset, not finite, not > 0, or 100 or more. Split out
+/// so the no-go chain below compares percents without re-deriving them
+/// from absolute half-widths.
+fn usable_sd_percent(constraint: &ResultConstraint) -> Option<f64> {
     constraint
         .sd_allowed
         .filter(|sd| sd.is_finite() && *sd > 0.0)
         .map(f64::abs)
         .filter(|sd| *sd < 100.0)
-        .map(|sd| correct.abs() * sd / 100.0)
+}
+
+/// The teacher's no-go percent after the head of the same sanitization:
+/// None when unset, not finite, or not > 0. Kept separate from
+/// `usable_no_go` (which additionally requires the zone to fit strictly
+/// inside the active SD window and scales to absolute) so the closed-option
+/// misfit error can name the percent the teacher actually set.
+fn no_go_percent(constraint: &ResultConstraint) -> Option<f64> {
+    constraint
+        .sd_no_go
+        .filter(|ng| ng.is_finite() && *ng > 0.0)
+        .map(f64::abs)
+}
+
+/// The teacher's no-go SD, given in **percent of the answer**, converted to
+/// an absolute forbidden half-width for this particular answer: while the
+/// SD window governs closed-option distractor sampling, no generated
+/// distractor may land within ±no_go of the correct answer (boundary
+/// inclusive). Mirrors `usable_sd_window`'s pure pre-RNG Option chain: None
+/// when unset, not finite, not > 0, or not strictly below the SD percent
+/// that produced the active window (`sd_pct`) — a no-go at or past the SD
+/// leaves an empty ring (no_go, sd], which is a misconfigured field rather
+/// than a setting, exactly as a zero or NaN already was (the house
+/// "misconfig is unset" style). The comparison inflates the zone by the
+/// same 1e-9 the sampler rejects on, so a no-go within a rounding hair of
+/// the SD is treated as unset too, always leaving the ring-refinement in
+/// `closed_option_rounding_unit` a strictly positive annulus to subdivide.
+///
+/// The no-go never affects open-answer acceptance, decoy literal values,
+/// the alternace, or the non-SD spread fallback: those paths never consult
+/// it. Decided as a pure Option before any RNG is consumed, so an unset
+/// no-go keeps the byte-identical RNG sequence (the ghost regression).
+fn usable_no_go(constraint: &ResultConstraint, correct: f64, sd_pct: Option<f64>) -> Option<f64> {
+    let sd = sd_pct?;
+    no_go_percent(constraint)
+        .filter(|ng| ng * (1.0 + 1e-9) < sd)
+        .map(|ng| correct.abs() * ng / 100.0)
         .filter(|w| w.is_finite() && *w > 0.0)
+}
+
+/// The largest integer grid offset k whose distance from the correct
+/// answer, k*unit, still falls inside the inflated no-go zone
+/// ng*(1+1e-9) — exactly the boundary `generate_in_window_distractor`
+/// rejects on. Derived via floor of the division and then fixed up with the
+/// multiply comparison, because ng/unit and k*unit can disagree by a ULP;
+/// defining the boundary once here keeps the capacity gates and the sampler
+/// from ever disagreeing about which offsets are forbidden.
+fn no_go_exclusive_k(no_go: f64, unit: f64) -> i64 {
+    let ng_eff = no_go * (1.0 + 1e-9);
+    let mut k = (ng_eff / unit).floor() as i64;
+    while k > 0 && (k as f64) * unit > ng_eff {
+        k -= 1;
+    }
+    while (k + 1) as f64 * unit <= ng_eff {
+        k += 1;
+    }
+    k.max(0)
+}
+
+/// How many distinct non-zero grid offsets fit in the ring (no_go, sd]:
+/// twice the gap between the window's largest in-window offset k_max
+/// (carrying its half-unit safety margin, the same arithmetic
+/// `generate_in_window_distractor` uses) and the no-go zone's largest
+/// excluded offset.
+fn no_go_ring_slots(sd: f64, no_go: f64, unit: f64) -> i64 {
+    let k_max = ((sd - unit * 0.5) / unit).floor() as i64;
+    let k_excl = no_go_exclusive_k(no_go, unit);
+    k_max.saturating_sub(k_excl).saturating_mul(2)
 }
 
 /// The absolute SD window that governs CLOSED-option distractor sampling
@@ -462,28 +538,66 @@ fn usable_sd_window(constraint: &ResultConstraint, correct: f64) -> Option<f64> 
 /// distractor uses — the closed-option SD window is disabled entirely:
 /// options fall back to the pre-SD spread-distractor behavior instead of
 /// failing generation or refining the grid past the teacher's sig-figs
-/// setting. Decided as a pure Option before any RNG is consumed, and
-/// identical to `usable_sd_window` whenever the sig-figs grid is
-/// inactive, so the no-sig-figs path keeps its byte-identical RNG sequence.
+/// setting. With a no-go zone set, the same grid must instead fit
+/// count-1 offsets into the RING (no_go, sd] — a ring too tight for the
+/// requested options is a misconfigured question the teacher must hear
+/// about, so it fails generation with an actionable error rather than
+/// silently ghosting to the spread fallback or widening anything. Decided
+/// as a pure Option before any RNG is consumed, and identical to
+/// `usable_sd_window` whenever the sig-figs grid is inactive, so the
+/// no-sig-figs path (and every path with no_go unset) keeps its
+/// byte-identical RNG sequence. `sd_pct`/`no_go_pct` (the sanitized
+/// percents the teacher set) exist solely so that error can name them.
 fn closed_option_sd_window(
     sd_window: Option<f64>,
+    no_go: Option<f64>,
+    sd_pct: Option<f64>,
+    no_go_pct: Option<f64>,
     sig_figs_active: bool,
     base_rounding_unit: f64,
     count: usize,
-) -> Option<f64> {
-    let sd = sd_window?;
+) -> Result<Option<f64>, GenerationError> {
+    let sd = match sd_window {
+        Some(sd) => sd,
+        None => return Ok(None),
+    };
     if !sig_figs_active {
-        return Some(sd);
+        return Ok(Some(sd));
     }
     // Largest integer grid offset k with |k|*unit <= sd - unit/2 (mirrors
     // generate_in_window_distractor): every non-correct option needs its
     // own distinct non-zero offset, and the correct answer takes offset 0.
     let k_span = (sd - base_rounding_unit * 0.5) / base_rounding_unit;
     let usable_offsets = 2.0 * k_span.floor();
-    if usable_offsets < count as f64 - 1.0 {
-        return None;
+    if no_go.is_none() {
+        if usable_offsets < count as f64 - 1.0 {
+            return Ok(None);
+        }
+        return Ok(Some(sd));
     }
-    Some(sd)
+    // A no-go zone carves the forbidden offsets out of the same ring the
+    // sampler draws from, so the capacity check moves with it. (Reaching
+    // this point at all means no_go is Some: the None case returned above.)
+    if let Some(ng) = no_go {
+        let ring_slots = no_go_ring_slots(sd, ng, base_rounding_unit);
+        if ring_slots < count as i64 - 1 {
+            let name_pct = |p: Option<f64>| {
+                p.map(|p| format!("{p} %"))
+                    .unwrap_or_else(|| "unset".to_string())
+            };
+            return Err(GenerationError::Distractor(format!(
+                "the no-go zone leaves too few distinct closed options \
+                 (sd {}, no-go {}, {} options requested): the significant-figures grid \
+                 (resolution {base_rounding_unit}) fits only {} distinct values in the ring \
+                 between them — widen the SD, lower the no-go, or allow more significant digits",
+                name_pct(sd_pct),
+                name_pct(no_go_pct),
+                count,
+                ring_slots.max(0),
+            )));
+        }
+    }
+    Ok(Some(sd))
 }
 
 /// The rounding unit every closed-option value (correct, alternace,
@@ -504,8 +618,21 @@ fn closed_option_sd_window(
 /// option count (verified for 2..=5: 2, 2, 4, 4). Round to the finer of
 /// the display grid and this 2*sd/(count+1) grid (display_grid clamps
 /// stay intact).
+///
+/// That count+1 arithmetic only counts offsets inside the WINDOW. With a
+/// no-go zone set, the ring (no_go, sd] must also fit count-1 offsets:
+/// the 2*sd/(count+1) candidate (or the coarser display grid it lost to)
+/// can leave the ring short, and unlike the sig-figs case nothing pins the
+/// grid here — so the candidate is halved and re-verified in a pure
+/// pre-RNG loop until the ring fits. This terminates because
+/// `usable_no_go` guarantees the inflated no-go zone lies strictly inside
+/// the window, so the ring's offset count grows without bound as the unit
+/// shrinks (the loop also stops if halving hits the denormal floor, in
+/// which case the sampler fails loudly instead of quietly breaking the
+/// no-go). With no_go unset the result is exactly today's.
 fn closed_option_rounding_unit(
     sd_window: Option<f64>,
+    no_go: Option<f64>,
     base_rounding_unit: f64,
     sig_figs_active: bool,
     count: usize,
@@ -513,25 +640,46 @@ fn closed_option_rounding_unit(
     match sd_window {
         Some(sd) if !sig_figs_active => {
             let sd_unit = 2.0 * sd / (count as f64 + 1.0);
-            if sd_unit < base_rounding_unit {
+            let mut unit = if sd_unit < base_rounding_unit {
                 sd_unit
             } else {
                 base_rounding_unit
+            };
+            if let Some(ng) = no_go {
+                let needed = count as i64 - 1;
+                while no_go_ring_slots(sd, ng, unit) < needed {
+                    let halved = unit * 0.5;
+                    if halved == 0.0 || halved == unit {
+                        break;
+                    }
+                    unit = halved;
+                }
             }
+            unit
         }
         _ => base_rounding_unit,
     }
 }
 
 /// Sample one distractor inside the absolute ±sd window around
-/// `rounded_correct`, on the `unit` display grid. Returns None when no
-/// distinct in-window value remains (float collapse that rounds every grid
-/// offset back onto the correct answer, a window narrower than a grid step,
-/// or uniqueness exhausted). The value is far enough from the correct and
-/// the alternate, unique against `placed`, and satisfies `validate_result`.
+/// `rounded_correct`, on the `unit` display grid, and — when a no-go zone
+/// is active — OUTSIDE the ±no_go zone around it (boundary inclusive, the
+/// annulus (no_go, sd]). The no-go boundary is deliberately strict while
+/// the outer SD boundary stays permissive: a distractor a rounding hair
+/// inside the window is harmless, one a rounding hair inside the forbidden
+/// zone defeats the field's whole purpose, so the inner check rejects on
+/// ng*(1+1e-9) while the outer still tolerates sd*(1+1e-9). Returns None
+/// when no distinct in-window value remains (float collapse that rounds
+/// every grid offset back onto the correct answer, a window narrower than
+/// a grid step, or uniqueness exhausted). The value is far enough from the
+/// correct and the alternate, unique against `placed`, and satisfies
+/// `validate_result`. With no_go None, zero new code paths run and the RNG
+/// sequence is byte-identical to the pre-no-go generator.
+#[allow(clippy::too_many_arguments)]
 fn generate_in_window_distractor<R: Rng>(
     rounded_correct: f64,
     sd: f64,
+    no_go: Option<f64>,
     unit: f64,
     placed: &[f64],
     rounded_alternate: Option<f64>,
@@ -553,11 +701,27 @@ fn generate_in_window_distractor<R: Rng>(
         if k == 0 {
             continue;
         }
+        // No-go on the drawn offset, before anything is rounded: the same
+        // inflated comparison no_go_exclusive_k defines, so this sampler
+        // and the capacity gates always agree about the boundary.
+        if let Some(ng) = no_go {
+            if (k as f64).abs() * unit <= ng * (1.0 + 1e-9) {
+                continue;
+            }
+        }
         let rounded = round_to_unit(rounded_correct + k as f64 * unit, unit);
         // |rounded - rounded_correct| = |k|*unit <= sd - unit/2 < sd, so the
         // value always stays strictly inside the window once rounded.
         if (rounded - rounded_correct).abs() > sd * (1.0 + 1e-9) {
             continue;
+        }
+        // Belt-and-braces on the rounded value, mirroring the SD double
+        // check above: rounding can move the drawn value, so the no-go is
+        // verified on what will actually be shown too.
+        if let Some(ng) = no_go {
+            if (rounded - rounded_correct).abs() <= ng * (1.0 + 1e-9) {
+                continue;
+            }
         }
         if close(rounded, rounded_correct)
             || rounded_alternate.is_some_and(|alt| close(rounded, alt))
@@ -608,17 +772,26 @@ pub(crate) fn generate_numeric_options<R: Rng>(
     // sequence (the ghost regression).
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
     let sig_figs_active = sig_figs_unit(correct, result_significant_digits).is_some();
+    // The optional no-go zone is decided from the same sanitized percents
+    // as the window itself, once and before any RNG is consumed, so an
+    // unset (or misconfigured) no-go keeps the exact byte-identical RNG
+    // sequence (the ghost regression).
+    let sd_pct = usable_sd_percent(constraint);
+    let no_go = usable_no_go(constraint, correct, sd_pct);
     let sd_window = closed_option_sd_window(
         // Same guard as the open interval: a percentage of 100 or more
         // would let a distractor sit at zero or on the far side of the
         // answer (a negative mass fraction among the options).
         usable_sd_window(constraint, correct),
+        no_go,
+        sd_pct,
+        no_go_percent(constraint),
         sig_figs_active,
         base_rounding_unit,
         count,
-    );
+    )?;
     let rounding_unit =
-        closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
+        closed_option_rounding_unit(sd_window, no_go, base_rounding_unit, sig_figs_active, count);
     let rounded_correct = round_to_unit(correct, rounding_unit);
     let close = |a: f64, b: f64| (a - b).abs() <= rounding_unit * 0.5 * (1.0 + f64::EPSILON);
 
@@ -716,6 +889,7 @@ pub(crate) fn generate_numeric_options<R: Rng>(
                 match generate_in_window_distractor(
                     rounded_correct,
                     sd,
+                    no_go,
                     rounding_unit,
                     pool,
                     rounded_alternate,
@@ -882,7 +1056,8 @@ fn close_enough(a: f64, b: f64, rounding_unit: f64) -> bool {
 /// unique against the correct answer, the alternate (if any), and every
 /// value already in `pool`. Returns whether it reached the target count
 /// within budget. When an SD window is active, values are instead drawn
-/// absolutely from the window around `rounded_correct`. Same logic
+/// absolutely from the window around `rounded_correct` — and outside the
+/// no-go zone around it, when one is set. Same logic
 /// `generate_numeric_options` uses internally, factored out for the
 /// multi-target row filler below.
 #[allow(clippy::too_many_arguments)]
@@ -897,6 +1072,7 @@ fn generate_around_value<R: Rng>(
     rounded_alternate: Option<f64>,
     constraint: &ResultConstraint,
     sd_window: Option<f64>,
+    no_go: Option<f64>,
 ) -> bool {
     let start_len = pool.len();
     let mut attempts = 0;
@@ -908,6 +1084,7 @@ fn generate_around_value<R: Rng>(
             match generate_in_window_distractor(
                 rounded_correct,
                 sd,
+                no_go,
                 rounding_unit,
                 pool,
                 rounded_alternate,
@@ -1064,6 +1241,7 @@ fn fallback_distractor<R: Rng>(
     rounded_alternate: Option<f64>,
     constraint: &ResultConstraint,
     sd_window: Option<f64>,
+    no_go: Option<f64>,
 ) -> Result<f64, GenerationError> {
     let mut pool = placed.to_vec();
     let start_len = pool.len();
@@ -1078,6 +1256,7 @@ fn fallback_distractor<R: Rng>(
         rounded_alternate,
         constraint,
         sd_window,
+        no_go,
     ) {
         return Err(GenerationError::Distractor(format!(
             "could not generate a fallback distractor around {anchor}"
@@ -1115,22 +1294,29 @@ fn fill_target_options<R: Rng>(
     let base_rounding_unit = display_grid(correct, max_deviation, result_significant_digits);
     let sig_figs_active = sig_figs_unit(correct, result_significant_digits).is_some();
     let count = role_order.len().max(1);
-    // Same gated window and shared rounding-unit decision as
-    // generate_numeric_options: the sig-figs grid is authoritative when
-    // active, and the closed-option SD window is disabled (falling back
-    // to the pre-SD spread behavior) when that grid cannot fit enough
-    // distinct in-window offsets for `count` options.
+    // Same gated window, shared rounding-unit decision, and pre-RNG no-go
+    // computation as generate_numeric_options: the sig-figs grid is
+    // authoritative when active, and the closed-option SD window is
+    // disabled (falling back to the pre-SD spread behavior) when that grid
+    // cannot fit enough distinct in-window offsets for `count` options —
+    // unless a no-go zone is set, in which case a ring too tight for the
+    // count fails generation instead of silently ghosting to the spread.
+    let sd_pct = usable_sd_percent(constraint);
+    let no_go = usable_no_go(constraint, correct, sd_pct);
     let sd_window = closed_option_sd_window(
         // Same guard as the open interval: a percentage of 100 or more
         // would let a distractor sit at zero or on the far side of the
         // answer (a negative mass fraction among the options).
         usable_sd_window(constraint, correct),
+        no_go,
+        sd_pct,
+        no_go_percent(constraint),
         sig_figs_active,
         base_rounding_unit,
         count,
-    );
+    )?;
     let rounding_unit =
-        closed_option_rounding_unit(sd_window, base_rounding_unit, sig_figs_active, count);
+        closed_option_rounding_unit(sd_window, no_go, base_rounding_unit, sig_figs_active, count);
     let rounded_correct = round_to_unit(correct, rounding_unit);
 
     let rounded_alternate: Option<f64> =
@@ -1217,6 +1403,7 @@ fn fill_target_options<R: Rng>(
                     rounded_alternate,
                     constraint,
                     sd_window,
+                    no_go,
                 )?,
                 false,
             ),
@@ -1244,6 +1431,7 @@ fn fill_target_options<R: Rng>(
                     rounded_alternate,
                     constraint,
                     sd_window,
+                    no_go,
                 )?,
             },
             OptionRole::DecoyExact(k) => *decoy_anchor
@@ -1261,6 +1449,7 @@ fn fill_target_options<R: Rng>(
                     rounded_alternate,
                     constraint,
                     sd_window,
+                    no_go,
                 )?
             }
             OptionRole::CorrectPerturb => fallback_distractor(
@@ -1273,6 +1462,7 @@ fn fill_target_options<R: Rng>(
                 rounded_alternate,
                 constraint,
                 sd_window,
+                no_go,
             )?,
         };
         // Per-role significant digits: a decoy row's own setting marks its
@@ -1987,7 +2177,7 @@ mod tests {
     }
 
     fn make_constraint(min: Option<f64>, max: Option<f64>, sd: Option<f64>) -> ResultConstraint {
-        make_constraint_typed(min, max, sd, ConstraintType::Range)
+        make_constraint_typed(min, max, sd, None, ConstraintType::Range)
     }
 
     fn make_decoy(formula: &str, option_count: u8) -> TemplateDecoy {
@@ -2005,6 +2195,7 @@ mod tests {
         min: Option<f64>,
         max: Option<f64>,
         sd: Option<f64>,
+        no_go: Option<f64>,
         constraint_type: ConstraintType,
     ) -> ResultConstraint {
         ResultConstraint {
@@ -2013,6 +2204,7 @@ mod tests {
             min_result: min,
             max_result: max,
             sd_allowed: sd,
+            sd_no_go: no_go,
             constraint_type,
         }
     }
@@ -2394,7 +2586,7 @@ mod tests {
 
     #[test]
     fn generate_closed_options_for_small_fraction_with_sd_constraint() {
-        let constraint = make_constraint_typed(None, None, Some(0.1), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.1), None, ConstraintType::Sd);
         let correct = 0.01;
         let mut rng = StdRng::seed_from_u64(7);
         let (options, _pos, _alt, _sig_digits) = generate_numeric_options(
@@ -2508,7 +2700,7 @@ mod tests {
     #[test]
     fn open_interval_width_follows_difficulty() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, None, ConstraintType::Range);
         let correct = 100.0;
 
         for (difficulty, expected_half_width) in [
@@ -2536,7 +2728,7 @@ mod tests {
     #[test]
     fn open_interval_width_follows_difficulty_for_small_answers() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, None, ConstraintType::Range);
 
         for correct in [0.05_f64, 0.0025, 3.44e-22] {
             for (difficulty, fraction) in [
@@ -2564,7 +2756,7 @@ mod tests {
     #[test]
     fn open_interval_falls_back_to_an_absolute_width_for_a_zero_answer() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, None, ConstraintType::Range);
         let (lo, hi) = open_interval(0.0, &constraint, "hard", None);
         assert!(
             (lo + ZERO_ANSWER_HALF_WIDTH).abs() < 1e-12,
@@ -2582,14 +2774,15 @@ mod tests {
     fn open_interval_precedence_sd_then_override_then_difficulty() {
         // A 2.5 percent SD on a 100 answer outranks both.
         let with_sd =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), None, ConstraintType::Sd);
         let (lo, hi) = open_interval(100.0, &with_sd, "hard", Some(0.40));
         assert!(
             (lo - 97.5).abs() < 1e-9 && (hi - 102.5).abs() < 1e-9,
             "SD must win: [{lo}, {hi}]"
         );
 
-        let plain = ResultConstraint::new(Uuid::new_v4(), None, None, None, ConstraintType::Range);
+        let plain =
+            ResultConstraint::new(Uuid::new_v4(), None, None, None, None, ConstraintType::Range);
         let (lo, hi) = open_interval(0.05, &plain, "hard", Some(0.40));
         assert!(
             ((hi - lo) / 2.0 - 0.02).abs() < 1e-12,
@@ -2612,7 +2805,7 @@ mod tests {
     #[test]
     fn an_sd_of_100_percent_or_more_falls_back_to_the_difficulty_spread() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(100.0), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(100.0), None, ConstraintType::Sd);
 
         // w = 317 / (317 + 854)
         let w = 317.0 / 1171.0;
@@ -2645,7 +2838,7 @@ mod tests {
     #[test]
     fn an_sd_below_100_percent_is_still_honored_in_full() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(10.0), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(10.0), None, ConstraintType::Sd);
 
         let (lo, hi) = open_interval(213.5, &constraint, "medium", None);
         assert!(
@@ -2667,7 +2860,7 @@ mod tests {
     #[test]
     fn closed_options_for_a_fraction_stay_positive_with_an_oversized_sd() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(100.0), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(100.0), None, ConstraintType::Sd);
         let w = 317.0 / 1171.0;
 
         for seed in 0..8u64 {
@@ -2698,7 +2891,7 @@ mod tests {
     #[test]
     fn open_interval_prefers_explicit_sd_over_difficulty() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), None, ConstraintType::Sd);
         let (lo, hi) = open_interval(100.0, &constraint, "easy", None);
         assert!((lo - 97.5).abs() < 1e-9, "unexpected lower bound {lo}");
         assert!((hi - 102.5).abs() < 1e-9, "unexpected upper bound {hi}");
@@ -4413,7 +4606,7 @@ mod tests {
     #[test]
     fn spread_override_loses_to_explicit_sd_allowed() {
         let constraint =
-            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), ConstraintType::Sd);
+            ResultConstraint::new(Uuid::new_v4(), None, None, Some(2.5), None, ConstraintType::Sd);
         let (lo, hi) = open_interval(100.0, &constraint, "easy", Some(0.9));
         assert!(
             (lo - 97.5).abs() < 1e-9,
@@ -4674,7 +4867,7 @@ mod tests {
     /// ±sd window around the correct answer, all distinct, correct present.
     #[test]
     fn closed_with_sd_options_all_inside_the_absolute_window() {
-        let constraint = make_constraint_typed(None, None, Some(0.2), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.2), None, ConstraintType::Sd);
         let correct = 7.0;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
@@ -4730,7 +4923,7 @@ mod tests {
         // the rounding grid below the default 0.01 display unit.
         let sd_percent = 0.02;
         let window = 123.456 * sd_percent / 100.0;
-        let constraint = make_constraint_typed(None, None, Some(sd_percent), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(sd_percent), None, ConstraintType::Sd);
         let correct = 123.456;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
@@ -4790,7 +4983,7 @@ mod tests {
         // the rounding grid below the default 0.01 display unit.
         let sd_percent = 0.01;
         let window = 123.456 * sd_percent / 100.0;
-        let constraint = make_constraint_typed(None, None, Some(sd_percent), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(sd_percent), None, ConstraintType::Sd);
         let correct = 123.456;
         for seed in 0..30u64 {
             let mut rng = StdRng::seed_from_u64(seed);
@@ -4832,7 +5025,7 @@ mod tests {
     /// Open + SD: the accepted interval is exactly correct ± sd percent.
     #[test]
     fn open_with_sd_interval_is_exactly_correct_plus_minus_sd() {
-        let constraint = make_constraint_typed(None, None, Some(10.0), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(10.0), None, ConstraintType::Sd);
         let (lo, hi) = open_interval(7.0, &constraint, "medium", None);
         assert!((lo - 6.3).abs() < 1e-9, "unexpected lower bound {lo}");
         assert!((hi - 7.7).abs() < 1e-9, "unexpected upper bound {hi}");
@@ -4843,7 +5036,7 @@ mod tests {
     #[test]
     fn open_invalid_sd_ghosts_to_difficulty_or_spread_override() {
         for bad in [Some(0.0), Some(-0.5), Some(f64::NAN)] {
-            let constraint = make_constraint_typed(None, None, bad, ConstraintType::Sd);
+            let constraint = make_constraint_typed(None, None, bad, None, ConstraintType::Sd);
             let (lo, hi) = open_interval(100.0, &constraint, "medium", None);
             assert!(
                 (lo - 70.0).abs() < 1e-9,
@@ -4855,7 +5048,7 @@ mod tests {
             );
         }
         // A valid spread_override also beats an invalid persisted sd.
-        let constraint = make_constraint_typed(None, None, Some(f64::NAN), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(f64::NAN), None, ConstraintType::Sd);
         let (lo, hi) = open_interval(100.0, &constraint, "medium", Some(0.9));
         assert!((lo - 10.0).abs() < 1e-9, "unexpected lower bound {lo}");
         assert!((hi - 190.0).abs() < 1e-9, "unexpected upper bound {hi}");
@@ -4867,7 +5060,7 @@ mod tests {
     /// value, the window and the option count.
     #[test]
     fn tiny_sd_float_collapse_returns_distractor_error() {
-        let constraint = make_constraint_typed(None, None, Some(1e-20), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(1e-20), None, ConstraintType::Sd);
         let correct = 1e6;
         let mut rng = StdRng::seed_from_u64(1);
         let res = generate_numeric_options(
@@ -4915,7 +5108,7 @@ mod tests {
         // correct = X * 2 in [2, 20]; min/max [5, 6] and sd 50 % means the
         // raw window around a correct answer pokes far outside the range.
         let constraint =
-            make_constraint_typed(Some(5.0), Some(6.0), Some(50.0), ConstraintType::Both);
+            make_constraint_typed(Some(5.0), Some(6.0), Some(50.0), None, ConstraintType::Both);
         let res = generate_variant(
             Uuid::new_v4(),
             "X * 2",
@@ -4960,7 +5153,7 @@ mod tests {
         let mut constants = HashMap::new();
         constants.insert("Kb".to_string(), 1.77e-5);
         let constraint =
-            make_constraint_typed(Some(10.0), Some(11.0), Some(10.0), ConstraintType::Both);
+            make_constraint_typed(Some(10.0), Some(11.0), Some(10.0), None, ConstraintType::Both);
 
         for seed in 0..10u64 {
             let variant = generate_variant(
@@ -5001,7 +5194,7 @@ mod tests {
         let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
         let constants = HashMap::new();
         let sd_percent = 0.5;
-        let constraint = make_constraint_typed(None, None, Some(sd_percent), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(sd_percent), None, ConstraintType::Sd);
         let targets = vec![
             crate::engine::answer_targets::AnswerTarget {
                 symbol: "n".to_string(),
@@ -5077,7 +5270,7 @@ mod tests {
     /// and every option must be a multiple of 0.001.
     #[test]
     fn sig_figs_grid_wins_over_finer_sd_grid() {
-        let constraint = make_constraint_typed(None, None, Some(0.0028), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.0028), None, ConstraintType::Sd);
         let correct = 23.4759;
         let decoys = [DecoyAnchor {
             value: 23.4779, // rounds to 23.478, inside the ±0.0028 window
@@ -5119,7 +5312,7 @@ mod tests {
     /// spread-distractor behavior, still on the sig-figs grid.
     #[test]
     fn sd_window_disabled_when_sig_grid_cannot_fit_enough_offsets() {
-        let constraint = make_constraint_typed(None, None, Some(0.0015), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.0015), None, ConstraintType::Sd);
         let correct = 23.4759;
         for seed in 0..20u64 {
             let mut rng = StdRng::seed_from_u64(seed);
@@ -5179,7 +5372,7 @@ mod tests {
 
         // Part 1: sd=0.0028 would refine the grid to ~0.000933; the
         // 0.001 sig-figs grid must win (it fits: 2*floor(sd/0.001 - 0.5) = 4).
-        let constraint = make_constraint_typed(None, None, Some(0.0028), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.0028), None, ConstraintType::Sd);
         for seed in 0..10u64 {
             let variant = generate_variant_with_targets(
                 Uuid::new_v4(),
@@ -5216,7 +5409,7 @@ mod tests {
         // Part 2: sd=0.0015 leaves only 2 distinct in-window offsets on
         // the 0.001 grid (4 needed) — the closed-option SD window must be
         // disabled and generation fall back to spread distractors.
-        let constraint = make_constraint_typed(None, None, Some(0.0015), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(0.0015), None, ConstraintType::Sd);
         for seed in 0..10u64 {
             let variant = generate_variant_with_targets(
                 Uuid::new_v4(),
@@ -5263,7 +5456,7 @@ mod tests {
     #[test]
     fn open_mode_sd_tolerance_unchanged_by_sig_figs_clamp() {
         let constants = HashMap::new();
-        let constraint = make_constraint_typed(None, None, Some(10.0), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(10.0), None, ConstraintType::Sd);
         let mut fixed_values = HashMap::new();
         fixed_values.insert("X".to_string(), 3.5);
         let variant = generate_variant(
@@ -5301,7 +5494,7 @@ mod tests {
     #[test]
     fn no_sig_figs_path_byte_identical() {
         // Single answer, SD window active (sd 4 %, decoy inside the window).
-        let constraint = make_constraint_typed(None, None, Some(4.0), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(4.0), None, ConstraintType::Sd);
         let decoys = [DecoyAnchor {
             value: 7.13,
             requested_count: 1,
@@ -5367,7 +5560,7 @@ mod tests {
         // Multi-answer (fill_target_options), SD window active: the row
         // layout and every target's options must stay bit-identical.
         let variables = vec![make_variable("V", 10.0, 100.0, 1.0, 0)];
-        let constraint = make_constraint_typed(None, None, Some(5.0), ConstraintType::Sd);
+        let constraint = make_constraint_typed(None, None, Some(5.0), None, ConstraintType::Sd);
         let targets = vec![
             crate::engine::answer_targets::AnswerTarget {
                 symbol: "n".to_string(),
@@ -5420,6 +5613,294 @@ mod tests {
                 answers[1].numeric_options,
                 Some(expected_m.clone()),
                 "multi sd, seed={seed}"
+            );
+        }
+    }
+
+    /// Property: with a no-go zone set and the SD window governing
+    /// sampling, every generated distractor lands in the annulus
+    /// (no_go, sd] around the correct answer — never inside the forbidden
+    /// zone, never outside the window. Decoys are absent so every
+    /// non-correct option is a generated distractor. Single-answer and
+    /// multi-answer paths alike (fill_target_options threads the zone
+    /// too).
+    #[test]
+    fn no_go_zone_keeps_every_distractor_outside_the_forbidden_ring() {
+        // Single answer: correct 100, sd 10 % -> window ±10, no-go 4 % ->
+        // forbidden ±4, display grid 0.01 (finer than 2*sd/(count+1)).
+        let constraint = make_constraint_typed(None, None, Some(10.0), Some(4.0), ConstraintType::Sd);
+        for seed in 0..64u64 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let (options, pos, alt, _sig) = generate_numeric_options(
+                100.0,
+                &[],
+                None,
+                &constraint,
+                &mut rng,
+                "medium",
+                5,
+                true,
+                None,
+                None,
+                None,
+            )
+            .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            assert_eq!(options.len(), 5, "seed {seed}");
+            assert_eq!(alt, None, "seed {seed}");
+            let correct_option = options[pos as usize - 1];
+            assert!(
+                (correct_option - 100.0).abs() < 1e-9,
+                "seed {seed}: correct option {correct_option}"
+            );
+            for (i, v) in options.iter().enumerate() {
+                if i == pos as usize - 1 {
+                    continue;
+                }
+                let d = (v - correct_option).abs();
+                assert!(
+                    d > 4.0,
+                    "seed {seed}: option {v} at index {i} landed inside the no-go zone"
+                );
+                assert!(
+                    d <= 10.0 * (1.0 + 1e-9),
+                    "seed {seed}: option {v} at index {i} escaped the SD window"
+                );
+            }
+            let mut sorted = options.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.dedup();
+            assert_eq!(sorted.len(), 5, "seed {seed}: options must be distinct");
+        }
+
+        // Multi-answer: fixed V = 40 -> n = 10, m = 250, sd 10 %, no-go 4 %.
+        // Integers on a 0.01 grid, so the rounded correct is exact and the
+        // annulus bound can be asserted without rounding slack.
+        let variables = vec![make_variable("V", 40.0, 40.0, 1.0, 0)];
+        let constraint = make_constraint_typed(None, None, Some(10.0), Some(4.0), ConstraintType::Sd);
+        let targets = vec![
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "n".to_string(),
+                unit: Some("mol".to_string()),
+            },
+            crate::engine::answer_targets::AnswerTarget {
+                symbol: "m".to_string(),
+                unit: Some("g".to_string()),
+            },
+        ];
+        for seed in 0..32u64 {
+            let mut fixed_values = HashMap::new();
+            fixed_values.insert("V".to_string(), 40.0);
+            let variant = generate_variant_with_targets(
+                Uuid::new_v4(),
+                "n = V / 4; m = n * 25",
+                &variables,
+                &HashMap::new(),
+                &constraint,
+                TemplateMode::Closed,
+                seed,
+                "medium",
+                5,
+                &fixed_values,
+                &targets,
+                &[],
+                None,
+                true, // correct answer first: options[0] is the reference
+                None,
+                None,
+                None,
+            )
+            .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            let answers = variant.answers_data.as_ref().unwrap();
+            for (answer, correct, no_go_abs, sd_abs) in
+                [(&answers[0], 10.0, 0.4, 1.0), (&answers[1], 250.0, 10.0, 25.0)]
+            {
+                let options = answer.numeric_options.as_ref().unwrap();
+                assert_eq!(options.len(), 5, "seed {seed}");
+                assert!(
+                    (options[0] - correct).abs() < 1e-9,
+                    "seed {seed}: correct option {correct} expected, got {}",
+                    options[0]
+                );
+                for v in &options[1..] {
+                    let d = (v - correct).abs();
+                    assert!(
+                        d > no_go_abs,
+                        "seed {seed}: multi-target option {v} landed inside the no-go zone of {correct}"
+                    );
+                    assert!(
+                        d <= sd_abs * (1.0 + 1e-9),
+                        "seed {seed}: multi-target option {v} escaped the SD window of {correct}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Byte-identity for the no-go field itself (the ghost regression,
+    /// no-go side): a constraint with sd_no_go None must reproduce the
+    /// pre-feature snapshots exactly, and so must every value the
+    /// sanitizer treats as unset — a no-go at or past the SD (an empty
+    /// ring is a misconfigured field, not a setting), a non-positive or
+    /// non-finite one. The expected vectors are the ones the ghost test
+    /// above captured from the unmodified generator.
+    #[test]
+    fn no_go_unset_or_misconfigured_is_byte_identical_to_the_pre_no_go_output() {
+        let unset = make_constraint_typed(None, None, Some(4.0), None, ConstraintType::Sd);
+        let decoys = [DecoyAnchor {
+            value: 7.13,
+            requested_count: 1,
+            sig_digits: None,
+        }];
+        let snapshots = [
+            (0u64, vec![7.13, 6.74, 7.0, 7.15], 3u8),
+            (7, vec![7.0, 6.890000000000001, 6.74, 7.13], 1),
+            (42, vec![7.13, 7.0200000000000005, 7.01, 7.0], 4),
+        ];
+        let treated_as_unset = [
+            None,
+            Some(4.0),  // == sd: empty ring
+            Some(50.0), // > sd: ring would swallow the window
+            Some(0.0),
+            Some(-2.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+        ];
+        for no_go in treated_as_unset {
+            let constraint =
+                make_constraint_typed(None, None, Some(4.0), no_go, ConstraintType::Sd);
+            for (seed, expected, expected_pos) in &snapshots {
+                for (label, c) in [("none", &unset), ("misconfigured", &constraint)] {
+                    let mut rng = StdRng::seed_from_u64(*seed);
+                    let (options, pos, alt, _sig) = generate_numeric_options(
+                        7.0,
+                        &decoys,
+                        None,
+                        c,
+                        &mut rng,
+                        "medium",
+                        4,
+                        false,
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                    assert_eq!(options, *expected, "{label} no_go {no_go:?}, seed {seed}");
+                    assert_eq!(pos, *expected_pos, "{label} no_go {no_go:?}, seed {seed}");
+                    assert_eq!(alt, None, "{label} no_go {no_go:?}, seed {seed}");
+                }
+            }
+        }
+    }
+
+    /// A no-go zone that leaves the sig-figs grid too few ring slots is a
+    /// misconfigured question and must fail generation with an actionable
+    /// error — never silently widen the ring, clamp the no-go, or ghost to
+    /// the spread fallback. The same setup with no_go unset keeps today's
+    /// behavior: the too-tight window is silently disabled and the spread
+    /// fallback takes over (or, when the window alone fits, generation
+    /// succeeds in-window).
+    #[test]
+    fn no_go_ring_too_tight_fails_generation_instead_of_ghosting() {
+        // Coarse grid: correct 999.5 at 1 significant figure -> unit 100.
+        // sd 20 % -> 199.9 -> k_max = 1 -> only 2 window offsets for 4
+        // distractors: the window alone cannot fit, so the None case must
+        // fall back; with no-go 19 % (k_excl = 1) the ring holds 0 slots.
+        let too_tight =
+            make_constraint_typed(None, None, Some(20.0), Some(19.0), ConstraintType::Sd);
+        let mut rng = StdRng::seed_from_u64(0);
+        let err = generate_numeric_options(
+            999.5,
+            &[],
+            None,
+            &too_tight,
+            &mut rng,
+            "medium",
+            5,
+            true,
+            None,
+            Some(1),
+            None,
+        )
+        .expect_err("a no-go ring with 0 slots must fail generation");
+        let message = err.to_string();
+        assert!(message.contains("no-go"), "error must name the no-go: {message}");
+        assert!(
+            message.contains("resolution 100"),
+            "error must name the sig-figs resolution: {message}"
+        );
+        assert!(
+            message.contains("5 options"),
+            "error must name the option count: {message}"
+        );
+        assert!(
+            message.contains("20") && message.contains("19"),
+            "error must name the sd and no-go percents: {message}"
+        );
+
+        let unset = make_constraint_typed(None, None, Some(20.0), None, ConstraintType::Sd);
+        let mut rng = StdRng::seed_from_u64(0);
+        generate_numeric_options(
+            999.5,
+            &[],
+            None,
+            &unset,
+            &mut rng,
+            "medium",
+            5,
+            true,
+            None,
+            Some(1),
+            None,
+        )
+        .expect("no_go None keeps the silent spread fallback");
+
+        // The window alone fits (sd 30 % -> k_max = 2 -> 4 offsets), so the
+        // interesting middle case: no-go 19 % shrinks the ring to 2 slots
+        // -> still an error; no-go 5 % (k_excl = 0) keeps all 4 -> succeeds
+        // in-window.
+        let ring_short =
+            make_constraint_typed(None, None, Some(30.0), Some(19.0), ConstraintType::Sd);
+        let mut rng = StdRng::seed_from_u64(0);
+        assert!(
+            generate_numeric_options(
+                999.5,
+                &[],
+                None,
+                &ring_short,
+                &mut rng,
+                "medium",
+                5,
+                true,
+                None,
+                Some(1),
+                None,
+            )
+            .is_err(),
+            "a ring with 2 slots for 4 distractors must fail generation"
+        );
+        let ring_fits =
+            make_constraint_typed(None, None, Some(30.0), Some(5.0), ConstraintType::Sd);
+        let mut rng = StdRng::seed_from_u64(0);
+        let (options, pos, _alt, _sig) = generate_numeric_options(
+            999.5,
+            &[],
+            None,
+            &ring_fits,
+            &mut rng,
+            "medium",
+            5,
+            true,
+            None,
+            Some(1),
+            None,
+        )
+        .expect("a ring with 4 slots must generate in-window");
+        let correct_option = options[pos as usize - 1];
+        for v in &options {
+            assert!(
+                (v - correct_option).abs() <= 299.85 * (1.0 + 1e-9),
+                "option {v} escaped the sd 30 % window around {correct_option}"
             );
         }
     }
