@@ -771,7 +771,7 @@ pub(crate) fn load_template_dependencies(
     let fixed_values = extract_fixed_placeholders(&template.question_text);
 
     let constraint = TemplateRepo::get_constraint(conn, &template.id)?.unwrap_or_else(|| {
-        ResultConstraint::new(template.id, None, None, None, ConstraintType::Range)
+        ResultConstraint::new(template.id, None, None, None, None, ConstraintType::Range)
     });
 
     Ok((variables, constants, constraint, fixed_values))
@@ -878,6 +878,7 @@ mod tests {
                 Some(0.0),
                 Some(100.0),
                 None,
+                None,
                 ConstraintType::Range,
             );
             let tv = TemplateVariable {
@@ -961,6 +962,7 @@ mod tests {
             template.id,
             Some(0.0),
             Some(1000.0),
+            None,
             None,
             ConstraintType::Range,
         );
@@ -1124,6 +1126,7 @@ mod tests {
             template.id,
             Some(0.0),
             Some(10000.0),
+            None,
             None,
             ConstraintType::Range,
         );

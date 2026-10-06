@@ -95,14 +95,15 @@ impl TemplateRepo {
 
         if let Some(rc) = constraint {
             tx.execute(
-                "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, constraint_type)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, sd_no_go, constraint_type)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     rc.id,
                     rc.template_id,
                     rc.min_result,
                     rc.max_result,
                     rc.sd_allowed,
+                    rc.sd_no_go,
                     serde_constraint_type(rc.constraint_type),
                 ],
             )?;
@@ -279,7 +280,7 @@ impl TemplateRepo {
         template_id: &Uuid,
     ) -> Result<Option<ResultConstraint>, DbError> {
         let result = conn.query_row(
-            "SELECT id, template_id, min_result, max_result, sd_allowed, constraint_type
+            "SELECT id, template_id, min_result, max_result, sd_allowed, sd_no_go, constraint_type
              FROM result_constraints WHERE template_id = ?1",
             params![template_id],
             |row| {
@@ -289,7 +290,8 @@ impl TemplateRepo {
                     min_result: row.get(2)?,
                     max_result: row.get(3)?,
                     sd_allowed: row.get(4)?,
-                    constraint_type: parse_constraint_type(&row.get::<_, String>(5)?),
+                    sd_no_go: row.get(5)?,
+                    constraint_type: parse_constraint_type(&row.get::<_, String>(6)?),
                 })
             },
         );
@@ -488,7 +490,14 @@ mod tests {
             template_id: t.id,
             constant_id: c1.id,
         }];
-        let rc = ResultConstraint::new(t.id, Some(0.0), Some(200.0), None, ConstraintType::Range);
+        let rc = ResultConstraint::new(
+            t.id,
+            Some(0.0),
+            Some(200.0),
+            Some(10.0),
+            Some(2.5),
+            ConstraintType::Both,
+        );
 
         TemplateRepo::insert(&conn, &t, &tvs, &tcs, Some(&rc), &[]).expect("insert");
 
@@ -502,7 +511,12 @@ mod tests {
         assert_eq!(linked_consts.len(), 1);
 
         let constraint = TemplateRepo::get_constraint(&conn, &t.id).expect("constraint");
-        assert!(constraint.is_some());
+        let constraint = constraint.expect("constraint row");
+        assert_eq!(constraint.min_result, Some(0.0));
+        assert_eq!(constraint.max_result, Some(200.0));
+        assert_eq!(constraint.sd_allowed, Some(10.0));
+        assert_eq!(constraint.sd_no_go, Some(2.5));
+        assert_eq!(constraint.constraint_type, ConstraintType::Both);
     }
 
     #[test]

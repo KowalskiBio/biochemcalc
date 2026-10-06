@@ -158,6 +158,13 @@ pub struct ResultConstraint {
     pub min_result: Option<f64>,
     pub max_result: Option<f64>,
     pub sd_allowed: Option<f64>,
+    /// Optional "no-go SD": a percent of the correct answer no closed-option
+    /// distractor may come within while the SD window governs sampling.
+    /// Never affects open-answer acceptance, decoy literals, the alternace,
+    /// or the non-SD spread fallback. None (or a misconfigured value) means
+    /// the distractors behave exactly as before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sd_no_go: Option<f64>,
     pub constraint_type: ConstraintType,
 }
 
@@ -167,6 +174,7 @@ impl ResultConstraint {
         min_result: Option<f64>,
         max_result: Option<f64>,
         sd_allowed: Option<f64>,
+        sd_no_go: Option<f64>,
         constraint_type: ConstraintType,
     ) -> Self {
         Self {
@@ -175,6 +183,7 @@ impl ResultConstraint {
             min_result,
             max_result,
             sd_allowed,
+            sd_no_go,
             constraint_type,
         }
     }

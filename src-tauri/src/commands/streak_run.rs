@@ -369,6 +369,7 @@ mod tests {
                 Some(0.0),
                 Some(100.0),
                 None,
+                None,
                 ConstraintType::Range,
             );
             let tv = TemplateVariable {

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 41;
+const CURRENT_USER_VERSION: u32 = 42;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -211,6 +211,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 41 {
         apply_migration_v41(conn)?;
         conn.pragma_update(None, "user_version", "41")?;
+    }
+
+    if user_version < 42 {
+        apply_migration_v42(conn)?;
+        conn.pragma_update(None, "user_version", "42")?;
     }
 
     Ok(())
@@ -1350,6 +1355,16 @@ fn apply_migration_v41(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// The optional per-question "no-go SD" (`models::ResultConstraint::
+/// sd_no_go`): a percent of the correct answer within which no closed-option
+/// distractor may land while the SD window governs sampling. Nullable, no
+/// default value — every pre-v42 row reads as "no no-go set", which is
+/// exactly the behavior those questions always had.
+fn apply_migration_v42(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("ALTER TABLE result_constraints ADD COLUMN sd_no_go REAL;")?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2341,5 +2356,55 @@ mod tests {
             .query_row("SELECT test_kind FROM topics", [], |row| row.get(0))
             .expect("test_kind readable");
         assert_eq!(kind, "prubezny");
+    }
+
+    /// A pre-v42 `result_constraints` row must survive the `sd_no_go` column
+    /// addition untouched: the new column reads NULL (no no-go set — the
+    /// exact behavior the question always had), and the old columns keep
+    /// the values the teacher entered.
+    #[test]
+    fn v42_adds_a_nullable_sd_no_go_column_and_keeps_old_rows_intact() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // Bring the DB to the pre-v42 shape the same way the v18 test does:
+        // apply v1 (which owns result_constraints), drop the FK so a
+        // constraint can be seeded without a full template row behind it,
+        // and set the version so run_migrations resumes from there.
+        apply_migration_v1(&conn).expect("v1");
+        conn.pragma_update(None, "user_version", "1")
+            .expect("set version");
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("fk off");
+
+        // sd_allowed 5.0 (not 0.1, which migration v18 deletes as a legacy
+        // importer artifact): a deliberate teacher SD that must survive.
+        conn.execute(
+            "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, constraint_type)
+             VALUES (randomblob(16), randomblob(16), NULL, NULL, 5.0, 'sd')",
+            [],
+        )
+        .expect("seed pre-v42 constraint");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (notnull, dflt): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT \"notnull\", dflt_value FROM pragma_table_info('result_constraints') WHERE name = 'sd_no_go'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or_else(|e| panic!("result_constraints.sd_no_go must exist after v42: {e}"));
+        assert_eq!(notnull, 0, "sd_no_go must be nullable");
+        assert_eq!(dflt, None, "sd_no_go must default to NULL");
+
+        let (sd_allowed, sd_no_go): (f64, Option<f64>) = conn
+            .query_row(
+                "SELECT sd_allowed, sd_no_go FROM result_constraints",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("seeded row readable after v42");
+        assert_eq!(sd_allowed, 5.0, "the old SD must be untouched");
+        assert_eq!(sd_no_go, None, "a pre-v42 row reads as no no-go set");
     }
 }

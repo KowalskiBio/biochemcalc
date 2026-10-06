@@ -427,6 +427,7 @@ fn clone_template(
             c.min_result,
             c.max_result,
             c.sd_allowed,
+            c.sd_no_go,
             c.constraint_type,
         )
     });
@@ -842,6 +843,12 @@ pub struct ConstraintInput {
     pub min_result: Option<f64>,
     pub max_result: Option<f64>,
     pub sd_allowed: Option<f64>,
+    // Explicit rename for the same reason the VariableMutation variants
+    // below need theirs: rename_all alone has proven unreliable for
+    // multi-word fields, and `default` keeps payloads written before this
+    // field existed deserializing as "no no-go set".
+    #[serde(default, rename = "sdNoGo")]
+    pub sd_no_go: Option<f64>,
     pub constraint_type: ConstraintType,
 }
 
@@ -1017,6 +1024,7 @@ fn build_constraint(template_id: Uuid, input: Option<ConstraintInput>) -> Option
             c.min_result,
             c.max_result,
             c.sd_allowed,
+            c.sd_no_go,
             c.constraint_type,
         )
     })
@@ -1306,8 +1314,8 @@ pub(crate) fn do_update_template(
     }
     if let Some(rc) = &constraint {
         tx.execute(
-            "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, constraint_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![rc.id, rc.template_id, rc.min_result, rc.max_result, rc.sd_allowed, serde_constraint_type(rc.constraint_type)],
+            "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, sd_no_go, constraint_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![rc.id, rc.template_id, rc.min_result, rc.max_result, rc.sd_allowed, rc.sd_no_go, serde_constraint_type(rc.constraint_type)],
         )?;
     }
 
@@ -1422,6 +1430,7 @@ pub fn apply_template_variable_mutations(
     let new_sd = payload.constraint.as_ref().and_then(|c| c.sd_allowed);
     let new_min = payload.constraint.as_ref().and_then(|c| c.min_result);
     let new_max = payload.constraint.as_ref().and_then(|c| c.max_result);
+    let new_no_go = payload.constraint.as_ref().and_then(|c| c.sd_no_go);
 
     let mut template = Template {
         id: payload.id,
@@ -1654,8 +1663,8 @@ pub fn apply_template_variable_mutations(
     let constraint = build_constraint(template.id, payload.constraint);
     if let Some(rc) = &constraint {
         tx.execute(
-            "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, constraint_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![rc.id, rc.template_id, rc.min_result, rc.max_result, rc.sd_allowed, serde_constraint_type(rc.constraint_type)],
+            "INSERT INTO result_constraints (id, template_id, min_result, max_result, sd_allowed, sd_no_go, constraint_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![rc.id, rc.template_id, rc.min_result, rc.max_result, rc.sd_allowed, rc.sd_no_go, serde_constraint_type(rc.constraint_type)],
         )?;
     }
 
@@ -1698,6 +1707,16 @@ pub fn apply_template_variable_mutations(
             "maxResult",
             old_max.map(|v| v.to_string()).as_deref(),
             new_max.map(|v| v.to_string()).as_deref(),
+        )?;
+    }
+    let old_no_go = old_constraint.as_ref().and_then(|c| c.sd_no_go);
+    if old_no_go != new_no_go {
+        TemplateHistoryRepo::record_change(
+            &tx,
+            &payload.id,
+            "sdNoGo",
+            old_no_go.map(|v| v.to_string()).as_deref(),
+            new_no_go.map(|v| v.to_string()).as_deref(),
         )?;
     }
 
@@ -2713,6 +2732,7 @@ mod tests {
             Some(0.0),
             Some(100.0),
             None,
+            None,
             ConstraintType::Range,
         );
         let decoys1 = vec![TemplateDecoyInput {
@@ -2868,6 +2888,7 @@ mod tests {
                 min_result: None,
                 max_result: None,
                 sd_allowed: Some(0.2),
+                sd_no_go: None,
                 constraint_type: ConstraintType::Sd,
             }),
             alternative_significant_digits: None,
@@ -2896,6 +2917,7 @@ mod tests {
                 min_result: None,
                 max_result: None,
                 sd_allowed: Some(0.2),
+                sd_no_go: None,
                 constraint_type: ConstraintType::Sd,
             }),
             alternative_significant_digits: None,
@@ -2910,12 +2932,14 @@ mod tests {
         assert_eq!(rc.min_result, None);
         assert_eq!(rc.max_result, None);
 
-        // Shape 2: range + SD -> type "both", min/max preserved, sd set.
+        // Shape 2: range + SD -> type "both", min/max preserved, sd set,
+        // and the no-go percent riding along on the same row.
         let both_payload = UpdateTemplateWithVariablesPayload {
             constraint: Some(ConstraintInput {
                 min_result: Some(5.0),
                 max_result: Some(9.0),
                 sd_allowed: Some(0.2),
+                sd_no_go: Some(0.05),
                 constraint_type: ConstraintType::Both,
             }),
             alternative_significant_digits: None,
@@ -2929,6 +2953,7 @@ mod tests {
         assert_eq!(rc.min_result, Some(5.0));
         assert_eq!(rc.max_result, Some(9.0));
         assert_eq!(rc.sd_allowed, Some(0.2));
+        assert_eq!(rc.sd_no_go, Some(0.05));
 
         // Shape 3: both + SD cleared (sd_allowed None) -> type "range", sd null.
         let range_payload = UpdateTemplateWithVariablesPayload {
@@ -2936,6 +2961,7 @@ mod tests {
                 min_result: Some(5.0),
                 max_result: Some(9.0),
                 sd_allowed: None,
+                sd_no_go: None,
                 constraint_type: ConstraintType::Range,
             }),
             alternative_significant_digits: None,
@@ -2947,6 +2973,7 @@ mod tests {
             .expect("range row present");
         assert_eq!(rc.constraint_type, ConstraintType::Range);
         assert_eq!(rc.sd_allowed, None);
+        assert_eq!(rc.sd_no_go, None);
         assert_eq!(rc.min_result, Some(5.0));
         assert_eq!(rc.max_result, Some(9.0));
 
@@ -2976,6 +3003,7 @@ mod tests {
                 min_result: None,
                 max_result: None,
                 sd_allowed: sd,
+                sd_no_go: None,
                 constraint_type: ConstraintType::Sd,
             }),
             alternative_significant_digits: None,
@@ -3026,6 +3054,7 @@ mod tests {
                 min_result: min,
                 max_result: max,
                 sd_allowed: None,
+                sd_no_go: None,
                 constraint_type: ConstraintType::Range,
             }),
             alternative_significant_digits: None,
