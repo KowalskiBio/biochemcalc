@@ -15,7 +15,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06b6d4?style=flat-square&logo=tailwindcss&logoColor=white)](tailwind.config.ts)
 [![Vite](https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite&logoColor=white)](vite.config.ts)
 [![Tauri](https://img.shields.io/badge/desktop-Tauri_2-24c8db?style=flat-square&logo=tauri&logoColor=white)](src-tauri)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](LICENSE)
 
 [**Features**](#features) · [**How it works**](#how-it-works) · [**Architecture**](#architecture) · [**Development**](#development) · [**Deployment**](#deployment)
 
@@ -222,7 +222,9 @@ The web app runs on a VM as `biochemcalc-server` behind nginx, with a live SQLit
 
 ## License
 
-[GPL-3.0](LICENSE).
+Copyright (C) 2026 Vojtech Rejtar.
+
+Biocal is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later). If you modify it and let others use it, including over a network, you must publish your modified source under the same license and keep the original copyright and attribution notices.
 
 <div align="center">
 <br />

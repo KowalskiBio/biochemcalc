@@ -172,7 +172,7 @@ export const cs = {
     footerContact: "Kontakt",
     footerTeacher: "Zodpovědný vyučující",
     footerBugs: "V případě chyb nebo problémů prosím kontaktujte autora.",
-    footerLicense: "Licencováno pod GNU General Public License v3.0.",
+    footerLicense: "Licencováno pod GNU Affero General Public License v3.0 nebo novější.",
   },
 
   // Student test sessions: a fixed batch of questions generated all at once,
@@ -1363,7 +1363,7 @@ export const cs = {
     description: "Generátor variabilních biochemických výpočtových úloh pro učitele",
     version: "1.0.0",
     author: "Biocal Team",
-    license: "MIT",
+    license: "AGPL-3.0-or-later",
   },
 } as const
 
