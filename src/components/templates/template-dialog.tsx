@@ -638,14 +638,24 @@ export function TemplateDialog({
               )}
 
               {formData.constraint?.constraintType === "sd" && (
-                <div className="space-y-2 col-span-2">
-                  <Label>SD Allowed (%)</Label>
-                  <DecimalInput
-                    value={formData.constraint?.sdAllowed ?? ""}
-                    onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
-                    placeholder="Percent of the answer (e.g. 10)"
-                  />
-                </div>
+                <>
+                  <div className="space-y-2 col-span-2">
+                    <Label>SD Allowed (%)</Label>
+                    <DecimalInput
+                      value={formData.constraint?.sdAllowed ?? ""}
+                      onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
+                      placeholder="Percent of the answer (e.g. 10)"
+                    />
+                  </div>
+                  <div className="space-y-2 col-span-2">
+                    <Label>SD No-Go (%)</Label>
+                    <DecimalInput
+                      value={formData.constraint?.sdNoGo ?? ""}
+                      onValueChange={(v) => handleConstraintChange("sdNoGo", v)}
+                      placeholder="Safe zone around the answer (e.g. 5)"
+                    />
+                  </div>
+                </>
               )}
 
               {formData.constraint?.constraintType === "both" && (
@@ -672,6 +682,14 @@ export function TemplateDialog({
                       value={formData.constraint?.sdAllowed ?? ""}
                       onValueChange={(v) => handleConstraintChange("sdAllowed", v)}
                       placeholder="Percent of the answer (e.g. 10)"
+                    />
+                  </div>
+                  <div className="space-y-2 col-span-2">
+                    <Label>SD No-Go (%)</Label>
+                    <DecimalInput
+                      value={formData.constraint?.sdNoGo ?? ""}
+                      onValueChange={(v) => handleConstraintChange("sdNoGo", v)}
+                      placeholder="Safe zone around the answer (e.g. 5)"
                     />
                   </div>
                 </>
