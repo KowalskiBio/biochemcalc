@@ -372,6 +372,8 @@ export function ExportVariantsDialog({
                 const isIncluded = state.included
                 const sdAllowed = templateDetails.constraint?.sdAllowed
                 const hasSd = sdAllowed != null && Number.isFinite(sdAllowed) && sdAllowed > 0
+                const sdNoGo = templateDetails.constraint?.sdNoGo
+                const hasSdNoGo = sdNoGo != null && Number.isFinite(sdNoGo) && sdNoGo > 0
                 const constantsMap = Object.fromEntries(
                   templateDetails.constants.map((c) => [c.symbol, c.value]),
                 )
@@ -438,7 +440,11 @@ export function ExportVariantsDialog({
                           disabled={!isIncluded || hasSd}
                           placeholder={
                             hasSd
-                              ? `SD ±${formatDecimalComma(String(sdAllowed))} %`
+                              ? `SD ±${formatDecimalComma(String(sdAllowed))} %${
+                                  hasSdNoGo
+                                    ? `, no-go ±${formatDecimalComma(String(sdNoGo))} %`
+                                    : ""
+                                }`
                               : String(
                                   defaultSpreadPercentFor(
                                     mode,
