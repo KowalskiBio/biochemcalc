@@ -1,6 +1,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cva } from "class-variance-authority"
 import {
+  Atom,
   FlaskConical,
   LogOut,
   Menu,
@@ -24,7 +25,7 @@ import { useAuthStore } from "@/stores/auth-store"
 import { useUiStore } from "@/stores/ui-store"
 
 /**
- * The student's whole world: three destinations and nothing else. Separate
+ * The student's whole world: four destinations and nothing else. Separate
  * from the teacher `AppShell`/`Sidebar` on purpose — that nav is entirely
  * content-authoring links that 403 for a student account (`/api/cmd/*` is
  * teacher-only), so sharing one component would mean maintaining a list of
@@ -46,6 +47,11 @@ const navItems: NavItem[] = [
     path: "/",
     icon: <Target className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.practice,
+  },
+  {
+    path: "/biomolekuly",
+    icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.biomolekuly,
   },
   {
     path: "/leaderboard",

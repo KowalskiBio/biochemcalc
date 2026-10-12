@@ -4,6 +4,8 @@ import { Navigate, Route, Routes } from "react-router-dom"
 import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
 import { StudentShell } from "@/components/layout/student-shell"
+import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
+import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
 import { ConstantsPage } from "@/pages/constants-page"
 import { DatabazePage } from "@/pages/databaze-page"
@@ -46,6 +48,9 @@ function TeacherRoutes() {
         <Route path="/projekty" element={<ProjektyPage />} />
         <Route path="/testy" element={<TestyPage />} />
         <Route path="/databaze" element={<DatabazePage />} />
+        <Route path="/biomolekuly" element={<BiomoleculesPage />} />
+        <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
+        <Route path="/biomolekuly/:categoryId/procvicovani" element={<BiomoleculesQuizPage />} />
         <Route path="/vzorce" element={<FormulasPage />} />
         <Route path="/bulk-import" element={<BulkImportPage />} />
         <Route path="/constants" element={<ConstantsPage />} />
@@ -62,10 +67,11 @@ function TeacherRoutes() {
 }
 
 /**
- * A student sees three destinations and nothing else: the practice question
- * generator, the leaderboard, and their own profile. Anything else redirects
- * back to the generator — the teacher pages all call `/api/cmd/*`, which is
- * teacher-only server-side, so there is nothing for a student to reach there.
+ * A student sees four destinations and nothing else: the practice question
+ * generator, the biomolecules reference, the leaderboard, and their own
+ * profile. Anything else redirects back to the generator — the teacher pages
+ * all call `/api/cmd/*`, which is teacher-only server-side, so there is
+ * nothing for a student to reach there.
  */
 function StudentRoutes() {
   return (
@@ -84,6 +90,9 @@ function StudentRoutes() {
         <Route path="/test/streak/active" element={<StudentStreakActivePage />} />
         <Route path="/test/streak/results" element={<StudentStreakResultsPage />} />
         <Route path="/leaderboard" element={<StudentLeaderboardPage />} />
+        <Route path="/biomolekuly" element={<BiomoleculesPage />} />
+        <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
+        <Route path="/biomolekuly/:categoryId/procvicovani" element={<BiomoleculesQuizPage />} />
         <Route path="/settings" element={<StudentSettingsPage />} />
         <Route path="*" element={<StudentPracticePage />} />
       </Routes>

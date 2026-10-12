@@ -1,5 +1,6 @@
 import { cva } from "class-variance-authority"
 import {
+  Atom,
   BookOpen,
   Database,
   FileText,
@@ -50,6 +51,11 @@ const navItems: NavItem[] = [
     path: "/databaze",
     icon: <Database className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.databaze,
+  },
+  {
+    path: "/biomolekuly",
+    icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.biomolekuly,
   },
   {
     path: "/vzorce",
