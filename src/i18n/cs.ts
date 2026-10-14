@@ -426,12 +426,20 @@ export const cs = {
       neutral: "Neutrální",
       positive: "Kladný",
     },
+    ringSystemLabels: {
+      purine: "Purin",
+      pyrimidine: "Pyrimidin",
+    },
     backToCategories: "Zpět na kategorie",
     categoryCount: "{count} molekul",
     categories: {
       aminokyseliny: {
         name: "Aminokyseliny",
         description: "Dvacet proteinogenních aminokyselin — názvy, zkratky a strukturní vzorce.",
+      },
+      "dusikate-baze": {
+        name: "Dusíkaté báze",
+        description: "Pět základních bází DNA a RNA — názvy, zkratky a strukturní vzorce.",
       },
     },
     quiz: {
@@ -477,6 +485,10 @@ export const cs = {
       sideChainLabel: "Postranní řetězec",
       chargeLabel: "Náboj při pH 7",
       essentialLabel: "Esenciální",
+      abbreviationLabel: "Zkratka",
+      ringSystemLabel: "Kruhový systém",
+      pairingLabel: "Páruje s",
+      occurrenceLabel: "Výskyt",
       factsLabel: "Zajímavosti",
       yes: "Ano",
       no: "Ne",

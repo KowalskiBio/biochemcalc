@@ -1,4 +1,3 @@
-import type { AminoAcid } from "@/lib/molecules/amino-acids"
 import { createSeededRandom, pick, randomInt, shuffle } from "@/lib/molecules/quiz/random"
 
 export type QuizQuestionType =
@@ -19,6 +18,29 @@ export type CharacteristicPredicate =
   | "essential"
   | "achiral"
   | "sulfur"
+
+/**
+ * The minimal, molecule-family-agnostic shape the quiz engine needs. Concrete
+ * families (amino acids, nitrogenous bases, …) are adapted to this via
+ * `getCategoryQuizConfig`, which also supplies their characteristic tests.
+ */
+export interface QuizMolecule {
+  id: string
+  name: string
+  smiles: string
+  /** Required only for the letter-based question types. */
+  oneLetter?: string
+  /** Groups molecules for the same-class distractor preference. */
+  classKey?: string
+  /** Enantiomer decoys are only allowed when this is false/undefined. */
+  achiral?: boolean
+}
+
+/** A named predicate plus its molecule test, supplied by the category adapter. */
+export interface CharacteristicDef {
+  predicate: CharacteristicPredicate
+  matches: (molecule: QuizMolecule) => boolean
+}
 
 export interface QuizOption {
   /** Unique within the question, e.g. the molecule id or `${id}:mirror`. */
@@ -60,6 +82,10 @@ export interface GenerateQuizConfig {
   seed: number
   /** Enantiomer decoys, default true. */
   mirrorDecoys?: boolean
+  /** Same-class grouping for distractor preference; default reads `m.classKey`. */
+  classKeyOf?: (molecule: QuizMolecule) => string | undefined
+  /** A non-empty list enables the "characteristic" question type. */
+  characteristics?: CharacteristicDef[]
 }
 
 /** All quiz types in a stable order. */
@@ -101,56 +127,53 @@ const STRUCTURE_OPTION_TYPES: ReadonlySet<QuizQuestionType> = new Set([
 
 const MIRROR_DECOY_PROBABILITY = 0.5
 
-/** Classify a molecule against a characteristic predicate. Pure. */
-export function moleculeMatchesPredicate(
-  molecule: AminoAcid,
-  predicate: CharacteristicPredicate,
-): boolean {
-  switch (predicate) {
-    case "nonpolar":
-      return molecule.sideChain === "nonpolar"
-    case "polar":
-      return molecule.sideChain === "polar"
-    case "acidic":
-      return molecule.sideChain === "acidic"
-    case "basic":
-      return molecule.sideChain === "basic"
-    case "aromatic":
-      return molecule.aromatic
-    case "essential":
-      return molecule.essential
-    case "achiral":
-      return molecule.achiral
-    case "sulfur":
-      return molecule.id === "cys" || molecule.id === "met"
-  }
-}
+type ClassKeyOf = (molecule: QuizMolecule) => string | undefined
+
+const defaultClassKeyOf: ClassKeyOf = (molecule) => molecule.classKey
 
 /**
  * Quiz types generatable from `molecules`. Letter types are only offered when
- * every molecule carries a `oneLetter`, since their options are letters looked
- * up by molecule id.
+ * every molecule carries a `oneLetter`; "characteristic" only when at least one
+ * characteristic definition is injected.
  */
-export function availableQuizTypes(molecules: AminoAcid[]): QuizQuestionType[] {
+export function availableQuizTypes(
+  molecules: QuizMolecule[],
+  characteristics?: CharacteristicDef[],
+): QuizQuestionType[] {
   if (molecules.length === 0) {
     return []
   }
-  const everyHasLetter = molecules.every((molecule) => molecule.oneLetter.trim().length > 0)
-  return ALL_QUIZ_TYPES.filter((type) => everyHasLetter || !LETTER_QUIZ_TYPES.has(type))
+  const everyHasLetter = molecules.every((molecule) => (molecule.oneLetter ?? "").trim().length > 0)
+  return ALL_QUIZ_TYPES.filter((type) => {
+    if (LETTER_QUIZ_TYPES.has(type)) {
+      return everyHasLetter
+    }
+    if (type === "characteristic") {
+      return characteristics !== undefined && characteristics.length > 0
+    }
+    return true
+  })
 }
 
-function qualifyingPredicates(molecules: AminoAcid[]): CharacteristicPredicate[] {
-  return CHARACTERISTIC_PREDICATES.filter((predicate) => {
-    const matches = molecules.filter((molecule) =>
-      moleculeMatchesPredicate(molecule, predicate),
-    ).length
+function qualifyingPredicates(
+  molecules: QuizMolecule[],
+  characteristics: CharacteristicDef[],
+): CharacteristicDef[] {
+  return characteristics.filter((def) => {
+    const matches = molecules.filter((molecule) => def.matches(molecule)).length
     return matches >= 1 && molecules.length - matches >= 3
   })
 }
 
-function isGeneratable(type: QuizQuestionType, molecules: AminoAcid[]): boolean {
+function isGeneratable(
+  type: QuizQuestionType,
+  molecules: QuizMolecule[],
+  characteristics: CharacteristicDef[] | undefined,
+): boolean {
   if (type === "characteristic") {
-    return qualifyingPredicates(molecules).length > 0
+    return (
+      characteristics !== undefined && qualifyingPredicates(molecules, characteristics).length > 0
+    )
   }
   // Needs the target plus three distinct distractors.
   return molecules.length >= 4
@@ -173,7 +196,7 @@ function optionDisplayFor(type: QuizQuestionType): "name" | "letter" | "structur
 
 function makeOption(
   display: "name" | "letter" | "structure",
-  molecule: AminoAcid,
+  molecule: QuizMolecule,
   correct: boolean,
   rng: () => number,
 ): QuizOption {
@@ -191,7 +214,7 @@ function makeOption(
   return { key: molecule.id, display, moleculeId: molecule.id, correct }
 }
 
-function makeMirrorDecoy(target: AminoAcid, rng: () => number): QuizOption {
+function makeMirrorDecoy(target: QuizMolecule, rng: () => number): QuizOption {
   return {
     key: `${target.id}:mirror`,
     display: "structure",
@@ -205,28 +228,33 @@ function makeMirrorDecoy(target: AminoAcid, rng: () => number): QuizOption {
 
 /**
  * Three distinct molecules that differ from the target, preferring the target's
- * own side-chain class when enough same-class molecules exist (harder traps).
- * Any shortfall is filled from the remaining molecules.
+ * own class when enough same-class molecules exist (harder traps). Undefined
+ * class keys never count as a match. Any shortfall is filled from the rest.
  */
 function selectDistractors(
-  molecules: AminoAcid[],
-  target: AminoAcid,
+  molecules: QuizMolecule[],
+  target: QuizMolecule,
   rng: () => number,
-): AminoAcid[] {
+  classKeyOf: ClassKeyOf,
+): QuizMolecule[] {
+  const targetKey = classKeyOf(target)
   const others = molecules.filter((molecule) => molecule.id !== target.id)
-  const sameClass = others.filter((molecule) => molecule.sideChain === target.sideChain)
-  const rest = others.filter((molecule) => molecule.sideChain !== target.sideChain)
+  const sameClass = others.filter((molecule) => {
+    const key = classKeyOf(molecule)
+    return key !== undefined && key === targetKey
+  })
+  const rest = others.filter((molecule) => !sameClass.includes(molecule))
   return [...shuffle(rng, sameClass), ...shuffle(rng, rest)].slice(0, 3)
 }
 
-function buildPrompt(target: AminoAcid, type: QuizQuestionType, rng: () => number): QuizPrompt {
+function buildPrompt(target: QuizMolecule, type: QuizQuestionType, rng: () => number): QuizPrompt {
   switch (type) {
     case "nameToLetter":
     case "nameToStructure":
       return { kind: "name", text: target.name }
     case "letterToName":
     case "letterToStructure":
-      return { kind: "letter", text: target.oneLetter }
+      return { kind: "letter", text: target.oneLetter ?? "" }
     case "structureToName":
     case "structureToLetter":
       return {
@@ -242,14 +270,15 @@ function buildPrompt(target: AminoAcid, type: QuizQuestionType, rng: () => numbe
 }
 
 function buildOptions(
-  molecules: AminoAcid[],
-  target: AminoAcid,
+  molecules: QuizMolecule[],
+  target: QuizMolecule,
   type: QuizQuestionType,
   rng: () => number,
   mirrorDecoys: boolean,
+  classKeyOf: ClassKeyOf,
 ): QuizOption[] {
   const display = optionDisplayFor(type)
-  const distractors = selectDistractors(molecules, target, rng)
+  const distractors = selectDistractors(molecules, target, rng, classKeyOf)
   const options: QuizOption[] = [
     makeOption(display, target, true, rng),
     ...distractors.map((molecule) => makeOption(display, molecule, false, rng)),
@@ -257,7 +286,7 @@ function buildOptions(
 
   // Enantiomer decoy: same molecule id as the target, but drawn mirrored, so
   // its depiction is the opposite enantiomer. Only for structure options of a
-  // chiral target (glycine is achiral and would look identical).
+  // chiral target (an achiral molecule would look identical when mirrored).
   if (
     mirrorDecoys &&
     STRUCTURE_OPTION_TYPES.has(type) &&
@@ -272,20 +301,20 @@ function buildOptions(
 }
 
 function buildCharacteristicQuestion(
-  molecules: AminoAcid[],
-  target: AminoAcid,
+  molecules: QuizMolecule[],
+  target: QuizMolecule,
+  characteristics: CharacteristicDef[],
   rng: () => number,
 ): QuizQuestion {
-  const qualifying = qualifyingPredicates(molecules)
-  const matchingTarget = qualifying.filter((predicate) =>
-    moleculeMatchesPredicate(target, predicate),
-  )
+  const qualifying = qualifyingPredicates(molecules, characteristics)
+  const matchingTarget = qualifying.filter((def) => def.matches(target))
   // Prefer a predicate the queued target satisfies, keeping the target queue
   // authoritative; fall back to any qualifying predicate for other inputs.
-  const predicate = matchingTarget.length > 0 ? pick(rng, matchingTarget) : pick(rng, qualifying)
+  const def = matchingTarget.length > 0 ? pick(rng, matchingTarget) : pick(rng, qualifying)
+  const predicate = def.predicate
 
-  const matches = molecules.filter((molecule) => moleculeMatchesPredicate(molecule, predicate))
-  const nonMatches = molecules.filter((molecule) => !moleculeMatchesPredicate(molecule, predicate))
+  const matches = molecules.filter((molecule) => def.matches(molecule))
+  const nonMatches = molecules.filter((molecule) => !def.matches(molecule))
   const correct = matches.some((molecule) => molecule.id === target.id)
     ? target
     : pick(rng, matches)
@@ -305,20 +334,22 @@ function buildCharacteristicQuestion(
 }
 
 function buildQuestion(
-  molecules: AminoAcid[],
-  target: AminoAcid,
+  molecules: QuizMolecule[],
+  target: QuizMolecule,
   type: QuizQuestionType,
   rng: () => number,
   mirrorDecoys: boolean,
+  classKeyOf: ClassKeyOf,
+  characteristics: CharacteristicDef[] | undefined,
 ): QuizQuestion {
-  if (type === "characteristic") {
-    return buildCharacteristicQuestion(molecules, target, rng)
+  if (type === "characteristic" && characteristics !== undefined) {
+    return buildCharacteristicQuestion(molecules, target, characteristics, rng)
   }
   return {
     type,
     targetId: target.id,
     prompt: buildPrompt(target, type, rng),
-    options: buildOptions(molecules, target, type, rng, mirrorDecoys),
+    options: buildOptions(molecules, target, type, rng, mirrorDecoys, classKeyOf),
   }
 }
 
@@ -328,9 +359,14 @@ function buildQuestion(
  * The same `seed` and config always produce byte-identical questions. Targets
  * are drawn from a shuffled queue that reshuffles when exhausted and never
  * repeats back-to-back; question types cycle through a freshly shuffled pool.
+ *
+ * When `"characteristic"` is requested but no characteristic definitions are
+ * injected (or none qualifies), those slots are safely skipped: the type is
+ * dropped from the requested pool, so a config that requests only that type
+ * yields an empty session.
  */
 export function generateQuizSession(
-  molecules: AminoAcid[],
+  molecules: QuizMolecule[],
   config: GenerateQuizConfig,
 ): QuizQuestion[] {
   if (molecules.length === 0 || config.questionCount <= 0) {
@@ -339,9 +375,10 @@ export function generateQuizSession(
 
   const rng = createSeededRandom(config.seed)
   const mirrorDecoys = config.mirrorDecoys !== false
-  const available = availableQuizTypes(molecules)
+  const classKeyOf = config.classKeyOf ?? defaultClassKeyOf
+  const available = availableQuizTypes(molecules, config.characteristics)
   const requested = [...new Set(config.types)].filter(
-    (type) => available.includes(type) && isGeneratable(type, molecules),
+    (type) => available.includes(type) && isGeneratable(type, molecules, config.characteristics),
   )
   if (requested.length === 0) {
     return []
@@ -349,7 +386,7 @@ export function generateQuizSession(
 
   const questions: QuizQuestion[] = []
   let typePool: QuizQuestionType[] = []
-  let targetPool: AminoAcid[] = []
+  let targetPool: QuizMolecule[] = []
   let lastTargetId: string | null = null
 
   const nextType = (): QuizQuestionType => {
@@ -361,7 +398,7 @@ export function generateQuizSession(
     return type
   }
 
-  const nextTarget = (): AminoAcid => {
+  const nextTarget = (): QuizMolecule => {
     if (targetPool.length === 0) {
       targetPool = shuffle(rng, molecules)
       // Avoid a back-to-back repeat across the reshuffle boundary.
@@ -380,7 +417,15 @@ export function generateQuizSession(
   for (let i = 0; i < config.questionCount; i++) {
     const type = nextType()
     const target = nextTarget()
-    const question = buildQuestion(molecules, target, type, rng, mirrorDecoys)
+    const question = buildQuestion(
+      molecules,
+      target,
+      type,
+      rng,
+      mirrorDecoys,
+      classKeyOf,
+      config.characteristics,
+    )
     lastTargetId = question.targetId
     questions.push(question)
   }

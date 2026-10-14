@@ -203,6 +203,22 @@ Curated, frontend-only, no DB or backend changes.
 - `src/pages/biomolecules-page.tsx` — hub (`/biomolekuly`, category cards) + category view
   (`/biomolekuly/:categoryId`, grid + detail dialog; NO manual rotation UI). Both routes
   in TeacherRoutes and StudentRoutes; nav points at the hub. Strings: `cs.biomolekuly.*`.
+- `src/lib/molecules/nitrogen-bases.ts` — 2nd family: 5 nitrogenous bases
+  (A, C, G, T, U; PubChem canonical SMILES, keto forms), Czech names, abbreviations,
+  Watson–Crick `pairsWithIds`, `inDna`/`inRna`, `ringSystem` purine/pyrimidine, facts.
+  Quiz deliberately limited to name↔structure (pairing info is display-only).
+- **Quiz engine is family-agnostic**: `question-generator.ts` knows only `QuizMolecule`
+  {id, name, smiles, oneLetter?, classKey?, achiral?} — distractor preference via
+  `classKeyOf`/classKey, characteristics via injected `CharacteristicDef[]`. Per-family
+  knowledge lives in `quiz/category-quiz.ts` (`getCategoryQuizConfig`): "aminokyseliny"
+  (oneLetter + sideChain classKey + 8 predicates), "dusikate-baze" (ringSystem classKey,
+  achiral → no mirror decoys, no letters → exactly 2 quiz types). Future family = dataset
+  + registry entry + cs strings + (optionally) browse descriptor bits in the page.
+- `src/pages/biomolecules-page.tsx` — per-category browse via local `CategoryBits<M>`
+  descriptors (cardCodeLine, cardBadges?, dialogDescription, detailRows) feeding a shared
+  MoleculeBrowser; amino-acid and nitrogen-base bits records.
+- `src/pages/biomolecules-quiz-page.tsx` — driven by `getCategoryQuizConfig(categoryId)`;
+  option labels resolve from config molecules (no dataset hardcoding).
 - `src/lib/molecules/quiz/` — headless quiz engine (pure, seed-deterministic, no React/DOM):
   `random.ts` (mulberry32 + pick/shuffle), `question-generator.ts` (7 question types:
   name↔letter, name↔structure, letter↔structure, characteristic — 4-option MCQ, same

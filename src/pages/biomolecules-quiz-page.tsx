@@ -7,11 +7,12 @@ import { Progress } from "@/components/ui/progress"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
 import { getMoleculeCategory } from "@/lib/molecules"
-import { AMINO_ACIDS, type AminoAcid } from "@/lib/molecules/amino-acids"
 import {
   availableQuizTypes,
   createQuizSession,
   generateQuizSession,
+  getCategoryQuizConfig,
+  type QuizMolecule,
   type QuizOption,
   type QuizPrompt,
   type QuizQuestion,
@@ -33,16 +34,12 @@ const FOCUS_RING_CLASS =
 const CATEGORY_COPY: Record<string, { name: string; description: string }> =
   cs.biomolekuly.categories
 
-/** Text options carry no display string — resolve name/letter from the dataset. */
-function findAminoAcid(id: string): AminoAcid | undefined {
-  return AMINO_ACIDS.find((aa) => aa.id === id)
-}
-
-function optionLabel(option: QuizOption): string {
-  const aa = findAminoAcid(option.moleculeId)
-  if (!aa) return option.key
+/** Text options carry no display string — resolve name/letter from the config molecules. */
+function optionLabel(molecules: QuizMolecule[], option: QuizOption): string {
+  const molecule = molecules.find((m) => m.id === option.moleculeId)
+  if (!molecule) return option.key
   // Letters only — the three-letter code would be a giveaway hint in letter questions.
-  return option.display === "letter" ? aa.oneLetter : aa.name
+  return option.display === "letter" ? (molecule.oneLetter ?? option.key) : molecule.name
 }
 
 function BackLink({ href, label }: { href: string; label: string }) {
@@ -96,13 +93,21 @@ function PromptView({ prompt }: { prompt: QuizPrompt }) {
 
 interface OptionButtonProps {
   option: QuizOption
+  molecules: QuizMolecule[]
   index: number
   answered: boolean
   isSelected: boolean
   onSelect: () => void
 }
 
-function OptionButton({ option, index, answered, isSelected, onSelect }: OptionButtonProps) {
+function OptionButton({
+  option,
+  molecules,
+  index,
+  answered,
+  isSelected,
+  onSelect,
+}: OptionButtonProps) {
   const stateClass = answered
     ? option.correct
       ? "border-accent bg-accent/5 text-accent"
@@ -143,7 +148,7 @@ function OptionButton({ option, index, answered, isSelected, onSelect }: OptionB
             option.display === "letter" ? "font-mono tabular text-lg" : "text-sm font-medium",
           )}
         >
-          {optionLabel(option)}
+          {optionLabel(molecules, option)}
         </span>
       )}
     </button>
@@ -154,6 +159,7 @@ interface SetupScreenProps {
   backHref: string
   categoryName: string
   allTypes: QuizQuestionType[]
+  allCount: number
   selectedTypes: QuizQuestionType[]
   onToggleType: (type: QuizQuestionType) => void
   countChoice: CountChoice
@@ -165,6 +171,7 @@ function SetupScreen({
   backHref,
   categoryName,
   allTypes,
+  allCount,
   selectedTypes,
   onToggleType,
   countChoice,
@@ -237,7 +244,7 @@ function SetupScreen({
                 {choice === "all" ? (
                   <>
                     {quizStrings.countAll.split("{count}")[0]}
-                    <span className="font-mono tabular">{AMINO_ACIDS.length}</span>
+                    <span className="font-mono tabular">{allCount}</span>
                     {quizStrings.countAll.split("{count}")[1]}
                   </>
                 ) : (
@@ -264,6 +271,7 @@ function SetupScreen({
 interface QuestionScreenProps {
   backHref: string
   question: QuizQuestion
+  molecules: QuizMolecule[]
   index: number
   total: number
   answered: boolean
@@ -275,6 +283,7 @@ interface QuestionScreenProps {
 function QuestionScreen({
   backHref,
   question,
+  molecules,
   index,
   total,
   answered,
@@ -309,6 +318,7 @@ function QuestionScreen({
           <OptionButton
             key={option.key}
             option={option}
+            molecules={molecules}
             index={i}
             answered={answered}
             isSelected={option.key === selectedKey}
@@ -395,20 +405,25 @@ function ResultsScreen({ session, categoryId, onRestart }: ResultsScreenProps) {
 export function BiomoleculesQuizPage() {
   const { categoryId } = useParams<{ categoryId: string }>()
   const category = getMoleculeCategory(categoryId ?? "")
+  const config = useMemo(() => getCategoryQuizConfig(categoryId ?? ""), [categoryId])
 
-  const allTypes = useMemo(() => availableQuizTypes(AMINO_ACIDS), [])
+  const allTypes = useMemo(
+    () => (config ? availableQuizTypes(config.molecules, config.characteristics) : []),
+    [config],
+  )
   const [selectedTypes, setSelectedTypes] = useState<QuizQuestionType[]>(allTypes)
   const [countChoice, setCountChoice] = useState<CountChoice>(10)
   const [started, setStarted] = useState(false)
   const [session, dispatch] = useReducer(quizSessionReducer, EMPTY_QUESTIONS, createQuizSession)
 
   const startQuiz = () => {
-    if (selectedTypes.length === 0) return
-    const questionCount = countChoice === "all" ? AMINO_ACIDS.length : countChoice
-    const questions = generateQuizSession(AMINO_ACIDS, {
+    if (!config || selectedTypes.length === 0) return
+    const questionCount = countChoice === "all" ? config.molecules.length : countChoice
+    const questions = generateQuizSession(config.molecules, {
       types: selectedTypes,
       questionCount,
       seed: Date.now(),
+      characteristics: config.characteristics,
     })
     dispatch({ type: "restart", questions })
     setStarted(true)
@@ -433,7 +448,7 @@ export function BiomoleculesQuizPage() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [started, session.finished, session.answered])
 
-  if (!category) {
+  if (!category || !config) {
     return <Navigate to="/biomolekuly" replace />
   }
 
@@ -446,6 +461,7 @@ export function BiomoleculesQuizPage() {
         backHref={backHref}
         categoryName={categoryName}
         allTypes={allTypes}
+        allCount={config.molecules.length}
         selectedTypes={selectedTypes}
         onToggleType={toggleType}
         countChoice={countChoice}
@@ -468,6 +484,7 @@ export function BiomoleculesQuizPage() {
     <QuestionScreen
       backHref={backHref}
       question={question}
+      molecules={config.molecules}
       index={session.index}
       total={session.questions.length}
       answered={session.answered}
