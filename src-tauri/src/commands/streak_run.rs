@@ -329,6 +329,8 @@ mod tests {
             created_at: Utc::now(),
             protected: false,
             email: None,
+            sections: crate::models::SectionAccess::Calculations,
+            preferred_section: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id

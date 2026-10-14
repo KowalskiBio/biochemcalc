@@ -1,5 +1,9 @@
 //! `/api/student/*` — the practice generator and leaderboard.
 //!
+//! Split in two: [`router`] (practice, tests, streak runs, reports) is the
+//! laboratory-calculations section and sits behind `require_calculations`;
+//! [`leaderboard_router`] is shared by every section.
+//!
 //! Mounted behind `require_auth` but *not* `require_teacher`: this is the
 //! only part of the API a student account can reach. Every handler derives
 //! the acting user from the session (`CurrentUser`) rather than from the
@@ -156,12 +160,17 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/test-topics", post(test_topics))
         .route("/next-question", post(next_question))
         .route("/submit-answer", post(submit_answer))
-        .route("/leaderboard", post(leaderboard))
         .route("/report-question", post(report_question))
         .route("/start-test", post(start_test))
         .route("/finish-test", post(finish_test))
         .route("/start-streak-run", post(start_streak_run))
         .route("/next-streak-question", post(next_streak_question))
         .route("/streak-run-summary", post(streak_run_summary))
+}
+
+/// Leaderboards stay reachable from every section.
+pub fn leaderboard_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/leaderboard", post(leaderboard))
         .route("/streak-leaderboard", post(streak_leaderboard))
 }

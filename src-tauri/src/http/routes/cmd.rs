@@ -24,8 +24,7 @@ use crate::commands::{
     SaveProjektPayload, SetTemplatePayload, TemplateLocation, TemplateWithDetails,
     UpdateConstantPayload, UpdateProjektPayload, UpdateSetModePayload, UpdateSetNamePayload,
     UpdateTemplatePayload, UpdateTemplateWithVariablesPayload, UpdateTemplatesByEquationPayload,
-    UpdateTopicPayload, UpdateVariablePayload, VictorChatPayload, VictorResponse, VictorSettings,
-    VictorSettingsPayload,
+    UpdateTopicPayload, UpdateVariablePayload,
 };
 use crate::db::repos::{
     CategoryRepo, ConstantRepo, OutputFileRepo, ProjektRepo, SetRepo, TemplateHistoryRepo,
@@ -829,38 +828,6 @@ async fn import_bulk_templates(
     Ok(Json(commands::do_import_bulk_templates(&conn, payload)?))
 }
 
-// ---------------------------------------------------------------------------
-// Victor
-// ---------------------------------------------------------------------------
-
-async fn get_victor_settings(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<VictorSettings>, HttpError> {
-    let conn = conn!(state);
-    Ok(Json(commands::do_get_victor_settings(&conn)?))
-}
-
-async fn set_victor_settings(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<VictorSettingsPayload>,
-) -> Result<Json<VictorSettings>, HttpError> {
-    let conn = conn!(state);
-    Ok(Json(commands::do_set_victor_settings(&conn, payload)?))
-}
-
-async fn chat_with_victor(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<VictorChatPayload>,
-) -> Result<Json<VictorResponse>, HttpError> {
-    let (api_base_url, api_key) = {
-        let conn = conn!(state);
-        commands::victor_settings_pair(&conn)?
-    };
-    Ok(Json(
-        commands::do_chat_with_victor(&api_base_url, &api_key, payload).await?,
-    ))
-}
-
 async fn list_question_reports(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<QuestionReportSummary>>, HttpError> {
@@ -976,9 +943,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/delete_projekt", post(delete_projekt))
         .route("/export_projekt_to_txt", post(export_projekt_to_txt))
         .route("/import_bulk_templates", post(import_bulk_templates))
-        .route("/get_victor_settings", post(get_victor_settings))
-        .route("/set_victor_settings", post(set_victor_settings))
-        .route("/chat_with_victor", post(chat_with_victor))
         .route("/list_question_reports", post(list_question_reports))
         .route("/get_question_report", post(get_question_report))
         .route("/delete_question_report", post(delete_question_report))

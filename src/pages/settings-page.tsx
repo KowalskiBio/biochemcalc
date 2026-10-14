@@ -1,10 +1,25 @@
-import { KeyRound, Loader2, Settings, Trash2, Users } from "lucide-react"
+import { KeyRound, Loader2, Plus, Trash2, Users } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { AccountCard } from "@/components/auth/account-card"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -16,12 +31,61 @@ import {
 } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { extractErrorMessage, victorApi } from "@/lib/api"
+import { extractErrorMessage } from "@/lib/api"
 import { authApi } from "@/lib/auth-api"
-import type { InviteCode, Role, User } from "@/lib/types"
+import type { InviteCode, Role, SectionAccess, User } from "@/lib/types"
 import { useAuthStore } from "@/stores/auth-store"
 
-const DEFAULT_API_BASE_URL = "https://api.moonshot.cn/v1/chat/completions"
+const SECTION_ACCESS_OPTIONS: SectionAccess[] = ["calculations", "biomolecules", "both"]
+
+function SectionAccessSelect({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  id?: string
+  value: SectionAccess
+  onChange: (value: SectionAccess) => void
+  disabled?: boolean
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as SectionAccess)} disabled={disabled}>
+      <SelectTrigger id={id} className="w-[160px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {SECTION_ACCESS_OPTIONS.map((option) => (
+          <SelectItem key={option} value={option}>
+            {cs.sections.access[option]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+function RoleSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Role
+  onChange: (value: Role) => void
+  disabled?: boolean
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as Role)} disabled={disabled}>
+      <SelectTrigger className="w-[130px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="student">{cs.settings.users.roleStudent}</SelectItem>
+        <SelectItem value="teacher">{cs.settings.users.roleTeacher}</SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
 
 function formatDateTime(value: string) {
   try {
@@ -41,7 +105,8 @@ function InviteCodeCard() {
   const { toast } = useToast()
   const [codes, setCodes] = useState<InviteCode[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [generatingRole, setGeneratingRole] = useState<Role | null>(null)
+  const [sections, setSections] = useState<SectionAccess>("calculations")
+  const [isGenerating, setIsGenerating] = useState(false)
   const [revokingCode, setRevokingCode] = useState<string | null>(null)
 
   const fetchCodes = useCallback(async () => {
@@ -61,10 +126,10 @@ function InviteCodeCard() {
     fetchCodes()
   }, [fetchCodes])
 
-  const handleGenerate = async (role: Role) => {
-    setGeneratingRole(role)
+  const handleGenerate = async () => {
+    setIsGenerating(true)
     try {
-      await authApi.createInviteCode({ role })
+      await authApi.createInviteCode({ sections })
       toast({ title: cs.settings.inviteCode.generated, variant: "default" })
       await fetchCodes()
     } catch (error) {
@@ -73,7 +138,7 @@ function InviteCodeCard() {
         variant: "destructive",
       })
     } finally {
-      setGeneratingRole(null)
+      setIsGenerating(false)
     }
   }
 
@@ -103,20 +168,20 @@ function InviteCodeCard() {
         <CardDescription>{cs.settings.inviteCode.description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => handleGenerate("student")} disabled={generatingRole !== null}>
-            {generatingRole === "student"
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-2">
+            <Label htmlFor="inviteSections">{cs.settings.inviteCode.sectionsLabel}</Label>
+            <SectionAccessSelect
+              id="inviteSections"
+              value={sections}
+              onChange={setSections}
+              disabled={isGenerating}
+            />
+          </div>
+          <Button onClick={() => void handleGenerate()} disabled={isGenerating}>
+            {isGenerating
               ? cs.settings.inviteCode.generating
               : cs.settings.inviteCode.generateStudent}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => handleGenerate("teacher")}
-            disabled={generatingRole !== null}
-          >
-            {generatingRole === "teacher"
-              ? cs.settings.inviteCode.generating
-              : cs.settings.inviteCode.generateTeacher}
           </Button>
         </div>
 
@@ -135,7 +200,7 @@ function InviteCodeCard() {
             <TableHeader>
               <TableRow>
                 <TableHead>{cs.settings.inviteCode.columns.code}</TableHead>
-                <TableHead>{cs.settings.inviteCode.columns.role}</TableHead>
+                <TableHead>{cs.settings.inviteCode.columns.sections}</TableHead>
                 <TableHead>{cs.settings.inviteCode.columns.expiresAt}</TableHead>
                 <TableHead>{cs.settings.inviteCode.columns.useCount}</TableHead>
                 <TableHead className="text-right">
@@ -149,11 +214,7 @@ function InviteCodeCard() {
                   <TableCell className="font-mono text-base tabular tracking-wider">
                     {invite.code}
                   </TableCell>
-                  <TableCell>
-                    {invite.role === "teacher"
-                      ? cs.settings.inviteCode.roleTeacher
-                      : cs.settings.inviteCode.roleStudent}
-                  </TableCell>
+                  <TableCell>{cs.sections.access[invite.sections]}</TableCell>
                   <TableCell>
                     {formatDateTime(invite.expiresAt)}
                     <span className="ml-2 text-xs text-muted-foreground">
@@ -192,12 +253,138 @@ function InviteCodeCard() {
   )
 }
 
+const EMPTY_NEW_USER = {
+  username: "",
+  password: "",
+  email: "",
+  role: "student" as Role,
+  sections: "calculations" as SectionAccess,
+}
+
+/**
+ * Admin only: the one place accounts are created directly (the only way to
+ * add a teacher), re-roled, re-scoped, or deleted.
+ */
+function AddUserDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCreated: () => Promise<void>
+}) {
+  const { toast } = useToast()
+  const [form, setForm] = useState(EMPTY_NEW_USER)
+  const [isCreating, setIsCreating] = useState(false)
+
+  const handleCreate = async () => {
+    setIsCreating(true)
+    try {
+      await authApi.createUser({
+        username: form.username.trim(),
+        password: form.password,
+        email: form.email.trim() || undefined,
+        role: form.role,
+        sections: form.role === "teacher" ? "both" : form.sections,
+      })
+      toast({ title: cs.settings.users.created, variant: "default" })
+      setForm(EMPTY_NEW_USER)
+      onOpenChange(false)
+      await onCreated()
+    } catch (error) {
+      toast({
+        title: extractErrorMessage(error, cs.settings.users.createError),
+        variant: "destructive",
+      })
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>{cs.settings.users.addTitle}</DialogTitle>
+          <DialogDescription>{cs.settings.users.addDescription}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="newUsername">{cs.auth.usernameLabel}</Label>
+            <Input
+              id="newUsername"
+              value={form.username}
+              onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
+              placeholder={cs.auth.usernamePlaceholder}
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="newPassword">{cs.auth.passwordLabel}</Label>
+            <Input
+              id="newPassword"
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
+              placeholder={cs.auth.resetPassword.newPasswordPlaceholder}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="newEmail">{cs.auth.emailLabel}</Label>
+            <Input
+              id="newEmail"
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+              placeholder={cs.auth.emailPlaceholder}
+            />
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <div className="space-y-2">
+              <Label>{cs.settings.users.columns.role}</Label>
+              <RoleSelect
+                value={form.role}
+                onChange={(role) => setForm((prev) => ({ ...prev, role }))}
+              />
+            </div>
+            {form.role === "student" && (
+              <div className="space-y-2">
+                <Label htmlFor="newSections">{cs.settings.users.columns.sections}</Label>
+                <SectionAccessSelect
+                  id="newSections"
+                  value={form.sections}
+                  onChange={(sections) => setForm((prev) => ({ ...prev, sections }))}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreating}>
+            {cs.common.cancel}
+          </Button>
+          <Button
+            onClick={() => void handleCreate()}
+            disabled={isCreating || !form.username.trim() || !form.password}
+          >
+            {isCreating ? cs.settings.users.creating : cs.settings.users.create}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function UsersCard() {
   const { toast } = useToast()
   const currentUser = useAuthStore((s) => s.user)
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [isAddOpen, setIsAddOpen] = useState(false)
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -232,22 +419,38 @@ function UsersCard() {
     }
   }
 
-  const formatDate = (value: string) => {
+  const handleUpdate = async (user: User, role: Role, sections: SectionAccess) => {
+    setUpdatingId(user.id)
     try {
-      return new Date(value).toLocaleString("cs-CZ")
-    } catch {
-      return value
+      const updated = await authApi.updateUser({ id: user.id, role, sections })
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)))
+      toast({ title: cs.settings.users.updated, variant: "default" })
+    } catch (error) {
+      toast({
+        title: extractErrorMessage(error, cs.settings.users.updateError),
+        variant: "destructive",
+      })
+    } finally {
+      setUpdatingId(null)
     }
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="size-5" />
-          {cs.settings.users.title}
-        </CardTitle>
-        <CardDescription>{cs.settings.users.description}</CardDescription>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="space-y-1.5">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="size-5" />
+              {cs.settings.users.title}
+            </CardTitle>
+            <CardDescription>{cs.settings.users.description}</CardDescription>
+          </div>
+          <Button onClick={() => setIsAddOpen(true)}>
+            <Plus className="size-4 mr-1" />
+            {cs.settings.users.add}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -264,6 +467,7 @@ function UsersCard() {
               <TableRow>
                 <TableHead>{cs.settings.users.columns.username}</TableHead>
                 <TableHead>{cs.settings.users.columns.role}</TableHead>
+                <TableHead>{cs.settings.users.columns.sections}</TableHead>
                 <TableHead>{cs.settings.users.columns.createdAt}</TableHead>
                 <TableHead className="text-right">{cs.settings.users.columns.actions}</TableHead>
               </TableRow>
@@ -272,6 +476,7 @@ function UsersCard() {
               {users.map((user) => {
                 const isSelf = user.id === currentUser?.id
                 const isProtected = user.protected
+                const isBusy = updatingId === user.id
                 const disabledReason = isSelf
                   ? cs.settings.users.cannotDeleteSelf
                   : isProtected
@@ -287,12 +492,31 @@ function UsersCard() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      {user.role === "teacher"
-                        ? cs.settings.users.roleTeacher
-                        : cs.settings.users.roleStudent}
+                    <TableCell
+                      title={isProtected ? cs.settings.users.cannotEditProtected : undefined}
+                    >
+                      <RoleSelect
+                        value={user.role}
+                        onChange={(role) =>
+                          void handleUpdate(user, role, role === "teacher" ? "both" : user.sections)
+                        }
+                        disabled={isProtected || isBusy}
+                      />
                     </TableCell>
-                    <TableCell>{formatDate(user.createdAt)}</TableCell>
+                    <TableCell>
+                      {user.role === "teacher" ? (
+                        <span className="text-muted-foreground">
+                          {cs.settings.users.sectionsAllForTeachers}
+                        </span>
+                      ) : (
+                        <SectionAccessSelect
+                          value={user.sections}
+                          onChange={(sections) => void handleUpdate(user, user.role, sections)}
+                          disabled={isBusy}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>{formatDateTime(user.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       <Button
                         size="sm"
@@ -316,80 +540,13 @@ function UsersCard() {
           </Table>
         )}
       </CardContent>
+      <AddUserDialog open={isAddOpen} onOpenChange={setIsAddOpen} onCreated={fetchUsers} />
     </Card>
   )
 }
 
 export function SettingsPage() {
-  const { toast } = useToast()
-  const [settings, setSettings] = useState({
-    apiBaseUrl: "",
-    apiKey: "",
-  })
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const loadedSettings = await victorApi.getSettings()
-        setSettings({
-          apiBaseUrl: loadedSettings.apiBaseUrl || "",
-          apiKey: loadedSettings.apiKey || "",
-        })
-      } catch (_error) {
-        toast({
-          title: cs.settings.victor.error,
-          variant: "destructive",
-        })
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    loadSettings()
-  }, [toast])
-
-  const handleSave = async () => {
-    setIsSaving(true)
-    try {
-      await victorApi.setSettings({
-        apiBaseUrl: settings.apiBaseUrl.trim() || DEFAULT_API_BASE_URL,
-        apiKey: settings.apiKey.trim(),
-      })
-      toast({
-        title: cs.settings.victor.saved,
-        variant: "default",
-      })
-    } catch (_error) {
-      toast({
-        title: cs.settings.victor.error,
-        variant: "destructive",
-      })
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleReset = () => {
-    setSettings({
-      apiBaseUrl: DEFAULT_API_BASE_URL,
-      apiKey: "",
-    })
-  }
-
-  if (isLoading) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {cs.settings.title}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">{cs.settings.description}</p>
-        </div>
-        <p className="text-foreground-muted">{cs.common.loading}...</p>
-      </div>
-    )
-  }
+  const isAdmin = useAuthStore((s) => s.user?.isAdmin ?? false)
 
   return (
     <div className="space-y-6">
@@ -405,54 +562,14 @@ export function SettingsPage() {
       </div>
 
       <div>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings className="size-5" />
-              {cs.settings.victor.title}
-            </CardTitle>
-            <CardDescription>{cs.settings.victor.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="apiBaseUrl">{cs.settings.victor.apiBaseUrlLabel}</Label>
-              <Input
-                id="apiBaseUrl"
-                type="text"
-                value={settings.apiBaseUrl}
-                onChange={(e) => setSettings((prev) => ({ ...prev, apiBaseUrl: e.target.value }))}
-                placeholder={cs.settings.victor.apiBaseUrlPlaceholder}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="apiKey">{cs.settings.victor.apiKeyLabel}</Label>
-              <Input
-                id="apiKey"
-                type="password"
-                value={settings.apiKey}
-                onChange={(e) => setSettings((prev) => ({ ...prev, apiKey: e.target.value }))}
-                placeholder={cs.settings.victor.apiKeyPlaceholder}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={handleSave} disabled={isSaving}>
-                {isSaving ? cs.settings.victor.saving : cs.settings.victor.save}
-              </Button>
-              <Button variant="outline" onClick={handleReset} disabled={isSaving}>
-                {cs.common.cancel}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div>
         <InviteCodeCard />
       </div>
 
-      <div>
-        <UsersCard />
-      </div>
+      {isAdmin && (
+        <div>
+          <UsersCard />
+        </div>
+      )}
     </div>
   )
 }

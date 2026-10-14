@@ -1,5 +1,7 @@
 import { httpRequest } from "./http"
 import type {
+  AdminCreateUserInput,
+  AdminUpdateUserInput,
   ChangePasswordInput,
   CreateInviteCodeInput,
   ForgotPasswordInput,
@@ -7,6 +9,7 @@ import type {
   LoginInput,
   RegisterInput,
   ResetPasswordInput,
+  Section,
   User,
 } from "./types"
 
@@ -47,8 +50,15 @@ export const authApi = {
     httpRequest<void>("/api/auth/reset-password", input),
 
   /**
-   * Teacher-only: mint an invite code for the given role, superseding
-   * whatever code that role had before.
+   * Either role: remember the section the user lands in. Rejects a section
+   * outside the account's access. Returns the updated user.
+   */
+  setPreferredSection: (section: Section): Promise<User> =>
+    httpRequest<User>("/api/auth/preferred-section", { section }),
+
+  /**
+   * Teacher-only: mint a student invite code for the given sections,
+   * superseding whatever code that same scope had before.
    */
   createInviteCode: (input: CreateInviteCodeInput): Promise<InviteCode> =>
     httpRequest<InviteCode>("/api/auth/invite-code", input),
@@ -65,13 +75,24 @@ export const authApi = {
     httpRequest<void>("/api/auth/invite-codes/revoke", { code }),
 
   /**
-   * Teacher-only: every registered account (teachers and students).
+   * Admin-only: every registered account (teachers and students).
    */
   listUsers: (): Promise<User[]> => httpRequest<User[]>("/api/auth/users"),
 
   /**
-   * Teacher-only: delete an account (not your own — the server rejects
-   * that to avoid the last teacher locking themselves out).
+   * Admin-only: create an account directly — the only way to add a teacher.
+   */
+  createUser: (input: AdminCreateUserInput): Promise<User> =>
+    httpRequest<User>("/api/auth/users/create", input),
+
+  /**
+   * Admin-only: change an account's role and section access.
+   */
+  updateUser: (input: AdminUpdateUserInput): Promise<User> =>
+    httpRequest<User>("/api/auth/users/update", input),
+
+  /**
+   * Admin-only: delete an account (not your own, not the protected one).
    */
   deleteUser: (id: string): Promise<void> => httpRequest<void>("/api/auth/users/delete", { id }),
 }

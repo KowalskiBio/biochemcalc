@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import type { Section } from "@/lib/types"
 
 /**
  * UI Store for BioCal
@@ -13,15 +14,21 @@ interface UiState {
   // Current page for tracking active route
   currentPage: string
 
+  // Section of the last section-specific page visited this session (not
+  // persisted — the durable choice is `user.preferredSection` on the server)
+  lastSection: Section | null
+
   // Actions
   setTheme: (theme: "light" | "dark") => void
   toggleTheme: () => void
   setCurrentPage: (page: string) => void
+  setLastSection: (section: Section | null) => void
 }
 
-const defaultState: Pick<UiState, "theme" | "currentPage"> = {
+const defaultState: Pick<UiState, "theme" | "currentPage" | "lastSection"> = {
   theme: "light",
   currentPage: "/",
+  lastSection: null,
 }
 
 /**
@@ -57,6 +64,8 @@ export const useUiStore = create<UiState>()(
       },
 
       setCurrentPage: (page) => set({ currentPage: page }),
+
+      setLastSection: (section) => set({ lastSection: section }),
     }),
     {
       // Only persist theme preference

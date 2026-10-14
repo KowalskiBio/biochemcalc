@@ -1,5 +1,5 @@
-import { ArrowLeft, ChevronRight } from "lucide-react"
-import { type ReactNode, useState } from "react"
+import { ArrowLeft, ChevronRight, Pencil } from "lucide-react"
+import { type ReactNode, useCallback, useState } from "react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
@@ -11,8 +11,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { StructureView } from "@/components/ui/structure-view"
+import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
+import { ApiError } from "@/lib/api"
+import type { CategoryField } from "@/lib/biomolecules-api"
 import { getMoleculeCategory, MOLECULE_CATEGORIES, type MoleculeBase } from "@/lib/molecules"
 import { AMINO_ACIDS, type AminoAcid } from "@/lib/molecules/amino-acids"
 import {
@@ -22,14 +26,13 @@ import {
 } from "@/lib/molecules/nitrogen-bases"
 import { getCategoryQuizConfig } from "@/lib/molecules/quiz"
 import { cn } from "@/lib/utils"
-
-const CATEGORY_COPY: Record<string, { name: string; description: string }> =
-  cs.biomolekuly.categories
-
-/** Display strings for a category; falls back to the slug if cs is behind the data. */
-function getCategoryCopy(id: string): { name: string; description: string } {
-  return CATEGORY_COPY[id] ?? { name: id, description: "" }
-}
+import { useAuthStore } from "@/stores/auth-store"
+import {
+  builtInCategoryText,
+  useBiomoleculeNamesStore,
+  useCategoryDescriptions,
+  useCategoryNames,
+} from "@/stores/biomolecule-names-store"
 
 function moleculeCountLabel(count: number): string {
   return cs.biomolekuly.categoryCount.replace("{count}", String(count))
@@ -44,6 +47,8 @@ const cardButtonClass = cn(
 /** Hub: one card per molecule category registered in MOLECULE_CATEGORIES. */
 export function BiomoleculesPage() {
   const navigate = useNavigate()
+  const nameOf = useCategoryNames()
+  const descriptionOf = useCategoryDescriptions()
 
   return (
     <div className="space-y-6">
@@ -57,29 +62,26 @@ export function BiomoleculesPage() {
 
       {/* Category grid */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-        {MOLECULE_CATEGORIES.map((category) => {
-          const copy = getCategoryCopy(category.id)
-          return (
-            <button
-              key={category.id}
-              type="button"
-              onClick={() => navigate(`/biomolekuly/${category.id}`)}
-              className={cardButtonClass}
-            >
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <span className="font-semibold tracking-tight">{copy.name}</span>
-                <span className="font-mono tabular text-xs text-muted-foreground">
-                  {moleculeCountLabel(category.molecules.length)}
-                </span>
-                <span className="text-sm text-muted-foreground">{copy.description}</span>
-              </div>
-              <ChevronRight
-                className="ml-auto mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
-                strokeWidth={1.75}
-              />
-            </button>
-          )
-        })}
+        {MOLECULE_CATEGORIES.map((category) => (
+          <button
+            key={category.id}
+            type="button"
+            onClick={() => navigate(`/biomolekuly/${category.id}`)}
+            className={cardButtonClass}
+          >
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <span className="font-semibold tracking-tight">{nameOf(category.id)}</span>
+              <span className="font-mono tabular text-xs text-muted-foreground">
+                {moleculeCountLabel(category.molecules.length)}
+              </span>
+              <span className="text-sm text-muted-foreground">{descriptionOf(category.id)}</span>
+            </div>
+            <ChevronRight
+              className="ml-auto mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
+              strokeWidth={1.75}
+            />
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -296,15 +298,115 @@ function categoryContent(categoryId: string): ReactNode {
 }
 
 /** One category's browse view: header, shared molecule browser, quiz link. */
+const INLINE_TEXT_STYLES: Record<
+  CategoryField,
+  { display: string; input: string; maxLength: number }
+> = {
+  name: {
+    display: "text-2xl font-semibold tracking-tight text-foreground",
+    input: "text-2xl font-semibold h-auto py-0",
+    maxLength: 80,
+  },
+  description: {
+    display: "text-sm text-muted-foreground mt-1",
+    input: "text-sm h-auto py-0 mt-1",
+    maxLength: 300,
+  },
+}
+
+/**
+ * A category's name or description. Teachers edit it inline exactly like a
+ * topic title (`topic-detail-page.tsx`): click the text, Enter or blur saves,
+ * Escape cancels. The new text is stored server-side and shows for everyone.
+ */
+function InlineCategoryText({
+  categoryId,
+  field,
+  value,
+}: {
+  categoryId: string
+  field: CategoryField
+  value: string
+}) {
+  const { toast } = useToast()
+  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const update = useBiomoleculeNamesStore((s) => s.update)
+  const [isEditing, setIsEditing] = useState(false)
+  const [draft, setDraft] = useState("")
+  const [saving, setSaving] = useState(false)
+  const styles = INLINE_TEXT_STYLES[field]
+  const Tag = field === "name" ? "h1" : "p"
+
+  const handleSave = useCallback(async () => {
+    const trimmed = draft.trim()
+    if (!trimmed || trimmed === value) {
+      setIsEditing(false)
+      return
+    }
+    try {
+      setSaving(true)
+      // Typing the built-in text back drops the override instead of pinning
+      // a copy of it.
+      await update(
+        categoryId,
+        field,
+        trimmed === builtInCategoryText(categoryId, field) ? null : trimmed,
+      )
+      toast({ title: cs.topics.renameSuccess })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: cs.topics.renameError, description: message, variant: "destructive" })
+    } finally {
+      setSaving(false)
+      setIsEditing(false)
+    }
+  }, [categoryId, field, value, draft, update, toast])
+
+  if (!isTeacher) {
+    return <Tag className={styles.display}>{value}</Tag>
+  }
+
+  return isEditing ? (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={handleSave}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") handleSave()
+        if (e.key === "Escape") setIsEditing(false)
+      }}
+      disabled={saving}
+      maxLength={styles.maxLength}
+      autoFocus
+      className={styles.input}
+    />
+  ) : (
+    <Tag className={styles.display}>
+      <button
+        type="button"
+        className="cursor-pointer hover:ring-2 hover:ring-primary/30 rounded px-1 -mx-1 text-left"
+        onClick={() => {
+          setDraft(value)
+          setIsEditing(true)
+        }}
+      >
+        {value}
+        <Pencil className="size-3 inline ml-2 text-muted-foreground opacity-0 hover:opacity-100" />
+      </button>
+    </Tag>
+  )
+}
+
 export function BiomoleculesCategoryPage() {
   const { categoryId } = useParams<{ categoryId: string }>()
   const category = getMoleculeCategory(categoryId ?? "")
+  const nameOf = useCategoryNames()
+  const descriptionOf = useCategoryDescriptions()
 
   if (!category) {
     return <Navigate to="/biomolekuly" replace />
   }
 
-  const copy = getCategoryCopy(category.id)
   const content = categoryContent(category.id)
   const quizAvailable = getCategoryQuizConfig(category.id) !== undefined
 
@@ -329,7 +431,7 @@ export function BiomoleculesCategoryPage() {
       {/* Category header */}
       <div>
         <div className="flex items-baseline justify-between gap-4">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{copy.name}</h1>
+          <InlineCategoryText categoryId={category.id} field="name" value={nameOf(category.id)} />
           <div className="flex items-center gap-3">
             <span className="whitespace-nowrap font-mono tabular text-sm text-muted-foreground">
               {moleculeCountLabel(category.molecules.length)}
@@ -343,7 +445,11 @@ export function BiomoleculesCategoryPage() {
             )}
           </div>
         </div>
-        <p className="text-sm text-muted-foreground mt-1">{copy.description}</p>
+        <InlineCategoryText
+          categoryId={category.id}
+          field="description"
+          value={descriptionOf(category.id)}
+        />
       </div>
 
       {content}

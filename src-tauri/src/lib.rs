@@ -181,9 +181,6 @@ pub fn run() {
             commands::import_test1,
             commands::import_reparse_test1,
             commands::import_bulk_templates,
-            commands::get_victor_settings,
-            commands::set_victor_settings,
-            commands::chat_with_victor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

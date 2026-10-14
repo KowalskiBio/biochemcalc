@@ -1,5 +1,5 @@
 use crate::db::DbError;
-use crate::models::{InviteCode, Role};
+use crate::models::{InviteCode, Role, SectionAccess};
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -10,31 +10,36 @@ pub struct InviteCodeRepo;
 pub const INVITE_CODE_TTL_DAYS: i64 = 7;
 
 const SELECT_COLUMNS: &str =
-    "code, role, created_by, created_at, expires_at, revoked_at, use_count";
+    "code, role, created_by, created_at, expires_at, revoked_at, use_count, sections";
 
 impl InviteCodeRepo {
-    /// Mint a code for `role`, revoking whatever code that role had before —
-    /// only one invite per role is ever live, so handing out a new one
-    /// reliably invalidates the old one. Both steps share a transaction so a
-    /// failure can't leave a role with two active codes (or none).
+    /// Mint a code for `role` scoped to `sections`, revoking whatever code
+    /// that same (role, sections) pair had before — only one invite per scope
+    /// is ever live, so handing out a new one reliably invalidates the old
+    /// one, while codes for other scopes (another class) keep working. Both
+    /// steps share a transaction so a failure can't leave a scope with two
+    /// active codes (or none).
     pub fn create(
         conn: &Connection,
         code: &str,
         role: Role,
+        sections: SectionAccess,
         created_by: Option<Uuid>,
     ) -> Result<(), DbError> {
         let now = Utc::now();
         let tx = conn.unchecked_transaction()?;
         tx.execute(
-            "UPDATE invite_codes SET revoked_at = ?2 WHERE role = ?1 AND revoked_at IS NULL",
-            params![role.as_str(), now.to_rfc3339()],
+            "UPDATE invite_codes SET revoked_at = ?3
+             WHERE role = ?1 AND sections = ?2 AND revoked_at IS NULL",
+            params![role.as_str(), sections.as_str(), now.to_rfc3339()],
         )?;
         tx.execute(
-            "INSERT INTO invite_codes (code, role, created_by, created_at, expires_at, use_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            "INSERT INTO invite_codes (code, role, sections, created_by, created_at, expires_at, use_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
             params![
                 code,
                 role.as_str(),
+                sections.as_str(),
                 created_by,
                 now.to_rfc3339(),
                 (now + Duration::days(INVITE_CODE_TTL_DAYS)).to_rfc3339(),
@@ -102,6 +107,8 @@ fn row_to_invite(row: &rusqlite::Row) -> rusqlite::Result<InviteCode> {
     Ok(InviteCode {
         code: row.get(0)?,
         role,
+        sections: SectionAccess::parse(&row.get::<_, String>(7)?)
+            .unwrap_or(SectionAccess::Calculations),
         created_by: row.get(2)?,
         created_at: parse_dt(row.get::<_, String>(3)?),
         expires_at: parse_dt(row.get::<_, String>(4)?),
@@ -141,6 +148,8 @@ mod tests {
             created_at: Utc::now(),
             protected: false,
             email: None,
+            sections: crate::models::SectionAccess::Calculations,
+            preferred_section: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id
@@ -149,7 +158,14 @@ mod tests {
     #[test]
     fn create_then_find_valid() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "ABC123", Role::Student, None).expect("create");
+        InviteCodeRepo::create(
+            &conn,
+            "ABC123",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create");
 
         let found = InviteCodeRepo::find_valid(&conn, "ABC123")
             .expect("find")
@@ -167,7 +183,14 @@ mod tests {
     #[test]
     fn code_stays_valid_across_many_uses() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "CLASS", Role::Student, None).expect("create");
+        InviteCodeRepo::create(
+            &conn,
+            "CLASS",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create");
 
         for _ in 0..3 {
             InviteCodeRepo::record_use(&conn, "CLASS").expect("record use");
@@ -185,12 +208,26 @@ mod tests {
         assert_eq!(found.use_count, 3);
     }
 
-    /// Only one code per role is live: minting a new one kills its predecessor.
+    /// Only one code per scope is live: minting a new one kills its predecessor.
     #[test]
     fn creating_a_new_code_revokes_the_previous_one_for_that_role() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "OLD", Role::Student, None).expect("create old");
-        InviteCodeRepo::create(&conn, "NEW", Role::Student, None).expect("create new");
+        InviteCodeRepo::create(
+            &conn,
+            "OLD",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create old");
+        InviteCodeRepo::create(
+            &conn,
+            "NEW",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create new");
 
         assert!(
             InviteCodeRepo::find_valid(&conn, "OLD")
@@ -203,12 +240,75 @@ mod tests {
             .is_some());
     }
 
+    /// Different section scopes are independent — a biomolecules code
+    /// doesn't kill a calculations one, so two classes can register at once.
+    #[test]
+    fn different_section_scopes_have_independent_codes() {
+        let conn = setup_conn();
+        InviteCodeRepo::create(
+            &conn,
+            "CALC",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create calc");
+        InviteCodeRepo::create(
+            &conn,
+            "BIO",
+            Role::Student,
+            SectionAccess::Biomolecules,
+            None,
+        )
+        .expect("create bio");
+        InviteCodeRepo::create(&conn, "BOTH", Role::Student, SectionAccess::Both, None)
+            .expect("create both");
+        InviteCodeRepo::create(
+            &conn,
+            "BIO2",
+            Role::Student,
+            SectionAccess::Biomolecules,
+            None,
+        )
+        .expect("create bio2");
+
+        let mut active: Vec<(String, SectionAccess)> = InviteCodeRepo::list_active(&conn)
+            .expect("list")
+            .into_iter()
+            .map(|c| (c.code, c.sections))
+            .collect();
+        active.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            active,
+            vec![
+                ("BIO2".to_string(), SectionAccess::Biomolecules),
+                ("BOTH".to_string(), SectionAccess::Both),
+                ("CALC".to_string(), SectionAccess::Calculations),
+            ],
+            "only the superseded same-scope code is revoked"
+        );
+    }
+
     /// Roles are independent — issuing a student code leaves the teacher one alone.
     #[test]
     fn roles_have_independent_codes() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "TEACH", Role::Teacher, None).expect("create teacher");
-        InviteCodeRepo::create(&conn, "STUD", Role::Student, None).expect("create student");
+        InviteCodeRepo::create(
+            &conn,
+            "TEACH",
+            Role::Teacher,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create teacher");
+        InviteCodeRepo::create(
+            &conn,
+            "STUD",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create student");
 
         assert!(InviteCodeRepo::find_valid(&conn, "TEACH")
             .expect("find")
@@ -224,7 +324,14 @@ mod tests {
     #[test]
     fn revoked_code_is_no_longer_valid_or_listed() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "KILLME", Role::Student, None).expect("create");
+        InviteCodeRepo::create(
+            &conn,
+            "KILLME",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create");
         InviteCodeRepo::revoke(&conn, "KILLME").expect("revoke");
 
         assert!(InviteCodeRepo::find_valid(&conn, "KILLME")
@@ -236,7 +343,14 @@ mod tests {
     #[test]
     fn revoking_twice_is_not_found() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "GONE", Role::Student, None).expect("create");
+        InviteCodeRepo::create(
+            &conn,
+            "GONE",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create");
         InviteCodeRepo::revoke(&conn, "GONE").expect("revoke");
 
         let result = InviteCodeRepo::revoke(&conn, "GONE");
@@ -246,7 +360,14 @@ mod tests {
     #[test]
     fn expired_code_is_rejected_and_not_listed() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "STALE", Role::Student, None).expect("create");
+        InviteCodeRepo::create(
+            &conn,
+            "STALE",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create");
         // Backdate the expiry rather than sleeping.
         conn.execute(
             "UPDATE invite_codes SET expires_at = ?2 WHERE code = ?1",

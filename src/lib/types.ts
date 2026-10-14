@@ -573,30 +573,6 @@ export interface ValidationResult {
   errors: FieldError[]
 }
 
-export interface VictorSettings {
-  apiBaseUrl: string
-  apiKey: string
-}
-
-export interface VictorMessage {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  timestamp: string
-}
-
-export interface VictorRequest {
-  question: string
-  history: VictorMessage[]
-}
-
-export interface VictorResponse {
-  calculation: string
-  solution: string
-  explanation: string
-  variables: Array<{ symbol: string; value: number; unit: string }>
-}
-
 export interface VariableHistoryEntry {
   id: string
   variableId: string
@@ -706,6 +682,12 @@ export interface ExportProjektInput {
 
 export type Role = "teacher" | "student"
 
+/** One app section — what the user is currently learning in. */
+export type Section = "calculations" | "biomolecules"
+
+/** Which sections an account (or an invite code) can reach. */
+export type SectionAccess = Section | "both"
+
 export interface User {
   id: string
   username: string
@@ -717,11 +699,19 @@ export interface User {
   /** Set only if the account registered with one. Enables self-service
    * password recovery; an account without one has no recovery path. */
   email: string | null
+  /** Sections this account can reach — always "both" for teachers. */
+  sections: SectionAccess
+  /** The section a user with access to both last chose; null until they pick. */
+  preferredSection: Section | null
+  /** The protected bootstrap account — the only one that manages users. */
+  isAdmin: boolean
 }
 
 export interface InviteCode {
   code: string
   role: Role
+  /** Which sections accounts registered with this code can reach. */
+  sections: SectionAccess
   createdBy: string | null
   createdAt: string
   expiresAt: string
@@ -743,7 +733,22 @@ export interface RegisterInput {
 }
 
 export interface CreateInviteCodeInput {
+  sections: SectionAccess
+}
+
+export interface AdminCreateUserInput {
+  username: string
+  password: string
+  email?: string
   role: Role
+  /** Ignored for teachers, who always reach every section. */
+  sections: SectionAccess
+}
+
+export interface AdminUpdateUserInput {
+  id: string
+  role: Role
+  sections: SectionAccess
 }
 
 export interface ForgotPasswordInput {

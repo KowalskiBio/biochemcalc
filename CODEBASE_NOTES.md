@@ -48,24 +48,24 @@ Key facts:
 | Path | Role |
 |---|---|
 | `engine/` | `formula.rs` (evalexpr-based eval + molar masses), `generator.rs` (~5,900 lines: sampling, rounding, distractors, constraints), `variable_extractor.rs`, `answer_targets.rs`, `export_writer.rs` (IS MU `.txt`) |
-| `db/` | `schema.rs` (~2,410 lines, **42 idempotent migrations**, `CURRENT_USER_VERSION = 42`) + `repos/` (22 repos, one per entity) |
-| `commands/` | `crud.rs` (~3,110 lines), `generation.rs`, `importer.rs`, `victor.rs`; HTTP-only: `auth.rs`, `practice.rs`, `test_session.rs`, `streak_run.rs`, `reports.rs` |
-| `http/` | axum router + SPA fallback, DB-backed session-cookie middleware with role gating, `routes/{auth,cmd,student}.rs` |
+| `db/` | `schema.rs` (~2,410 lines, **46 idempotent migrations**, `CURRENT_USER_VERSION = 46`) + `repos/` (22 repos, one per entity) |
+| `commands/` | `crud.rs` (~3,110 lines), `generation.rs`, `importer.rs`; HTTP-only: `auth.rs`, `practice.rs`, `test_session.rs`, `streak_run.rs`, `reports.rs` |
+| `http/` | axum router + SPA fallback, DB-backed session-cookie middleware with role gating (`require_teacher`, `require_admin`, `require_calculations`), `routes/{auth,cmd,student}.rs` |
 | `bin/` | `biochemcalc-server` (web entrypoint, env-configured), `import_bulk_json`, `reparse_test1` |
 | `email.rs` | SMTP (lettre) password reset; `Disabled` mode just logs the link |
-| `lib.rs` | Tauri app: registers **73 commands**, seeds constants/atomic weights, file logger + panic hook |
+| `lib.rs` | Tauri app: registers **70 commands**, seeds constants/atomic weights, file logger + panic hook |
 
 Notable deps (Rust): `evalexpr` (formula eval — *not* hand-rolled on the Rust side),
-`rusqlite` bundled, `axum` 0.8, `argon2`, `lettre`, `reqwest` (Victor LLM chat).
+`rusqlite` bundled, `axum` 0.8, `argon2`, `lettre`.
 
 ### Frontend layout (`src/`)
 
 | Path | Role |
 |---|---|
 | `main.tsx` → `App.tsx` | Entry; `App.tsx:109` routes; role split `RequireAuth` → `TeacherRoutes`/`StudentRoutes` |
-| `pages/` | ~30 screens (teacher under `AppShell`: topics/sets/databaze/vzorce/bulk-import/constants/history/hlaseni/leaderboard/victor/settings; student under `StudentShell`: practice/test/ucen/mistr/results/leaderboard/settings) |
+| `pages/` | ~30 screens (teacher under `AppShell`: topics/sets/databaze/vzorce/bulk-import/constants/history/hlaseni/leaderboard/settings + biomolekuly; student under `StudentShell`: practice/test/ucen/mistr/results/leaderboard/settings + biomolekuly) |
 | `components/` | Feature dialogs + layout shells + shadcn `ui/` primitives. **`questions/question-detail-dialog.tsx` (~125 KB) is the largest, most critical, untested file** — the teacher's whole editing surface |
-| `stores/` | Zustand only: `auth-store` (cookie-based, not persisted), `databaze-store` (**persisted localStorage, client-local, NOT server-backed**), `ui-store` (persisted theme), `drag-store` (carry), `generation-store` (per-set variants + difficulty) |
+| `stores/` | Zustand only: `auth-store` (cookie-based, not persisted), `databaze-store` (**persisted localStorage, client-local, NOT server-backed**), `ui-store` (persisted theme; in-memory `lastSection`), `drag-store` (carry), `generation-store` (per-set variants + difficulty) |
 | `lib/` | API clients (`api.ts`, `student-api.ts`, `auth-api.ts`, `reports-api.ts` → `http.ts`), plus the mirror engine: `math-utils.ts` (**1,621 lines — tokenizer/parser/AST evaluator/LaTeX**), `chemical-formula-parser.ts`, `periodic-table-data.ts` (canonical atomic weights), bulk-import/verify, `formula-checker.ts`, `render-question-text.tsx`, `types.ts` (**must match Rust models exactly**, header comment `:2`) |
 | `i18n/cs.ts` | Single Czech string dictionary, imported directly as `cs` — **no i18n runtime/provider**. All new UI text goes here |
 
@@ -174,7 +174,7 @@ first, else `design-system/MASTER.md` (v2.1.0) is authoritative.
 11. **Session cookie is not `Secure` yet** (noted in `deploy/biochemcalc.service`) — be
     careful before claiming HTTPS-only cookies work.
 12. **No schema change without migration number + version bump**, and migrations must be
-    idempotent (the existing 42 are; live DB has real teacher data — backups mandatory).
+    idempotent (the existing 46 are; live DB has real teacher data — backups mandatory).
 
 ## 8b. Biomolekuly module (added 2026-10-12)
 
@@ -243,6 +243,53 @@ Curated, frontend-only, no DB or backend changes.
   Frontend auth is HTTP-only (`/api/auth/*`); the Tauri webview also needs the local
   server running in dev (Vite proxies `/api` → :8080) — no in-process server in lib.rs.
   PS1 script must stay ASCII-only (PS 5.1 ANSI parse gotcha: UTF-8 dashes break strings).
+
+## 8c. App sections, scoped invite codes, admin (added 2026-10-14)
+
+The app is split into **sections**: laboratory calculations and Biomolekuly (more later —
+the switcher shows a disabled "We are cooking…" teaser). Victor (LLM chat) was removed
+entirely (frontend, `commands/victor.rs`, routes, `reqwest`, the dead `settings_repo`).
+
+- **Access** (`models::SectionAccess` = calculations | biomolecules | both; migration v43):
+  a student's `users.sections` is copied from the invite code they registered with;
+  teachers always read as `both` (`UserRecord::effective_sections`). Pre-v43 accounts
+  and codes are calculations-only.
+- **Invite codes are student-only** with a section scope; one live code per
+  (role, sections) — minting replaces only the same-scope code. v43 revoked live
+  teacher codes; `do_register` rejects any teacher code.
+- **Admin** = the `protected` bootstrap account (`User.isAdmin`). `/api/auth/users*`
+  (list/create/update/delete) sit behind `require_admin`; creating a user there is the
+  only way to add a teacher. The protected account can't be re-roled or deleted.
+- **Preferred section** (`users.preferred_section`, `POST /api/auth/preferred-section`)
+  is saved server-side whenever the user picks in the switcher or the one-time
+  `SectionPicker` (shown when access is `both` and nothing is saved yet — no hard-coded
+  default). Single-section users see the switcher locked with an explanation.
+- **Server gate**: `/api/student/*` practice/test/streak/report routes need calculations
+  access (`require_calculations`); `leaderboard`/`streak-leaderboard` are shared.
+- **Frontend**: `src/hooks/use-section.ts` (`useSection`: URL → section, shared pages
+  `/leaderboard` `/settings` `/help` fall back to the last section then the saved
+  preference; `useLandingRedirect`), `components/layout/section-switcher.tsx` (teacher
+  top bar, student sidebar header), `section-picker.tsx`. Sidebars pick their nav list
+  per section; `StudentRoutes` only registers the routes the student's access allows.
+- **Category name/description edits** (migration v44, `biomolecule_category_overrides`,
+  nullable `name`/`description` per slug): teachers edit both for everyone, inline on the
+  category page exactly like a topic title (`InlineCategoryText` in
+  `biomolecules-page.tsx`); typing the built-in text back = reset (row dropped when both
+  are NULL). `/api/biomolecules/category-overrides` (any user) + `/update-category`
+  {categoryId, field, value} (teacher). Frontend reads the text only via
+  `useCategoryNames()` / `useCategoryDescriptions()` (`stores/biomolecule-names-store.ts`)
+  — never `cs.biomolekuly.categories[id]` directly.
+  Migration v46 repairs DBs that ran an interim v44 (`biomolecule_category_names`):
+  creates the overrides table, copies names over, drops the old table.
+- **Per-section leaderboard**: `/leaderboard` renders the board of the current section.
+  Calculations = practice attempts + streak boards (idle students listed only if they
+  have calculations access). Biomolekuly = migration v45 `biomolecule_quiz_results`,
+  one row per finished quiz, **client-graded** (the quiz runs in the browser), so the
+  server only sanity-checks the score (≤ 100 questions, correct ≤ total).
+  `/api/biomolecules/record-quiz-result` (`require_biomolecules`) +
+  `/api/biomolecules/leaderboard` (any user, optional `categoryId`).
+- TODO(biomolekuly-launch) in `App.tsx`: pop-up inviting calculations-only students to
+  try Biomolekuly once it's ready.
 
 ## 9. Feature-addition checklist
 

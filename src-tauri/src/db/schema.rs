@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 42;
+const CURRENT_USER_VERSION: u32 = 46;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -216,6 +216,26 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 42 {
         apply_migration_v42(conn)?;
         conn.pragma_update(None, "user_version", "42")?;
+    }
+
+    if user_version < 43 {
+        apply_migration_v43(conn)?;
+        conn.pragma_update(None, "user_version", "43")?;
+    }
+
+    if user_version < 44 {
+        apply_migration_v44(conn)?;
+        conn.pragma_update(None, "user_version", "44")?;
+    }
+
+    if user_version < 45 {
+        apply_migration_v45(conn)?;
+        conn.pragma_update(None, "user_version", "45")?;
+    }
+
+    if user_version < 46 {
+        apply_migration_v46(conn)?;
+        conn.pragma_update(None, "user_version", "46")?;
     }
 
     Ok(())
@@ -1365,6 +1385,102 @@ fn apply_migration_v42(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// App sections (`models::SectionAccess`): a student invite code now scopes
+/// which parts of the app its registrants get — laboratory calculations,
+/// biomolecules, or both — and the account inherits that scope. Every
+/// pre-v43 account and code reads as calculations-only, which is all a
+/// student could reach before Biomolekuly became its own section.
+/// `preferred_section` is the section a user with access to both last chose
+/// (NULL until they pick one).
+///
+/// Teachers are no longer invited by code at all (only the admin creates
+/// teacher accounts), so any still-live teacher code is retired here.
+fn apply_migration_v43(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE invite_codes ADD COLUMN sections TEXT NOT NULL DEFAULT 'calculations'
+            CHECK (sections IN ('calculations', 'biomolecules', 'both'));
+        ALTER TABLE users ADD COLUMN sections TEXT NOT NULL DEFAULT 'calculations'
+            CHECK (sections IN ('calculations', 'biomolecules', 'both'));
+        ALTER TABLE users ADD COLUMN preferred_section TEXT
+            CHECK (preferred_section IN ('calculations', 'biomolecules'));
+        ",
+    )?;
+    conn.execute(
+        "UPDATE invite_codes SET revoked_at = ?1 WHERE role = 'teacher' AND revoked_at IS NULL",
+        rusqlite::params![chrono::Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Teacher-edited display text for Biomolekuly categories. The categories
+/// themselves are frontend data (`src/lib/molecules`), so this only stores
+/// overrides keyed by the category's route slug; a NULL column (or no row)
+/// means the built-in text from `cs.biomolekuly.categories`.
+fn apply_migration_v44(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_category_overrides (
+            category_id TEXT PRIMARY KEY NOT NULL,
+            name TEXT,
+            description TEXT,
+            updated_at TEXT NOT NULL,
+            updated_by BLOB REFERENCES users(id) ON DELETE SET NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+/// Finished Biomolekuly quizzes, for that section's own leaderboard. The
+/// quiz is generated and graded in the browser (its molecule data is
+/// frontend-only), so a row is the client's reported score for one finished
+/// session — `category_id` is the category's route slug.
+fn apply_migration_v45(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_quiz_results (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            category_id TEXT NOT NULL,
+            correct_count INTEGER NOT NULL CHECK (correct_count >= 0),
+            total_count INTEGER NOT NULL CHECK (total_count >= correct_count),
+            finished_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_biomolecule_quiz_results_user
+        ON biomolecule_quiz_results(user_id);
+        ",
+    )?;
+    Ok(())
+}
+
+/// Repairs databases migrated by an interim v44 that created the name-only
+/// `biomolecule_category_names` table instead of today's
+/// `biomolecule_category_overrides` (v44 itself never re-runs on them).
+/// Ensures the overrides table exists, carries any renamed categories over,
+/// and drops the old table. A no-op on databases that ran the final v44.
+fn apply_migration_v46(conn: &Connection) -> Result<(), rusqlite::Error> {
+    apply_migration_v44(conn)?;
+    let has_old_table: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'biomolecule_category_names')",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_old_table {
+        conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO biomolecule_category_overrides
+                (category_id, name, description, updated_at, updated_by)
+            SELECT category_id, name, NULL, updated_at, updated_by
+            FROM biomolecule_category_names;
+            DROP TABLE biomolecule_category_names;
+            ",
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2406,5 +2522,125 @@ mod tests {
             .expect("seeded row readable after v42");
         assert_eq!(sd_allowed, 5.0, "the old SD must be untouched");
         assert_eq!(sd_no_go, None, "a pre-v42 row reads as no no-go set");
+    }
+
+    #[test]
+    fn v43_scopes_existing_accounts_and_codes_to_calculations_and_retires_teacher_codes() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        apply_migration_v15(&conn).expect("v15");
+        apply_migration_v16(&conn).expect("v16");
+        apply_migration_v17(&conn).expect("v17");
+        apply_migration_v37(&conn).expect("v37");
+        conn.pragma_update(None, "user_version", "42")
+            .expect("set version");
+
+        conn.execute_batch(
+            "
+            INSERT INTO users (id, username, password_hash, role, created_at) VALUES
+                (randomblob(16), 'old-student', 'h', 'student', '2026-01-01T00:00:00Z');
+            INSERT INTO invite_codes (code, role, created_by, created_at, expires_at, use_count) VALUES
+                ('TEACH', 'teacher', NULL, '2026-01-01T00:00:00Z', '2999-01-01T00:00:00Z', 0),
+                ('STUD', 'student', NULL, '2026-01-01T00:00:00Z', '2999-01-01T00:00:00Z', 0);
+            ",
+        )
+        .expect("seed pre-v43 rows");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (sections, preferred): (String, Option<String>) = conn
+            .query_row(
+                "SELECT sections, preferred_section FROM users WHERE username = 'old-student'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("old student readable");
+        assert_eq!(sections, "calculations");
+        assert_eq!(preferred, None);
+
+        let code_sections: String = conn
+            .query_row(
+                "SELECT sections FROM invite_codes WHERE code = 'STUD'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("student code readable");
+        assert_eq!(code_sections, "calculations");
+
+        let teacher_revoked: Option<String> = conn
+            .query_row(
+                "SELECT revoked_at FROM invite_codes WHERE code = 'TEACH'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("teacher code readable");
+        assert!(
+            teacher_revoked.is_some(),
+            "live teacher codes must be retired"
+        );
+        let student_revoked: Option<String> = conn
+            .query_row(
+                "SELECT revoked_at FROM invite_codes WHERE code = 'STUD'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("student code readable");
+        assert!(student_revoked.is_none(), "student codes stay live");
+
+        assert!(
+            conn.execute(
+                "UPDATE users SET sections = 'everything' WHERE username = 'old-student'",
+                [],
+            )
+            .is_err(),
+            "sections must be constrained"
+        );
+    }
+
+    #[test]
+    fn v46_moves_interim_v44_names_into_the_overrides_table() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // A database that ran the interim v44: name-only table, no overrides
+        // table, version already past 44. v15 supplies the `users` table the
+        // overrides table references.
+        apply_migration_v15(&conn).expect("v15");
+        conn.execute_batch(
+            "
+            CREATE TABLE biomolecule_category_names (
+                category_id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                updated_by BLOB
+            );
+            INSERT INTO biomolecule_category_names VALUES
+                ('aminokyseliny', 'AK', '2026-10-15T00:00:00Z', NULL);
+            ",
+        )
+        .expect("seed interim table");
+        conn.pragma_update(None, "user_version", "45")
+            .expect("set version");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (name, description): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT name, description FROM biomolecule_category_overrides
+                 WHERE category_id = 'aminokyseliny'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("rename carried over");
+        assert_eq!(name.as_deref(), Some("AK"));
+        assert_eq!(description, None);
+
+        let old_left: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'biomolecule_category_names')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert!(!old_left, "the interim table is dropped");
     }
 }

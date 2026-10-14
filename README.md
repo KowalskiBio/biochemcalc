@@ -123,7 +123,8 @@ BioCal turns a biochemistry calculation into a **template**: question text with 
 
 ### Accounts
 
-- **Teacher** and **student** roles on the web server. Students register with an invite code; email is optional and only used for self-service password reset.
+- **Teacher** and **student** roles on the web server. Students register with an invite code that a teacher scopes to laboratory calculations, Biomolekuly, or both; email is optional and only used for self-service password reset. Teacher accounts are created only by the admin (the bootstrap account), who manages all users and roles.
+- The app is split into **sections** (laboratory calculations, Biomolekuly), switched from a menu; the choice is remembered per account.
 - Passwords are hashed with **Argon2**; sessions use cookies; reset emails go out over SMTP (STARTTLS).
 
 ---

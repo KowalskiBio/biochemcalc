@@ -1,16 +1,43 @@
 import { cva } from "class-variance-authority"
-import { Bot, LogOut } from "lucide-react"
+import { LogOut } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
+import { SectionSwitcher } from "@/components/layout/section-switcher"
+import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
 import { categoriesApi, setsApi, topicsApi } from "@/lib/api"
+import { getMoleculeCategory } from "@/lib/molecules"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
+import { useCategoryNames } from "@/stores/biomolecule-names-store"
 import { useCarryStore } from "@/stores/drag-store"
 
 interface BreadcrumbItem {
   path: string
   label: string
+}
+
+const biomoleculesRoot: BreadcrumbItem = { path: "/biomolekuly", label: cs.navigation.biomolekuly }
+
+/** Biomolekuly hub, category, and quiz pages — names come from `nameOf`. */
+function biomoleculesBreadcrumbs(
+  path: string,
+  nameOf: (categoryId: string) => string,
+): BreadcrumbItem[] | null {
+  const match = path.match(/^\/biomolekuly(?:\/([^/]+))?(\/procvicovani)?\/?$/)
+  if (!match) return null
+  const [, categoryId, quiz] = match
+  const crumbs = [biomoleculesRoot]
+  if (categoryId && getMoleculeCategory(categoryId)) {
+    crumbs.push({ path: `/biomolekuly/${categoryId}`, label: nameOf(categoryId) })
+    if (quiz) {
+      crumbs.push({
+        path: `/biomolekuly/${categoryId}/procvicovani`,
+        label: cs.biomolekuly.quiz.title,
+      })
+    }
+  }
+  return crumbs
 }
 
 const topBarVariants = cva(
@@ -45,10 +72,6 @@ const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
     { path: "/topics", label: cs.navigation.topics },
     { path: "/help", label: cs.navigation.help },
   ],
-  "/victor": [
-    { path: "/topics", label: cs.navigation.topics },
-    { path: "/victor", label: cs.navigation.victor },
-  ],
   "/leaderboard": [
     { path: "/topics", label: cs.navigation.topics },
     { path: "/leaderboard", label: cs.navigation.leaderboard },
@@ -58,6 +81,8 @@ const staticRouteBreadcrumbs: Record<string, BreadcrumbItem[]> = {
 export function TopBar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { section } = useSection()
+  const categoryNameOf = useCategoryNames()
   const logout = useAuthStore((s) => s.logout)
   const isCarrying = useCarryStore((s) => s.isCarrying)
   const [currentTime, setCurrentTime] = useState<string>("")
@@ -113,8 +138,21 @@ export function TopBar() {
   const loadDynamicBreadcrumbs = useCallback(async () => {
     const path = location.pathname
 
+    const bioCrumbs = biomoleculesBreadcrumbs(path, categoryNameOf)
+    if (bioCrumbs) {
+      setBreadcrumbs(bioCrumbs)
+      return
+    }
+
     if (staticRouteBreadcrumbs[path]) {
-      setBreadcrumbs(staticRouteBreadcrumbs[path])
+      // Shared pages (settings, leaderboard) root at whichever section the
+      // user is in, rather than always at Témata.
+      const [root, ...rest] = staticRouteBreadcrumbs[path]
+      setBreadcrumbs(
+        section === "biomolecules" && rest.length > 0
+          ? [biomoleculesRoot, ...rest]
+          : [root, ...rest],
+      )
       return
     }
 
@@ -122,14 +160,7 @@ export function TopBar() {
       const topicMatch = path.match(/^\/topics\/([^/]+)$/)
       const topicSetMatch = path.match(/^\/topics\/([^/]+)\/sets\/([^/]+)$/)
       const setMatch = path.match(/^\/sets\/([^/]+)$/)
-      const victorMatch = path.match(/^\/victor($|\/)/)
-
-      if (victorMatch) {
-        setBreadcrumbs([
-          { path: "/topics", label: cs.navigation.topics },
-          { path: "/victor", label: cs.navigation.victor },
-        ])
-      } else if (topicMatch) {
+      if (topicMatch) {
         const topicId = topicMatch[1]
         const topic = await topicsApi.get(topicId)
         setBreadcrumbs([
@@ -189,7 +220,7 @@ export function TopBar() {
         ],
       )
     }
-  }, [location.pathname])
+  }, [location.pathname, section, categoryNameOf])
 
   useEffect(() => {
     loadDynamicBreadcrumbs()
@@ -241,16 +272,9 @@ export function TopBar() {
         </div>
       </div>
 
-      {/* Right side - Victor button and clock */}
+      {/* Right side - section switcher, logout and clock */}
+      <SectionSwitcher tone="light" />
       <div className="hidden sm:flex items-center gap-4">
-        <Link
-          to="/victor"
-          className="p-2 rounded-[4px] border border-border hover:bg-muted"
-          aria-label={cs.navigation.victor}
-          title={cs.navigation.victor}
-        >
-          <Bot className="size-5" />
-        </Link>
         <button
           type="button"
           onClick={handleLogout}

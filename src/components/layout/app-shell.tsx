@@ -1,8 +1,10 @@
 import { cva } from "class-variance-authority"
 import { type ReactNode, useEffect } from "react"
 import { CarryOverlay } from "@/components/layout/carry-overlay"
+import { SectionPicker } from "@/components/layout/section-picker"
 import { PageTransition } from "@/components/ui/page-transition"
 import { Toaster } from "@/components/ui/toaster"
+import { useLandingRedirect, useSection } from "@/hooks/use-section"
 import { cn } from "@/lib/utils"
 import { useCarryStore } from "@/stores/drag-store"
 
@@ -21,6 +23,9 @@ export function AppShell({ children }: AppShellProps) {
     root.style.setProperty("--sidebar-width", "232px")
     root.style.setProperty("--top-bar-height", "56px")
   }, [])
+
+  const { needsChoice } = useSection()
+  useLandingRedirect()
 
   const isCarrying = useCarryStore((s) => s.isCarrying)
   const updateMouse = useCarryStore((s) => s.updateMouse)
@@ -41,6 +46,15 @@ export function AppShell({ children }: AppShellProps) {
       document.body.style.cursor = ""
     }
   }, [isCarrying, updateMouse, endCarry])
+
+  if (needsChoice) {
+    return (
+      <>
+        <SectionPicker />
+        <Toaster />
+      </>
+    )
+  }
 
   return (
     <div className="relative flex min-h-screen w-full">

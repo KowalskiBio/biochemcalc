@@ -16,16 +16,22 @@ import {
 import type React from "react"
 import { type ReactNode, useEffect, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
+import { SectionPicker } from "@/components/layout/section-picker"
+import { SectionSwitcher } from "@/components/layout/section-switcher"
 import { StudentFooter } from "@/components/layout/student-footer"
 import { PageTransition } from "@/components/ui/page-transition"
 import { Toaster } from "@/components/ui/toaster"
+import { useLandingRedirect, useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
+import type { Section } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
 import { useUiStore } from "@/stores/ui-store"
 
 /**
- * The student's whole world: four destinations and nothing else. Separate
+ * The student's whole world: a handful of destinations per section and
+ * nothing else — which section(s) they can reach comes from the invite code
+ * they registered with (`user.sections`). Separate
  * from the teacher `AppShell`/`Sidebar` on purpose — that nav is entirely
  * content-authoring links that 403 for a student account (`/api/cmd/*` is
  * teacher-only), so sharing one component would mean maintaining a list of
@@ -37,33 +43,43 @@ interface NavItem {
   label: string
 }
 
-const navItems: NavItem[] = [
-  {
-    path: "/test",
-    icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.test,
-  },
-  {
-    path: "/",
-    icon: <Target className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.practice,
-  },
-  {
-    path: "/biomolekuly",
-    icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.biomolekuly,
-  },
-  {
-    path: "/leaderboard",
-    icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.leaderboard,
-  },
-  {
-    path: "/settings",
-    icon: <Settings className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.settings,
-  },
-]
+const leaderboardNavItem: NavItem = {
+  path: "/leaderboard",
+  icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
+  label: cs.navigation.leaderboard,
+}
+
+const settingsNavItem: NavItem = {
+  path: "/settings",
+  icon: <Settings className="size-[18px]" strokeWidth={1.75} />,
+  label: cs.navigation.settings,
+}
+
+const navBySection: Record<Section, NavItem[]> = {
+  calculations: [
+    {
+      path: "/test",
+      icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
+      label: cs.navigation.test,
+    },
+    {
+      path: "/",
+      icon: <Target className="size-[18px]" strokeWidth={1.75} />,
+      label: cs.navigation.practice,
+    },
+    leaderboardNavItem,
+    settingsNavItem,
+  ],
+  biomolecules: [
+    {
+      path: "/biomolekuly",
+      icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
+      label: cs.navigation.biomolekuly,
+    },
+    leaderboardNavItem,
+    settingsNavItem,
+  ],
+}
 
 const sidebarVariants = cva(
   "flex flex-col h-full bg-[hsl(var(--sidebar))] border-r border-black/20 text-[hsl(var(--sidebar-foreground))] w-[var(--sidebar-width)]",
@@ -102,6 +118,8 @@ function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const darkMode = useUiStore((state) => state.theme === "dark")
   const logout = useAuthStore((s) => s.logout)
   const username = useAuthStore((s) => s.user?.username)
+  const { section } = useSection()
+  const navItems = navBySection[section]
 
   const handleLogout = async () => {
     onNavigate?.()
@@ -123,6 +141,10 @@ function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
             {username}
           </span>
         </div>
+      </div>
+
+      <div className="border-b border-white/5 p-3">
+        <SectionSwitcher tone="sidebar" onSwitch={onNavigate} />
       </div>
 
       <nav className="flex-1 p-3">
@@ -177,11 +199,22 @@ function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 export function StudentShell({ children }: { children: ReactNode }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+  const { needsChoice } = useSection()
+  useLandingRedirect()
 
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty("--sidebar-width", "232px")
   }, [])
+
+  if (needsChoice) {
+    return (
+      <>
+        <SectionPicker />
+        <Toaster />
+      </>
+    )
+  }
 
   return (
     <div className="relative flex min-h-screen w-full">

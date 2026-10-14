@@ -104,6 +104,8 @@ mod tests {
             created_at: Utc::now(),
             protected: false,
             email: Some(format!("{}@example.com", Uuid::new_v4())),
+            sections: crate::models::SectionAccess::Calculations,
+            preferred_section: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id

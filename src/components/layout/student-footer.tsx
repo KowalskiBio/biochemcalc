@@ -28,6 +28,14 @@ export function StudentFooter() {
           rejtarv@sci.muni.cz
         </a>
       </p>
+      <p>
+        {cs.student.footerAuthorAnd} <strong className="text-foreground">Mgr. David Novák</strong>
+        {" · "}
+        {cs.student.footerContact}:{" "}
+        <a href="mailto:davidnovak@mail.muni.cz" className="text-primary hover:underline">
+          davidnovak@mail.muni.cz
+        </a>
+      </p>
       <p>{cs.student.footerBugs}</p>
       <p>
         <a

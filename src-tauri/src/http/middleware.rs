@@ -8,7 +8,7 @@
 
 use crate::db::repos::{SessionRepo, UserRepo};
 use crate::db::AppState;
-use crate::models::{Role, User};
+use crate::models::{Role, Section, User};
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
@@ -105,6 +105,49 @@ pub async fn require_teacher(req: Request, next: Next) -> Response {
     match req.extensions().get::<CurrentUser>() {
         Some(CurrentUser(user)) if user.role == Role::Teacher => next.run(req).await,
         Some(_) => error_response(StatusCode::FORBIDDEN, "forbidden", "Teacher role required"),
+        None => unauthorized(),
+    }
+}
+
+/// Must run *after* [`require_auth`]. The admin is the protected bootstrap
+/// account (`User::is_admin`) — the only account that manages users.
+pub async fn require_admin(req: Request, next: Next) -> Response {
+    match req.extensions().get::<CurrentUser>() {
+        Some(CurrentUser(user)) if user.is_admin => next.run(req).await,
+        Some(_) => error_response(StatusCode::FORBIDDEN, "forbidden", "Admin required"),
+        None => unauthorized(),
+    }
+}
+
+/// Must run *after* [`require_auth`]. Gates the practice/test/streak API to
+/// accounts whose section access includes laboratory calculations
+/// (teachers always pass — their access is always `Both`).
+pub async fn require_calculations(req: Request, next: Next) -> Response {
+    match req.extensions().get::<CurrentUser>() {
+        Some(CurrentUser(user)) if user.sections.allows(Section::Calculations) => {
+            next.run(req).await
+        }
+        Some(_) => error_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Your account does not have access to laboratory calculations",
+        ),
+        None => unauthorized(),
+    }
+}
+
+/// Must run *after* [`require_auth`]. The Biomolekuly counterpart of
+/// [`require_calculations`].
+pub async fn require_biomolecules(req: Request, next: Next) -> Response {
+    match req.extensions().get::<CurrentUser>() {
+        Some(CurrentUser(user)) if user.sections.allows(Section::Biomolecules) => {
+            next.run(req).await
+        }
+        Some(_) => error_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Your account does not have access to biomolecules",
+        ),
         None => unauthorized(),
     }
 }

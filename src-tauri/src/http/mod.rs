@@ -71,6 +71,11 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
             routes::auth::teacher_router()
                 .layer(from_fn(middleware::require_teacher))
                 .layer(from_fn_with_state(state.clone(), middleware::require_auth)),
+        )
+        .merge(
+            routes::auth::admin_router()
+                .layer(from_fn(middleware::require_admin))
+                .layer(from_fn_with_state(state.clone(), middleware::require_auth)),
         );
 
     let cmd_router = routes::cmd::router()
@@ -78,12 +83,21 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
     // Any logged-in account — this is the surface a student has, and a
-    // teacher may equally want to try their own questions.
+    // teacher may equally want to try their own questions. Practice, tests
+    // and streaks additionally need calculations access; leaderboards don't.
     let student_router = routes::student::router()
+        .layer(from_fn(middleware::require_calculations))
+        .merge(routes::student::leaderboard_router())
+        .layer(from_fn_with_state(state.clone(), middleware::require_auth));
+
+    let biomolecules_router = routes::biomolecules::router()
+        .merge(routes::biomolecules::quiz_router().layer(from_fn(middleware::require_biomolecules)))
+        .merge(routes::biomolecules::teacher_router().layer(from_fn(middleware::require_teacher)))
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
     let api_router = Router::new()
         .nest("/auth", auth_router)
+        .nest("/biomolecules", biomolecules_router)
         .nest("/cmd", cmd_router)
         .nest("/student", student_router);
 

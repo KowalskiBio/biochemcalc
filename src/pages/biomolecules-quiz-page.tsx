@@ -1,11 +1,12 @@
 import { ArrowLeft } from "lucide-react"
-import { useEffect, useMemo, useReducer, useState } from "react"
+import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { Link, Navigate, useParams } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
+import { biomoleculesApi } from "@/lib/biomolecules-api"
 import { getMoleculeCategory } from "@/lib/molecules"
 import {
   availableQuizTypes,
@@ -20,6 +21,7 @@ import {
   quizSessionReducer,
 } from "@/lib/molecules/quiz"
 import { cn } from "@/lib/utils"
+import { useCategoryNames } from "@/stores/biomolecule-names-store"
 
 const quizStrings = cs.biomolekuly.quiz
 
@@ -30,9 +32,6 @@ const COUNT_CHOICES: CountChoice[] = [10, 20, "all"]
 
 const FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-
-const CATEGORY_COPY: Record<string, { name: string; description: string }> =
-  cs.biomolekuly.categories
 
 /** Text options carry no display string — resolve name/letter from the config molecules. */
 function optionLabel(molecules: QuizMolecule[], option: QuizOption): string {
@@ -405,6 +404,7 @@ function ResultsScreen({ session, categoryId, onRestart }: ResultsScreenProps) {
 export function BiomoleculesQuizPage() {
   const { categoryId } = useParams<{ categoryId: string }>()
   const category = getMoleculeCategory(categoryId ?? "")
+  const nameOf = useCategoryNames()
   const config = useMemo(() => getCategoryQuizConfig(categoryId ?? ""), [categoryId])
 
   const allTypes = useMemo(
@@ -435,6 +435,19 @@ export function BiomoleculesQuizPage() {
     )
   }
 
+  // Report each finished session's score once, for the Biomolekuly
+  // leaderboard. Keyed on the question array, which every (re)start replaces.
+  const recordedQuestionsRef = useRef<QuizQuestion[] | null>(null)
+  useEffect(() => {
+    if (!started || !session.finished || session.questions.length === 0 || !categoryId) return
+    if (recordedQuestionsRef.current === session.questions) return
+    recordedQuestionsRef.current = session.questions
+    const correct = session.answers.filter(Boolean).length
+    // Best effort: a lost score only costs a leaderboard entry, not the
+    // results screen the student is looking at.
+    biomoleculesApi.recordQuizResult(categoryId, correct, session.questions.length).catch(() => {})
+  }, [started, session.finished, session.questions, session.answers, categoryId])
+
   // Enter advances to the next question once the current one is answered.
   useEffect(() => {
     if (!started || session.finished || !session.answered) return
@@ -453,7 +466,7 @@ export function BiomoleculesQuizPage() {
   }
 
   const backHref = `/biomolekuly/${category.id}`
-  const categoryName = CATEGORY_COPY[category.id]?.name ?? category.id
+  const categoryName = nameOf(category.id)
 
   if (!started) {
     return (

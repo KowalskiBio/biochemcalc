@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod biomolecules;
 mod crud;
 mod generation;
 pub(crate) mod importer;
@@ -6,12 +7,10 @@ pub mod practice;
 pub mod reports;
 pub mod streak_run;
 pub mod test_session;
-mod victor;
 
 pub use crud::*;
 pub use generation::*;
 pub use importer::*;
-pub use victor::*;
 
 // Crate-internal helpers the HTTP layer (`src/http`) reuses directly instead
 // of going through Tauri's `State<'_, AppState>` — see their doc comments in

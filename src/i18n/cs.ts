@@ -83,7 +83,6 @@ export const cs = {
     settings: "Nastavení",
     history: "Historie",
     help: "Nápověda",
-    victor: "Victor",
     practice: "Procvičování",
     test: "Test",
     leaderboard: "Žebříček",
@@ -91,6 +90,37 @@ export const cs = {
     openMenu: "Otevřít menu",
     closeMenu: "Zavřít menu",
     mobileNavTitle: "Navigace",
+  },
+
+  // App sections (laboratory calculations / biomolecules) and the switcher
+  sections: {
+    calculations: "Laboratorní výpočty",
+    biomolecules: "Biomolekuly",
+    cooking: "We are cooking…",
+    // Students learn in a section; teachers manage its content — so the
+    // switcher label and the one-time picker are worded per role.
+    switcherLabel: {
+      student: "Co se chcete učit",
+      teacher: "Sekce aplikace",
+    },
+    switchError: "Sekci se nepodařilo přepnout",
+    lockedHint: "Váš zvací kód zpřístupňuje pouze sekci {section}.",
+    picker: {
+      student: {
+        title: "Co se chcete učit?",
+        description: "Vyberte sekci. Volbu si zapamatujeme, ale můžete ji kdykoli změnit v menu.",
+      },
+      teacher: {
+        title: "Ve které sekci chcete pracovat?",
+        description:
+          "Vyberte sekci, kterou chcete spravovat. Volbu si zapamatujeme, ale můžete ji kdykoli přepnout v horní liště.",
+      },
+    },
+    access: {
+      calculations: "Výpočty",
+      biomolecules: "Biomolekuly",
+      both: "Obojí",
+    },
   },
 
   // Student practice generator
@@ -154,6 +184,15 @@ export const cs = {
     leaderboardStreakTimePerAnswer: "Čas/otázka",
     leaderboardStreakEmpty: "Zatím nikdo nedokončil žádnou sérii.",
     leaderboardStreakPickScope: "Vyberte téma a obtížnost pro zobrazení žebříčku.",
+    leaderboardCalculationsDescription:
+      "Laboratorní výpočty – kdo kolik příkladů spočítal správně.",
+    leaderboardBiomoleculesTitle: "Žebříček – Biomolekuly",
+    leaderboardBiomoleculesDescription:
+      "Kdo kolik otázek z kvízů o biomolekulách zodpověděl správně.",
+    leaderboardBiomoleculesEmpty: "Zatím nikdo nedokončil žádný kvíz. Buďte první!",
+    leaderboardQuizCount: "Kvízy",
+    leaderboardCategoryLabel: "Kategorie",
+    leaderboardCategoryAll: "Všechny kategorie",
 
     settingsTitle: "Nastavení",
     settingsDescription: "Váš účet a vzhled aplikace.",
@@ -169,10 +208,11 @@ export const cs = {
     reportSending: "Odesílám...",
     reportSubmit: "Odeslat hlášení",
 
-    footerAuthor: "BioCal vytvořil",
+    footerAuthor: "BioCal vytvořili",
+    footerAuthorAnd: "a",
     footerContact: "Kontakt",
     footerTeacher: "Zodpovědný vyučující",
-    footerBugs: "V případě chyb nebo problémů prosím kontaktujte autora.",
+    footerBugs: "V případě chyb nebo problémů prosím kontaktujte autory.",
     footerLicense: "Licencováno pod GNU Affero General Public License v3.0 nebo novější.",
   },
 
@@ -1271,26 +1311,12 @@ export const cs = {
   settings: {
     title: "Nastavení",
     description: "Správa nastavení aplikace",
-    victor: {
-      title: "Victor",
-      description: "Konfigurace Victor API pro výpočty",
-      apiBaseUrlLabel: "Base URL API",
-      apiBaseUrlPlaceholder: "https://api.moonshot.cn/v1/chat/completions",
-      apiKeyLabel: "API klíč",
-      apiKeyPlaceholder: "Zadejte svůj API klíč",
-      save: "Uložit",
-      saving: "Ukládání...",
-      saved: "Nastavení uloženo",
-      error: "Chyba při ukládání nastavení",
-    },
     inviteCode: {
       title: "Zvací kódy",
       description:
-        "Jeden platný kód pro učitele a jeden pro studenty. Kód může použít libovolný počet osob a platí 7 dní. Vygenerováním nového kódu přestane předchozí platit.",
-      roleTeacher: "Učitel",
-      roleStudent: "Student",
+        "Kódy pro registraci studentů. Pro každou sekci (výpočty, biomolekuly, obojí) platí jeden kód, který může použít libovolný počet studentů po dobu 7 dní. Vygenerováním nového kódu přestane předchozí kód pro stejnou sekci platit.",
+      sectionsLabel: "Sekce",
       generateStudent: "Nový kód pro studenty",
-      generateTeacher: "Nový kód pro učitele",
       generating: "Generuji...",
       generated: "Kód vygenerován",
       error: "Chyba při generování kódu",
@@ -1301,24 +1327,36 @@ export const cs = {
       daysLeft: "zbývá {days} dní",
       columns: {
         code: "Kód",
-        role: "Role",
+        sections: "Sekce",
         expiresAt: "Platí do",
         useCount: "Použití",
         actions: "Akce",
       },
-      copyHint: "Předejte kód osobám, které se mají zaregistrovat na /register",
+      copyHint: "Předejte kód studentům, kteří se mají zaregistrovat na /register",
     },
     users: {
       title: "Uživatelé",
-      description: "Přehled všech zaregistrovaných účtů",
+      description: "Přehled všech účtů. Učitele lze přidat pouze zde.",
       columns: {
         username: "Uživatelské jméno",
         role: "Role",
+        sections: "Sekce",
         createdAt: "Vytvořen",
         actions: "Akce",
       },
       roleTeacher: "Učitel",
       roleStudent: "Student",
+      sectionsAllForTeachers: "Vše",
+      add: "Přidat uživatele",
+      addTitle: "Nový uživatel",
+      addDescription: "Účet bude ihned aktivní. Předejte uživateli jméno a heslo.",
+      create: "Vytvořit",
+      creating: "Vytvářím...",
+      created: "Uživatel vytvořen",
+      createError: "Chyba při vytváření uživatele",
+      updated: "Uživatel upraven",
+      updateError: "Chyba při úpravě uživatele",
+      cannotEditProtected: "Tento účet je chráněný a nelze jej upravit",
       deleted: "Účet byl smazán",
       deleteError: "Chyba při mazání účtu",
       loadError: "Chyba při načítání uživatelů",
@@ -1327,20 +1365,6 @@ export const cs = {
       cannotDeleteProtected: "Tento účet je chráněný a nelze jej smazat",
       protectedBadge: "chráněný",
     },
-  },
-
-  // Victor chat page
-  victor: {
-    title: "Victor",
-    description: "Chat s Victorem pro výpočty a vysvětlení biochemických úloh",
-    inputPlaceholder: "Zadejte svou otázku...",
-    send: "Odeslat",
-    calculation: "Výpočet",
-    solution: "Řešení",
-    explanation: "Vysvětlení",
-    variables: "Proměnné",
-    thinking: "Victor přemýšlí...",
-    error: "Došlo k chybě při komunikaci s Victorem",
   },
 
   // Form labels and placeholders

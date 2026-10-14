@@ -1,4 +1,5 @@
-//! Registration, login, and invite-code issuance for the web deployment.
+//! Registration, login, invite-code issuance, and admin user management for
+//! the web deployment.
 //!
 //! These are plain functions (not `#[tauri::command]`s) because the desktop
 //! Tauri build has no concept of accounts — it's a single trusted local user.
@@ -8,7 +9,7 @@
 
 use crate::db::repos::{InviteCodeRepo, PasswordResetTokenRepo, SessionRepo, UserRecord, UserRepo};
 use crate::db::DbError;
-use crate::models::{InviteCode, Role, User};
+use crate::models::{InviteCode, Role, Section, SectionAccess, User};
 use argon2::password_hash::{
     rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
 };
@@ -52,10 +53,39 @@ pub struct LoginPayload {
     pub password: String,
 }
 
+/// Invite codes are student-only: teachers are created by the admin
+/// directly (see [`do_admin_create_user`]), so the only choice a teacher
+/// makes when minting a code is which sections it unlocks.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateInviteCodePayload {
-    pub role: String,
+    pub sections: SectionAccess,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminCreateUserPayload {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    pub role: Role,
+    /// Ignored for teachers, who always reach every section.
+    pub sections: SectionAccess,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUpdateUserPayload {
+    pub id: Uuid,
+    pub role: Role,
+    pub sections: SectionAccess,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPreferredSectionPayload {
+    pub section: Section,
 }
 
 /// A successful register/login: the public user plus a fresh opaque session
@@ -107,38 +137,57 @@ fn create_session(conn: &Connection, user: User) -> Result<AuthSession, DbError>
     })
 }
 
-pub fn do_register(conn: &Connection, payload: RegisterPayload) -> Result<AuthSession, DbError> {
-    let username = payload.username.trim();
+/// Shared by self-registration and admin account creation: the trimmed
+/// username and normalized optional email, or the first validation error.
+fn validate_new_account(
+    username: &str,
+    password: &str,
+    email: Option<&str>,
+) -> Result<(String, Option<String>), DbError> {
+    let username = username.trim();
     if username.is_empty() {
         return Err(DbError::Validation("Username is required".into()));
     }
-    if payload.password.len() < 8 {
+    if password.len() < 8 {
         return Err(DbError::Validation(
             "Password must be at least 8 characters".into(),
         ));
     }
-
-    let code = payload.invite_code.trim();
-    let invite = InviteCodeRepo::find_valid(conn, code)?
-        .ok_or_else(|| DbError::Validation("Invite code is invalid or expired".into()))?;
-
-    let email = match payload.email.as_deref().map(str::trim) {
+    let email = match email.map(str::trim) {
         Some("") | None => None,
         Some(e) if !is_plausible_email(e) => {
             return Err(DbError::Validation("Enter a valid email address".into()));
         }
         Some(e) => Some(e.to_string()),
     };
+    Ok((username.to_string(), email))
+}
+
+pub fn do_register(conn: &Connection, payload: RegisterPayload) -> Result<AuthSession, DbError> {
+    let (username, email) = validate_new_account(
+        &payload.username,
+        &payload.password,
+        payload.email.as_deref(),
+    )?;
+
+    // Teacher codes can't be minted any more and migration v43 revoked the
+    // live ones; the role check guards against any that slipped through.
+    let code = payload.invite_code.trim();
+    let invite = InviteCodeRepo::find_valid(conn, code)?
+        .filter(|invite| invite.role == Role::Student)
+        .ok_or_else(|| DbError::Validation("Invite code is invalid or expired".into()))?;
 
     let password_hash = hash_password(&payload.password)?;
     let record = UserRecord {
         id: Uuid::new_v4(),
-        username: username.to_string(),
+        username,
         password_hash,
-        role: invite.role,
+        role: Role::Student,
         created_at: Utc::now(),
         protected: false,
         email,
+        sections: invite.sections,
+        preferred_section: None,
     };
     UserRepo::insert(conn, &record)?;
     InviteCodeRepo::record_use(conn, &invite.code)?;
@@ -169,10 +218,14 @@ pub fn do_create_invite_code(
     created_by: &Uuid,
     payload: CreateInviteCodePayload,
 ) -> Result<InviteCode, DbError> {
-    let role = Role::parse(&payload.role)
-        .ok_or_else(|| DbError::Validation(format!("Invalid role: {}", payload.role)))?;
     let code = generate_invite_code();
-    InviteCodeRepo::create(conn, &code, role, Some(*created_by))?;
+    InviteCodeRepo::create(
+        conn,
+        &code,
+        Role::Student,
+        payload.sections,
+        Some(*created_by),
+    )?;
     InviteCodeRepo::find_valid(conn, &code)?
         .ok_or_else(|| DbError::Internal("invite code vanished immediately after creation".into()))
 }
@@ -192,11 +245,10 @@ pub fn do_list_users(conn: &Connection) -> Result<Vec<User>, DbError> {
         .collect())
 }
 
-/// A teacher can delete any account except their own (self-deletion would
-/// let the last teacher lock themselves out with no invite-code issuer left
-/// to recover from) and except the protected bootstrap admin (see migration
-/// v16) — otherwise any second teacher account could delete the original
-/// admin outright, which is the surprising behavior this guards against.
+/// Admin-only (the HTTP layer gates it). The admin can delete any account
+/// except their own and except a protected one — the admin *is* the
+/// protected bootstrap account (see migration v16), so both checks keep the
+/// one account able to manage users from ever disappearing.
 pub fn do_delete_user(
     conn: &Connection,
     requesting_user_id: &Uuid,
@@ -214,6 +266,66 @@ pub fn do_delete_user(
         ));
     }
     UserRepo::delete(conn, target_id)
+}
+
+/// Admin-only: create an account directly, with any role. This is the only
+/// way to add a teacher — invite codes are student-only.
+pub fn do_admin_create_user(
+    conn: &Connection,
+    payload: AdminCreateUserPayload,
+) -> Result<User, DbError> {
+    let (username, email) = validate_new_account(
+        &payload.username,
+        &payload.password,
+        payload.email.as_deref(),
+    )?;
+    let record = UserRecord {
+        id: Uuid::new_v4(),
+        username,
+        password_hash: hash_password(&payload.password)?,
+        role: payload.role,
+        created_at: Utc::now(),
+        protected: false,
+        email,
+        sections: payload.sections,
+        preferred_section: None,
+    };
+    UserRepo::insert(conn, &record)?;
+    Ok(record.into_public())
+}
+
+/// Admin-only: change an account's role and section access. The protected
+/// admin account itself is off limits, so the admin can never demote
+/// themselves out of user management.
+pub fn do_admin_update_user(
+    conn: &Connection,
+    payload: AdminUpdateUserPayload,
+) -> Result<User, DbError> {
+    let target = UserRepo::get_by_id(conn, &payload.id)?;
+    if target.protected {
+        return Err(DbError::Validation(
+            "This account is protected and cannot be changed".into(),
+        ));
+    }
+    UserRepo::update_role_and_sections(conn, &payload.id, payload.role, payload.sections)?;
+    Ok(UserRepo::get_by_id(conn, &payload.id)?.into_public())
+}
+
+/// Either role: remember which section the user wants to land in. Rejects a
+/// section their access doesn't include.
+pub fn do_set_preferred_section(
+    conn: &Connection,
+    user_id: &Uuid,
+    payload: SetPreferredSectionPayload,
+) -> Result<User, DbError> {
+    let record = UserRepo::get_by_id(conn, user_id)?;
+    if !record.effective_sections().allows(payload.section) {
+        return Err(DbError::Validation(
+            "Your account does not have access to this section".into(),
+        ));
+    }
+    UserRepo::set_preferred_section(conn, user_id, Some(payload.section))?;
+    Ok(UserRepo::get_by_id(conn, user_id)?.into_public())
 }
 
 #[derive(Debug, Deserialize)]
@@ -338,6 +450,8 @@ pub fn do_bootstrap_admin_if_empty(
         created_at: Utc::now(),
         protected: true,
         email: None,
+        sections: SectionAccess::Both,
+        preferred_section: None,
     };
     UserRepo::insert(conn, &record)?;
     Ok(Some(record.into_public()))
@@ -365,7 +479,14 @@ mod tests {
     #[test]
     fn register_consumes_invite_code_and_creates_session() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "STUDENT1", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "STUDENT1",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
 
         let session = do_register(
             &conn,
@@ -396,7 +517,14 @@ mod tests {
     #[test]
     fn register_accepts_a_reused_invite_code() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "SHARED", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "SHARED",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         for username in ["bob", "carol"] {
             do_register(
                 &conn,
@@ -420,8 +548,22 @@ mod tests {
     #[test]
     fn register_rejects_a_superseded_invite_code() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "OLDCODE", Role::Student, None).expect("create old");
-        InviteCodeRepo::create(&conn, "NEWCODE", Role::Student, None).expect("create new");
+        InviteCodeRepo::create(
+            &conn,
+            "OLDCODE",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create old");
+        InviteCodeRepo::create(
+            &conn,
+            "NEWCODE",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create new");
 
         let result = do_register(
             &conn,
@@ -438,7 +580,14 @@ mod tests {
     #[test]
     fn register_rejects_an_expired_invite_code() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "EXPIRED", Role::Student, None).expect("create");
+        InviteCodeRepo::create(
+            &conn,
+            "EXPIRED",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create");
         conn.execute(
             "UPDATE invite_codes SET expires_at = ?2 WHERE code = ?1",
             rusqlite::params!["EXPIRED", (Utc::now() - Duration::days(1)).to_rfc3339()],
@@ -460,7 +609,14 @@ mod tests {
     #[test]
     fn register_with_valid_email_succeeds_and_stores_it() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "EMAILED", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "EMAILED",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
 
         let session = do_register(
             &conn,
@@ -479,7 +635,14 @@ mod tests {
     #[test]
     fn register_without_email_still_succeeds() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "NOEMAIL", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "NOEMAIL",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
 
         let session = do_register(
             &conn,
@@ -498,7 +661,14 @@ mod tests {
     #[test]
     fn register_rejects_malformed_email() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "BADEMAIL", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "BADEMAIL",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
 
         let result = do_register(
             &conn,
@@ -515,7 +685,14 @@ mod tests {
     #[test]
     fn register_rejects_duplicate_email_case_insensitively() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "DUPEMAIL", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "DUPEMAIL",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         do_register(
             &conn,
             RegisterPayload {
@@ -542,7 +719,14 @@ mod tests {
     #[test]
     fn login_with_correct_password_succeeds() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "T1", Role::Teacher, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "T1",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         do_register(
             &conn,
             RegisterPayload {
@@ -568,7 +752,14 @@ mod tests {
     #[test]
     fn login_with_wrong_password_is_unauthorized() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "T2", Role::Teacher, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "T2",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         do_register(
             &conn,
             RegisterPayload {
@@ -606,7 +797,14 @@ mod tests {
     #[test]
     fn logout_deletes_session() {
         let conn = setup_conn();
-        InviteCodeRepo::create(&conn, "T3", Role::Teacher, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "T3",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         let session = do_register(
             &conn,
             RegisterPayload {
@@ -649,11 +847,12 @@ mod tests {
             &conn,
             &teacher.id,
             CreateInviteCodePayload {
-                role: "student".into(),
+                sections: SectionAccess::Biomolecules,
             },
         )
         .expect("create invite code");
         assert_eq!(invite.role, Role::Student);
+        assert_eq!(invite.sections, SectionAccess::Biomolecules);
 
         let session = do_register(
             &conn,
@@ -666,6 +865,137 @@ mod tests {
         )
         .expect("register with fresh invite");
         assert_eq!(session.user.role, Role::Student);
+        assert_eq!(
+            session.user.sections,
+            SectionAccess::Biomolecules,
+            "the account inherits the code's section scope"
+        );
+        assert_eq!(session.user.preferred_section, None);
+    }
+
+    #[test]
+    fn register_rejects_a_teacher_code() {
+        let conn = setup_conn();
+        InviteCodeRepo::create(&conn, "OLDTEACH", Role::Teacher, SectionAccess::Both, None)
+            .expect("create invite");
+        let result = do_register(
+            &conn,
+            RegisterPayload {
+                username: "would-be-teacher".into(),
+                password: "password123".into(),
+                invite_code: "OLDTEACH".into(),
+                email: None,
+            },
+        );
+        assert!(matches!(result, Err(DbError::Validation(_))));
+        assert_eq!(UserRepo::count_all(&conn).expect("count"), 0);
+    }
+
+    #[test]
+    fn admin_creates_a_teacher_with_access_to_everything() {
+        let conn = setup_conn();
+        let teacher = do_admin_create_user(
+            &conn,
+            AdminCreateUserPayload {
+                username: "new-teacher".into(),
+                password: "teacherpassword1".into(),
+                email: None,
+                role: Role::Teacher,
+                sections: SectionAccess::Calculations,
+            },
+        )
+        .expect("create teacher");
+        assert_eq!(teacher.role, Role::Teacher);
+        assert_eq!(teacher.sections, SectionAccess::Both);
+        assert!(!teacher.is_admin);
+    }
+
+    #[test]
+    fn admin_update_changes_role_and_sections_but_not_the_protected_account() {
+        let conn = setup_conn();
+        let admin = do_bootstrap_admin_if_empty(&conn, "admin", "adminpassword1")
+            .expect("bootstrap")
+            .expect("created");
+        assert!(admin.is_admin);
+        let student = do_admin_create_user(
+            &conn,
+            AdminCreateUserPayload {
+                username: "pupil".into(),
+                password: "pupilpassword1".into(),
+                email: None,
+                role: Role::Student,
+                sections: SectionAccess::Both,
+            },
+        )
+        .expect("create student");
+        do_set_preferred_section(
+            &conn,
+            &student.id,
+            SetPreferredSectionPayload {
+                section: Section::Biomolecules,
+            },
+        )
+        .expect("prefer bio");
+
+        let updated = do_admin_update_user(
+            &conn,
+            AdminUpdateUserPayload {
+                id: student.id,
+                role: Role::Student,
+                sections: SectionAccess::Calculations,
+            },
+        )
+        .expect("update");
+        assert_eq!(updated.sections, SectionAccess::Calculations);
+        assert_eq!(
+            updated.preferred_section, None,
+            "a preference the new scope disallows is cleared"
+        );
+
+        let result = do_admin_update_user(
+            &conn,
+            AdminUpdateUserPayload {
+                id: admin.id,
+                role: Role::Student,
+                sections: SectionAccess::Calculations,
+            },
+        );
+        assert!(matches!(result, Err(DbError::Validation(_))));
+    }
+
+    #[test]
+    fn preferred_section_must_be_within_access() {
+        let conn = setup_conn();
+        let student = do_admin_create_user(
+            &conn,
+            AdminCreateUserPayload {
+                username: "calc-only".into(),
+                password: "pupilpassword1".into(),
+                email: None,
+                role: Role::Student,
+                sections: SectionAccess::Calculations,
+            },
+        )
+        .expect("create student");
+
+        let result = do_set_preferred_section(
+            &conn,
+            &student.id,
+            SetPreferredSectionPayload {
+                section: Section::Biomolecules,
+            },
+        );
+        assert!(matches!(result, Err(DbError::Validation(_))));
+
+        let user = do_set_preferred_section(
+            &conn,
+            &student.id,
+            SetPreferredSectionPayload {
+                section: Section::Calculations,
+            },
+        )
+        .expect("prefer calc");
+        assert_eq!(user.preferred_section, Some(Section::Calculations));
     }
 
     #[test]
@@ -674,7 +1004,14 @@ mod tests {
         do_bootstrap_admin_if_empty(&conn, "teacher", "teacherpassword1")
             .expect("bootstrap")
             .expect("created");
-        InviteCodeRepo::create(&conn, "LISTME", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "LISTME",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         do_register(
             &conn,
             RegisterPayload {
@@ -710,7 +1047,14 @@ mod tests {
         let teacher = do_bootstrap_admin_if_empty(&conn, "admin2", "teacherpassword1")
             .expect("bootstrap")
             .expect("created");
-        InviteCodeRepo::create(&conn, "REMOVEME", Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(
+            &conn,
+            "REMOVEME",
+            Role::Student,
+            SectionAccess::Calculations,
+            None,
+        )
+        .expect("create invite");
         let session = do_register(
             &conn,
             RegisterPayload {
@@ -738,19 +1082,17 @@ mod tests {
                 .expect("created");
         assert!(bootstrap_admin.protected);
 
-        InviteCodeRepo::create(&conn, "MAKEME2ND", Role::Teacher, Some(bootstrap_admin.id))
-            .expect("create invite");
-        let second_teacher = do_register(
+        let second_teacher = do_admin_create_user(
             &conn,
-            RegisterPayload {
+            AdminCreateUserPayload {
                 username: "second-teacher".into(),
                 password: "secondpassword1".into(),
-                invite_code: "MAKEME2ND".into(),
                 email: None,
+                role: Role::Teacher,
+                sections: SectionAccess::Both,
             },
         )
-        .expect("register")
-        .user;
+        .expect("create second teacher");
         assert!(!second_teacher.protected);
 
         // The second teacher must not be able to delete the original admin —
@@ -844,7 +1186,8 @@ mod tests {
         code: &str,
         email: &str,
     ) -> AuthSession {
-        InviteCodeRepo::create(conn, code, Role::Student, None).expect("create invite");
+        InviteCodeRepo::create(conn, code, Role::Student, SectionAccess::Calculations, None)
+            .expect("create invite");
         do_register(
             conn,
             RegisterPayload {

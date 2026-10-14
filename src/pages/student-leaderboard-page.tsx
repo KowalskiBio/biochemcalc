@@ -20,8 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
+import { type BiomoleculeLeaderboardEntry, biomoleculesApi } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
+import { MOLECULE_CATEGORIES } from "@/lib/molecules"
 import { studentApi } from "@/lib/student-api"
 import type {
   LeaderboardEntry,
@@ -31,6 +34,7 @@ import type {
 } from "@/lib/types"
 import { cn, formatDecimalComma } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
+import { useCategoryNames } from "@/stores/biomolecule-names-store"
 
 function formatMinutesSeconds(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
@@ -283,7 +287,7 @@ function StreakLeaderboardCard({
  * (Učeň/Mistr) separately: those scores aren't points, they're "how far did
  * you get before your first mistake," which the main table doesn't capture.
  */
-export function StudentLeaderboardPage() {
+function CalculationsLeaderboard() {
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [entries, setEntries] = useState<LeaderboardEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -315,7 +319,9 @@ export function StudentLeaderboardPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {cs.student.leaderboardTitle}
         </h1>
-        <p className="text-muted-foreground text-sm">{cs.student.leaderboardDescription}</p>
+        <p className="text-muted-foreground text-sm">
+          {cs.student.leaderboardCalculationsDescription}
+        </p>
       </div>
 
       <Card>
@@ -400,4 +406,165 @@ export function StudentLeaderboardPage() {
       </div>
     </div>
   )
+}
+
+/**
+ * Biomolekuly's own board: correct answers summed over every finished quiz,
+ * optionally narrowed to one category. Kept apart from the calculations
+ * board — a quiz answer and a calculated example aren't the same currency.
+ */
+/** Last board seen per category ("" = all), shown instantly on revisit while it refreshes. */
+const biomoleculeBoardCache = new Map<string, BiomoleculeLeaderboardEntry[]>()
+
+function BiomoleculesLeaderboard() {
+  const currentUserId = useAuthStore((s) => s.user?.id)
+  const nameOf = useCategoryNames()
+  const [categoryId, setCategoryId] = useState<string>("")
+  const [entries, setEntries] = useState<BiomoleculeLeaderboardEntry[] | null>(
+    () => biomoleculeBoardCache.get("") ?? null,
+  )
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    // Keep whatever is on screen (or the cached board for this category)
+    // while the fresh one loads, instead of flashing skeletons on every switch.
+    const cached = biomoleculeBoardCache.get(categoryId)
+    if (cached) setEntries(cached)
+    setIsRefreshing(true)
+    setError(null)
+    biomoleculesApi
+      .leaderboard(categoryId || undefined)
+      .then((loaded) => {
+        biomoleculeBoardCache.set(categoryId, loaded)
+        if (!cancelled) setEntries(loaded)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(extractErrorMessage(err, cs.student.leaderboardError))
+      })
+      .finally(() => {
+        if (!cancelled) setIsRefreshing(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [categoryId])
+
+  const hasAnyActivity = (entries ?? []).some((entry) => entry.quizCount > 0)
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {cs.student.leaderboardBiomoleculesTitle}
+        </h1>
+        <p className="text-muted-foreground text-sm">
+          {cs.student.leaderboardBiomoleculesDescription}
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">
+            <Trophy className="size-5 inline mr-2" />
+            {cs.student.leaderboardTitle}
+          </CardTitle>
+          <CardDescription>{cs.student.leaderboardBiomoleculesDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2 sm:max-w-xs">
+            <Label htmlFor="bio-board-category">{cs.student.leaderboardCategoryLabel}</Label>
+            <Select
+              value={categoryId || "all"}
+              onValueChange={(value) => setCategoryId(value === "all" ? "" : value)}
+            >
+              <SelectTrigger id="bio-board-category">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{cs.student.leaderboardCategoryAll}</SelectItem>
+                {MOLECULE_CATEGORIES.map((category) => (
+                  <SelectItem key={category.id} value={category.id}>
+                    {nameOf(category.id)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {entries === null && !error ? (
+            <div className="space-y-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : error ? (
+            <p className="py-6 text-center text-destructive">{error}</p>
+          ) : !hasAnyActivity ? (
+            <p className="py-6 text-center text-muted-foreground">
+              {cs.student.leaderboardBiomoleculesEmpty}
+            </p>
+          ) : (
+            <Table
+              aria-busy={isRefreshing}
+              className={cn("transition-opacity duration-150", isRefreshing && "opacity-60")}
+            >
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[70px]">{cs.student.leaderboardRank}</TableHead>
+                  <TableHead>{cs.student.leaderboardUser}</TableHead>
+                  <TableHead className="w-[110px] text-right">
+                    {cs.student.leaderboardCorrect}
+                  </TableHead>
+                  <TableHead className="w-[130px] text-right">
+                    {cs.student.leaderboardAnswered}
+                  </TableHead>
+                  <TableHead className="w-[100px] text-right">
+                    {cs.student.leaderboardQuizCount}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(entries ?? []).map((entry, idx) => {
+                  const isMe = entry.userId === currentUserId
+                  return (
+                    <TableRow key={entry.userId} className={cn(isMe && "bg-muted/50")}>
+                      <TableCell className="font-mono tabular-nums text-muted-foreground">
+                        {idx + 1}.
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {entry.username}
+                        {isMe && (
+                          <Badge variant="outline" className="ml-2">
+                            {cs.student.leaderboardYou}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {entry.correctCount}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {entry.answeredCount}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{entry.quizCount}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/**
+ * The leaderboard is a shared page, so it shows the board of whichever
+ * section the user is in (see `useSection`).
+ */
+export function StudentLeaderboardPage() {
+  const { section } = useSection()
+  return section === "biomolecules" ? <BiomoleculesLeaderboard /> : <CalculationsLeaderboard />
 }

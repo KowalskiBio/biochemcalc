@@ -1,5 +1,5 @@
 use crate::db::DbError;
-use crate::models::{Role, User};
+use crate::models::{Role, Section, SectionAccess, User};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -16,10 +16,22 @@ pub struct UserRecord {
     pub created_at: DateTime<Utc>,
     pub protected: bool,
     pub email: Option<String>,
+    /// Stored scope; ignored for teachers (see `into_public`).
+    pub sections: SectionAccess,
+    pub preferred_section: Option<Section>,
 }
 
 impl UserRecord {
+    /// Effective access: teachers always reach every section.
+    pub fn effective_sections(&self) -> SectionAccess {
+        match self.role {
+            Role::Teacher => SectionAccess::Both,
+            Role::Student => self.sections,
+        }
+    }
+
     pub fn into_public(self) -> User {
+        let sections = self.effective_sections();
         User {
             id: self.id,
             username: self.username,
@@ -27,16 +39,22 @@ impl UserRecord {
             created_at: self.created_at,
             protected: self.protected,
             email: self.email,
+            sections,
+            preferred_section: self.preferred_section,
+            is_admin: self.protected,
         }
     }
 }
+
+const SELECT_COLUMNS: &str =
+    "id, username, password_hash, role, created_at, protected, email, sections, preferred_section";
 
 pub struct UserRepo;
 
 impl UserRepo {
     pub fn insert(conn: &Connection, user: &UserRecord) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, role, created_at, protected, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO users (id, username, password_hash, role, created_at, protected, email, sections, preferred_section) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 user.id,
                 user.username,
@@ -45,6 +63,8 @@ impl UserRepo {
                 user.created_at.to_rfc3339(),
                 user.protected,
                 user.email,
+                user.sections.as_str(),
+                user.preferred_section.map(|s| s.as_str()),
             ],
         )
         .map_err(|e| match &e {
@@ -72,7 +92,7 @@ impl UserRepo {
         username: &str,
     ) -> Result<Option<UserRecord>, DbError> {
         let result = conn.query_row(
-            "SELECT id, username, password_hash, role, created_at, protected, email FROM users WHERE username = ?1 COLLATE NOCASE",
+            &format!("SELECT {SELECT_COLUMNS} FROM users WHERE username = ?1 COLLATE NOCASE"),
             params![username],
             row_to_record,
         );
@@ -87,7 +107,7 @@ impl UserRepo {
     /// forgot-password flow — see `commands::auth::do_forgot_password`.
     pub fn find_by_email(conn: &Connection, email: &str) -> Result<Option<UserRecord>, DbError> {
         let result = conn.query_row(
-            "SELECT id, username, password_hash, role, created_at, protected, email FROM users WHERE email = ?1 COLLATE NOCASE",
+            &format!("SELECT {SELECT_COLUMNS} FROM users WHERE email = ?1 COLLATE NOCASE"),
             params![email],
             row_to_record,
         );
@@ -100,7 +120,7 @@ impl UserRepo {
 
     pub fn get_by_id(conn: &Connection, id: &Uuid) -> Result<UserRecord, DbError> {
         conn.query_row(
-            "SELECT id, username, password_hash, role, created_at, protected, email FROM users WHERE id = ?1",
+            &format!("SELECT {SELECT_COLUMNS} FROM users WHERE id = ?1"),
             params![id],
             row_to_record,
         )
@@ -116,9 +136,9 @@ impl UserRepo {
     }
 
     pub fn list_all(conn: &Connection) -> Result<Vec<UserRecord>, DbError> {
-        let mut stmt = conn.prepare(
-            "SELECT id, username, password_hash, role, created_at, protected, email FROM users ORDER BY created_at DESC",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {SELECT_COLUMNS} FROM users ORDER BY created_at DESC"
+        ))?;
         let rows = stmt.query_map([], row_to_record)?;
         rows.map(|r| r.map_err(DbError::Sqlite)).collect()
     }
@@ -128,6 +148,46 @@ impl UserRepo {
     /// `ON DELETE SET NULL`) — see migration v15.
     pub fn delete(conn: &Connection, id: &Uuid) -> Result<(), DbError> {
         let affected = conn.execute("DELETE FROM users WHERE id = ?1", params![id])?;
+        if affected == 0 {
+            return Err(DbError::NotFound(format!("User {id}")));
+        }
+        Ok(())
+    }
+
+    /// Admin-only edit of who an account is and what it can reach. Clears a
+    /// `preferred_section` the new scope no longer allows, so a demoted
+    /// account never lands somewhere it can't go.
+    pub fn update_role_and_sections(
+        conn: &Connection,
+        id: &Uuid,
+        role: Role,
+        sections: SectionAccess,
+    ) -> Result<(), DbError> {
+        let affected = conn.execute(
+            "UPDATE users SET role = ?2, sections = ?3 WHERE id = ?1",
+            params![id, role.as_str(), sections.as_str()],
+        )?;
+        if affected == 0 {
+            return Err(DbError::NotFound(format!("User {id}")));
+        }
+        let record = Self::get_by_id(conn, id)?;
+        if let Some(preferred) = record.preferred_section {
+            if !record.effective_sections().allows(preferred) {
+                Self::set_preferred_section(conn, id, None)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_preferred_section(
+        conn: &Connection,
+        id: &Uuid,
+        section: Option<Section>,
+    ) -> Result<(), DbError> {
+        let affected = conn.execute(
+            "UPDATE users SET preferred_section = ?2 WHERE id = ?1",
+            params![id, section.map(|s| s.as_str())],
+        )?;
         if affected == 0 {
             return Err(DbError::NotFound(format!("User {id}")));
         }
@@ -157,6 +217,12 @@ fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UserRecord> {
         created_at: parse_dt(row.get::<_, String>(4)?),
         protected: row.get(5)?,
         email: row.get(6)?,
+        sections: SectionAccess::parse(&row.get::<_, String>(7)?)
+            .unwrap_or(SectionAccess::Calculations),
+        preferred_section: row
+            .get::<_, Option<String>>(8)?
+            .as_deref()
+            .and_then(Section::parse),
     })
 }
 
@@ -189,6 +255,8 @@ mod tests {
             created_at: Utc::now(),
             protected: false,
             email: None,
+            sections: crate::models::SectionAccess::Calculations,
+            preferred_section: None,
         }
     }
 

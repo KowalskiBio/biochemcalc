@@ -20,8 +20,10 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
+import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
 import { reportsApi } from "@/lib/reports-api"
+import type { Section } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useUiStore } from "@/stores/ui-store"
 
@@ -31,7 +33,7 @@ interface NavItem {
   label: string
 }
 
-const navItems: NavItem[] = [
+const calculationsNavItems: NavItem[] = [
   {
     path: "/topics",
     icon: <BookOpen className="size-[18px]" strokeWidth={1.75} />,
@@ -51,11 +53,6 @@ const navItems: NavItem[] = [
     path: "/databaze",
     icon: <Database className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.databaze,
-  },
-  {
-    path: "/biomolekuly",
-    icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.biomolekuly,
   },
   {
     path: "/vzorce",
@@ -89,18 +86,44 @@ const navItems: NavItem[] = [
   },
 ]
 
-const bottomNavItems: NavItem[] = [
-  {
-    path: "/settings",
-    icon: <Settings className="size-[18px]" strokeWidth={1.75} />,
-    label: cs.navigation.settings,
-  },
+const settingsNavItem: NavItem = {
+  path: "/settings",
+  icon: <Settings className="size-[18px]" strokeWidth={1.75} />,
+  label: cs.navigation.settings,
+}
+
+const calculationsBottomNavItems: NavItem[] = [
+  settingsNavItem,
   {
     path: "/help",
     icon: <HelpCircle className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.help,
   },
 ]
+
+const biomoleculesNavItems: NavItem[] = [
+  {
+    path: "/biomolekuly",
+    icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.biomolekuly,
+  },
+  {
+    path: "/leaderboard",
+    icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.leaderboard,
+  },
+]
+
+const navBySection: Record<Section, { main: NavItem[]; bottom: NavItem[] }> = {
+  calculations: { main: calculationsNavItems, bottom: calculationsBottomNavItems },
+  biomolecules: { main: biomoleculesNavItems, bottom: [settingsNavItem] },
+}
+
+/** Biomolekuly owns its category and quiz sub-pages; everything else is exact. */
+function isNavItemActive(itemPath: string, pathname: string): boolean {
+  if (itemPath === "/biomolekuly") return pathname.startsWith(itemPath)
+  return pathname === itemPath
+}
 
 const sidebarVariants = cva(
   "flex flex-col h-full bg-[hsl(var(--sidebar))] border-r border-black/20 text-[hsl(var(--sidebar-foreground))] w-[var(--sidebar-width)]",
@@ -135,6 +158,8 @@ const themeToggleVariants = cva(
 
 export function Sidebar() {
   const location = useLocation()
+  const { section } = useSection()
+  const { main: navItems, bottom: bottomNavItems } = navBySection[section]
   const darkMode = useUiStore((state) => state.theme === "dark")
   const [reportCount, setReportCount] = useState<number>(0)
 
@@ -182,7 +207,7 @@ export function Sidebar() {
         </div>
         <div className={cn(navSectionVariants())}>
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path
+            const isActive = isNavItemActive(item.path, location.pathname)
             const isReports = item.path === "/hlaseni"
             return (
               <Link
@@ -212,7 +237,7 @@ export function Sidebar() {
         {/* Bottom navigation */}
         <div className={cn(navSectionVariants(), "mt-4")}>
           {bottomNavItems.map((item) => {
-            const isActive = location.pathname === item.path
+            const isActive = isNavItemActive(item.path, location.pathname)
             return (
               <Link
                 key={item.path}

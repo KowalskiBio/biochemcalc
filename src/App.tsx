@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from "react-router-dom"
 import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
 import { StudentShell } from "@/components/layout/student-shell"
+import { allowedSections } from "@/hooks/use-section"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
@@ -33,7 +34,6 @@ import { StudentTestStartPage } from "@/pages/student-test-start-page"
 import { TestyPage } from "@/pages/testy-page"
 import { TopicDetailPage } from "@/pages/topic-detail-page"
 import { TopicsPage } from "@/pages/topics-page"
-import { VictorPage } from "@/pages/victor-page"
 import { useAuthStore } from "@/stores/auth-store"
 import { useUiStore } from "@/stores/ui-store"
 
@@ -57,7 +57,6 @@ function TeacherRoutes() {
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/hlaseni" element={<ReportsPage />} />
         <Route path="/leaderboard" element={<StudentLeaderboardPage />} />
-        <Route path="/victor" element={<VictorPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="*" element={<Navigate to="/topics" replace />} />
@@ -67,34 +66,58 @@ function TeacherRoutes() {
 }
 
 /**
- * A student sees four destinations and nothing else: the practice question
- * generator, the biomolecules reference, the leaderboard, and their own
- * profile. Anything else redirects back to the generator — the teacher pages
- * all call `/api/cmd/*`, which is teacher-only server-side, so there is
- * nothing for a student to reach there.
+ * A student sees only the sections their invite code unlocked
+ * (`user.sections`): laboratory calculations (the practice generator and
+ * tests), Biomolekuly, or both — plus the leaderboard and their own
+ * profile, which every section shares. Anything else redirects to the
+ * student's home. The teacher pages all call `/api/cmd/*`, which is
+ * teacher-only server-side, so there is nothing for a student to reach
+ * there; the calculations API itself is gated server-side as well
+ * (`require_calculations`).
+ *
+ * TODO(biomolekuly-launch): once the Biomolekuly section is ready, show
+ * calculations-only students (every account that predates section-scoped
+ * invite codes) a one-time pop-up inviting them to check out Biomolekuly.
  */
 function StudentRoutes() {
+  const access = useAuthStore((s) => s.user?.sections ?? "calculations")
+  const allowed = allowedSections(access)
+  const hasCalculations = allowed.includes("calculations")
+  const hasBiomolecules = allowed.includes("biomolecules")
+  const home = hasCalculations ? <StudentPracticePage /> : <Navigate to="/biomolekuly" replace />
+
   return (
     <StudentShell>
       <Routes>
-        <Route path="/" element={<StudentPracticePage />} />
-        <Route path="/test" element={<StudentTestModePage />} />
-        <Route path="/test/uvodni" element={<StudentTestStartPage kind="uvodni" />} />
-        <Route path="/test/uvodni/active" element={<StudentTestPage />} />
-        <Route path="/test/uvodni/results" element={<StudentTestResultsPage />} />
-        <Route path="/test/prubezny" element={<StudentTestStartPage kind="prubezny" />} />
-        <Route path="/test/prubezny/active" element={<StudentTestPage />} />
-        <Route path="/test/prubezny/results" element={<StudentTestResultsPage />} />
-        <Route path="/test/ucen" element={<StudentStreakSetupPage kind="apprentice" />} />
-        <Route path="/test/mistr" element={<StudentStreakSetupPage kind="master" />} />
-        <Route path="/test/streak/active" element={<StudentStreakActivePage />} />
-        <Route path="/test/streak/results" element={<StudentStreakResultsPage />} />
+        <Route path="/" element={home} />
+        {hasCalculations && (
+          <>
+            <Route path="/test" element={<StudentTestModePage />} />
+            <Route path="/test/uvodni" element={<StudentTestStartPage kind="uvodni" />} />
+            <Route path="/test/uvodni/active" element={<StudentTestPage />} />
+            <Route path="/test/uvodni/results" element={<StudentTestResultsPage />} />
+            <Route path="/test/prubezny" element={<StudentTestStartPage kind="prubezny" />} />
+            <Route path="/test/prubezny/active" element={<StudentTestPage />} />
+            <Route path="/test/prubezny/results" element={<StudentTestResultsPage />} />
+            <Route path="/test/ucen" element={<StudentStreakSetupPage kind="apprentice" />} />
+            <Route path="/test/mistr" element={<StudentStreakSetupPage kind="master" />} />
+            <Route path="/test/streak/active" element={<StudentStreakActivePage />} />
+            <Route path="/test/streak/results" element={<StudentStreakResultsPage />} />
+          </>
+        )}
         <Route path="/leaderboard" element={<StudentLeaderboardPage />} />
-        <Route path="/biomolekuly" element={<BiomoleculesPage />} />
-        <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
-        <Route path="/biomolekuly/:categoryId/procvicovani" element={<BiomoleculesQuizPage />} />
+        {hasBiomolecules && (
+          <>
+            <Route path="/biomolekuly" element={<BiomoleculesPage />} />
+            <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
+            <Route
+              path="/biomolekuly/:categoryId/procvicovani"
+              element={<BiomoleculesQuizPage />}
+            />
+          </>
+        )}
         <Route path="/settings" element={<StudentSettingsPage />} />
-        <Route path="*" element={<StudentPracticePage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </StudentShell>
   )

@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { authApi } from "@/lib/auth-api"
-import type { User } from "@/lib/types"
+import type { Section, User } from "@/lib/types"
+import { useUiStore } from "@/stores/ui-store"
 
 /**
  * Auth state. Deliberately holds no session token — that lives only in the
@@ -22,6 +23,8 @@ interface AuthState {
     email?: string,
   ) => Promise<void>
   logout: () => Promise<void>
+  /** Saves the user's landing section on the server and updates `user`. */
+  setPreferredSection: (section: Section) => Promise<void>
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -49,6 +52,12 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: async () => {
     await authApi.logout()
+    useUiStore.getState().setLastSection(null)
     set({ user: null, status: "anonymous" })
+  },
+
+  setPreferredSection: async (section) => {
+    const user = await authApi.setPreferredSection(section)
+    set({ user })
   },
 }))

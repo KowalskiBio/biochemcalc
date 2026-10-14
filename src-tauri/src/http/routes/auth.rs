@@ -1,8 +1,10 @@
 use crate::commands::auth::{
-    do_change_password, do_create_invite_code, do_delete_user, do_forgot_password,
-    do_list_invite_codes, do_list_users, do_login, do_logout, do_register, do_reset_password,
-    do_revoke_invite_code, AuthSession, ChangePasswordPayload, CreateInviteCodePayload,
-    ForgotPasswordPayload, LoginPayload, RegisterPayload, ResetPasswordPayload,
+    do_admin_create_user, do_admin_update_user, do_change_password, do_create_invite_code,
+    do_delete_user, do_forgot_password, do_list_invite_codes, do_list_users, do_login, do_logout,
+    do_register, do_reset_password, do_revoke_invite_code, do_set_preferred_section,
+    AdminCreateUserPayload, AdminUpdateUserPayload, AuthSession, ChangePasswordPayload,
+    CreateInviteCodePayload, ForgotPasswordPayload, LoginPayload, RegisterPayload,
+    ResetPasswordPayload, SetPreferredSectionPayload,
 };
 use crate::db::AppState;
 use crate::http::error::HttpError;
@@ -127,6 +129,15 @@ async fn change_password(
     Ok(())
 }
 
+async fn set_preferred_section(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<SetPreferredSectionPayload>,
+) -> Result<Json<User>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_set_preferred_section(&conn, &user.id, payload)?))
+}
+
 async fn create_invite_code(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -167,6 +178,22 @@ async fn delete_user(
     Ok(())
 }
 
+async fn create_user(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<AdminCreateUserPayload>,
+) -> Result<Json<User>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_admin_create_user(&conn, payload)?))
+}
+
+async fn update_user(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<AdminUpdateUserPayload>,
+) -> Result<Json<User>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_admin_update_user(&conn, payload)?))
+}
+
 /// Public: no session required.
 pub fn public_router() -> Router<Arc<AppState>> {
     Router::new()
@@ -187,16 +214,24 @@ pub fn authenticated_router() -> Router<Arc<AppState>> {
         .route("/logout", post(logout))
         .route("/me", post(me))
         .route("/change-password", post(change_password))
+        .route("/preferred-section", post(set_preferred_section))
 }
 
-/// Teacher only — issuing invite codes is how new accounts get created at
-/// all, so it must not be reachable by students. Same for seeing/managing
-/// the account list.
+/// Teacher only — issuing (student) invite codes is how students get
+/// accounts at all, so it must not be reachable by students.
 pub fn teacher_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/invite-code", post(create_invite_code))
         .route("/invite-codes", post(list_invite_codes))
         .route("/invite-codes/revoke", post(revoke_invite_code))
+}
+
+/// Admin only — the account list and every change to it, including the
+/// only way to create a teacher.
+pub fn admin_router() -> Router<Arc<AppState>> {
+    Router::new()
         .route("/users", post(list_users))
+        .route("/users/create", post(create_user))
+        .route("/users/update", post(update_user))
         .route("/users/delete", post(delete_user))
 }

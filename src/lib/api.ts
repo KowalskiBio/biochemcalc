@@ -38,9 +38,6 @@ import type {
   VariableHistoryEntry,
   VariableInput,
   Variant,
-  VictorRequest,
-  VictorResponse,
-  VictorSettings,
 } from "./types"
 import { normalizeDecimalCommasInText } from "./utils"
 
@@ -402,20 +399,6 @@ export const generationApi = {
 
   regenerateVariant: (input: RegenerateVariantInput): Promise<Variant> =>
     apiFetch<Variant>("regenerate_variant", input),
-}
-
-// ============================================================================
-// Victor API
-// ============================================================================
-
-export const victorApi = {
-  getSettings: (): Promise<VictorSettings> => apiFetch<VictorSettings>("get_victor_settings"),
-
-  setSettings: (input: VictorSettings): Promise<VictorSettings> =>
-    apiFetch<VictorSettings>("set_victor_settings", input),
-
-  chat: (request: VictorRequest): Promise<VictorResponse> =>
-    apiFetch<VictorResponse>("chat_with_victor", request),
 }
 
 // ============================================================================

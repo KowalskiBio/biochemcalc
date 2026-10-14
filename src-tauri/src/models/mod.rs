@@ -28,6 +28,6 @@ pub use template::{
 pub use test_kind::{TestKind, TestOffer};
 pub use topic::Topic;
 pub use topic_group::TopicGroup;
-pub use user::{InviteCode, Role, User};
+pub use user::{InviteCode, Role, Section, SectionAccess, User};
 pub use variable::{Notation, Variable, VariableType};
 pub use variant::{AnswerField, Variant};

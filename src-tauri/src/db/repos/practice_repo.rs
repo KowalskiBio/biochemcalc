@@ -416,9 +416,11 @@ impl PracticeRepo {
         Ok(())
     }
 
-    /// Everyone worth showing on the leaderboard: all students (so a student
-    /// with no answers yet still sees themselves), plus anyone else who has
-    /// actually practised — a teacher trying the generator earns a place too.
+    /// Everyone worth showing on the leaderboard: all students with
+    /// calculations access (so a student with no answers yet still sees
+    /// themselves — a Biomolekuly-only student has their own board), plus
+    /// anyone else who has actually practised — a teacher trying the
+    /// generator earns a place too.
     ///
     /// `SUM(CASE ...)` rather than `COUNT(...) FILTER (...)`: the filter
     /// clause needs SQLite 3.30+, and nothing else in this codebase assumes a
@@ -433,7 +435,7 @@ impl PracticeRepo {
              FROM users u
              LEFT JOIN practice_attempts pa ON pa.user_id = u.id
              GROUP BY u.id
-             HAVING u.role = 'student' OR answered_count > 0
+             HAVING (u.role = 'student' AND u.sections != 'biomolecules') OR answered_count > 0
              ORDER BY correct_count DESC, points DESC, answered_count ASC, u.username COLLATE NOCASE",
         )?;
         let rows = stmt
@@ -467,6 +469,20 @@ mod tests {
     }
 
     fn insert_user(conn: &Connection, username: &str, role: Role) -> Uuid {
+        insert_user_with_sections(
+            conn,
+            username,
+            role,
+            crate::models::SectionAccess::Calculations,
+        )
+    }
+
+    fn insert_user_with_sections(
+        conn: &Connection,
+        username: &str,
+        role: Role,
+        sections: crate::models::SectionAccess,
+    ) -> Uuid {
         let user = UserRecord {
             id: Uuid::new_v4(),
             username: username.into(),
@@ -475,6 +491,8 @@ mod tests {
             created_at: Utc::now(),
             protected: false,
             email: None,
+            sections,
+            preferred_section: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id
@@ -597,6 +615,12 @@ mod tests {
         let busy = insert_user(&conn, "busy", Role::Student);
         let idle = insert_user(&conn, "idle", Role::Student);
         let teacher = insert_user(&conn, "teacher", Role::Teacher);
+        insert_user_with_sections(
+            &conn,
+            "bio-only",
+            Role::Student,
+            crate::models::SectionAccess::Biomolecules,
+        );
 
         for (user, point_value, correct) in [
             (busy, 4u8, true),
@@ -611,6 +635,7 @@ mod tests {
 
         let board = PracticeRepo::leaderboard(&conn).expect("leaderboard");
         let names: Vec<&str> = board.iter().map(|r| r.username.as_str()).collect();
+        // "bio-only" can't practise calculations, so it isn't listed here.
         assert_eq!(names, vec!["busy", "teacher", "idle"]);
 
         let top = &board[0];
