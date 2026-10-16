@@ -1,5 +1,5 @@
 import { ArrowLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +28,7 @@ import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError } from "@/lib/api"
 import type { Biomolecule, BiomoleculeTraits, CategoryField } from "@/lib/biomolecules-api"
-import { moleculeFacts, traitOf, TRAIT } from "@/lib/molecules"
+import { moleculeFacts, TRAIT, traitOf } from "@/lib/molecules"
 import {
   generatableQuizTypes,
   getCategoryQuizConfig,
@@ -78,18 +78,44 @@ export function BiomoleculesPage() {
   const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
   const categories = useMoleculeCategories()
   const loaded = useBiomoleculeDataLoaded()
+  const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const nameOf = useCategoryNames()
   const descriptionOf = useCategoryDescriptions()
   const [createOpen, setCreateOpen] = useState(false)
 
+  // The hub-level practice link applies only while some category can actually
+  // generate questions. Students only: TeacherRoutes has no
+  // /biomolekuly/procvicovani route, so teachers keep the per-category link.
+  const anyQuizTypes = useMemo(
+    () =>
+      categories.some((category) => {
+        const config = getCategoryQuizConfig(
+          category.slug,
+          allMolecules.filter((molecule) => molecule.categorySlug === category.slug),
+        )
+        return (
+          config !== undefined &&
+          generatableQuizTypes(config.molecules, config.characteristics).length > 0
+        )
+      }),
+    [categories, allMolecules],
+  )
+
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {cs.biomolekuly.title}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">{cs.biomolekuly.pageDescription}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {cs.biomolekuly.title}
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">{cs.biomolekuly.pageDescription}</p>
+        </div>
+        {!isTeacher && anyQuizTypes && (
+          <Button asChild size="sm" className="mt-1 shrink-0">
+            <Link to="/biomolekuly/procvicovani">{quizStrings.practice}</Link>
+          </Button>
+        )}
       </div>
 
       {/* Category grid */}

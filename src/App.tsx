@@ -109,6 +109,7 @@ function StudentRoutes() {
         {hasBiomolecules && (
           <>
             <Route path="/biomolekuly" element={<BiomoleculesPage />} />
+            <Route path="/biomolekuly/procvicovani" element={<BiomoleculesQuizPage />} />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"

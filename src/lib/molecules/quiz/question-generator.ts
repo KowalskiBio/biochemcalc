@@ -39,6 +39,8 @@ export interface QuizMolecule {
   smiles: string
   /** Required only for the letter-based question types. */
   oneLetter?: string
+  /** Additional accepted spellings for open (hard-mode) name answers. */
+  aliases?: string[]
   /** Groups molecules for the same-class distractor preference. */
   classKey?: string
   /** Enantiomer decoys are only allowed when this is false/undefined. */
@@ -77,11 +79,23 @@ export interface QuizPrompt {
   predicate?: CharacteristicPredicate
 }
 
+/**
+ * Quiz difficulty. "easy" is the classic multiple-choice flow; "hard" keeps
+ * the same MCQs but restricts the types to written-answer material and
+ * attaches an `openAnswer` the UI can grade free-text input against.
+ */
+export type QuizMode = "easy" | "hard"
+
+/** The accepted free-text answer for a hard-mode question. */
+export type OpenAnswer = { kind: "name" | "letter"; acceptedAnswers: string[] }
+
 export interface QuizQuestion {
   type: QuizQuestionType
   targetId: string
   prompt: QuizPrompt
   options: QuizOption[]
+  /** Present only on hard-mode questions; graded via `isOpenAnswerCorrect`. */
+  openAnswer?: OpenAnswer
 }
 
 export interface GenerateQuizConfig {
@@ -95,6 +109,8 @@ export interface GenerateQuizConfig {
   classKeyOf?: (molecule: QuizMolecule) => string | undefined
   /** A non-empty list enables the "characteristic" question type. */
   characteristics?: CharacteristicDef[]
+  /** Quiz difficulty, default "easy". */
+  mode?: QuizMode
 }
 
 /** All quiz types in a stable order. */
@@ -104,6 +120,19 @@ export const ALL_QUIZ_TYPES: readonly QuizQuestionType[] = [
   "nameToStructure",
   "structureToName",
   "letterToStructure",
+  "structureToLetter",
+  "characteristic",
+]
+
+/**
+ * The types hard mode quizzes: those whose answer is a written name or letter.
+ * The structure-as-answer types (`nameToStructure`, `letterToStructure`) are
+ * excluded — a structure can't be typed, so they stay multiple-choice only.
+ */
+export const HARD_MODE_QUIZ_TYPES: readonly QuizQuestionType[] = [
+  "nameToLetter",
+  "letterToName",
+  "structureToName",
   "structureToLetter",
   "characteristic",
 ]
@@ -173,10 +202,15 @@ export function availableQuizTypes(
 export function generatableQuizTypes(
   molecules: QuizMolecule[],
   characteristics?: CharacteristicDef[],
+  mode: QuizMode = "easy",
 ): QuizQuestionType[] {
-  return availableQuizTypes(molecules, characteristics).filter((type) =>
+  const types = availableQuizTypes(molecules, characteristics).filter((type) =>
     isGeneratable(type, molecules, characteristics),
   )
+  if (mode === "hard") {
+    return types.filter((type) => HARD_MODE_QUIZ_TYPES.includes(type))
+  }
+  return types
 }
 
 function qualifyingPredicates(
@@ -378,6 +412,63 @@ function buildQuestion(
 }
 
 /**
+ * Normalize a free-text quiz answer for tolerant comparison: Unicode-decompose,
+ * strip combining diacritics, lowercase, trim, and collapse inner whitespace.
+ * So "Kyselina asparagová" and "  kyselina   asparagova " compare equal.
+ */
+export function normalizeQuizAnswer(input: string): string {
+  return input.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ")
+}
+
+/**
+ * The accepted free-text answer for a hard-mode question. Name answers accept
+ * the molecule's name plus any aliases; characteristic answers accept every
+ * molecule matching the chosen predicate. Letter answers accept the letter.
+ */
+function buildOpenAnswer(
+  question: QuizQuestion,
+  target: QuizMolecule,
+  molecules: QuizMolecule[],
+  characteristics: CharacteristicDef[] | undefined,
+): OpenAnswer {
+  switch (question.type) {
+    case "nameToLetter":
+    case "structureToLetter":
+      return { kind: "letter", acceptedAnswers: [target.oneLetter ?? ""] }
+    case "characteristic": {
+      const predicate = question.prompt.predicate
+      const def = characteristics?.find((candidate) => candidate.predicate === predicate)
+      const matching =
+        def === undefined ? [] : molecules.filter((molecule) => def.matches(molecule))
+      return {
+        kind: "name",
+        acceptedAnswers: matching.flatMap((molecule) => [
+          molecule.name,
+          ...(molecule.aliases ?? []),
+        ]),
+      }
+    }
+    default:
+      return { kind: "name", acceptedAnswers: [target.name, ...(target.aliases ?? [])] }
+  }
+}
+
+/**
+ * True when `input` matches a hard-mode question's accepted answer, using
+ * `normalizeQuizAnswer` on both sides. Always false without an `openAnswer`
+ * (easy-mode questions are graded through their options).
+ */
+export function isOpenAnswerCorrect(question: QuizQuestion, input: string): boolean {
+  if (question.openAnswer === undefined) {
+    return false
+  }
+  const normalized = normalizeQuizAnswer(input)
+  return question.openAnswer.acceptedAnswers
+    .map(normalizeQuizAnswer)
+    .some((answer) => answer === normalized)
+}
+
+/**
  * Generate a deterministic quiz session for `molecules`.
  *
  * The same `seed` and config always produce byte-identical questions. Targets
@@ -400,11 +491,16 @@ export function generateQuizSession(
   const rng = createSeededRandom(config.seed)
   const mirrorDecoys = config.mirrorDecoys !== false
   const classKeyOf = config.classKeyOf ?? defaultClassKeyOf
+  const mode = config.mode ?? "easy"
   const available = availableQuizTypes(molecules, config.characteristics)
   const requested = [...new Set(config.types)].filter(
     (type) => available.includes(type) && isGeneratable(type, molecules, config.characteristics),
   )
-  if (requested.length === 0) {
+  // Hard mode narrows the pool to written-answer types; an empty intersection
+  // yields an empty session, exactly like a config with no generatable types.
+  const wanted =
+    mode === "hard" ? requested.filter((type) => HARD_MODE_QUIZ_TYPES.includes(type)) : requested
+  if (wanted.length === 0) {
     return []
   }
 
@@ -415,7 +511,7 @@ export function generateQuizSession(
 
   const nextType = (): QuizQuestionType => {
     if (typePool.length === 0) {
-      typePool = shuffle(rng, requested)
+      typePool = shuffle(rng, wanted)
     }
     const type = typePool[0]
     typePool = typePool.slice(1)
@@ -450,6 +546,9 @@ export function generateQuizSession(
       classKeyOf,
       config.characteristics,
     )
+    if (mode === "hard") {
+      question.openAnswer = buildOpenAnswer(question, target, molecules, config.characteristics)
+    }
     lastTargetId = question.targetId
     questions.push(question)
   }

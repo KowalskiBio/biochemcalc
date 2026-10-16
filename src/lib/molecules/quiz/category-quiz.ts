@@ -16,9 +16,9 @@ import {
   hasTraitFlag,
   isAchiral,
   NITROGEN_BASES_SLUG,
+  TRAIT,
   type TraitKey,
   traitOf,
-  TRAIT,
 } from "@/lib/molecules"
 import type { CharacteristicDef, QuizMolecule } from "@/lib/molecules/quiz/question-generator"
 
@@ -32,12 +32,18 @@ export function traitPredicate(trait: string, value: string): string {
   return `${trait}:${value}`
 }
 
-function baseQuizMolecule(molecule: Biomolecule, letter?: string, classKey?: string): QuizMolecule {
+function baseQuizMolecule(
+  molecule: Biomolecule,
+  letter?: string,
+  classKey?: string,
+  aliases?: string[],
+): QuizMolecule {
   return {
     id: molecule.slug,
     name: molecule.name,
     smiles: molecule.smiles,
     oneLetter: letter,
+    aliases,
     classKey,
     achiral: isAchiral(molecule),
   }
@@ -45,13 +51,18 @@ function baseQuizMolecule(molecule: Biomolecule, letter?: string, classKey?: str
 
 /** Amino acids: letter quizzes from `oneLetter`, the eight curated predicates. */
 function aminoAcidsQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
-  const quizMolecules = molecules.map((molecule) =>
-    baseQuizMolecule(
+  const quizMolecules = molecules.map((molecule) => {
+    // The three-letter code spells the answer a student may type in hard mode.
+    const abbreviation = traitOf(molecule, TRAIT.abbreviation)
+    const aliases =
+      abbreviation !== undefined && abbreviation.length > 1 ? [abbreviation] : undefined
+    return baseQuizMolecule(
       molecule,
       traitOf(molecule, TRAIT.oneLetter),
       traitOf(molecule, TRAIT.sideChain),
-    ),
-  )
+      aliases,
+    )
+  })
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
   const classIs =
     (classKey: string) =>
@@ -117,13 +128,22 @@ function qualifies(
 function genericQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   const everyHasAbbreviation =
     molecules.length > 0 && molecules.every((molecule) => traitOf(molecule, TRAIT.abbreviation))
-  const quizMolecules = molecules.map((molecule) =>
-    baseQuizMolecule(
+  const quizMolecules = molecules.map((molecule) => {
+    const abbreviation = traitOf(molecule, TRAIT.abbreviation)
+    const oneLetter = everyHasAbbreviation ? abbreviation : undefined
+    // A multi-character abbreviation that isn't already the quiz letter is an
+    // accepted alternative spelling.
+    const aliases =
+      abbreviation !== undefined && abbreviation.length > 1 && abbreviation !== oneLetter
+        ? [abbreviation]
+        : undefined
+    return baseQuizMolecule(
       molecule,
-      everyHasAbbreviation ? traitOf(molecule, TRAIT.abbreviation) : undefined,
+      oneLetter,
       traitOf(molecule, TRAIT.polarity) ?? traitOf(molecule, TRAIT.charge),
-    ),
-  )
+      aliases,
+    )
+  })
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
   const traitIs =
     (key: TraitKey, value: string) =>
