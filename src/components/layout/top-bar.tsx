@@ -6,10 +6,13 @@ import { SectionSwitcher } from "@/components/layout/section-switcher"
 import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
 import { categoriesApi, setsApi, topicsApi } from "@/lib/api"
-import { getMoleculeCategory } from "@/lib/molecules"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
-import { useCategoryNames } from "@/stores/biomolecule-names-store"
+import {
+  useBiomoleculeDataLoaded,
+  useCategoryNames,
+  useMoleculeCategories,
+} from "@/stores/biomolecule-data-store"
 import { useCarryStore } from "@/stores/drag-store"
 
 interface BreadcrumbItem {
@@ -23,12 +26,13 @@ const biomoleculesRoot: BreadcrumbItem = { path: "/biomolekuly", label: cs.navig
 function biomoleculesBreadcrumbs(
   path: string,
   nameOf: (categoryId: string) => string,
+  categoryExists: (categoryId: string) => boolean,
 ): BreadcrumbItem[] | null {
   const match = path.match(/^\/biomolekuly(?:\/([^/]+))?(\/procvicovani)?\/?$/)
   if (!match) return null
   const [, categoryId, quiz] = match
   const crumbs = [biomoleculesRoot]
-  if (categoryId && getMoleculeCategory(categoryId)) {
+  if (categoryId && categoryExists(categoryId)) {
     crumbs.push({ path: `/biomolekuly/${categoryId}`, label: nameOf(categoryId) })
     if (quiz) {
       crumbs.push({
@@ -83,6 +87,8 @@ export function TopBar() {
   const navigate = useNavigate()
   const { section } = useSection()
   const categoryNameOf = useCategoryNames()
+  const moleculeCategories = useMoleculeCategories()
+  const biomoleculeDataLoaded = useBiomoleculeDataLoaded()
   const logout = useAuthStore((s) => s.logout)
   const isCarrying = useCarryStore((s) => s.isCarrying)
   const [currentTime, setCurrentTime] = useState<string>("")
@@ -138,7 +144,13 @@ export function TopBar() {
   const loadDynamicBreadcrumbs = useCallback(async () => {
     const path = location.pathname
 
-    const bioCrumbs = biomoleculesBreadcrumbs(path, categoryNameOf)
+    // Pre-load the category list is still empty — report every slug as
+    // existing so direct links don't lose their category crumb and pop
+    // back in once the dataset arrives.
+    const categoryExists = (categoryId: string) =>
+      !biomoleculeDataLoaded || moleculeCategories.some((c) => c.slug === categoryId)
+
+    const bioCrumbs = biomoleculesBreadcrumbs(path, categoryNameOf, categoryExists)
     if (bioCrumbs) {
       setBreadcrumbs(bioCrumbs)
       return
@@ -220,7 +232,7 @@ export function TopBar() {
         ],
       )
     }
-  }, [location.pathname, section, categoryNameOf])
+  }, [location.pathname, section, categoryNameOf, moleculeCategories, biomoleculeDataLoaded])
 
   useEffect(() => {
     loadDynamicBreadcrumbs()

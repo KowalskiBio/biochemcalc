@@ -24,7 +24,6 @@ import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
 import { type BiomoleculeLeaderboardEntry, biomoleculesApi } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
-import { MOLECULE_CATEGORIES } from "@/lib/molecules"
 import { studentApi } from "@/lib/student-api"
 import type {
   LeaderboardEntry,
@@ -34,7 +33,7 @@ import type {
 } from "@/lib/types"
 import { cn, formatDecimalComma } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
-import { useCategoryNames } from "@/stores/biomolecule-names-store"
+import { useCategoryNames, useMoleculeCategories } from "@/stores/biomolecule-data-store"
 
 function formatMinutesSeconds(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
@@ -419,6 +418,7 @@ const biomoleculeBoardCache = new Map<string, BiomoleculeLeaderboardEntry[]>()
 function BiomoleculesLeaderboard() {
   const currentUserId = useAuthStore((s) => s.user?.id)
   const nameOf = useCategoryNames()
+  const categories = useMoleculeCategories()
   const [categoryId, setCategoryId] = useState<string>("")
   const [entries, setEntries] = useState<BiomoleculeLeaderboardEntry[] | null>(
     () => biomoleculeBoardCache.get("") ?? null,
@@ -484,9 +484,9 @@ function BiomoleculesLeaderboard() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{cs.student.leaderboardCategoryAll}</SelectItem>
-                {MOLECULE_CATEGORIES.map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {nameOf(category.id)}
+                {categories.map((category) => (
+                  <SelectItem key={category.slug} value={category.slug}>
+                    {nameOf(category.slug)}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 46;
+const CURRENT_USER_VERSION: u32 = 47;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -236,6 +236,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 46 {
         apply_migration_v46(conn)?;
         conn.pragma_update(None, "user_version", "46")?;
+    }
+
+    if user_version < 47 {
+        apply_migration_v47(conn)?;
+        conn.pragma_update(None, "user_version", "47")?;
     }
 
     Ok(())
@@ -1481,6 +1486,94 @@ fn apply_migration_v46(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Biomolekuly moves from frontend-shipped datasets into the database so
+/// teachers can manage categories and molecules themselves (following the
+/// calculations side, where all question data lives in SQLite).
+///
+/// `biomolecule_categories` + `biomolecules` hold the library — name and
+/// SMILES are mandatory per molecule, the per-category slug keeps quiz URLs
+/// and leaderboard rows stable. `biomolecule_traits` carries the optional,
+/// code-validated characteristics (abbreviation, charge, polarity, letter
+/// codes, side-chain class, …) as key/value pairs. The two curated
+/// categories (amino acids, nitrogen bases) are seeded here with
+/// `built_in = 1` and remain fully editable; any name/description a teacher
+/// overrode through v44's `biomolecule_category_overrides` is folded into
+/// the new rows before that table is dropped.
+fn apply_migration_v47(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_categories (
+            slug TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
+            updated_at TEXT NOT NULL,
+            updated_by BLOB REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS biomolecules (
+            id BLOB PRIMARY KEY NOT NULL,
+            category_slug TEXT NOT NULL REFERENCES biomolecule_categories(slug)
+                ON DELETE CASCADE,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            smiles TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
+            updated_at TEXT NOT NULL,
+            updated_by BLOB REFERENCES users(id) ON DELETE SET NULL,
+            UNIQUE (category_slug, slug)
+        );
+        -- Quiz options show molecule names, so duplicates inside one
+        -- category would be ambiguous regardless of letter case.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_biomolecules_category_name
+        ON biomolecules (category_slug, name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_biomolecules_category
+        ON biomolecules (category_slug);
+
+        CREATE TABLE IF NOT EXISTS biomolecule_traits (
+            molecule_id BLOB NOT NULL REFERENCES biomolecules(id) ON DELETE CASCADE,
+            trait TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (molecule_id, trait)
+        );
+        ",
+    )?;
+
+    crate::db::biomolecule_seed::seed_builtins_if_empty(conn)?;
+
+    // Fold teacher overrides from v44 into the seeded rows they renamed,
+    // then retire the overrides table — the categories are real rows now.
+    apply_migration_v44(conn)?;
+    conn.execute_batch(
+        "
+        UPDATE biomolecule_categories SET
+            name = COALESCE((
+                SELECT o.name FROM biomolecule_category_overrides o
+                WHERE o.category_id = biomolecule_categories.slug AND o.name IS NOT NULL
+            ), name),
+            description = COALESCE((
+                SELECT o.description FROM biomolecule_category_overrides o
+                WHERE o.category_id = biomolecule_categories.slug AND o.description IS NOT NULL
+            ), description),
+            updated_at = COALESCE((
+                SELECT o.updated_at FROM biomolecule_category_overrides o
+                WHERE o.category_id = biomolecule_categories.slug
+            ), updated_at),
+            updated_by = COALESCE((
+                SELECT o.updated_by FROM biomolecule_category_overrides o
+                WHERE o.category_id = biomolecule_categories.slug
+            ), updated_by);
+        DROP TABLE biomolecule_category_overrides;
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2598,7 +2691,7 @@ mod tests {
     }
 
     #[test]
-    fn v46_moves_interim_v44_names_into_the_overrides_table() {
+    fn v46_and_v47_move_interim_v44_names_into_the_categories_table() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         // A database that ran the interim v44: name-only table, no overrides
         // table, version already past 44. v15 supplies the `users` table the
@@ -2623,24 +2716,76 @@ mod tests {
         run_migrations(&conn).expect("migrations");
         assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
-        let (name, description): (Option<String>, Option<String>) = conn
+        // v46 moved the rename into `biomolecule_category_overrides`, and
+        // v47 folded it into the seeded category row before dropping both
+        // legacy tables.
+        let (name, description): (String, Option<String>) = conn
             .query_row(
-                "SELECT name, description FROM biomolecule_category_overrides
-                 WHERE category_id = 'aminokyseliny'",
+                "SELECT name, description FROM biomolecule_categories
+                 WHERE slug = 'aminokyseliny'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("rename carried over");
-        assert_eq!(name.as_deref(), Some("AK"));
-        assert_eq!(description, None);
+        assert_eq!(name, "AK");
+        assert!(
+            description.is_some(),
+            "the seeded description survives a name-only override"
+        );
 
-        let old_left: bool = conn
+        for legacy in ["biomolecule_category_names", "biomolecule_category_overrides"] {
+            let left: bool = conn
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = ?1)",
+                    rusqlite::params![legacy],
+                    |row| row.get(0),
+                )
+                .expect("query");
+            assert!(!left, "legacy table {legacy} is dropped");
+        }
+    }
+
+    #[test]
+    fn v47_seeds_the_builtin_biomolecule_library() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let categories: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_categories", [], |row| {
+                row.get(0)
+            })
+            .expect("count categories");
+        assert_eq!(categories, 2);
+
+        let molecules: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
+            .expect("count molecules");
+        assert_eq!(molecules, 25);
+
+        let traits: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_traits", [], |row| row.get(0))
+            .expect("count traits");
+        assert!(traits > 100, "every seeded molecule carries traits");
+
+        // The seed must not bake in a quiz-ambiguous or broken dataset.
+        let duplicate_names: i64 = conn
             .query_row(
-                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'biomolecule_category_names')",
+                "SELECT COUNT(*) FROM (
+                     SELECT 1 FROM biomolecules
+                     GROUP BY category_slug, name COLLATE NOCASE
+                     HAVING COUNT(*) > 1)",
                 [],
                 |row| row.get(0),
             )
-            .expect("query");
-        assert!(!old_left, "the interim table is dropped");
+            .expect("duplicate check");
+        assert_eq!(duplicate_names, 0);
+
+        // Idempotent: a second migration run keeps the library untouched.
+        run_migrations(&conn).expect("migrations again");
+        let molecules_after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
+            .expect("count again");
+        assert_eq!(molecules_after, 25);
     }
 }

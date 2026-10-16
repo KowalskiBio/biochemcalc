@@ -24,7 +24,7 @@ React 19 / TS / Tailwind / Radix (src/)
    └── Tauri commands ──→ desktop app (src-tauri/src/lib.rs)    ← desktop path
             └── BOTH call shared `do_*` business functions (src-tauri/src/commands)
                      ├── engine/   formula evaluation, variant generator, IS MU export
-                     └── db/       SQLite (42 migrations, 22 repos)
+                     └── db/       SQLite (47 migrations, 23 repos)
 ```
 
 Key facts:
@@ -48,7 +48,7 @@ Key facts:
 | Path | Role |
 |---|---|
 | `engine/` | `formula.rs` (evalexpr-based eval + molar masses), `generator.rs` (~5,900 lines: sampling, rounding, distractors, constraints), `variable_extractor.rs`, `answer_targets.rs`, `export_writer.rs` (IS MU `.txt`) |
-| `db/` | `schema.rs` (~2,410 lines, **46 idempotent migrations**, `CURRENT_USER_VERSION = 46`) + `repos/` (22 repos, one per entity) |
+| `db/` | `schema.rs` (~2,470 lines, **47 idempotent migrations**, `CURRENT_USER_VERSION = 47`) + `repos/` (23 repos, one per entity) + `biomolecule_seed.rs` (built-in Biomolekuly dataset) |
 | `commands/` | `crud.rs` (~3,110 lines), `generation.rs`, `importer.rs`; HTTP-only: `auth.rs`, `practice.rs`, `test_session.rs`, `streak_run.rs`, `reports.rs` |
 | `http/` | axum router + SPA fallback, DB-backed session-cookie middleware with role gating (`require_teacher`, `require_admin`, `require_calculations`), `routes/{auth,cmd,student}.rs` |
 | `bin/` | `biochemcalc-server` (web entrypoint, env-configured), `import_bulk_json`, `reparse_test1` |
@@ -178,15 +178,34 @@ first, else `design-system/MASTER.md` (v2.1.0) is authoritative.
 
 ## 8b. Biomolekuly module (added 2026-10-12)
 
-Learning module for biomolecules (amino acids first; nucleotides/vitamins/metabolites later).
-Curated, frontend-only, no DB or backend changes.
+Learning module for biomolecules (amino acids + nitrogen bases built in; teachers add their
+own categories). **Fully DB-backed and teacher-managed since v47** — the two built-in
+categories are editable seed data like everything else.
 
-- `src/lib/molecules/amino-acids.ts` — curated dataset of the 20 L-amino acids (PubChem
-  canonical isomeric SMILES, neutral state), Czech names, 1-/3-letter codes, side-chain
-  class, charge at pH 7, essential, facts + `getAminoAcidByOneLetter`, `canMirrorStructure`.
-- `src/lib/molecules/index.ts` — category registry (`MoleculeBase`, `MoleculeCategory`,
-  `MOLECULE_CATEGORIES` = `[aminokyseliny]`, `getMoleculeCategory`); route slugs live here,
-  display strings in cs. Category pages may consume richer datasets (AA fields) directly.
+- `src-tauri/src/db/biomolecule_seed.rs` — the built-in dataset (source of truth): the 20
+  L-amino acids (PubChem canonical isomeric SMILES, neutral state; glycine the only achiral
+  one) and the 5 nitrogenous bases (A/C/G/T/U, keto forms). Traits per molecule:
+  `oneLetter`/`abbreviation`, `sideChain`, `charge`, `essential`, `sulfur`, `ringSystem`,
+  `pairsWith`, `inDna`/`inRna`, `facts`. Inserted once by migration v47
+  (`biomolecule_categories`, `biomolecules`, `biomolecule_traits`).
+- `src/lib/molecules/index.ts` — the shared trait vocabulary read by the browse page and
+  quiz engine (`TRAIT` keys mirroring `commands::biomolecules::traits`, `traitOf`,
+  `hasTraitFlag`, `moleculeFacts`, `isAchiral` ← no `@` in SMILES, category-slug consts).
+  No datasets and no category registry live here anymore.
+- DB layer: `db/repos/biomolecule_repo.rs` (categories + molecules + traits in one
+  `BiomoleculeData` payload; every mutation returns the fresh full dataset), validated in
+  `commands/biomolecules.rs` (slugs, NOCASE-unique molecule names per category, controlled
+  trait vocabulary/values, SMILES = non-empty printable ASCII ≤ 300). Routes
+  (`http/routes/biomolecules.rs`): `/data` (any user), `create-category` /
+  `update-category-meta` / `delete-category` / `create-molecule` / `update-molecule` /
+  `delete-molecule` (teacher), `record-quiz-result` (requires Biomolekuly access + an
+  existing category), `leaderboard` (any user). Teachers may rename/edit/delete built-ins;
+  duplicate category names are allowed (the derived slug is uniquified).
+- Frontend data: `src/lib/biomolecules-api.ts` (client), `src/stores/biomolecule-data-store.ts`
+  (zustand; loads `/data` once per session, every mutation replaces the store atomically;
+  `useMoleculeCategories` / `useMoleculeCategory` / `useCategoryMolecules` /
+  `useBiomoleculeDataLoaded` + the `useCategoryNames()` / `useCategoryDescriptions()` hooks
+  with cs built-in fallback — never read `cs.biomolekuly.categories[id]` directly).
 - `src/components/ui/structure-view.tsx` — `StructureView`: SmilesDrawer SVG wrapper
   (`bondLength 24`, `explicitHydrogens: false` keeps the stereochemical wedge).
   TRANSPARENT background (SvgWrapper paints no opaque bg — verified 2.4.1 `constructSvg`),
@@ -200,39 +219,43 @@ Curated, frontend-only, no DB or backend changes.
   Never CSS-rotate/mirror the finished SVG (rotates/flips text too).
 - `src/lib/molecules/orientation.ts` — pure transform math (`transformPoints`,
   `pointsBoundingCenter`); unit tested in `__tests__/orientation.test.ts` (10 tests).
-- `src/pages/biomolecules-page.tsx` — hub (`/biomolekuly`, category cards) + category view
-  (`/biomolekuly/:categoryId`, grid + detail dialog; NO manual rotation UI). Both routes
-  in TeacherRoutes and StudentRoutes; nav points at the hub. Strings: `cs.biomolekuly.*`.
-- `src/lib/molecules/nitrogen-bases.ts` — 2nd family: 5 nitrogenous bases
-  (A, C, G, T, U; PubChem canonical SMILES, keto forms), Czech names, abbreviations,
-  Watson–Crick `pairsWithIds`, `inDna`/`inRna`, `ringSystem` purine/pyrimidine, facts.
-  Quiz deliberately limited to name↔structure (pairing info is display-only).
+- `src/pages/biomolecules-page.tsx` — hub (`/biomolekuly`, category cards + teacher's
+  new-category dialog) + category view (`/biomolekuly/:categoryId`, grid + detail dialog
+  with trait rows + teacher management: inline rename, molecule add/edit via
+  `MoleculeFormDialog` with live SMILES preview/`onValidityChange`, delete with confirm).
+  Both routes in TeacherRoutes and StudentRoutes; nav points at the hub. Per-kind browse
+  via local `CategoryBits` descriptors (cardCodeLine, cardBadges?, dialogDescription,
+  detailRows) for amino-acids/nitrogen-bases/custom categories, fed by molecules from the
+  store. Strings: `cs.biomolekuly.*` (+ `manage.*` block).
 - **Quiz engine is family-agnostic**: `question-generator.ts` knows only `QuizMolecule`
   {id, name, smiles, oneLetter?, classKey?, achiral?} — distractor preference via
-  `classKeyOf`/classKey, characteristics via injected `CharacteristicDef[]`. Per-family
-  knowledge lives in `quiz/category-quiz.ts` (`getCategoryQuizConfig`): "aminokyseliny"
-  (oneLetter + sideChain classKey + 8 predicates), "dusikate-baze" (ringSystem classKey,
-  achiral → no mirror decoys, no letters → exactly 2 quiz types). Future family = dataset
-  + registry entry + cs strings + (optionally) browse descriptor bits in the page.
-- `src/pages/biomolecules-page.tsx` — per-category browse via local `CategoryBits<M>`
-  descriptors (cardCodeLine, cardBadges?, dialogDescription, detailRows) feeding a shared
-  MoleculeBrowser; amino-acid and nitrogen-base bits records.
-- `src/pages/biomolecules-quiz-page.tsx` — driven by `getCategoryQuizConfig(categoryId)`;
-  option labels resolve from config molecules (no dataset hardcoding).
+  `classKeyOf`/classKey, characteristics via injected `CharacteristicDef[]`
+  (`predicate: string`, so `trait:value` ids like `charge:positive` work next to the
+  curated amino-acid ones). Per-category adaptation lives in `quiz/category-quiz.ts`
+  (`getCategoryQuizConfig(categoryId, molecules)`): "aminokyseliny" (oneLetter + sideChain
+  classKey + the 8 curated predicates), "dusikate-baze" (ringSystem classKey, achiral → no
+  mirror decoys, no letters → exactly 2 quiz types), any other category generically
+  (`abbreviation` → quiz letter when every molecule has one, `charge`/`polarity` values →
+  predicates, same trait = distractor classKey). `generatableQuizTypes` = the types a
+  session can actually produce (≥ 4 molecules, qualifying predicate) — it drives both the
+  quiz-page chips and the category page's "Procvičovat" button.
 - `src/lib/molecules/quiz/` — headless quiz engine (pure, seed-deterministic, no React/DOM):
   `random.ts` (mulberry32 + pick/shuffle), `question-generator.ts` (7 question types:
   name↔letter, name↔structure, letter↔structure, characteristic — 4-option MCQ, same
   sideChain-class distractor preference, ~50% enantiomer mirror decoys on structure-option
-  MCQs for chiral targets, characteristic predicates: nonpolar/polar/aromatic/acidic/basic/
-  essential/achiral/sulfur with distractors strictly from the complement), `quiz-session.ts`
-  (pure reducer + `scoreSummary`), `index.ts` barrel. Invariants: exactly one correct,
-  4 options, target queue never repeats consecutively.
+  MCQs for chiral targets, characteristic predicates with distractors strictly from the
+  complement), `quiz-session.ts` (pure reducer + `scoreSummary`), `index.ts` barrel.
+  Invariants: exactly one correct, 4 options, target queue never repeats consecutively.
 - `src/pages/biomolecules-quiz-page.tsx` — practice UI at `/biomolekuly/:categoryId/procvicovani`
-  (both shells): setup (type chips from `availableQuizTypes`, 10/20/all count) → question
-  (prompt + options, instant accent/destructive feedback, reveal correct on wrong, Enter =
-  next) → results (score, per-type breakdown, restart with fresh seed). Fully local state;
-  text options resolve labels from the dataset by `moleculeId`.
-- Tests: amino-acids (9) + orientation (10) + quiz engine (27) = 46 in the molecules suite.
+  (both shells): reads molecules from `biomolecule-data-store`, builds the config lazily
+  (redirect gates on `useBiomoleculeDataLoaded()` — unknown slug / empty category → hub,
+  no generatable types → category page): setup (type chips from `generatableQuizTypes`,
+  10/20/all count) → question (prompt + options, instant accent/destructive feedback,
+  reveal correct on wrong, Enter = next) → results (score, per-type breakdown, restart
+  with fresh seed). Finished scores POST to `/record-quiz-result` (best-effort).
+- Tests: quiz engine (`__tests__/question-generator.test.ts` + `quiz-session.test.ts`,
+  driving configs from `__tests__/fixtures.ts` — a TS copy of the v47 seed; update both
+  when the seed changes) + orientation (10).
 - smiles-drawer 2.4.1 (MIT, ~55 KB gzip) — chosen over RDKit.js (7.4 MB WASM); see §8.1
   note: TS formula engine is unrelated, no sync needed.
 - Dev-machine note: `npm run check` repo-wide shows ~110 pre-existing CRLF formatter
@@ -271,16 +294,14 @@ entirely (frontend, `commands/victor.rs`, routes, `reqwest`, the dead `settings_
   preference; `useLandingRedirect`), `components/layout/section-switcher.tsx` (teacher
   top bar, student sidebar header), `section-picker.tsx`. Sidebars pick their nav list
   per section; `StudentRoutes` only registers the routes the student's access allows.
-- **Category name/description edits** (migration v44, `biomolecule_category_overrides`,
-  nullable `name`/`description` per slug): teachers edit both for everyone, inline on the
-  category page exactly like a topic title (`InlineCategoryText` in
-  `biomolecules-page.tsx`); typing the built-in text back = reset (row dropped when both
-  are NULL). `/api/biomolecules/category-overrides` (any user) + `/update-category`
-  {categoryId, field, value} (teacher). Frontend reads the text only via
-  `useCategoryNames()` / `useCategoryDescriptions()` (`stores/biomolecule-names-store.ts`)
-  — never `cs.biomolekuly.categories[id]` directly.
-  Migration v46 repairs DBs that ran an interim v44 (`biomolecule_category_names`):
-  creates the overrides table, copies names over, drops the old table.
+- **Category name/description edits**: migration v47 replaced the v44 overrides machinery
+  (`biomolecule_category_overrides`, folded into `biomolecule_categories` and dropped; the
+  built-in categories became editable seed rows). Teachers now rename/edit via
+  `POST /api/biomolecules/update-category-meta` {categoryId, field, value} (`InlineCategoryText`
+  in `biomolecules-page.tsx`); the old `/category-overrides` + `/update-category` routes are
+  gone (pre-v47 app bundles calling them degrade gracefully to cs's built-in text).
+  Frontend reads the text only via `useCategoryNames()` / `useCategoryDescriptions()`
+  (`stores/biomolecule-data-store.ts`) — never `cs.biomolekuly.categories[id]` directly.
 - **Per-section leaderboard**: `/leaderboard` renders the board of the current section.
   Calculations = practice attempts + streak boards (idle students listed only if they
   have calculations access). Biomolekuly = migration v45 `biomolecule_quiz_results`,

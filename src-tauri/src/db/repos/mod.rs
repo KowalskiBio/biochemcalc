@@ -1,5 +1,5 @@
-pub mod biomolecule_category_repo;
 pub mod biomolecule_quiz_repo;
+pub mod biomolecule_repo;
 pub mod category_repo;
 pub mod constant_repo;
 pub mod invite_code_repo;
@@ -21,8 +21,9 @@ pub mod user_repo;
 pub mod variable_history_repo;
 pub mod variable_repo;
 
-pub use biomolecule_category_repo::BiomoleculeCategoryRepo;
 pub use biomolecule_quiz_repo::{BiomoleculeLeaderboardRow, BiomoleculeQuizRepo};
+#[allow(unused_imports)]
+pub use biomolecule_repo::{BiomoleculeData, BiomoleculeRepo};
 pub use category_repo::CategoryRepo;
 pub use constant_repo::ConstantRepo;
 pub use invite_code_repo::InviteCodeRepo;

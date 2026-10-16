@@ -1,49 +1,78 @@
-// Biomolekuly category registry — pure data, no display strings.
+// Biomolekuly molecule traits — pure data, no display strings.
 //
-// Display names and descriptions live in `cs.biomolekuly.categories`, keyed
-// by category id, so this module stays language-agnostic. Each molecule
-// family ships its own dataset (./amino-acids, ./nitrogen-bases today;
-// vitamins and metabolites later) and registers one entry in
-// MOLECULE_CATEGORIES.
+// Molecules and categories live in the database (see `biomolecules-api.ts`
+// and `stores/biomolecule-data-store.ts`); this module holds the shared
+// trait vocabulary the browse page and the quiz engine read. Display labels
+// for trait values live in `cs.biomolekuly` (`sideChainLabels`,
+// `chargeLabels`, `polarityLabels`, `ringSystemLabels`).
 
-import { AMINO_ACIDS } from "./amino-acids"
-import { NITROGEN_BASES } from "./nitrogen-bases"
+import type { Biomolecule, BiomoleculeTraits } from "@/lib/biomolecules-api"
+
+/** Route slug of the seeded amino-acid category. */
+export const AMINO_ACIDS_SLUG = "aminokyseliny"
+/** Route slug of the seeded nitrogenous-bases category. */
+export const NITROGEN_BASES_SLUG = "dusikate-baze"
+
+/** The trait keys validated server-side (mirrors `commands::biomolecules::traits`). */
+export const TRAIT = {
+  /** Short code shown on cards (amino acids: three-letter, bases: one letter). */
+  abbreviation: "abbreviation",
+  /** Single letter used by letter-based quiz questions (amino acids). */
+  oneLetter: "oneLetter",
+  /** Charge at pH 7: positive | neutral | negative. */
+  charge: "charge",
+  /** hydrophobic | hydrophilic. */
+  polarity: "polarity",
+  /** Amino-acid side-chain class: nonpolar | polar | aromatic | acidic | basic. */
+  sideChain: "sideChain",
+  /** Flag traits (value "true" when present). */
+  essential: "essential",
+  sulfur: "sulfur",
+  inDna: "inDna",
+  inRna: "inRna",
+  /** purine | pyrimidine. */
+  ringSystem: "ringSystem",
+  /** Comma-separated slugs of Watson-Crick partners within the category. */
+  pairsWith: "pairsWith",
+  /** Czech teaching facts, one per line. */
+  facts: "facts",
+} as const
+
+export type TraitKey = (typeof TRAIT)[keyof typeof TRAIT]
+
+/** A molecule's trait value, or undefined when it doesn't carry the trait. */
+export function traitOf(molecule: Biomolecule, key: TraitKey): string | undefined {
+  const value = molecule.traits[key]
+  return value && value.trim().length > 0 ? value : undefined
+}
+
+/** True when the molecule carries a flag trait (essential, sulfur, inDna, …). */
+export function hasTraitFlag(molecule: Biomolecule, key: TraitKey): boolean {
+  return traitOf(molecule, key) === "true"
+}
+
+/** A molecule's teaching facts (the `facts` trait, one per line). */
+export function moleculeFacts(molecule: Biomolecule): string[] {
+  return (traitOf(molecule, TRAIT.facts) ?? "")
+    .split("\n")
+    .map((fact) => fact.trim())
+    .filter((fact) => fact.length > 0)
+}
 
 /**
- * The minimal shape a molecule needs to be browsable in the Biomolekuly
- * section. Each family dataset is a structural superset of this shape (its
- * extra fields — amino acids: `sideChain`, `essential`, letter codes;
- * nitrogen bases: `ringSystem`, `pairsWithIds` — are consumed by that
- * family's bespoke category view), so richer families fit without registry
- * changes.
+ * Mirror decoys flip the depiction's stereochemistry, so they are only
+ * honest for molecules with no stereocenters. SMILES marks chirality with
+ * `@`/`@@`, so its absence is the achirality signal — for the curated sets
+ * this matches the old hand-maintained flags exactly (only glycine).
  */
-export interface MoleculeBase {
-  /** Stable id, unique within its category ("ala"). */
-  id: string
-  /** Czech display name ("Alanin"). */
-  name: string
-  /** SMILES for the skeletal depiction. */
-  smiles: string
-  /** Letter codes for families that have them (amino acids: 3- and 1-letter). */
-  codes?: {
-    threeLetter?: string
-    oneLetter?: string
-  }
-  /** Czech teaching facts shown in the detail view. */
-  facts?: string[]
+export function isAchiral(molecule: Pick<Biomolecule, "smiles">): boolean {
+  return !molecule.smiles.includes("@")
 }
 
-export interface MoleculeCategory {
-  /** Stable route slug for "/biomolekuly/:categoryId" and cs lookup key. */
-  id: string
-  molecules: MoleculeBase[]
-}
+/**
+ * The minimal shape the shared molecule browser needs. Biomolecules from
+ * the database satisfy it directly.
+ */
+export type MoleculeBase = Pick<Biomolecule, "slug" | "name" | "smiles" | "traits">
 
-export const MOLECULE_CATEGORIES: MoleculeCategory[] = [
-  { id: "aminokyseliny", molecules: AMINO_ACIDS },
-  { id: "dusikate-baze", molecules: NITROGEN_BASES },
-]
-
-export function getMoleculeCategory(id: string): MoleculeCategory | undefined {
-  return MOLECULE_CATEGORIES.find((category) => category.id === id)
-}
+export type { Biomolecule, BiomoleculeTraits }

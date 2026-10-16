@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
 
+pub mod biomolecule_seed;
 pub mod repos;
 pub mod schema;
 

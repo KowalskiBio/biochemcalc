@@ -9,7 +9,8 @@ export type QuizQuestionType =
   | "structureToLetter"
   | "characteristic"
 
-export type CharacteristicPredicate =
+/** The curated amino-acid characteristic predicates (aminokyseliny). */
+export type AminoAcidCharacteristicPredicate =
   | "nonpolar"
   | "polar"
   | "aromatic"
@@ -18,6 +19,14 @@ export type CharacteristicPredicate =
   | "essential"
   | "achiral"
   | "sulfur"
+
+/**
+ * A characteristic question's predicate id. Amino acids use their curated
+ * set above; any category can also get `trait:value` predicates derived
+ * from molecule traits ("charge:positive", "polarity:hydrophobic"). The
+ * page localizes prompts via `cs.biomolekuly.quiz.characteristicPrompts`.
+ */
+export type CharacteristicPredicate = string
 
 /**
  * The minimal, molecule-family-agnostic shape the quiz engine needs. Concrete
@@ -99,8 +108,8 @@ export const ALL_QUIZ_TYPES: readonly QuizQuestionType[] = [
   "characteristic",
 ]
 
-/** All characteristic predicates in a stable order. */
-export const CHARACTERISTIC_PREDICATES: readonly CharacteristicPredicate[] = [
+/** The curated amino-acid predicates in a stable order. */
+export const CHARACTERISTIC_PREDICATES: readonly AminoAcidCharacteristicPredicate[] = [
   "nonpolar",
   "polar",
   "aromatic",
@@ -153,6 +162,21 @@ export function availableQuizTypes(
     }
     return true
   })
+}
+
+/**
+ * The types a session with these molecules can actually produce — the
+ * available types, minus those without enough material (four molecules per
+ * option set, a qualifying predicate for "characteristic"). The setup
+ * screen offers exactly these.
+ */
+export function generatableQuizTypes(
+  molecules: QuizMolecule[],
+  characteristics?: CharacteristicDef[],
+): QuizQuestionType[] {
+  return availableQuizTypes(molecules, characteristics).filter((type) =>
+    isGeneratable(type, molecules, characteristics),
+  )
 }
 
 function qualifyingPredicates(

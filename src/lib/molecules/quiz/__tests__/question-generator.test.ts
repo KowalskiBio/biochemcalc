@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { Biomolecule } from "@/lib/biomolecules-api"
 import { type CategoryQuizConfig, getCategoryQuizConfig } from "@/lib/molecules/quiz/category-quiz"
 import {
   ALL_QUIZ_TYPES,
@@ -10,14 +11,18 @@ import {
   type QuizMolecule,
   type QuizQuestionType,
 } from "@/lib/molecules/quiz/question-generator"
+import { TEST_AMINO_ACIDS, TEST_NITROGEN_BASES } from "./fixtures"
 
 const ALL_TYPES: QuizQuestionType[] = [...ALL_QUIZ_TYPES]
 const BASE_TYPES: QuizQuestionType[] = ["nameToStructure", "structureToName"]
 
-function requireConfig(categoryId: string): CategoryQuizConfig {
-  const config = getCategoryQuizConfig(categoryId)
+const AMINO_ACIDS_SLUG = TEST_AMINO_ACIDS[0]?.categorySlug ?? "aminokyseliny"
+const NITROGEN_BASES_SLUG = TEST_NITROGEN_BASES[0]?.categorySlug ?? "dusikate-baze"
+
+function requireConfig(categoryId: string, molecules: typeof TEST_AMINO_ACIDS): CategoryQuizConfig {
+  const config = getCategoryQuizConfig(categoryId, molecules)
   if (config === undefined) {
-    throw new Error(`Unknown category: ${categoryId}`)
+    throw new Error(`No quiz config for category: ${categoryId}`)
   }
   return config
 }
@@ -29,8 +34,8 @@ function requireCharacteristics(config: CategoryQuizConfig): CharacteristicDef[]
   return config.characteristics
 }
 
-const AMINO_ACIDS_QUIZ = requireConfig("aminokyseliny")
-const NITROGEN_BASES_QUIZ = requireConfig("dusikate-baze")
+const AMINO_ACIDS_QUIZ = requireConfig(AMINO_ACIDS_SLUG, TEST_AMINO_ACIDS)
+const NITROGEN_BASES_QUIZ = requireConfig(NITROGEN_BASES_SLUG, TEST_NITROGEN_BASES)
 const AA_CHARACTERISTICS = requireCharacteristics(AMINO_ACIDS_QUIZ)
 
 const aminoAcidById = new Map<string, QuizMolecule>(
@@ -380,7 +385,84 @@ describe("nitrogen bases category", () => {
     expect(purineTargetsWithPurineDistractor / purineTargets).toBeGreaterThan(0.5)
   })
 
-  it("returns undefined for an unknown category id", () => {
-    expect(getCategoryQuizConfig("neznamy")).toBeUndefined()
+  it("returns undefined when the category has no molecules", () => {
+    expect(getCategoryQuizConfig("aminokyseliny", [])).toBeUndefined()
+    expect(getCategoryQuizConfig("neznamy", [])).toBeUndefined()
+  })
+})
+
+describe("generic category adapter", () => {
+  // A teacher-made category: abbreviations double as quiz letters, each
+  // charge/polarity value with enough material becomes a predicate.
+  const customSeed: Array<Pick<Biomolecule, "slug" | "name" | "smiles" | "traits">> = [
+    {
+      slug: "ala-x",
+      name: "Látka A",
+      smiles: "CC",
+      traits: { abbreviation: "A", polarity: "hydrophobic" },
+    },
+    {
+      slug: "bet-x",
+      name: "Látka B",
+      smiles: "CCC",
+      traits: { abbreviation: "B", polarity: "hydrophilic" },
+    },
+    {
+      slug: "gam-x",
+      name: "Látka G",
+      smiles: "CCCC",
+      traits: { abbreviation: "G", polarity: "hydrophilic" },
+    },
+    {
+      slug: "del-x",
+      name: "Látka D",
+      smiles: "CCCCC",
+      traits: { abbreviation: "D", polarity: "hydrophilic", charge: "positive" },
+    },
+    {
+      slug: "eps-x",
+      name: "Látka E",
+      smiles: "CCCCCC",
+      traits: { abbreviation: "E", polarity: "hydrophilic", charge: "neutral" },
+    },
+  ]
+  const customMolecules: Biomolecule[] = customSeed.map((molecule, position) => ({
+    id: `vlastni-${molecule.slug}`,
+    categorySlug: "vlastni-kategorie",
+    position,
+    ...molecule,
+  }))
+
+  it("derives letters from abbreviations and predicates from trait values", () => {
+    const config = requireConfig("vlastni-kategorie", customMolecules)
+    expect(config.molecules.every((molecule) => (molecule.oneLetter ?? "").length > 0)).toBe(true)
+    expect(config.molecules[0].classKey).toBe("hydrophobic")
+
+    const predicates = (config.characteristics ?? []).map((def) => def.predicate)
+    // polarity:hydrophobic (1 match, 4 non-matches) and charge:positive /
+    // charge:neutral qualify; polarity:hydrophilic leaves only 1 non-match.
+    expect(predicates).toContain("polarity:hydrophobic")
+    expect(predicates).toContain("charge:positive")
+    expect(predicates).toContain("charge:neutral")
+    expect(predicates).not.toContain("polarity:hydrophilic")
+
+    const types = availableQuizTypes(config.molecules, config.characteristics)
+    expect(types).toContain("nameToLetter")
+    expect(types).toContain("nameToStructure")
+    expect(types).toContain("characteristic")
+  })
+
+  it("drops letter types when any molecule lacks an abbreviation", () => {
+    const withoutAbbreviation = customMolecules.map((molecule, index) =>
+      index === 0
+        ? { ...molecule, traits: { polarity: molecule.traits.polarity ?? "" } }
+        : molecule,
+    )
+    const config = requireConfig("vlastni-kategorie", withoutAbbreviation)
+    expect(config.molecules.every((molecule) => molecule.oneLetter === undefined)).toBe(true)
+    const types = availableQuizTypes(config.molecules, config.characteristics)
+    expect(types).not.toContain("nameToLetter")
+    expect(types).not.toContain("letterToName")
+    expect(types).toContain("nameToStructure")
   })
 })

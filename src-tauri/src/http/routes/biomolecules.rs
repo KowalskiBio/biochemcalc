@@ -1,37 +1,79 @@
-//! `/api/biomolecules/*` — Biomolekuly category display text (name and
-//! description). Reading is open to any logged-in account; editing is
-//! teacher-only. The quiz leaderboard is open to any logged-in account;
-//! recording a quiz score needs Biomolekuly access.
+//! `/api/biomolecules/*` — the Biomolekuly molecule library and the quiz
+//! leaderboard. Reading is open to any logged-in account (the frontend
+//! caches the whole dataset per session); category/molecule management is
+//! teacher-only. Recording a quiz score needs Biomolekuly access.
 
 use crate::commands::biomolecules::{
-    do_list_category_overrides, do_quiz_leaderboard, do_record_quiz_result, do_update_category,
-    BiomoleculeLeaderboardEntry, QuizLeaderboardPayload, RecordQuizResultPayload,
-    UpdateCategoryPayload,
+    do_create_category, do_create_molecule, do_delete_category, do_delete_molecule, do_list_data,
+    do_quiz_leaderboard, do_record_quiz_result, do_update_category_meta, do_update_molecule,
+    BiomoleculeLeaderboardEntry, CreateCategoryPayload, CreateMoleculePayload,
+    DeleteCategoryPayload, DeleteMoleculePayload, QuizLeaderboardPayload, RecordQuizResultPayload,
+    UpdateCategoryMetaPayload, UpdateMoleculePayload,
 };
-use crate::db::repos::biomolecule_category_repo::CategoryOverride;
+use crate::db::repos::biomolecule_repo::BiomoleculeData;
 use crate::db::AppState;
 use crate::http::error::HttpError;
 use crate::http::middleware::CurrentUser;
 use axum::extract::{Extension, State};
 use axum::routing::post;
 use axum::{Json, Router};
-use std::collections::HashMap;
 use std::sync::Arc;
 
-async fn category_overrides(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<HashMap<String, CategoryOverride>>, HttpError> {
+async fn data(State(state): State<Arc<AppState>>) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_list_category_overrides(&conn)?))
+    Ok(Json(do_list_data(&conn)?))
 }
 
-async fn update_category(
+async fn create_category(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
-    Json(payload): Json<UpdateCategoryPayload>,
-) -> Result<Json<HashMap<String, CategoryOverride>>, HttpError> {
+    Json(payload): Json<CreateCategoryPayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_update_category(&conn, &user.id, payload)?))
+    Ok(Json(do_create_category(&conn, &user.id, payload)?))
+}
+
+async fn update_category_meta(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<UpdateCategoryMetaPayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_update_category_meta(&conn, &user.id, payload)?))
+}
+
+async fn delete_category(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeleteCategoryPayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_delete_category(&conn, payload)?))
+}
+
+async fn create_molecule(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<CreateMoleculePayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_create_molecule(&conn, &user.id, payload)?))
+}
+
+async fn update_molecule(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<UpdateMoleculePayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_update_molecule(&conn, &user.id, payload)?))
+}
+
+async fn delete_molecule(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeleteMoleculePayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_delete_molecule(&conn, payload)?))
 }
 
 async fn record_quiz_result(
@@ -55,7 +97,7 @@ async fn leaderboard(
 /// Any authenticated user.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/category-overrides", post(category_overrides))
+        .route("/data", post(data))
         .route("/leaderboard", post(leaderboard))
 }
 
@@ -66,5 +108,11 @@ pub fn quiz_router() -> Router<Arc<AppState>> {
 
 /// Teacher only.
 pub fn teacher_router() -> Router<Arc<AppState>> {
-    Router::new().route("/update-category", post(update_category))
+    Router::new()
+        .route("/create-category", post(create_category))
+        .route("/update-category-meta", post(update_category_meta))
+        .route("/delete-category", post(delete_category))
+        .route("/create-molecule", post(create_molecule))
+        .route("/update-molecule", post(update_molecule))
+        .route("/delete-molecule", post(delete_molecule))
 }

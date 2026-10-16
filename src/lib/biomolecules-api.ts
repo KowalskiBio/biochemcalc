@@ -1,13 +1,38 @@
 import { httpRequest } from "./http"
 
-/** Teacher-edited text for one category; a missing field = built-in text. */
-export interface CategoryOverride {
-  name?: string
+/**
+ * Optional molecule characteristics. The keys are a controlled vocabulary
+ * validated server-side (see `commands::biomolecules::traits`); a molecule
+ * carries any subset of them.
+ */
+export type BiomoleculeTraits = Record<string, string>
+
+/** One Biomolekuly category, as listed on the hub. */
+export interface BiomoleculeCategoryInfo {
+  slug: string
+  name: string
   description?: string
+  builtIn: boolean
+  moleculeCount: number
 }
 
-/** Category slug → its overrides. A missing slug = all built-in text. */
-export type CategoryOverrides = Record<string, CategoryOverride>
+/** One molecule. `name` and `smiles` are mandatory, traits optional. */
+export interface Biomolecule {
+  id: string
+  categorySlug: string
+  /** Stable per-category slug — the molecule's identity in quiz questions. */
+  slug: string
+  name: string
+  smiles: string
+  position: number
+  traits: BiomoleculeTraits
+}
+
+/** The whole Biomolekuly library; every mutation returns a fresh copy. */
+export interface BiomoleculeData {
+  categories: BiomoleculeCategoryInfo[]
+  molecules: Biomolecule[]
+}
 
 export type CategoryField = "name" | "description"
 
@@ -20,26 +45,62 @@ export interface BiomoleculeLeaderboardEntry {
   quizCount: number
 }
 
-/** `/api/biomolecules/*` — Biomolekuly category display text and quiz leaderboard. */
+/** `/api/biomolecules/*` — the molecule library, its management, and the leaderboard. */
 export const biomoleculesApi = {
-  /** Any logged-in user. */
-  categoryOverrides: (): Promise<CategoryOverrides> =>
-    httpRequest<CategoryOverrides>("/api/biomolecules/category-overrides"),
+  /** Any logged-in user: the full category + molecule dataset. */
+  data: (): Promise<BiomoleculeData> => httpRequest<BiomoleculeData>("/api/biomolecules/data"),
 
-  /**
-   * Teacher-only: change a category's name or description for everyone; a
-   * null/blank value restores the built-in text. Returns the full override map.
-   */
-  updateCategory: (
+  /** Teacher: create a category (the server derives its slug from the name). */
+  createCategory: (name: string, description: string | null): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/create-category", { name, description }),
+
+  /** Teacher: rename a category or change its description. */
+  updateCategoryMeta: (
     categoryId: string,
     field: CategoryField,
     value: string | null,
-  ): Promise<CategoryOverrides> =>
-    httpRequest<CategoryOverrides>("/api/biomolecules/update-category", {
+  ): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/update-category-meta", {
       categoryId,
       field,
       value,
     }),
+
+  /** Teacher: delete a category with its molecules (past quiz scores remain). */
+  deleteCategory: (categoryId: string): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/delete-category", { categoryId }),
+
+  /** Teacher: add a molecule to a category. */
+  createMolecule: (
+    categoryId: string,
+    name: string,
+    smiles: string,
+    traits: BiomoleculeTraits,
+  ): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/create-molecule", {
+      categoryId,
+      name,
+      smiles,
+      traits,
+    }),
+
+  /** Teacher: update a molecule's name, SMILES, and trait set (wholesale). */
+  updateMolecule: (
+    moleculeId: string,
+    name: string,
+    smiles: string,
+    traits: BiomoleculeTraits,
+  ): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/update-molecule", {
+      moleculeId,
+      name,
+      smiles,
+      traits,
+    }),
+
+  /** Teacher: delete one molecule. */
+  deleteMolecule: (moleculeId: string): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/delete-molecule", { moleculeId }),
 
   /** Store the score of a finished quiz (needs Biomolekuly access). */
   recordQuizResult: (categoryId: string, correctCount: number, totalCount: number): Promise<void> =>

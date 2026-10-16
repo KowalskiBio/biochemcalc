@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { AMINO_ACIDS } from "@/lib/molecules/amino-acids"
+import { getCategoryQuizConfig } from "@/lib/molecules/quiz/category-quiz"
 import {
   ALL_QUIZ_TYPES,
   generateQuizSession,
@@ -10,11 +10,18 @@ import {
   quizSessionReducer,
   scoreSummary,
 } from "@/lib/molecules/quiz/quiz-session"
+import { TEST_AMINO_ACIDS } from "./fixtures"
 
-const questions = generateQuizSession(AMINO_ACIDS, {
+const aminoAcidsConfig = getCategoryQuizConfig(TEST_AMINO_ACIDS[0].categorySlug, TEST_AMINO_ACIDS)
+if (aminoAcidsConfig === undefined) {
+  throw new Error("expected a quiz config for the fixture amino acids")
+}
+
+const questions = generateQuizSession(aminoAcidsConfig.molecules, {
   types: [...ALL_QUIZ_TYPES],
   questionCount: 3,
   seed: 7,
+  characteristics: aminoAcidsConfig.characteristics,
 })
 
 function correctKey(question: QuizQuestion): string {
@@ -123,10 +130,11 @@ describe("quizSessionReducer restart", () => {
       type: "select",
       key: correctKey(session.questions[0]),
     })
-    const fresh = generateQuizSession(AMINO_ACIDS, {
+    const fresh = generateQuizSession(aminoAcidsConfig.molecules, {
       types: [...ALL_QUIZ_TYPES],
       questionCount: 2,
       seed: 42,
+      characteristics: aminoAcidsConfig.characteristics,
     })
     session = quizSessionReducer(session, { type: "restart", questions: fresh })
 

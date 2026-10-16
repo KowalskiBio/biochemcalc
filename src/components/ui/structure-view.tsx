@@ -27,6 +27,8 @@ export interface StructureViewProps {
   className?: string
   /** Accessible name; falls back to the SMILES string when omitted. */
   title?: string
+  /** Reports whether the SMILES parsed and drew — used by the editor form. */
+  onValidityChange?: (valid: boolean) => void
 }
 
 /**
@@ -83,6 +85,7 @@ export function StructureView({
   theme,
   className,
   title,
+  onValidityChange,
 }: StructureViewProps) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [hasError, setHasError] = useState(false)
@@ -103,6 +106,7 @@ export function StructureView({
     SmilesDrawer.parse(
       smiles,
       (tree) => {
+        onValidityChange?.(true)
         const drawer = new SmilesDrawer.SvgDrawer({
           width: size,
           height: size,
@@ -138,8 +142,11 @@ export function StructureView({
       },
       () => {
         setHasError(true)
+        onValidityChange?.(false)
       },
     )
+    // onValidityChange is intentionally not a dependency: its identity can
+    // change per parent render, and only real inputs should trigger a redraw.
   }, [smiles, size, orientationDeg, mirror, resolvedTheme])
 
   return (

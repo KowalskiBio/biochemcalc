@@ -4,13 +4,13 @@ import { Link, Navigate, useParams } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
 import { biomoleculesApi } from "@/lib/biomolecules-api"
-import { getMoleculeCategory } from "@/lib/molecules"
 import {
-  availableQuizTypes,
   createQuizSession,
+  generatableQuizTypes,
   generateQuizSession,
   getCategoryQuizConfig,
   type QuizMolecule,
@@ -21,7 +21,12 @@ import {
   quizSessionReducer,
 } from "@/lib/molecules/quiz"
 import { cn } from "@/lib/utils"
-import { useCategoryNames } from "@/stores/biomolecule-names-store"
+import {
+  useBiomoleculeDataLoaded,
+  useCategoryMolecules,
+  useCategoryNames,
+  useMoleculeCategory,
+} from "@/stores/biomolecule-data-store"
 
 const quizStrings = cs.biomolekuly.quiz
 
@@ -403,18 +408,32 @@ function ResultsScreen({ session, categoryId, onRestart }: ResultsScreenProps) {
 
 export function BiomoleculesQuizPage() {
   const { categoryId } = useParams<{ categoryId: string }>()
-  const category = getMoleculeCategory(categoryId ?? "")
+  const slug = categoryId ?? ""
+  const loaded = useBiomoleculeDataLoaded()
+  const category = useMoleculeCategory(slug)
+  const molecules = useCategoryMolecules(slug)
   const nameOf = useCategoryNames()
-  const config = useMemo(() => getCategoryQuizConfig(categoryId ?? ""), [categoryId])
+  const config = useMemo(() => getCategoryQuizConfig(slug, molecules), [slug, molecules])
 
   const allTypes = useMemo(
-    () => (config ? availableQuizTypes(config.molecules, config.characteristics) : []),
+    () => (config ? generatableQuizTypes(config.molecules, config.characteristics) : []),
     [config],
   )
-  const [selectedTypes, setSelectedTypes] = useState<QuizQuestionType[]>(allTypes)
+  // null = "all of the above" — the chips start fully selected, but only
+  // once the dataset lands (before that allTypes is still empty).
+  const [chosenTypes, setChosenTypes] = useState<QuizQuestionType[] | null>(null)
+  const selectedTypes = chosenTypes ?? allTypes
   const [countChoice, setCountChoice] = useState<CountChoice>(10)
   const [started, setStarted] = useState(false)
   const [session, dispatch] = useReducer(quizSessionReducer, EMPTY_QUESTIONS, createQuizSession)
+
+  // Reset the chips when navigating between categories within the route
+  // (adjust-state-during-render, so the stale selection never commits).
+  const [prevSlug, setPrevSlug] = useState(slug)
+  if (prevSlug !== slug) {
+    setPrevSlug(slug)
+    setChosenTypes(null)
+  }
 
   const startQuiz = () => {
     if (!config || selectedTypes.length === 0) return
@@ -430,8 +449,10 @@ export function BiomoleculesQuizPage() {
   }
 
   const toggleType = (type: QuizQuestionType) => {
-    setSelectedTypes((current) =>
-      current.includes(type) ? current.filter((t) => t !== type) : [...current, type],
+    setChosenTypes(
+      selectedTypes.includes(type)
+        ? selectedTypes.filter((t) => t !== type)
+        : [...selectedTypes, type],
     )
   }
 
@@ -461,12 +482,28 @@ export function BiomoleculesQuizPage() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [started, session.finished, session.answered])
 
+  // Wait for the first load before judging a slug — otherwise a direct
+  // link would bounce to the hub while the dataset is still being fetched.
   if (!category || !config) {
+    if (!loaded) {
+      return (
+        <div className="mx-auto w-full max-w-2xl space-y-6">
+          <Skeleton className="h-8 w-48 rounded-[4px]" />
+          <Skeleton className="h-24 rounded-[4px]" />
+        </div>
+      )
+    }
     return <Navigate to="/biomolekuly" replace />
   }
 
-  const backHref = `/biomolekuly/${category.id}`
-  const categoryName = nameOf(category.id)
+  // A category with nothing quiz-worthy (e.g. fewer than four molecules)
+  // never shows the quiz button, but its URL can still be typed directly.
+  if (!started && allTypes.length === 0) {
+    return <Navigate to={`/biomolekuly/${category.slug}`} replace />
+  }
+
+  const backHref = `/biomolekuly/${category.slug}`
+  const categoryName = nameOf(category.slug)
 
   if (!started) {
     return (
@@ -485,7 +522,7 @@ export function BiomoleculesQuizPage() {
   }
 
   if (session.finished) {
-    return <ResultsScreen session={session} categoryId={category.id} onRestart={startQuiz} />
+    return <ResultsScreen session={session} categoryId={category.slug} onRestart={startQuiz} />
   }
 
   const question = session.questions[session.index]
