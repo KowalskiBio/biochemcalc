@@ -492,6 +492,8 @@ pub struct RecordQuizResultPayload {
     pub category_id: String,
     pub correct_count: i64,
     pub total_count: i64,
+    /// Quiz difficulty: `"easy"` or `"hard"`.
+    pub mode: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -509,6 +511,8 @@ pub struct BiomoleculeLeaderboardEntry {
     pub correct_count: i64,
     pub answered_count: i64,
     pub quiz_count: i64,
+    /// Weighted score: hard-mode correct answers count double.
+    pub points: i64,
 }
 
 /// Store the score of one finished quiz for the acting user. The quiz is
@@ -530,12 +534,17 @@ pub fn do_record_quiz_result(
     {
         return Err(DbError::Validation("Invalid quiz score".into()));
     }
+    let mode = payload.mode.trim();
+    if mode != "easy" && mode != "hard" {
+        return Err(DbError::Validation(format!("Invalid mode: {mode}")));
+    }
     BiomoleculeQuizRepo::insert(
         conn,
         user_id,
         category_id,
         payload.correct_count,
         payload.total_count,
+        mode,
     )
 }
 
@@ -557,6 +566,7 @@ pub fn do_quiz_leaderboard(
                 correct_count: row.correct_count,
                 answered_count: row.answered_count,
                 quiz_count: row.quiz_count,
+                points: row.points,
             },
         )
         .collect())
@@ -935,6 +945,7 @@ mod tests {
                     category_id: category.into(),
                     correct_count: correct,
                     total_count: total,
+                    mode: "easy".into(),
                 },
             )
         };

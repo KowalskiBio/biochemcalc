@@ -408,9 +408,10 @@ function CalculationsLeaderboard() {
 }
 
 /**
- * Biomolekuly's own board: correct answers summed over every finished quiz,
- * optionally narrowed to one category. Kept apart from the calculations
- * board — a quiz answer and a calculated example aren't the same currency.
+ * Biomolekuly's own board, ranked by weighted points — a correct hard-mode
+ * answer counts double — optionally narrowed to one category. Kept apart
+ * from the calculations board: a quiz answer and a calculated example aren't
+ * the same currency.
  */
 /** Last board seen per category ("" = all), shown instantly on revisit while it refreshes. */
 const biomoleculeBoardCache = new Map<string, BiomoleculeLeaderboardEntry[]>()
@@ -451,7 +452,13 @@ function BiomoleculesLeaderboard() {
     }
   }, [categoryId])
 
-  const hasAnyActivity = (entries ?? []).some((entry) => entry.quizCount > 0)
+  // The server already orders by points; sorting the stable way here just
+  // guarantees a cached board can't render a stale order after refetches.
+  const rankedEntries = useMemo(
+    () => [...(entries ?? [])].sort((a, b) => b.points - a.points),
+    [entries],
+  )
+  const hasAnyActivity = rankedEntries.some((entry) => entry.quizCount > 0)
 
   return (
     <div className="space-y-6">
@@ -515,7 +522,7 @@ function BiomoleculesLeaderboard() {
                   <TableHead className="w-[70px]">{cs.student.leaderboardRank}</TableHead>
                   <TableHead>{cs.student.leaderboardUser}</TableHead>
                   <TableHead className="w-[110px] text-right">
-                    {cs.student.leaderboardCorrect}
+                    {cs.student.leaderboardPoints}
                   </TableHead>
                   <TableHead className="w-[130px] text-right">
                     {cs.student.leaderboardAnswered}
@@ -526,7 +533,7 @@ function BiomoleculesLeaderboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(entries ?? []).map((entry, idx) => {
+                {rankedEntries.map((entry, idx) => {
                   const isMe = entry.userId === currentUserId
                   return (
                     <TableRow key={entry.userId} className={cn(isMe && "bg-muted/50")}>
@@ -542,7 +549,7 @@ function BiomoleculesLeaderboard() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">
-                        {entry.correctCount}
+                        {entry.points}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {entry.answeredCount}

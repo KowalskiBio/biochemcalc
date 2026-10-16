@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 47;
+const CURRENT_USER_VERSION: u32 = 48;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -241,6 +241,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 47 {
         apply_migration_v47(conn)?;
         conn.pragma_update(None, "user_version", "47")?;
+    }
+
+    if user_version < 48 {
+        apply_migration_v48(conn)?;
+        conn.pragma_update(None, "user_version", "48")?;
     }
 
     Ok(())
@@ -1569,6 +1574,19 @@ fn apply_migration_v47(conn: &Connection) -> Result<(), rusqlite::Error> {
                 WHERE o.category_id = biomolecule_categories.slug
             ), updated_by);
         DROP TABLE biomolecule_category_overrides;
+        ",
+    )?;
+    Ok(())
+}
+
+/// Records the difficulty a quiz was played at so the leaderboard can weight
+/// hard-mode answers higher. Additive: every pre-existing row predates hard
+/// mode, so it defaults to `'easy'`.
+fn apply_migration_v48(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        ALTER TABLE biomolecule_quiz_results
+            ADD COLUMN mode TEXT NOT NULL DEFAULT 'easy';
         ",
     )?;
     Ok(())

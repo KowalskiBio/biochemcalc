@@ -43,6 +43,8 @@ export interface BiomoleculeLeaderboardEntry {
   correctCount: number
   answeredCount: number
   quizCount: number
+  /** Weighted score: hard-mode correct answers count double. */
+  points: number
 }
 
 /** `/api/biomolecules/*` — the molecule library, its management, and the leaderboard. */
@@ -103,12 +105,13 @@ export const biomoleculesApi = {
     httpRequest<BiomoleculeData>("/api/biomolecules/delete-molecule", { moleculeId }),
 
   /** Store the score of a finished quiz (needs Biomolekuly access). */
-  recordQuizResult: (categoryId: string, correctCount: number, totalCount: number): Promise<void> =>
-    httpRequest<void>("/api/biomolecules/record-quiz-result", {
-      categoryId,
-      correctCount,
-      totalCount,
-    }),
+  recordQuizResult: (args: {
+    categoryId: string
+    correctCount: number
+    totalCount: number
+    /** Played difficulty: `"easy"` or `"hard"` — hard answers score double. */
+    mode: "easy" | "hard"
+  }): Promise<void> => httpRequest<void>("/api/biomolecules/record-quiz-result", args),
 
   /** Any logged-in user. Omitting `categoryId` sums every category. */
   leaderboard: (categoryId?: string): Promise<BiomoleculeLeaderboardEntry[]> =>

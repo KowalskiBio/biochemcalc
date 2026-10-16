@@ -202,10 +202,14 @@ interface OpenAnswerFormProps {
 
 /**
  * Hard mode's answer slot: a text input instead of the option grid. Enter or
- * "Zkontrolovat" locks the answer; the input keeps showing the typed text and
- * takes the verdict tint. Remounted per question (`key={index}`), so the
- * draft starts empty. The typed answer itself lives only here — the session
- * records just the verdict (see QuestionScreen's `onOpenSubmit`).
+ * "Zkontrolovat" locks the answer; the locked input keeps showing the typed
+ * text and takes the same accent/destructive verdict state the easy-mode
+ * option buttons use. The input owns its Enter keystroke (`stopPropagation`),
+ * so grading never trips the window-level "Enter = next question" listener —
+ * the first Enter reveals the verdict, the second advances. Remounted per
+ * question (`key={index}`), so the draft starts empty. The typed answer
+ * itself lives only here — the session records just the verdict (see
+ * QuestionScreen's `onOpenSubmit`).
  */
 function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
   const [value, setValue] = useState("")
@@ -220,6 +224,10 @@ function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault()
+            // Keep this keystroke off window: the quiz's "Enter = next
+            // question" listener must never see the Enter that graded this
+            // answer — only the one pressed once the verdict is on screen.
+            event.stopPropagation()
             if (canSubmit) onSubmit(value)
           }
         }}
@@ -233,6 +241,9 @@ function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
           "max-w-xs text-center",
           verdict === "correct" && "border-accent bg-accent/5 text-accent",
           verdict === "incorrect" && "border-destructive bg-destructive/10 text-destructive",
+          // A locked-in answer should read as graded, not greyed out — undo
+          // the Input's disabled dimming once the verdict lands.
+          verdict !== null && "font-medium disabled:opacity-100",
         )}
       />
       {!answered && (
@@ -504,7 +515,7 @@ function QuestionScreen({
       )}
 
       {answered && (
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4" aria-live="polite">
           <div className="space-y-0.5">
             <p
               className={cn("text-sm font-medium", wasCorrect ? "text-accent" : "text-destructive")}
@@ -697,11 +708,18 @@ export function BiomoleculesQuizPage() {
     // Best effort: a lost score only costs a leaderboard entry, not the
     // results screen the student is looking at.
     biomoleculesApi
-      .recordQuizResult(activeQuiz.slug, correct, session.questions.length)
+      .recordQuizResult({
+        categoryId: activeQuiz.slug,
+        correctCount: correct,
+        totalCount: session.questions.length,
+        mode: activeQuiz.mode,
+      })
       .catch(() => {})
   }, [activeQuiz, session.finished, session.questions, session.answers])
 
-  // Enter advances to the next question once the current one is answered.
+  // Enter advances to the next question once the current one is answered. The
+  // hard-mode input swallows its own Enter (see OpenAnswerForm), so this only
+  // ever fires for the keystroke pressed after the verdict is already visible.
   useEffect(() => {
     if (!activeQuiz || session.finished || !session.answered) return
     const onKeyDown = (event: KeyboardEvent) => {

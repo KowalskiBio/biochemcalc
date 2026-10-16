@@ -72,6 +72,11 @@ const navBySection: Record<Section, NavItem[]> = {
   ],
   biomolecules: [
     {
+      path: "/biomolekuly/procvicovani",
+      icon: <Target className="size-[18px]" strokeWidth={1.75} />,
+      label: cs.navigation.practice,
+    },
+    {
       path: "/biomolekuly",
       icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
       label: cs.navigation.biomolekuly,
@@ -121,6 +126,23 @@ function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { section } = useSection()
   const navItems = navBySection[section]
 
+  // Nav paths can nest ("/biomolekuly/procvicovani" sits under
+  // "/biomolekuly"), and a plain startsWith would light up both items at
+  // once. Match on whole segments, then let the longest match win: exactly
+  // one item is active on any route, and subpages (e.g. a molecule
+  // category) still highlight their parent item.
+  const matchesPath = (path: string) =>
+    path === "/"
+      ? location.pathname === "/"
+      : location.pathname === path || location.pathname.startsWith(`${path}/`)
+  const activePath = navItems.reduce<string | null>(
+    (best, item) =>
+      matchesPath(item.path) && (best === null || item.path.length > best.length)
+        ? item.path
+        : best,
+    null,
+  )
+
   const handleLogout = async () => {
     onNavigate?.()
     await logout()
@@ -150,10 +172,7 @@ function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 p-3">
         <div className="flex flex-col gap-1">
           {navItems.map((item) => {
-            const isActive =
-              item.path === "/"
-                ? location.pathname === "/"
-                : location.pathname.startsWith(item.path)
+            const isActive = item.path === activePath
             return (
               <Link
                 key={item.path}

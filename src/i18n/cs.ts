@@ -188,7 +188,7 @@ export const cs = {
       "Laboratorní výpočty – kdo kolik příkladů spočítal správně.",
     leaderboardBiomoleculesTitle: "Žebříček – Biomolekuly",
     leaderboardBiomoleculesDescription:
-      "Kdo kolik otázek z kvízů o biomolekulách zodpověděl správně.",
+      "Kdo kolik bodů získal v kvízech o biomolekulách. Lehká obtížnost = 1 bod, těžká = 2 body.",
     leaderboardBiomoleculesEmpty: "Zatím nikdo nedokončil žádný kvíz. Buďte první!",
     leaderboardQuizCount: "Kvízy",
     leaderboardCategoryLabel: "Kategorie",
