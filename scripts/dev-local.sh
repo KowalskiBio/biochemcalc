@@ -7,6 +7,11 @@
 #
 # Usage: npm run dev:local     (or: bash scripts/dev-local.sh)
 # Stop:  Ctrl-C (stops vite AND the backend).
+# Data:  on first run (no .local-dev/biochemcalc.sqlite) pulls the VM snapshot
+#        via scripts/db-pull.sh (needs ssh alias `proxmox1`); SKIP_DB_PULL=1
+#        starts with a FRESH database + bootstrap teacher admin/adminpassword1
+#        instead. Windows/Git Bash defaults to SKIP_DB_PULL=1 (the retired
+#        PowerShell port never pulled either). Force a pull: SKIP_DB_PULL=0.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,9 +21,28 @@ PID_FILE="$DATA_DIR/server.pid"
 LOG="$DATA_DIR/server-stdout.log"
 
 # --- 1. Data snapshot -------------------------------------------------------
+if [ -z "${SKIP_DB_PULL:-}" ]; then
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) SKIP_DB_PULL=1 ;; # no VM access assumed on Windows
+    *) SKIP_DB_PULL=0 ;;
+  esac
+fi
+
+LOGIN_HINT="log in with a VM account (e.g. 'kowalski')"
 if [ ! -f "$DB" ]; then
-  echo "[dev-local] No local snapshot found — pulling from proxmox1 first..."
-  bash scripts/db-pull.sh
+  if [ "$SKIP_DB_PULL" = "1" ]; then
+    # Fresh database: the server creates the schema on startup and seeds one
+    # teacher account from these (first run only — a no-op once users exist).
+    export BIOCHEMCALC_ADMIN_USERNAME="${BIOCHEMCALC_ADMIN_USERNAME:-admin}"
+    export BIOCHEMCALC_ADMIN_PASSWORD="${BIOCHEMCALC_ADMIN_PASSWORD:-adminpassword1}"
+    LOGIN_HINT="log in: $BIOCHEMCALC_ADMIN_USERNAME / $BIOCHEMCALC_ADMIN_PASSWORD (bootstrapped)"
+    echo "[dev-local] No local snapshot — starting with a FRESH database (SKIP_DB_PULL=1)."
+    echo "[dev-local] Teacher account will be bootstrapped: $BIOCHEMCALC_ADMIN_USERNAME / $BIOCHEMCALC_ADMIN_PASSWORD"
+    echo "[dev-local] To seed from the VM instead: npm run db:pull (needs ssh alias 'proxmox1'), then re-run."
+  else
+    echo "[dev-local] No local snapshot — pulling from ${VM_HOST:-proxmox1} first (SKIP_DB_PULL=1 to skip)..."
+    bash scripts/db-pull.sh
+  fi
 fi
 
 # --- 2. Backend build --------------------------------------------------------
@@ -73,12 +97,12 @@ stop_backend() {
 
 if curl -sf -o /dev/null http://localhost:1420 2>/dev/null; then
   echo "[dev-local] vite is already running on :1420 — reusing it."
-  echo "[dev-local] Open http://localhost:1420 and log in with a VM account (e.g. 'kowalski')."
+  echo "[dev-local] Open http://localhost:1420 and $LOGIN_HINT."
   echo "[dev-local] Backend is still running in the background; Ctrl-C vite and re-run this script to stop everything."
   exit 0
 fi
 
-echo "[dev-local] Starting vite on http://localhost:1420 — log in with a VM account (e.g. 'kowalski')."
+echo "[dev-local] Starting vite on http://localhost:1420 — $LOGIN_HINT."
 trap stop_backend EXIT
 trap 'exit 130' INT TERM
 npm run dev

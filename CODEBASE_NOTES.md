@@ -260,9 +260,11 @@ categories are editable seed data like everything else.
   note: TS formula engine is unrelated, no sync needed.
 - Dev-machine note: `npm run check` repo-wide shows ~110 pre-existing CRLF formatter
   errors on this Windows checkout (`core.autocrlf=true` vs repo LF); untouched-file noise,
-  not gate-worthy. Preview: `npm run dev:local` (now cross-platform via
-  `scripts/dev-local.js` → `dev-local.ps1` on Windows / `dev-local.sh` elsewhere); first
-  run bootstraps teacher `admin` / `adminpassword1` into a fresh `.local-dev` DB.
+  not gate-worthy. Preview: `npm run dev:local` (cross-platform via
+  `scripts/dev-local.js` → `dev-local.sh` everywhere; Git Bash required on Windows,
+  no PowerShell port). First run pulls the VM snapshot into `.local-dev` unless
+  SKIP_DB_PULL=1 (the default on Windows), which bootstraps teacher
+  `admin` / `adminpassword1` into a fresh `.local-dev` DB.
   Frontend auth is HTTP-only (`/api/auth/*`); the Tauri webview also needs the local
   server running in dev (Vite proxies `/api` → :8080) — no in-process server in lib.rs.
   PS1 script must stay ASCII-only (PS 5.1 ANSI parse gotcha: UTF-8 dashes break strings).

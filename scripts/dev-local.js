@@ -1,7 +1,6 @@
 // Cross-platform launcher for `npm run dev:local`.
-// Prefers the original bash script everywhere it can run (full parity incl.
-// db-pull); on Windows falls back to the PowerShell port when Git Bash is
-// not installed.
+// Runs the bash script everywhere; on Windows a MINGW/MSYS bash (Git Bash)
+// is required — the PowerShell port was retired, there is no fallback.
 import { spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 
@@ -25,10 +24,10 @@ function pickTarget() {
   if (process.platform !== "win32") return { cmd: "bash", args: ["scripts/dev-local.sh"] }
   const bash = findBash()
   if (bash) return { cmd: bash, args: ["scripts/dev-local.sh"] }
-  return {
-    cmd: "powershell.exe",
-    args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/dev-local.ps1"],
-  }
+  console.error(
+    "[dev-local] Git Bash not found — install Git for Windows: https://git-scm.com/download/win",
+  )
+  process.exit(1)
 }
 
 const target = pickTarget()
