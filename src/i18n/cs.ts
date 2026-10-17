@@ -77,6 +77,7 @@ export const cs = {
     testy: "Testy",
     databaze: "Databáze",
     biomolekuly: "Biomolekuly",
+    projections: "Projekce",
     formulas: "Vzorce",
     bulkImport: "Hromadný import",
     constants: "Konstanty",
@@ -643,6 +644,20 @@ export const cs = {
       deleteError: "Smazání se nezdařilo.",
       deleteAction: "Smazat",
       cancelAction: "Zrušit",
+    },
+    projection: {
+      title: "Haworthovy projekce",
+      description: "Ověřte, jak aplikace nakládá s vašimi SMILES řetězci u cyklických sacharidů.",
+      cardTitle: "Náhled SMILES",
+      cardDescription:
+        "Vložte SMILES molekuly. Rozpoznáme-li v ní sacharidový prstenec, přepneme její zobrazení do Haworthovy projekce.",
+      smilesLabel: "SMILES molekuly",
+      smilesPlaceholder: "např. OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O",
+      verdictRecognized: "Rozpoznáno jako sacharid:",
+      verdictNone: "Sacharidový prstenec nerozpoznán — zobrazí se pouze skelet.",
+      verdictInvalid: "SMILES se nepodařilo přečíst.",
+      ringPyranose: "pyranózový prstenec",
+      ringFuranose: "furanózový prstenec",
     },
   },
 

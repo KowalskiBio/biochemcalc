@@ -3,6 +3,7 @@ import {
   Atom,
   BookOpen,
   Database,
+  Eye,
   FileText,
   Flag,
   FlaskConical,
@@ -108,6 +109,11 @@ const biomoleculesNavItems: NavItem[] = [
     label: cs.navigation.biomolekuly,
   },
   {
+    path: "/biomolekuly/projekce",
+    icon: <Eye className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.projections,
+  },
+  {
     path: "/leaderboard",
     icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.leaderboard,
@@ -119,9 +125,11 @@ const navBySection: Record<Section, { main: NavItem[]; bottom: NavItem[] }> = {
   biomolecules: { main: biomoleculesNavItems, bottom: [settingsNavItem] },
 }
 
-/** Biomolekuly owns its category and quiz sub-pages; everything else is exact. */
+/** Biomolekuly owns its category pages; Projekce has its own sibling nav item. */
 function isNavItemActive(itemPath: string, pathname: string): boolean {
-  if (itemPath === "/biomolekuly") return pathname.startsWith(itemPath)
+  if (itemPath === "/biomolekuly") {
+    return pathname === itemPath || (pathname.startsWith(`${itemPath}/`) && !pathname.startsWith("/biomolekuly/projekce"))
+  }
   return pathname === itemPath
 }
 

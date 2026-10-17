@@ -6,6 +6,7 @@ import { AppShell } from "@/components/layout/app-shell"
 import { StudentShell } from "@/components/layout/student-shell"
 import { allowedSections } from "@/hooks/use-section"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
+import { BiomoleculesProjectionPage } from "@/pages/biomolecules-projection-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
 import { BiomoleculesStreakPage } from "@/pages/biomolecules-streak-page"
 import { BiomoleculesTestPage } from "@/pages/biomolecules-test-page"
@@ -51,6 +52,7 @@ function TeacherRoutes() {
         <Route path="/testy" element={<TestyPage />} />
         <Route path="/databaze" element={<DatabazePage />} />
         <Route path="/biomolekuly" element={<BiomoleculesPage />} />
+        <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
         <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
         <Route path="/biomolekuly/:categoryId/procvicovani" element={<BiomoleculesQuizPage />} />
         <Route path="/vzorce" element={<FormulasPage />} />
