@@ -127,14 +127,15 @@ export const ALL_QUIZ_TYPES: readonly QuizQuestionType[] = [
 /**
  * The types hard mode quizzes: those whose answer is a written name or letter.
  * The structure-as-answer types (`nameToStructure`, `letterToStructure`) are
- * excluded — a structure can't be typed, so they stay multiple-choice only.
+ * excluded — a structure can't be typed, so they stay multiple-choice only —
+ * and so is `characteristic`: accepting any matching molecule makes it a
+ * trivially repeatable question rather than a recall exercise.
  */
 export const HARD_MODE_QUIZ_TYPES: readonly QuizQuestionType[] = [
   "nameToLetter",
   "letterToName",
   "structureToName",
   "structureToLetter",
-  "characteristic",
 ]
 
 /** The curated amino-acid predicates in a stable order. */
@@ -422,32 +423,16 @@ export function normalizeQuizAnswer(input: string): string {
 
 /**
  * The accepted free-text answer for a hard-mode question. Name answers accept
- * the molecule's name plus any aliases; characteristic answers accept every
- * molecule matching the chosen predicate. Letter answers accept the letter.
+ * the molecule's name plus any aliases; letter answers accept the letter.
  */
 function buildOpenAnswer(
   question: QuizQuestion,
   target: QuizMolecule,
-  molecules: QuizMolecule[],
-  characteristics: CharacteristicDef[] | undefined,
 ): OpenAnswer {
   switch (question.type) {
     case "nameToLetter":
     case "structureToLetter":
       return { kind: "letter", acceptedAnswers: [target.oneLetter ?? ""] }
-    case "characteristic": {
-      const predicate = question.prompt.predicate
-      const def = characteristics?.find((candidate) => candidate.predicate === predicate)
-      const matching =
-        def === undefined ? [] : molecules.filter((molecule) => def.matches(molecule))
-      return {
-        kind: "name",
-        acceptedAnswers: matching.flatMap((molecule) => [
-          molecule.name,
-          ...(molecule.aliases ?? []),
-        ]),
-      }
-    }
     default:
       return { kind: "name", acceptedAnswers: [target.name, ...(target.aliases ?? [])] }
   }
@@ -547,7 +532,7 @@ export function generateQuizSession(
       config.characteristics,
     )
     if (mode === "hard") {
-      question.openAnswer = buildOpenAnswer(question, target, molecules, config.characteristics)
+      question.openAnswer = buildOpenAnswer(question, target)
     }
     lastTargetId = question.targetId
     questions.push(question)

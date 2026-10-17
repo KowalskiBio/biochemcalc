@@ -64,7 +64,6 @@ describe("HARD_MODE_QUIZ_TYPES", () => {
       "letterToName",
       "structureToName",
       "structureToLetter",
-      "characteristic",
     ])
   })
 
@@ -82,7 +81,7 @@ describe("generatableQuizTypes in hard mode", () => {
     expect(hard).toEqual(easy.filter((type) => HARD_MODE_QUIZ_TYPES.includes(type)))
     expect(hard).not.toContain("nameToStructure")
     expect(hard).not.toContain("letterToStructure")
-    expect(hard).toContain("characteristic")
+    expect(hard).not.toContain("characteristic")
   })
 
   it("defaults to easy when the mode is omitted", () => {
@@ -151,25 +150,6 @@ describe("hard-mode openAnswer content", () => {
     }
   })
 
-  it("accepts every molecule matching the characteristic predicate", () => {
-    for (let seed = 0; seed < 25; seed++) {
-      const question = hardQuestion("characteristic", seed)
-      const predicate = question.prompt.predicate
-      const def = AA_CHARACTERISTICS.find((candidate) => candidate.predicate === predicate)
-      if (def === undefined) {
-        throw new Error(`unknown predicate: ${predicate}`)
-      }
-      const expected = AMINO_ACIDS.molecules
-        .filter((molecule) => def.matches(molecule))
-        .flatMap((molecule) => [molecule.name, ...(molecule.aliases ?? [])])
-      const openAnswer = question.openAnswer
-      if (openAnswer === undefined) {
-        throw new Error("characteristic question has no openAnswer")
-      }
-      expect(openAnswer.kind).toBe("name")
-      expect([...openAnswer.acceptedAnswers].sort()).toEqual([...expected].sort())
-    }
-  })
 })
 
 describe("aliases propagation", () => {
