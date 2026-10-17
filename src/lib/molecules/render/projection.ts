@@ -2,8 +2,11 @@
 //
 // The first projection kind is the Haworth depiction of cyclic saccharides:
 // a fixed textbook skeleton per ring form (pyranose hexagon with the ring
-// oxygen at the top-right, furanose pentagon with the oxygen on top) plus
-// strictly vertical substituent bonds labelled by a declarative spec.
+// oxygen at the top-right, furanose pentagon with the oxygen on top — both
+// slightly wider than tall, see `haworth-polygon.ts`) plus strictly vertical
+// substituent bonds labelled by a declarative spec.
+
+import { haworthPolygon } from "@/lib/molecules/render/haworth-polygon"
 //
 // The spec is the source of truth for stereochemistry (see `HaworthSpec`):
 // alpha/beta anomers and D/L series are *consequences* of the declared
@@ -47,7 +50,6 @@ export interface ProjectionDrawing {
 }
 
 const BOND = 26
-const ROOT3_HALF = Math.sqrt(3) / 2
 const HYDROGEN_PAD = 7
 const PADDING = 14
 const TEXT_WIDTH_PER_CHAR = 7
@@ -64,43 +66,34 @@ interface RingVertex {
   pt: Pt
 }
 
-/** Regular pentagon geometry for the furanose forms (edge = BOND, O on top). */
-const PENTAGON_RADIUS = BOND / (2 * Math.sin(Math.PI / 5))
-const FURANOSE = (() => {
-  const r = PENTAGON_RADIUS
-  const top: Pt = { x: 0, y: -r }
-  const upperRight: Pt = { x: r * Math.cos(Math.PI / 10), y: -r * Math.sin(Math.PI / 10) }
-  const lowerRight: Pt = { x: r * Math.sin(Math.PI / 5), y: r * Math.cos(Math.PI / 5) }
-  const lowerLeft: Pt = { x: -lowerRight.x, y: lowerRight.y }
-  const upperLeft: Pt = { x: -upperRight.x, y: upperRight.y }
-  return { top, upperRight, lowerRight, lowerLeft, upperLeft }
-})()
-
 /**
  * The ring atoms in cycle order (oxygen last), in fixed Haworth positions.
- * Pyranose: O back-right, C1 rightmost; furanose: O on top.
+ * Both polygons are slightly wider than tall (see `haworth-polygon.ts`).
  */
 function ringVertices(spec: HaworthSpec): RingVertex[] {
   const anomeric = spec.anomericCarbon ?? 1
+  const polygon = haworthPolygon(spec.ringSize)
   if (spec.ringSize === 6) {
-    return [
-      { atom: "C1", isOxygen: false, pt: { x: 1.5 * BOND, y: ROOT3_HALF * BOND } },
-      { atom: "C2", isOxygen: false, pt: { x: BOND, y: 2 * ROOT3_HALF * BOND } },
-      { atom: "C3", isOxygen: false, pt: { x: 0, y: 2 * ROOT3_HALF * BOND } },
-      { atom: "C4", isOxygen: false, pt: { x: -0.5 * BOND, y: ROOT3_HALF * BOND } },
-      { atom: "C5", isOxygen: false, pt: { x: 0, y: 0 } },
-      { atom: "O", isOxygen: true, pt: { x: BOND, y: 0 } },
-    ]
+    const atoms = ["C1", "C2", "C3", "C4", "C5"]
+    return atoms.map((atom, index) => ({
+      atom,
+      isOxygen: false,
+      pt: { x: polygon[index].x * BOND, y: polygon[index].y * BOND },
+    })).concat({
+      atom: "O",
+      isOxygen: true,
+      pt: { x: polygon[5].x * BOND, y: polygon[5].y * BOND },
+    })
   }
+  // Furanose atom labels depend on whether the anomeric carbon is C1
+  // (aldoses) or C2 (ketoses like fructose).
   const first = anomeric === 2 ? 2 : 1
-  const atoms = [`C${first}`, `C${first + 1}`, `C${first + 2}`, `C${first + 3}`]
-  return [
-    { atom: atoms[0], isOxygen: false, pt: FURANOSE.upperRight },
-    { atom: atoms[1], isOxygen: false, pt: FURANOSE.lowerRight },
-    { atom: atoms[2], isOxygen: false, pt: FURANOSE.lowerLeft },
-    { atom: atoms[3], isOxygen: false, pt: FURANOSE.upperLeft },
-    { atom: "O", isOxygen: true, pt: FURANOSE.top },
-  ]
+  const atoms = [`C${first}`, `C${first + 1}`, `C${first + 2}`, `C${first + 3}`, "O"]
+  return atoms.map((atom, index) => ({
+    atom,
+    isOxygen: atom === "O",
+    pt: { x: polygon[index].x * BOND, y: polygon[index].y * BOND },
+  }))
 }
 
 /** Ring atom positions keyed by label — exposed for the golden tests. */
@@ -361,20 +354,47 @@ function buildElements(spec: ProjectionSpec): DrawingElement[] {
     }
   }
 
+// Strictly vertical substituent bonds; upward bonds are slightly shortened
+// so their labels never reach into the ring interior.
+const UP_BOND_FACTOR = 0.9
+
+/**
+ * OH label direction convention: an OH on the LEFT half of the ring reads
+ * "HO" anchored LEFT of its bond — the classic skeletal-formula idiom (so
+ * hexose C4, being a left-half carbon, always gets "HO"), which also pulls
+ * the label out of crowded ring areas. Right-half OHs keep a centred "OH".
+ */
+interface LabelPlacement {
+  text: string
+  anchor: "start" | "middle" | "end"
+}
+
+function ohPlacement(group: string, anchorX: number, ringCentroidX: number): LabelPlacement {
+  if (group === "OH" && anchorX < ringCentroidX) {
+    return { text: "HO", anchor: "end" }
+  }
+  return { text: group, anchor: "middle" }
+}
+
+  const ringCentroid = {
+    x: vertices.reduce((sum, vertex) => sum + vertex.pt.x, 0) / vertices.length,
+    y: vertices.reduce((sum, vertex) => sum + vertex.pt.y, 0) / vertices.length,
+  }
   for (const substituent of substituents) {
     const base = positions[substituent.atom]
     if (base === undefined) {
       continue
     }
     const direction = substituent.side === "up" ? -1 : 1
-    const endY = base.y + direction * BOND
+    const endY = base.y + direction * (direction < 0 ? BOND * UP_BOND_FACTOR : BOND)
     elements.push({ kind: "line", x1: base.x, y1: base.y, x2: base.x, y2: endY })
+    const label = ohPlacement(substituent.group, base.x, ringCentroid.x)
     elements.push({
       kind: "text",
       x: base.x,
       y: endY + direction * HYDROGEN_PAD,
-      text: substituent.group,
-      anchor: "middle",
+      text: label.text,
+      anchor: label.anchor,
     })
   }
 
@@ -383,11 +403,17 @@ function buildElements(spec: ProjectionSpec): DrawingElement[] {
 
 function mirror(elements: DrawingElement[], box: Box): DrawingElement[] {
   const cx = (box.minX + box.maxX) / 2
-  return elements.map((element) =>
-    element.kind === "line"
-      ? { ...element, x1: 2 * cx - element.x1, x2: 2 * cx - element.x2 }
-      : { ...element, x: 2 * cx - element.x },
-  )
+  return elements.map((element) => {
+    if (element.kind === "line") {
+      return { ...element, x1: 2 * cx - element.x1, x2: 2 * cx - element.x2 }
+    }
+    // Mirroring flips geometry: text anchors flip with it so labels keep
+    // hugging their attachment end (an "outward"-leaning HO label must lean
+    // outward in the mirrored depiction too).
+    const anchor =
+      element.anchor === "start" ? "end" : element.anchor === "end" ? "start" : element.anchor
+    return { ...element, x: 2 * cx - element.x, anchor }
+  })
 }
 
 function rotate(elements: DrawingElement[], box: Box, degrees: number): DrawingElement[] {

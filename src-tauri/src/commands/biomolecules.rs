@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn seeded_saccharides_carry_parseable_haworth_projections() {
+    fn seeded_saccharides_are_fully_smiles_driven() {
         let conn = setup_conn();
         let data = do_list_data(&conn).expect("list");
         let saccharides: Vec<_> = data
@@ -808,45 +808,18 @@ mod tests {
             .collect();
         assert_eq!(saccharides.len(), 9);
 
-        // The seven free sugars carry an explicit Haworth spec; the two
-        // nucleotides rely on the client-side ring recognizer instead and
-        // therefore carry only their full isomeric SMILES.
-        let with_projection: Vec<_> = saccharides
-            .iter()
-            .filter(|m| m.projection.is_some())
-            .collect();
-        assert_eq!(with_projection.len(), 7);
-
-        for molecule in &with_projection {
-            let raw = molecule.projection.as_deref().expect("projection present");
-            let projection: serde_json::Value =
-                serde_json::from_str(raw).unwrap_or_else(|e| panic!("{}: {e}", molecule.slug));
-            assert_eq!(projection["type"], "haworth", "{}", molecule.slug);
-            let ring_size = projection["ringSize"]
-                .as_i64()
-                .unwrap_or_else(|| panic!("{} has an integer ringSize", molecule.slug));
-            assert!(
-                matches!(ring_size, 5 | 6),
-                "{} ringSize must be 5 or 6",
-                molecule.slug
-            );
-            assert!(
-                projection["substituents"].is_array(),
-                "{} substituents must be an array",
-                molecule.slug
-            );
-        }
-
-        // The nucleotides keep full structures — the recognizer needs the
-        // isomeric tags to lay the ribose out as Haworth.
-        for slug in ["adenosin", "amp"] {
-            let molecule = saccharides
-                .iter()
-                .find(|m| m.slug == slug)
-                .unwrap_or_else(|| panic!("{slug} seeded"));
+        // Every molecule in the category is drawn from its isomeric SMILES
+        // alone by the client-side ring recognizer — no declarative
+        // projection specs are stored anywhere.
+        assert!(
+            saccharides.iter().all(|m| m.projection.is_none()),
+            "no sacharidy molecule should carry a projection spec"
+        );
+        for molecule in &saccharides {
             assert!(
                 molecule.smiles.contains('@'),
-                "{slug} must carry an isomeric SMILES"
+                "{} must carry an isomeric SMILES so the recognizer can derive Haworth sides",
+                molecule.slug
             );
         }
 

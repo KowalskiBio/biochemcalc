@@ -129,18 +129,20 @@ function applyPlan(
     ringPositions.set(vertexId, target)
     place(preprocessor, vertexId, target)
   })
-
   // 2. Exocyclic substituents strictly vertical; subtrees rotated to follow.
   // Chain substituents (CH2OH, N-linked bases, phosphate tails) are biased
   // toward their free side relative to the ring centroid so they clear the
-  // ring and, e.g. the glycosidic base and the 5′ tail, part ways instead of
-  // colliding above the ring.
+  // ring. Bond lengths are side-aware: upward substituents are shortened so
+  // their labels never reach into the ring interior.
   const blocked = new Set(ringIds)
   const ringCenterWorld = {
     x: offset.x + polygonCenter.x * bondLength,
     y: offset.y + polygonCenter.y * bondLength,
   }
-  const CHAIN_BIAS = Math.PI / 6 // tilt chains ±30° toward free space
+  const CHAIN_BIAS = Math.PI / 10 // tilt chains ±18° toward free space
+  const UP_BOND_FACTOR = 0.9
+  /** Pure -CH2OH tails: continuation bond turns 60° off the chain, i.e. the textbook 120° interior angle. */
+  const CH2OH_TURN = Math.PI / 3
   for (const atom of plan.atoms) {
     const anchor = ringPositions.get(atom.vertexId)
     if (anchor === undefined) {
@@ -159,33 +161,47 @@ function applyPlan(
         if (atomInfo === undefined) {
           continue
         }
-        const isChain =
-          outwardX !== 0 &&
-          (atomInfo.neighbours ?? []).some(
-            (neighbour) =>
-              neighbour !== atom.vertexId &&
-              preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value
+        const continuationIds = (atomInfo.neighbours ?? []).filter(
+          (neighbour) =>
+            neighbour !== atom.vertexId &&
+            preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value
+              .element !== "H",
+        )
+        const isChain = outwardX !== 0 && continuationIds.length > 0
+        // Pure -CH2OH tail: the chain atom carries exactly one heavy
+        // continuation (the terminal OH) — draw its first bond strictly
+        // vertical (textbook), no tilt.
+        const continuationId = isChain ? continuationIds[0] : undefined
+        const continuationAtom =
+          continuationId === undefined
+            ? undefined
+            : preprocessor.graph.vertices.find((c) => c.id === continuationId)
+        const isPureTail =
+          continuationAtom !== undefined &&
+          (continuationAtom.neighbours ?? []).filter(
+            (n) =>
+              n !== substituentId &&
+              preprocessor.graph.vertices.find((candidate) => candidate.id === n)?.value
                 .element !== "H",
-          )
+          ).length === 0
+        const isTiltedChain = isChain && !isPureTail
         // Rotate the whole subtree around the ring atom so the bond becomes
-        // vertical (or chain-biased): one motion landing the substituent on
-        // its ray with the distance preserved and the subtree following.
+        // vertical (tilted chains lean 18° toward free space; pure CH2OH
+        // tails stay exactly vertical), then normalize its length.
         const current = { x: atomInfo.position.x, y: atomInfo.position.y }
         const heading = Math.atan2(current.y - anchor.y, current.x - anchor.x)
-        const desired = isChain
+        const desired = isTiltedChain
           ? Math.atan2(group.direction, outwardX * Math.tan(CHAIN_BIAS))
           : group.direction * (Math.PI / 2)
         const subtree = collectSubtree(preprocessor, substituentId, new Set(blocked))
         rotatePositions(preprocessor, subtree, anchor, desired - heading)
-        // The library's original anchor→substituent vector may be longer or
-        // shorter than one bond (the ring was refit); normalize the distance
-        // so every substituent bond is exactly one bond length long, shifting
-        // its subtree along by the same translation.
+
         const rotated = preprocessor.graph.vertices.find((c) => c.id === substituentId)
         if (rotated !== undefined) {
+          const targetLength = bondLength * (group.direction < 0 ? UP_BOND_FACTOR : 1)
           const target = {
-            x: anchor.x + Math.cos(desired) * bondLength,
-            y: anchor.y + Math.sin(desired) * bondLength,
+            x: anchor.x + Math.cos(desired) * targetLength,
+            y: anchor.y + Math.sin(desired) * targetLength,
           }
           const shiftX = target.x - rotated.position.x
           const shiftY = target.y - rotated.position.y
@@ -197,6 +213,37 @@ function applyPlan(
                 vertex.position.y += shiftY
               }
             }
+          }
+        }
+
+        // Pure -CH2OH tail: after the chain atom lands vertically on its
+        // ray, give its continuation →O bond a full 60° turn on the
+        // away-from-ring side — the textbook 120° interior angle of the
+        // chain — instead of whatever near-linear remnant survived the
+        // rigid rotation.
+        if (isPureTail && continuationId !== undefined) {
+          const chainVertex = preprocessor.graph.vertices.find((c) => c.id === substituentId)
+          const continuation = preprocessor.graph.vertices.find((c) => c.id === continuationId)
+          if (chainVertex !== undefined && continuation !== undefined) {
+            const continuationAngle = Math.atan2(
+              group.direction,
+              (outwardX === 0 ? 1 : outwardX) * Math.tan(CH2OH_TURN),
+            )
+            const childSubtree = collectSubtree(
+              preprocessor,
+              continuationId,
+              new Set([...blocked, substituentId]),
+            )
+            rotatePositions(
+              preprocessor,
+              childSubtree,
+              { x: chainVertex.position.x, y: chainVertex.position.y },
+              continuationAngle -
+                Math.atan2(
+                  continuation.position.y - chainVertex.position.y,
+                  continuation.position.x - chainVertex.position.x,
+                ),
+            )
           }
         }
         blocked.add(substituentId)
@@ -248,4 +295,88 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
     applyPlan(preprocessor, plan, bondLength)
   }
   return true
+}
+
+/** Post-draw label hint: swap a terminal hydroxyl label to "HO" on left-of-ring-centroid. */
+export interface HOHint {
+  x: number
+  y: number
+  side: "HO" | "OH"
+}
+
+/**
+ * Collect the "HO"-swap hints for a freshly laid-out drawing: for every
+ * terminal hydroxyl substituent (-OH, single bond, no other heavy atoms) of
+ * every recognized sugar ring, decide by its position relative to the ring
+ * centroid which side the label should read from. Left-half OHs become "HO"
+ * — the classic idiom (hexose C4 is always left — and it pulls the label
+ * into free space, easing overlaps).
+ */
+export function collectOhLabelHints(preprocessor: HaworthPreprocessor): HOHint[] {
+  const snapshot = snapshotFromPreprocessor(preprocessor)
+  const plans = recognizeSugarRings(snapshot)
+  const hints: HOHint[] = []
+  for (const plan of plans) {
+    const positions = plan.cycle
+      .map((id) => preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.position)
+      .filter((position): position is { x: number; y: number } => position !== undefined)
+    if (positions.length === 0) {
+      continue
+    }
+    const centroidX = positions.reduce((sum, position) => sum + position.x, 0) / positions.length
+    for (const atom of plan.atoms) {
+      for (const substituentId of [...atom.up, ...atom.down]) {
+        const substituent = preprocessor.graph.vertices.find(
+          (candidate) => candidate.id === substituentId,
+        )
+        if (substituent === undefined || substituent.value.element !== "O") {
+          continue
+        }
+        const heavyNeighbours = (substituent.neighbours ?? []).filter(
+          (neighbour) =>
+            preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value
+              .element !== "H",
+        )
+        if (heavyNeighbours.length > 1) {
+          continue
+        }
+        hints.push({
+          x: substituent.position.x,
+          y: substituent.position.y,
+          side: substituent.position.x < centroidX ? "HO" : "OH",
+        })
+      }
+    }
+  }
+  return hints
+}
+
+/**
+ * Post-draw label fix: applies the "HO" swap to the hydroxyl <text> nodes
+ * the library drew, matching hints to the closest "OH" text node within a
+ * few pixels and anchoring the label left so it hangs off the ring.
+ */
+export function applyHaworthHOLabels(svgRoot: SVGSVGElement, hints: HOHint[]): void {
+  const texts = Array.from(svgRoot.querySelectorAll("text"))
+  const ohTexts = texts.filter((node) => (node.textContent ?? "").trim() === "OH")
+  for (const hint of hints) {
+    if (hint.side !== "HO") {
+      continue
+    }
+    let nearest: Element | null = null
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const node of ohTexts) {
+      const x = Number(node.getAttribute("x") ?? Number.NaN)
+      const y = Number(node.getAttribute("y") ?? Number.NaN)
+      const distance = Math.hypot(x - hint.x, y - hint.y)
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearest = node
+      }
+    }
+    if (nearest !== null && nearestDistance < 5) {
+      nearest.textContent = "HO"
+      nearest.setAttribute("text-anchor", "end")
+    }
+  }
 }

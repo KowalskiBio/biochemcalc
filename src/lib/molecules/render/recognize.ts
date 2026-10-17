@@ -14,6 +14,8 @@
 // priority comparison, unusual ring) yields `null` for that ring and the
 // caller keeps the plain skeletal drawing — never a wrong Haworth.
 
+import { haworthPolygon } from "@/lib/molecules/render/haworth-polygon"
+
 export interface SnapshotAtom {
   vertexId: number
   element: string
@@ -343,23 +345,11 @@ function isAnomericCandidate(
   })
 }
 
-/** Haworth polygon positions (unit bond) shared by recognizer and layout. */
+/** Haworth polygons (unit bond), shared by the recognizer and the layout —
+ * canonical, slightly-wider-than-tall shapes from `haworth-polygon.ts`. */
 export const HAWORTH_POLYGON: Record<5 | 6, { x: number; y: number }[]> = {
-  6: [
-    { x: 1.5, y: 0.86603 }, // anomeric C (right)
-    { x: 1, y: 1.73205 },
-    { x: 0, y: 1.73205 },
-    { x: -0.5, y: 0.86603 },
-    { x: 0, y: 0 },
-    { x: 1, y: 0 }, // ring O (top right)
-  ],
-  5: [
-    { x: 0.80902, y: -0.26287 }, // anomeric C (right)
-    { x: 0.5, y: 0.68819 },
-    { x: -0.5, y: 0.68819 },
-    { x: -0.80902, y: -0.26287 },
-    { x: 0, y: -0.85065 }, // ring O (top)
-  ],
+  6: haworthPolygon(6),
+  5: haworthPolygon(5),
 }
 
 /**

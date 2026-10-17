@@ -221,37 +221,37 @@ const NITROGEN_BASES: &[SeedMolecule] = &[
 const SACCHARIDES: &[SeedMolecule] = &[
     SeedMolecule {
         slug: "glukoza-a", name: "α-D-glukóza", smiles: "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O)O",
-        projection: Some(r#"{"type":"haworth","ringSize":6,"anomericCarbon":1,"substituents":[{"atom":"C1","group":"OH","side":"down"},{"atom":"C2","group":"OH","side":"down"},{"atom":"C3","group":"OH","side":"up"},{"atom":"C4","group":"OH","side":"down"},{"atom":"C5","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        projection: None,
         traits: &[("ringForm", "pyranose"), ("anomer", "alpha")],
     },
     SeedMolecule {
         slug: "glukoza-b", name: "β-D-glukóza", smiles: "C([C@@H]1[C@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O",
-        projection: Some(r#"{"type":"haworth","ringSize":6,"anomericCarbon":1,"substituents":[{"atom":"C1","group":"OH","side":"up"},{"atom":"C2","group":"OH","side":"down"},{"atom":"C3","group":"OH","side":"up"},{"atom":"C4","group":"OH","side":"down"},{"atom":"C5","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        projection: None,
         traits: &[("ringForm", "pyranose"), ("anomer", "beta")],
     },
     SeedMolecule {
         slug: "galaktoza-b", name: "β-D-galaktóza", smiles: "C([C@@H]1[C@@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O",
-        projection: Some(r#"{"type":"haworth","ringSize":6,"anomericCarbon":1,"substituents":[{"atom":"C1","group":"OH","side":"up"},{"atom":"C2","group":"OH","side":"down"},{"atom":"C3","group":"OH","side":"up"},{"atom":"C4","group":"OH","side":"up"},{"atom":"C5","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        projection: None,
         traits: &[("ringForm", "pyranose"), ("anomer", "beta")],
     },
     SeedMolecule {
         slug: "manoza-a", name: "α-D-manóza", smiles: "C([C@@H]1[C@H]([C@@H]([C@@H]([C@H](O1)O)O)O)O)O",
-        projection: Some(r#"{"type":"haworth","ringSize":6,"anomericCarbon":1,"substituents":[{"atom":"C1","group":"OH","side":"down"},{"atom":"C2","group":"OH","side":"up"},{"atom":"C3","group":"OH","side":"up"},{"atom":"C4","group":"OH","side":"down"},{"atom":"C5","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        projection: None,
         traits: &[("ringForm", "pyranose"), ("anomer", "alpha")],
     },
     SeedMolecule {
         slug: "fruktoza-b", name: "β-D-fruktóza", smiles: "OC[C@]1(O)[C@@H](O)[C@@H](O)[C@@H](CO)O1",
-        projection: Some(r#"{"type":"haworth","ringSize":5,"anomericCarbon":2,"substituents":[{"atom":"C2","group":"OH","side":"up"},{"atom":"C2","group":"CH₂OH","side":"down"},{"atom":"C3","group":"OH","side":"up"},{"atom":"C4","group":"OH","side":"down"},{"atom":"C5","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        projection: None,
         traits: &[("ringForm", "furanose"), ("anomer", "beta")],
     },
     SeedMolecule {
-        slug: "riboza-b", name: "β-D-ribóza", smiles: "OCC1OC(O)C(O)C1O",
-        projection: Some(r#"{"type":"haworth","ringSize":5,"anomericCarbon":1,"substituents":[{"atom":"C1","group":"OH","side":"up"},{"atom":"C2","group":"OH","side":"down"},{"atom":"C3","group":"OH","side":"down"},{"atom":"C4","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        slug: "riboza-b", name: "β-D-ribóza", smiles: "OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O",
+        projection: None,
         traits: &[("ringForm", "furanose"), ("anomer", "beta")],
     },
     SeedMolecule {
-        slug: "deoxyriboza-b", name: "2-deoxy-β-D-ribóza", smiles: "OCC1OC(O)CC1O",
-        projection: Some(r#"{"type":"haworth","ringSize":5,"anomericCarbon":1,"substituents":[{"atom":"C1","group":"OH","side":"up"},{"atom":"C2","group":"H","side":"up"},{"atom":"C2","group":"H","side":"down"},{"atom":"C3","group":"OH","side":"down"},{"atom":"C4","group":"CH₂OH","side":"up"}],"showHydrogens":false}"#),
+        slug: "deoxyriboza-b", name: "2-deoxy-β-D-ribóza", smiles: "OC[C@H]1O[C@@H](O)C[C@@H]1O",
+        projection: None,
         traits: &[("ringForm", "furanose"), ("anomer", "beta"), ("deoxy", "true")],
     },
     // Nucleotides carry a full isomeric SMILES (Kekulé base so the drawing

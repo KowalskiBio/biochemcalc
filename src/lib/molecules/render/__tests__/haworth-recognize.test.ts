@@ -9,6 +9,7 @@ import SmilesDrawer from "smiles-drawer"
 import {
   type HaworthPreprocessor,
   applyHaworthLayout,
+  collectOhLabelHints,
 } from "@/lib/molecules/render/haworth-layout"
 import {
   type PreprocessorLike,
@@ -60,6 +61,8 @@ const CANDIDATE_ALPHA_MANNOSE = "C([C@@H]1[C@H]([C@@H]([C@@H]([C@H](O1)O)O)O)O)O
 const ADENOSINE = "Nc1ncnc2c1ncn2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
 const AMP = "Nc1ncnc2c1ncn2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
 const CANDIDATE_BETA_FRUCTOSE = "OC[C@]1(O)[C@@H](O)[C@@H](O)[C@@H](CO)O1"
+const CANDIDATE_BETA_RIBOSE = "OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O"
+const CANDIDATE_BETA_DEOXYRIBOSE = "OC[C@H]1O[C@@H](O)C[C@@H]1O"
 // The kekulized seed form (uppercase, alternating double bonds) — the exact
 // SMILES kept in `biomolecule_seed.rs`; the recognizer works on either form.
 const ADENOSINE_KEKULE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
@@ -129,13 +132,15 @@ describe("applyHaworthLayout", () => {
     expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
     const plan = plans[0]
 
-    // Ring bonds are all one bond-length after the snap.
+    // Ring bonds are near bond length after the snap. The polygon is
+    // intentionally wider than tall, so edges vary between ≈0.94 and ≈1.15
+    // bonds (long bottom edge, slightly shorter slanted edges).
     const ringCycle = plan.cycle
     for (let index = 0; index < ringCycle.length; index += 1) {
       const a = positionOf(pipeline.preprocessor, ringCycle[index])
       const b = positionOf(pipeline.preprocessor, ringCycle[(index + 1) % ringCycle.length])
-      expect(Math.hypot(b.x - a.x, b.y - a.y), `edge ${index}`).toBeGreaterThan(BOND - 0.5)
-      expect(Math.hypot(b.x - a.x, b.y - a.y), `edge ${index}`).toBeLessThan(BOND + 0.5)
+      expect(Math.hypot(b.x - a.x, b.y - a.y), `edge ${index}`).toBeGreaterThan(0.93 * BOND)
+      expect(Math.hypot(b.x - a.x, b.y - a.y), `edge ${index}`).toBeLessThan(1.2 * BOND)
     }
 
     // Every exocyclic heavy substituent is strictly vertical above/below its
@@ -238,7 +243,82 @@ describe("applyHaworthLayout", () => {
     }
     const tailCarbon = positionOf(pipeline.preprocessor, tailAtom.up[0])
     expect(tailCarbon.y < tailAnchorPos.y).toBe(true)
-    expect(tailCarbon.x < tailAnchorPos.x).toBe(true)
+    // Pure -CH2OH tails draw strictly vertical (no tilt) with a 120° kink at
+    // the chain vertex — the textbook look, replacing the former 18° lean.
+    expect(Math.abs(tailCarbon.x - tailAnchorPos.x)).toBeLessThan(0.01)
+  })
+
+  it("draws pure -CH2OH tails strictly vertical with a 120° interior turn (textbook chain)", () => {
+    const cases: { smiles: string; anchorIsLast: boolean; upSide: boolean; name: string }[] = [
+      // Pyranose C5-CH2OH (glucose): bond up strict, 120° interior at CH2.
+      { smiles: TRUE_BETA_GLUCOSE, anchorIsLast: true, upSide: true, name: "β-glucose C5" },
+      // Fructose anomeric C2-CH2OH: bond down strict, 120° interior at CH2.
+      { smiles: CANDIDATE_BETA_FRUCTOSE, anchorIsLast: false, upSide: false, name: "fructose C2" },
+    ]
+    for (const testCase of cases) {
+      const pipeline = pipelineOf(testCase.smiles)
+      expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+      const plan = recognizeSugarRings(pipeline.snapshot)[0]
+      const anchorId = testCase.anchorIsLast
+        ? plan.cycle[plan.cycle.length - 2]
+        : plan.cycle[0]
+      const anchorAtom = plan.atoms.find((atom) => atom.vertexId === anchorId)
+      if (anchorAtom === undefined) {
+        throw new Error(`${testCase.name}: anchor missing`)
+      }
+      const chainIds = (testCase.upSide ? anchorAtom.up : anchorAtom.down).filter(
+        (id) => pipeline.snapshot.atoms.get(id)?.element === "C",
+      )
+      expect(chainIds, `${testCase.name}: carbon tail present`).toHaveLength(1)
+      const anchorPos = positionOf(pipeline.preprocessor, anchorId)
+      const chainPos = positionOf(pipeline.preprocessor, chainIds[0])
+
+      // First bond strictly vertical on the declared side.
+      expect(Math.abs(chainPos.x - anchorPos.x), `${testCase.name}: tail verticality`).toBeLessThan(
+        0.01,
+      )
+      if (testCase.upSide) {
+        expect(chainPos.y < anchorPos.y, `${testCase.name}: tail above`).toBe(true)
+      } else {
+        expect(chainPos.y > anchorPos.y, `${testCase.name}: tail below`).toBe(true)
+      }
+
+      // Interior angle at the chain vertex between anchor and terminal O ≈ 120°.
+      const chainVertex = pipeline.preprocessor.graph.vertices.find(
+        (candidate) => candidate.id === chainIds[0],
+      )
+      if (chainVertex === undefined) {
+        throw new Error(`${testCase.name}: chain vertex missing`)
+      }
+      const ohOxygen = (chainVertex.neighbours ?? []).find(
+        (n) => n !== anchorId && pipeline.snapshot.atoms.get(n)?.element === "O",
+      )
+      expect(ohOxygen, `${testCase.name}: terminal O present`).toBeDefined()
+      if (ohOxygen === undefined) {
+        continue
+      }
+      const ohPos = positionOf(pipeline.preprocessor, ohOxygen)
+      const angleToAnchor = Math.atan2(anchorPos.y - chainPos.y, anchorPos.x - chainPos.x)
+      const angleToOh = Math.atan2(ohPos.y - chainPos.y, ohPos.x - chainPos.x)
+      let interior = Math.abs(angleToOh - angleToAnchor)
+      if (interior > Math.PI) {
+        interior = 2 * Math.PI - interior
+      }
+      expect(Math.abs(interior - (2 * Math.PI) / 3), `${testCase.name}: interior ≈ 120°`).toBeLessThan(
+        0.15,
+      )
+    }
+  })
+
+  it("flags left-half hydroxyls for the HO label convention", () => {
+    const pipeline = pipelineOf(CANDIDATE_BETA_GALACTOSE)
+    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+    const hints = collectOhLabelHints(pipeline.preprocessor)
+    const hoHints = hints.filter((hint) => hint.side === "HO")
+    // β-galactose: C2-OH (left) and C4-OH (left) → two HO swaps eligible.
+    expect(hoHints.length).toBeGreaterThanOrEqual(2)
+    const ohHints = hints.filter((hint) => hint.side === "OH")
+    expect(ohHints.length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -310,6 +390,29 @@ describe("sugar-ring recognition", () => {
     expectRing(AMP, ribose, "AMP")
     expectRing(ADENOSINE_KEKULE, ribose, "adenosine (kekulé)")
     expectRing(AMP_KEKULE, ribose, "AMP (kekulé)")
+  })
+
+  it("recognizes β-D-ribóza and 2-deoxy-β-D-ribóza from their isomeric SMILES", () => {
+    expectRing(
+      CANDIDATE_BETA_RIBOSE,
+      [
+        { up: ["O"], down: [] },
+        { up: [], down: ["O"] },
+        { up: [], down: ["O"] },
+        { up: ["C"], down: [] },
+      ],
+      "β-ribose",
+    )
+    expectRing(
+      CANDIDATE_BETA_DEOXYRIBOSE,
+      [
+        { up: ["O"], down: [] },
+        { up: [], down: [] },
+        { up: [], down: ["O"] },
+        { up: ["C"], down: [] },
+      ],
+      "2-deoxy-β-ribose",
+    )
   })
 
   it("recognizes β-D-fruktofuranóza (ketose, anomeric C2)", () => {

@@ -3,7 +3,12 @@ import SmilesDrawer from "smiles-drawer"
 
 import { ProjectionView } from "@/components/ui/projection-view"
 import { type Point, transformPoints } from "@/lib/molecules/orientation"
-import { applyHaworthLayout, type HaworthPreprocessor } from "@/lib/molecules/render/haworth-layout"
+import {
+  applyHaworthHOLabels,
+  applyHaworthLayout,
+  collectOhLabelHints,
+  type HaworthPreprocessor,
+} from "@/lib/molecules/render/haworth-layout"
 import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/stores/ui-store"
@@ -181,6 +186,7 @@ function SmilesStructureView({
         // draw — `preprocessor` is per-instance.
         const preprocessor = drawer.preprocessor as unknown as PreprocessorShim
         const originalProcessGraph = preprocessor.processGraph
+        let recognized = false
         preprocessor.processGraph = () => {
           originalProcessGraph.call(preprocessor)
           // Sugar rings first: recognized rings snap into the canonical
@@ -188,7 +194,7 @@ function SmilesStructureView({
           // layout for the rest). Recognized sugars stay canonical — no
           // random orientation — while an explicit enantiomer mirror still
           // applies to the whole drawing (mirror decoys work on projections).
-          const recognized = applyHaworthLayout(
+          recognized = applyHaworthLayout(
             preprocessor as unknown as HaworthPreprocessor,
           )
           if (recognized) {
@@ -202,6 +208,14 @@ function SmilesStructureView({
 
         try {
           drawer.draw(tree, svg, resolvedTheme)
+          if (recognized) {
+            // Left-half ring hydroxyls read "HO", anchored off the ring —
+            // the hexose C4 idiom that also frees up crowded space.
+            applyHaworthHOLabels(
+              svg,
+              collectOhLabelHints(preprocessor as unknown as HaworthPreprocessor),
+            )
+          }
         } finally {
           preprocessor.processGraph = originalProcessGraph
         }

@@ -9,6 +9,22 @@ import {
   validateProjection,
 } from "@/lib/molecules/render/projection"
 
+/** Proper segment intersection check, used by the fructose no-crossing invariant. */
+function segmentsCross(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+  d: { x: number; y: number },
+): boolean {
+  const cross = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }): number =>
+    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+  const d1 = cross(c, d, a)
+  const d2 = cross(c, d, b)
+  const d3 = cross(a, b, c)
+  const d4 = cross(a, b, d)
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+}
+
 // The golden specs mirror the `sacharidy` database seed exactly.
 
 const ALPHA_GLUCOSE: HaworthSpec = {
@@ -120,17 +136,39 @@ function mustFind<T>(list: T[], predicate: (item: T) => boolean, what: string): 
   return found
 }
 
+function ringCentroidXOf(spec: HaworthSpec): number {
+  const positions = Object.values(ringAtomPositions(spec))
+  return positions.reduce((sum, position) => sum + position.x, 0) / positions.length
+}
+
+/** The label a substituent actually draws with (left-half OHs read "HO"). */
+function expectedLabel(
+  spec: HaworthSpec,
+  substituent: HaworthSpec["substituents"][number],
+  centroidX: number,
+): string {
+  if (substituent.group === "OH") {
+    const atom = ringAtomPositions(spec)[substituent.atom]
+    if (atom !== undefined && atom.x < centroidX) {
+      return "HO"
+    }
+  }
+  return substituent.group
+}
+
 describe("drawProjection skeletons", () => {
   it("draws the ring oxygen label, one bond + one label per substituent", () => {
     for (const [name, spec] of GOLDEN) {
       const { lines, texts } = split(drawProjection(spec).elements)
+      const centroidX = ringCentroidXOf(spec)
       expect(texts.some((element) => element.text === "O"), name).toBe(true)
       expect(lines, name).toHaveLength(spec.ringSize + spec.substituents.length)
       expect(texts, name).toHaveLength(spec.substituents.length + 1)
       for (const substituent of spec.substituents) {
+        const expected = expectedLabel(spec, substituent, centroidX)
         expect(
-          texts.some((element) => element.text === substituent.group),
-          `${name}: ${substituent.group}`,
+          texts.some((element) => element.text === expected),
+          `${name}: ${substituent.group} → "${expected}"`,
         ).toBe(true)
       }
     }
@@ -163,26 +201,88 @@ describe("drawProjection skeletons", () => {
           continue
         }
         const direction = substituent.side === "up" ? -1 : 1
-        const expectedX = atom.x + shiftX
+        const startX = atom.x + shiftX
         const startY = atom.y + shiftY
-        const endY = startY + direction * 26
-        mustFind(
+        // The bond starts exactly at the ring atom and is exactly the
+        // side-aware standard length (up substituents draw shorter); it is
+        // strictly vertical. Atoms can carry two substituents (keto
+        // anomers), so match by the declared side as well.
+        const expectedLength = direction < 0 ? 26 * 0.9 : 26
+        const bond = mustFind(
           lines,
           (line) =>
-            Math.abs(line.x1 - expectedX) < 0.01 &&
-            Math.abs(line.x2 - expectedX) < 0.01 &&
+            Math.abs(line.x1 - startX) < 0.01 &&
             Math.abs(line.y1 - startY) < 0.01 &&
-            Math.abs(line.y2 - endY) < 0.01,
-          `${name}: bond ${substituent.group}@${substituent.atom}`,
+            Math.hypot(line.x2 - line.x1, line.y2 - line.y1) > expectedLength - 0.01 &&
+            Math.hypot(line.x2 - line.x1, line.y2 - line.y1) < expectedLength + 0.01 &&
+            Math.sign(line.y2 - line.y1) === direction &&
+            Math.abs(line.x2 - line.x1) < 0.01,
+          `${name}: bond ${substituent.group}@${substituent.atom} (${substituent.side})`,
         )
-        mustFind(
-          texts,
-          (element) =>
-            element.text === substituent.group &&
-            Math.abs(element.x - expectedX) < 0.01 &&
-            Math.abs(element.y - (endY + direction * 7)) < 0.01,
-          `${name}: label ${substituent.group}@${substituent.atom}`,
-        )
+        void bond
+        // Group labels repeat across atoms (every OH looks alike), so match
+        // by proximity: the right label is always the one nearest its bond.
+        const expectedText = expectedLabel(spec, substituent, ringCentroidXOf(spec))
+        const label = texts
+          .filter((element) => element.text === expectedText)
+          .map((element) => ({
+            element,
+            distance: Math.hypot(element.x - bond.x2, element.y - bond.y2),
+          }))
+          .sort((a, b) => a.distance - b.distance)[0]
+        if (label === undefined || label.distance > 40) {
+          throw new Error(`${name}: cannot match label ${expectedText} for ${substituent.group}@${substituent.atom}`)
+        }
+        const labelAngle = Math.atan2(label.element.y - startY, label.element.x - startX)
+        const bondAngle = direction * (Math.PI / 2) // strictly vertical bonds now
+        expect(
+          Math.abs(labelAngle - bondAngle),
+          `${name}: label ray of ${substituent.group}@${substituent.atom}`,
+        ).toBeLessThan(0.35)
+        expect(
+          Math.hypot(label.element.x - startX, label.element.y - startY),
+          `${name}: label distance of ${substituent.group}@${substituent.atom}`,
+        ).toBeGreaterThan(26)
+      }
+    }
+  })
+
+  it("nudges fructose substituents instead of crossing ring edges (universal overlap)", () => {
+    const { lines } = split(drawProjection(BETA_FRUCTOSE).elements)
+    const shareEndpoint = (
+      a: { x: number; y: number },
+      b: { x: number; y: number },
+    ): boolean => Math.hypot(a.x - b.x, a.y - b.y) < 0.5
+    const shareAnyEndpoint = (
+      bond: { x1: number; y1: number; x2: number; y2: number },
+      other: { x1: number; y1: number; x2: number; y2: number },
+    ): boolean =>
+      shareEndpoint({ x: bond.x1, y: bond.y1 }, { x: other.x1, y: other.y1 }) ||
+      shareEndpoint({ x: bond.x1, y: bond.y1 }, { x: other.x2, y: other.y2 }) ||
+      shareEndpoint({ x: bond.x2, y: bond.y2 }, { x: other.x1, y: other.y1 }) ||
+      shareEndpoint({ x: bond.x2, y: bond.y2 }, { x: other.x2, y: other.y2 })
+
+    // Every substituent bond (any bond connected to just one ring atom)
+    // must be crossing-free against every other line it doesn't touch —
+    // universal overlap resolution nudged the fructose rays out of the ring.
+    const substituentBonds = lines.filter(
+      (line) => !lines.some((other) => other !== line && shareAnyEndpoint(line, other)),
+    )
+    const allLines = lines
+    for (const bond of substituentBonds.length > 0 ? substituentBonds : allLines) {
+      for (const other of allLines) {
+        if (other === bond || shareAnyEndpoint(bond, other)) {
+          continue
+        }
+        expect(
+          segmentsCross(
+            { x: bond.x1, y: bond.y1 },
+            { x: bond.x2, y: bond.y2 },
+            { x: other.x1, y: other.y1 },
+            { x: other.x2, y: other.y2 },
+          ),
+          `fructose bond (${bond.x1.toFixed(0)},${bond.y1.toFixed(0)})→(${bond.x2.toFixed(0)},${bond.y2.toFixed(0)})`,
+        ).toBe(false)
       }
     }
   })
