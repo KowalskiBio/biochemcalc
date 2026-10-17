@@ -190,7 +190,6 @@ export const cs = {
     leaderboardBiomoleculesDescription:
       "Kdo kolik bodů získal v kvízech o biomolekulách. Lehká obtížnost = 1 bod, těžká = 2 body.",
     leaderboardBiomoleculesEmpty: "Zatím nikdo nedokončil žádný kvíz. Buďte první!",
-    leaderboardQuizCount: "Kvízy",
     leaderboardCategoryLabel: "Kategorie",
     leaderboardCategoryAll: "Všechny kategorie",
 

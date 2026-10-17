@@ -408,57 +408,40 @@ function CalculationsLeaderboard() {
 }
 
 /**
- * Biomolekuly's own board, ranked by weighted points — a correct hard-mode
- * answer counts double — optionally narrowed to one category. Kept apart
- * from the calculations board: a quiz answer and a calculated example aren't
- * the same currency.
+ * Biomolekuly's own board — same table layout as the calculations board, but
+ * ranked by weighted points (a correct hard-mode answer counts double) and
+ * optionally narrowed to one category.
  */
-/** Last board seen per category ("" = all), shown instantly on revisit while it refreshes. */
-const biomoleculeBoardCache = new Map<string, BiomoleculeLeaderboardEntry[]>()
-
 function BiomoleculesLeaderboard() {
   const currentUserId = useAuthStore((s) => s.user?.id)
   const nameOf = useCategoryNames()
   const categories = useMoleculeCategories()
   const [categoryId, setCategoryId] = useState<string>("")
-  const [entries, setEntries] = useState<BiomoleculeLeaderboardEntry[] | null>(
-    () => biomoleculeBoardCache.get("") ?? null,
-  )
-  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [entries, setEntries] = useState<BiomoleculeLeaderboardEntry[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    // Keep whatever is on screen (or the cached board for this category)
-    // while the fresh one loads, instead of flashing skeletons on every switch.
-    const cached = biomoleculeBoardCache.get(categoryId)
-    if (cached) setEntries(cached)
-    setIsRefreshing(true)
+    setIsLoading(true)
     setError(null)
     biomoleculesApi
       .leaderboard(categoryId || undefined)
       .then((loaded) => {
-        biomoleculeBoardCache.set(categoryId, loaded)
         if (!cancelled) setEntries(loaded)
       })
       .catch((err) => {
         if (!cancelled) setError(extractErrorMessage(err, cs.student.leaderboardError))
       })
       .finally(() => {
-        if (!cancelled) setIsRefreshing(false)
+        if (!cancelled) setIsLoading(false)
       })
     return () => {
       cancelled = true
     }
   }, [categoryId])
 
-  // The server already orders by points; sorting the stable way here just
-  // guarantees a cached board can't render a stale order after refetches.
-  const rankedEntries = useMemo(
-    () => [...(entries ?? [])].sort((a, b) => b.points - a.points),
-    [entries],
-  )
-  const hasAnyActivity = rankedEntries.some((entry) => entry.quizCount > 0)
+  const hasAnyActivity = entries.some((entry) => entry.quizCount > 0)
 
   return (
     <div className="space-y-6">
@@ -500,7 +483,7 @@ function BiomoleculesLeaderboard() {
             </Select>
           </div>
 
-          {entries === null && !error ? (
+          {isLoading ? (
             <div className="space-y-2">
               {[1, 2, 3, 4, 5].map((i) => (
                 <Skeleton key={i} className="h-10 w-full" />
@@ -513,27 +496,24 @@ function BiomoleculesLeaderboard() {
               {cs.student.leaderboardBiomoleculesEmpty}
             </p>
           ) : (
-            <Table
-              aria-busy={isRefreshing}
-              className={cn("transition-opacity duration-150", isRefreshing && "opacity-60")}
-            >
+            <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[70px]">{cs.student.leaderboardRank}</TableHead>
                   <TableHead>{cs.student.leaderboardUser}</TableHead>
                   <TableHead className="w-[110px] text-right">
-                    {cs.student.leaderboardPoints}
+                    {cs.student.leaderboardCorrect}
                   </TableHead>
                   <TableHead className="w-[130px] text-right">
                     {cs.student.leaderboardAnswered}
                   </TableHead>
                   <TableHead className="w-[100px] text-right">
-                    {cs.student.leaderboardQuizCount}
+                    {cs.student.leaderboardPoints}
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rankedEntries.map((entry, idx) => {
+                {entries.map((entry, idx) => {
                   const isMe = entry.userId === currentUserId
                   return (
                     <TableRow key={entry.userId} className={cn(isMe && "bg-muted/50")}>
@@ -549,12 +529,12 @@ function BiomoleculesLeaderboard() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">
-                        {entry.points}
+                        {entry.correctCount}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {entry.answeredCount}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{entry.quizCount}</TableCell>
+                      <TableCell className="text-right tabular-nums">{entry.points}</TableCell>
                     </TableRow>
                   )
                 })}
