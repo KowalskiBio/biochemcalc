@@ -47,6 +47,19 @@ export interface BiomoleculeLeaderboardEntry {
   points: number
 }
 
+/** The two Biomolekuly streak variants: Učeň and Mistr. */
+export type BiomoleculeStreakKind = "apprentice" | "master"
+
+/** One user's best finished Biomolekuly streak of a given kind. */
+export interface BiomoleculeStreakLeaderboardEntry {
+  userId: string
+  username: string
+  bestCorrectCount: number
+  totalSeconds: number
+  /** `totalSeconds / (bestCorrectCount + 1)` — the failed answer counts too. */
+  secondsPerAnswer: number
+}
+
 /** `/api/biomolecules/*` — the molecule library, its management, and the leaderboard. */
 export const biomoleculesApi = {
   /** Any logged-in user: the full category + molecule dataset. */
@@ -116,4 +129,19 @@ export const biomoleculesApi = {
   /** Any logged-in user. Omitting `categoryId` sums every category. */
   leaderboard: (categoryId?: string): Promise<BiomoleculeLeaderboardEntry[]> =>
     httpRequest<BiomoleculeLeaderboardEntry[]>("/api/biomolecules/leaderboard", { categoryId }),
+
+  /** Store the aggregate of a finished streak run (needs Biomolekuly access). */
+  recordStreakResult: (args: {
+    kind: BiomoleculeStreakKind
+    correctCount: number
+    totalSeconds: number
+  }): Promise<void> => httpRequest<void>("/api/biomolecules/record-streak-result", args),
+
+  /** Any logged-in user. Each user's single best finished run of `kind`. */
+  streakLeaderboard: (
+    kind: BiomoleculeStreakKind,
+  ): Promise<BiomoleculeStreakLeaderboardEntry[]> =>
+    httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/streak-leaderboard", {
+      kind,
+    }),
 }

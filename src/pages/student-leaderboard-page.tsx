@@ -22,7 +22,12 @@ import {
 } from "@/components/ui/table"
 import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
-import { type BiomoleculeLeaderboardEntry, biomoleculesApi } from "@/lib/biomolecules-api"
+import {
+  type BiomoleculeLeaderboardEntry,
+  type BiomoleculeStreakKind,
+  type BiomoleculeStreakLeaderboardEntry,
+  biomoleculesApi,
+} from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
 import type {
@@ -408,9 +413,124 @@ function CalculationsLeaderboard() {
 }
 
 /**
+ * Biomolekuly's best-streak board for one run kind (Učeň/Mistr). Unlike the
+ * calculations `StreakLeaderboardCard` there is nothing to scope by — every
+ * biomolecules streak already draws from all categories — so the card is
+ * just the table: fetch on mount, then loading/error/empty like the others.
+ */
+function BiomoleculeStreakLeaderboardCard({
+  kind,
+  title,
+  icon: Icon,
+}: {
+  kind: BiomoleculeStreakKind
+  title: string
+  icon: typeof Swords
+}) {
+  const currentUserId = useAuthStore((s) => s.user?.id)
+  const [entries, setEntries] = useState<BiomoleculeStreakLeaderboardEntry[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    biomoleculesApi
+      .streakLeaderboard(kind)
+      .then((loaded) => {
+        if (!cancelled) setEntries(loaded)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(extractErrorMessage(err, cs.student.leaderboardError))
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [kind])
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">
+          <Icon className="size-5 inline mr-2" />
+          {title}
+        </CardTitle>
+        <CardDescription>{cs.student.leaderboardStreakDescription}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : error ? (
+          <p className="py-6 text-center text-destructive">{error}</p>
+        ) : entries.length === 0 ? (
+          <p className="py-6 text-center text-muted-foreground">
+            {cs.student.leaderboardStreakEmpty}
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[70px]">{cs.student.leaderboardRank}</TableHead>
+                <TableHead>{cs.student.leaderboardUser}</TableHead>
+                <TableHead className="w-[120px] text-right">
+                  {cs.student.leaderboardStreakCount}
+                </TableHead>
+                <TableHead className="w-[110px] text-right">
+                  {cs.student.leaderboardStreakTime}
+                </TableHead>
+                <TableHead className="w-[110px] text-right">
+                  {cs.student.leaderboardStreakTimePerAnswer}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map((entry, idx) => {
+                const isMe = entry.userId === currentUserId
+                return (
+                  <TableRow key={entry.userId} className={cn(isMe && "bg-muted/50")}>
+                    <TableCell className="font-mono tabular-nums text-muted-foreground">
+                      {idx + 1}.
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {entry.username}
+                      {isMe && (
+                        <Badge variant="outline" className="ml-2">
+                          {cs.student.leaderboardYou}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">
+                      {entry.bestCorrectCount}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {formatMinutesSeconds(entry.totalSeconds)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {formatDecimalComma(entry.secondsPerAnswer.toFixed(1))} s
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
  * Biomolekuly's own board — same table layout as the calculations board, but
  * ranked by weighted points (a correct hard-mode answer counts double) and
- * optionally narrowed to one category.
+ * optionally narrowed to one category. Below it, the two streak boards
+ * (Učeň/Mistr) — same "how far before the first mistake" story as the
+ * calculations section's, minus the scoping selectors.
  */
 function BiomoleculesLeaderboard() {
   const currentUserId = useAuthStore((s) => s.user?.id)
@@ -543,6 +663,19 @@ function BiomoleculesLeaderboard() {
           )}
         </CardContent>
       </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <BiomoleculeStreakLeaderboardCard
+          kind="apprentice"
+          title={cs.student.leaderboardApprenticeTitle}
+          icon={Swords}
+        />
+        <BiomoleculeStreakLeaderboardCard
+          kind="master"
+          title={cs.student.leaderboardMasterTitle}
+          icon={Crown}
+        />
+      </div>
     </div>
   )
 }

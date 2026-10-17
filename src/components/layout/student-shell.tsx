@@ -77,6 +77,11 @@ const navBySection: Record<Section, NavItem[]> = {
       label: cs.navigation.practice,
     },
     {
+      path: "/biomolekuly/test",
+      icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
+      label: cs.navigation.test,
+    },
+    {
       path: "/biomolekuly",
       icon: <Atom className="size-[18px]" strokeWidth={1.75} />,
       label: cs.navigation.biomolekuly,

@@ -542,6 +542,20 @@ export const cs = {
       promptStructureLabel: "Struktura molekuly k rozpoznání",
       structureOptionLabel: "Struktura (možnost {index})",
     },
+    // The section-wide streak test (Učeň/Mistr režimy): endless questions
+    // from every category at once, the run ends on the first wrong answer.
+    // Mode titles and the picker chrome are the shared `cs.test` strings;
+    // only these descriptions differ, because Biomolekuly scopes by
+    // difficulty across all categories, not by a picked topic.
+    test: {
+      modeUcenDescription:
+        "Nekonečná série lehkých otázek ze všech kategorií — vybíráte ze čtyř možností. Série končí první špatnou odpovědí.",
+      modeMistrDescription:
+        "Nekonečná série těžkých otázek ze všech kategorií — odpověď napíšete. Série končí první špatnou odpovědí.",
+      streakEmptyTitle: "Zatím tu nejsou žádné otázky pro tento režim",
+      streakEmptyDescription:
+        "Žádná kategorie zatím nemá otázky, které by tento režim uměl použít. Až vyučující doplní molekuly, série půjde spustit.",
+    },
     detail: {
       sideChainLabel: "Postranní řetězec",
       chargeLabel: "Náboj při pH 7",

@@ -5,10 +5,12 @@
 
 use crate::commands::biomolecules::{
     do_create_category, do_create_molecule, do_delete_category, do_delete_molecule, do_list_data,
-    do_quiz_leaderboard, do_record_quiz_result, do_update_category_meta, do_update_molecule,
-    BiomoleculeLeaderboardEntry, CreateCategoryPayload, CreateMoleculePayload,
+    do_quiz_leaderboard, do_record_quiz_result, do_record_streak_result, do_streak_leaderboard,
+    do_update_category_meta, do_update_molecule, BiomoleculeLeaderboardEntry,
+    BiomoleculeStreakLeaderboardEntry, CreateCategoryPayload, CreateMoleculePayload,
     DeleteCategoryPayload, DeleteMoleculePayload, QuizLeaderboardPayload, RecordQuizResultPayload,
-    UpdateCategoryMetaPayload, UpdateMoleculePayload,
+    RecordStreakResultPayload, StreakLeaderboardPayload, UpdateCategoryMetaPayload,
+    UpdateMoleculePayload,
 };
 use crate::db::repos::biomolecule_repo::BiomoleculeData;
 use crate::db::AppState;
@@ -94,16 +96,37 @@ async fn leaderboard(
     Ok(Json(do_quiz_leaderboard(&conn, &payload)?))
 }
 
+async fn record_streak_result(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<RecordStreakResultPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_record_streak_result(&conn, &user.id, payload)?;
+    Ok(())
+}
+
+async fn streak_leaderboard(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<StreakLeaderboardPayload>,
+) -> Result<Json<Vec<BiomoleculeStreakLeaderboardEntry>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_streak_leaderboard(&conn, &payload)?))
+}
+
 /// Any authenticated user.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/data", post(data))
         .route("/leaderboard", post(leaderboard))
+        .route("/streak-leaderboard", post(streak_leaderboard))
 }
 
 /// Accounts with Biomolekuly access.
 pub fn quiz_router() -> Router<Arc<AppState>> {
-    Router::new().route("/record-quiz-result", post(record_quiz_result))
+    Router::new()
+        .route("/record-quiz-result", post(record_quiz_result))
+        .route("/record-streak-result", post(record_streak_result))
 }
 
 /// Teacher only.

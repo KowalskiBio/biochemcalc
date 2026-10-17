@@ -7,6 +7,8 @@ import { StudentShell } from "@/components/layout/student-shell"
 import { allowedSections } from "@/hooks/use-section"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
+import { BiomoleculesStreakPage } from "@/pages/biomolecules-streak-page"
+import { BiomoleculesTestPage } from "@/pages/biomolecules-test-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
 import { ConstantsPage } from "@/pages/constants-page"
 import { DatabazePage } from "@/pages/databaze-page"
@@ -110,6 +112,15 @@ function StudentRoutes() {
           <>
             <Route path="/biomolekuly" element={<BiomoleculesPage />} />
             <Route path="/biomolekuly/procvicovani" element={<BiomoleculesQuizPage />} />
+            <Route path="/biomolekuly/test" element={<BiomoleculesTestPage />} />
+            <Route
+              path="/biomolekuly/test/ucen"
+              element={<BiomoleculesStreakPage kind="apprentice" />}
+            />
+            <Route
+              path="/biomolekuly/test/mistr"
+              element={<BiomoleculesStreakPage kind="master" />}
+            />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"

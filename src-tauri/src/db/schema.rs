@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 48;
+const CURRENT_USER_VERSION: u32 = 49;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -246,6 +246,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 48 {
         apply_migration_v48(conn)?;
         conn.pragma_update(None, "user_version", "48")?;
+    }
+
+    if user_version < 49 {
+        apply_migration_v49(conn)?;
+        conn.pragma_update(None, "user_version", "49")?;
     }
 
     Ok(())
@@ -1587,6 +1592,30 @@ fn apply_migration_v48(conn: &Connection) -> Result<(), rusqlite::Error> {
         "
         ALTER TABLE biomolecule_quiz_results
             ADD COLUMN mode TEXT NOT NULL DEFAULT 'easy';
+        ",
+    )?;
+    Ok(())
+}
+
+/// Finished Biomolekuly streak runs (Učeň/Mistr): a client-graded run that
+/// ends on the first wrong answer — the mirror of `biomolecule_quiz_results`,
+/// but for the endless one-question-at-a-time mode, so only the run's
+/// aggregate is stored. `kind` is the run's variant (`apprentice`/`master`),
+/// `correct_count` the streak length, `total_seconds` the wall-clock time the
+/// whole run took (a positive REAL).
+fn apply_migration_v49(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_streak_runs (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            correct_count INTEGER NOT NULL CHECK (correct_count >= 0),
+            total_seconds REAL NOT NULL CHECK (total_seconds > 0),
+            finished_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_biomolecule_streak_runs_kind_user
+        ON biomolecule_streak_runs(kind, user_id);
         ",
     )?;
     Ok(())

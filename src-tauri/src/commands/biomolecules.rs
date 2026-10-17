@@ -9,7 +9,10 @@
 //! so recorded scores are only sanity-checked — and the category must exist.
 
 use crate::db::repos::biomolecule_repo::{BiomoleculeData, CategoryField};
-use crate::db::repos::{BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo};
+use crate::db::repos::{
+    BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
+    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo,
+};
 use crate::db::DbError;
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -27,6 +30,20 @@ const MAX_FACTS_CHARS: usize = 1000;
 /// the biggest category is well under this. Stops a hand-crafted request
 /// from claiming a thousand correct answers in one go.
 const MAX_QUIZ_QUESTIONS: i64 = 100;
+
+/// Generous upper bound on one streak run's length: a client-graded run is
+/// endless, so this only stops a hand-crafted request from reporting an
+/// absurd streak.
+const MAX_STREAK_CORRECT: i64 = 10_000;
+
+/// Longest wall-clock time a single run may claim (one day), likewise only a
+/// sanity bound on a client-reported number.
+const MAX_STREAK_SECONDS: f64 = 86_400.0;
+
+/// The streak-run variants (`models::StreakRunKind` on the calculations side);
+/// kept as text here since the Biomolekuly streak lives entirely in the
+/// frontend and is only validated on record.
+const STREAK_KINDS: [&str; 2] = ["apprentice", "master"];
 
 /// The validated trait vocabulary (values stored as text in
 /// `biomolecule_traits`; adding a kind needs no schema change).
@@ -572,6 +589,89 @@ pub fn do_quiz_leaderboard(
         .collect())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordStreakResultPayload {
+    /// Run variant: `"apprentice"` or `"master"`.
+    pub kind: String,
+    pub correct_count: i64,
+    pub total_seconds: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreakLeaderboardPayload {
+    /// The run variant to rank: `"apprentice"` or `"master"`.
+    pub kind: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeStreakLeaderboardEntry {
+    pub user_id: String,
+    pub username: String,
+    pub best_correct_count: i64,
+    pub total_seconds: f64,
+    /// `total_seconds / (best_correct_count + 1)` — the run ended on a wrong
+    /// answer, which counts as an answered question.
+    pub seconds_per_answer: f64,
+}
+
+/// Store the aggregate of one finished Biomolekuly streak run for the acting
+/// user. The run is graded client-side, so this can only sanity-check the
+/// numbers (`kind` must be a known variant, counts/times within their bounds).
+pub fn do_record_streak_result(
+    conn: &Connection,
+    user_id: &Uuid,
+    payload: RecordStreakResultPayload,
+) -> Result<(), DbError> {
+    let kind = validate_streak_kind(&payload.kind)?;
+    if !(0..=MAX_STREAK_CORRECT).contains(&payload.correct_count) {
+        return Err(DbError::Validation("Invalid streak score".into()));
+    }
+    if !(payload.total_seconds > 0.0 && payload.total_seconds <= MAX_STREAK_SECONDS) {
+        return Err(DbError::Validation("Invalid streak time".into()));
+    }
+    BiomoleculeStreakRepo::insert(
+        conn,
+        user_id,
+        kind,
+        payload.correct_count,
+        payload.total_seconds,
+    )
+}
+
+pub fn do_streak_leaderboard(
+    conn: &Connection,
+    payload: &StreakLeaderboardPayload,
+) -> Result<Vec<BiomoleculeStreakLeaderboardEntry>, DbError> {
+    let kind = validate_streak_kind(&payload.kind)?;
+    Ok(BiomoleculeStreakRepo::best_per_user(conn, kind)?
+        .into_iter()
+        .map(
+            |row: BiomoleculeStreakLeaderboardRow| BiomoleculeStreakLeaderboardEntry {
+                user_id: row.user_id.to_string(),
+                username: row.username,
+                best_correct_count: row.best_correct_count,
+                total_seconds: row.total_seconds,
+                // The failed answer counts as answered, mirroring the
+                // calculations streak summary.
+                seconds_per_answer: row.total_seconds / (row.best_correct_count + 1) as f64,
+            },
+        )
+        .collect())
+}
+
+/// Trim and validate a streak-run variant, returning the canonical `&str`.
+fn validate_streak_kind(kind: &str) -> Result<&str, DbError> {
+    let kind = kind.trim();
+    if STREAK_KINDS.contains(&kind) {
+        Ok(kind)
+    } else {
+        Err(DbError::Validation(format!("Invalid streak kind: {kind}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,6 +1066,72 @@ mod tests {
         assert_eq!(board.len(), 1);
         assert_eq!(board[0].correct_count, 7);
         assert_eq!(board[0].answered_count, 10);
+    }
+
+    #[test]
+    fn record_streak_result_validates_kind_and_score() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "student");
+        let record = |kind: &str, correct, seconds| {
+            do_record_streak_result(
+                &conn,
+                &student,
+                RecordStreakResultPayload {
+                    kind: kind.into(),
+                    correct_count: correct,
+                    total_seconds: seconds,
+                },
+            )
+        };
+
+        assert!(matches!(
+            record("vysoky", 5, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("apprentice", -1, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("apprentice", MAX_STREAK_CORRECT + 1, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("apprentice", 5, 0.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("apprentice", 5, MAX_STREAK_SECONDS + 1.0),
+            Err(DbError::Validation(_))
+        ));
+        record("apprentice", 5, 30.0).expect("valid streak");
+        // A wrong answer is always answered, so a zero-length streak is valid.
+        record("master", 0, 4.0).expect("valid empty streak");
+
+        let board = do_streak_leaderboard(
+            &conn,
+            &StreakLeaderboardPayload {
+                kind: "apprentice".into(),
+            },
+        )
+        .expect("leaderboard");
+        assert_eq!(board.len(), 1);
+        assert_eq!(board[0].best_correct_count, 5);
+        assert_eq!(board[0].total_seconds, 30.0);
+        // 30 / (5 + 1) — the failed answer counts as answered.
+        assert_eq!(board[0].seconds_per_answer, 5.0);
+
+        // The two variants are ranked independently.
+        let master = do_streak_leaderboard(
+            &conn,
+            &StreakLeaderboardPayload {
+                kind: "master".into(),
+            },
+        )
+        .expect("leaderboard");
+        assert_eq!(master.len(), 1);
+        assert_eq!(master[0].best_correct_count, 0);
+        assert_eq!(master[0].seconds_per_answer, 4.0);
     }
 
     #[test]
