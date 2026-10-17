@@ -524,7 +524,6 @@ export const cs = {
         "charge:neutral": "Která z těchto molekul je při pH 7 bez náboje?",
         "charge:negative": "Která z těchto molekul je při pH 7 záporně nabitá?",
       } as Record<string, string>,
-      countAll: "Všechny ({count})",
       noTypesHint: "Vyberte alespoň jeden typ otázky.",
       noHardTypesHint: "Tato kategorie nemá žádné typy otázek pro těžkou obtížnost.",
       start: "Začít procvičovat",

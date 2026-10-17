@@ -5,6 +5,7 @@ import { Link, Navigate, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { Slider } from "@/components/ui/slider"
 import {
   Select,
   SelectContent,
@@ -44,8 +45,9 @@ const quizStrings = cs.biomolekuly.quiz
 
 const EMPTY_QUESTIONS: QuizQuestion[] = []
 
-type CountChoice = 10 | 20 | "all"
-const COUNT_CHOICES: CountChoice[] = [10, 20, "all"]
+const QUESTION_COUNT_MIN = 5
+const QUESTION_COUNT_MAX = 50
+const QUESTION_COUNT_DEFAULT = 10
 
 const QUIZ_MODES: QuizMode[] = ["easy", "hard"]
 
@@ -264,11 +266,10 @@ interface SetupScreenProps {
   mode: QuizMode
   onModeChange: (mode: QuizMode) => void
   allTypes: QuizQuestionType[]
-  allCount: number
   selectedTypes: QuizQuestionType[]
   onToggleType: (type: QuizQuestionType) => void
-  countChoice: CountChoice
-  onCountChoice: (choice: CountChoice) => void
+  questionCount: number
+  onQuestionCountChange: (count: number) => void
   onStart: () => void
 }
 
@@ -281,11 +282,10 @@ function SetupScreen({
   mode,
   onModeChange,
   allTypes,
-  allCount,
   selectedTypes,
   onToggleType,
-  countChoice,
-  onCountChoice,
+  questionCount,
+  onQuestionCountChange,
   onStart,
 }: SetupScreenProps) {
   // Reachable only in hard mode: the chosen category has types in easy mode
@@ -389,40 +389,28 @@ function SetupScreen({
 
           {/* Question count */}
           <div className="space-y-2">
-            <MicroLabel>{quizStrings.countLabel}</MicroLabel>
-            <div className="inline-flex">
-              {COUNT_CHOICES.map((choice, i) => {
-                const active = countChoice === choice
-                return (
-                  <button
-                    key={choice}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => onCountChoice(choice)}
-                    className={cn(
-                      "min-h-[44px] cursor-pointer border bg-card px-4 text-sm font-medium",
-                      "transition-colors duration-150",
-                      FOCUS_RING_CLASS,
-                      i === 0 && "rounded-l-[4px]",
-                      i === COUNT_CHOICES.length - 1 && "rounded-r-[4px]",
-                      i > 0 && "-ml-px",
-                      active
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {choice === "all" ? (
-                      <>
-                        {quizStrings.countAll.split("{count}")[0]}
-                        <span className="font-mono tabular">{allCount}</span>
-                        {quizStrings.countAll.split("{count}")[1]}
-                      </>
-                    ) : (
-                      <span className="font-mono tabular">{choice}</span>
-                    )}
-                  </button>
-                )
-              })}
+            <div className="flex items-baseline gap-1.5">
+              <MicroLabel>{quizStrings.countLabel}</MicroLabel>
+              <span className="font-mono tabular text-sm font-semibold text-primary">
+                {questionCount}
+              </span>
+            </div>
+            <div className="max-w-xs space-y-0.5">
+              <Slider
+                value={[questionCount]}
+                onValueChange={([value]) => onQuestionCountChange(value)}
+                min={QUESTION_COUNT_MIN}
+                max={QUESTION_COUNT_MAX}
+                step={1}
+                aria-label={quizStrings.countLabel}
+              />
+              <div
+                aria-hidden="true"
+                className="flex justify-between font-mono tabular text-[10px] text-muted-foreground"
+              >
+                <span>{QUESTION_COUNT_MIN}</span>
+                <span>{QUESTION_COUNT_MAX}</span>
+              </div>
             </div>
           </div>
         </>
@@ -637,7 +625,7 @@ export function BiomoleculesQuizPage() {
   // null = "all of the above" — the chips start fully selected, but only
   // once the category+mode pair lands (before that allTypes is still empty).
   const [chosenTypes, setChosenTypes] = useState<QuizQuestionType[] | null>(null)
-  const [countChoice, setCountChoice] = useState<CountChoice>(10)
+  const [questionCount, setQuestionCount] = useState(QUESTION_COUNT_DEFAULT)
   // The quiz in flight, bound to the setup it started from so mid-run setup
   // state can never skew a session's molecules, mode, or scoring category.
   const [activeQuiz, setActiveQuiz] = useState<{
@@ -663,7 +651,6 @@ export function BiomoleculesQuizPage() {
 
   const startQuiz = () => {
     if (slug === null || !entry || selectedTypes.length === 0) return
-    const questionCount = countChoice === "all" ? entry.config.molecules.length : countChoice
     const questions = generateQuizSession(entry.config.molecules, {
       types: selectedTypes,
       questionCount,
@@ -777,11 +764,10 @@ export function BiomoleculesQuizPage() {
         mode={mode}
         onModeChange={selectMode}
         allTypes={allTypes}
-        allCount={entry?.config.molecules.length ?? 0}
         selectedTypes={selectedTypes}
         onToggleType={toggleType}
-        countChoice={countChoice}
-        onCountChoice={setCountChoice}
+        questionCount={questionCount}
+        onQuestionCountChange={setQuestionCount}
         onStart={startQuiz}
       />
     )
