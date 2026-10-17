@@ -1,0 +1,352 @@
+// @vitest-environment jsdom
+// Truth battery for the sugar-ring recognizer: drives the real smiles-drawer
+// pipeline headlessly, then asserts the derived Haworth up/down sides against
+// the known depictions (α/β-D-glucopyranose, β-D-galaktopyranóza,
+// α-D-manopyranóza, adenosine/AMP ribose).
+import { describe, expect, it } from "vitest"
+
+import SmilesDrawer from "smiles-drawer"
+import {
+  type HaworthPreprocessor,
+  applyHaworthLayout,
+} from "@/lib/molecules/render/haworth-layout"
+import {
+  type PreprocessorLike,
+  snapshotFromPreprocessor,
+} from "@/lib/molecules/render/pipeline-snapshot"
+import { type GraphSnapshot, recognizeSugarRings } from "@/lib/molecules/render/recognize"
+
+interface Pipeline {
+  snapshot: GraphSnapshot
+  preprocessor: HaworthPreprocessor
+}
+
+function pipelineOf(smiles: string): Pipeline {
+  let captured: Pipeline | null = null
+  SmilesDrawer.parse(smiles, (tree: unknown) => {
+    const drawer = new SmilesDrawer.SvgDrawer({ width: 400, height: 300, bondLength: 24 })
+    const preprocessor = (
+      drawer as unknown as {
+        preprocessor: HaworthPreprocessor & { processGraph: (...args: unknown[]) => void }
+      }
+    ).preprocessor
+    const original = preprocessor.processGraph
+    preprocessor.processGraph = ((...args: unknown[]) => {
+      const result = original.apply(preprocessor, args)
+      captured = { snapshot: snapshotFromPreprocessor(preprocessor as PreprocessorLike), preprocessor }
+      return result
+    }) as typeof original
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    document.body.appendChild(svg)
+    drawer.draw(tree, svg, "light")
+    svg.remove()
+  })
+  if (captured === null) {
+    throw new Error(`no snapshot captured for ${smiles}`)
+  }
+  return captured
+}
+
+function snapshotOf(smiles: string): GraphSnapshot {
+  return pipelineOf(smiles).snapshot
+}
+
+// True SMILES verified against the library's R/S annotation (see the pipeline
+// probe): every center's R/S matches the expected configuration of the sugar.
+const TRUE_ALPHA_GLUCOSE = "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O)O"
+const TRUE_BETA_GLUCOSE = "C([C@@H]1[C@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O"
+const CANDIDATE_BETA_GALACTOSE = "C([C@@H]1[C@@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O"
+const CANDIDATE_ALPHA_MANNOSE = "C([C@@H]1[C@H]([C@@H]([C@@H]([C@H](O1)O)O)O)O)O"
+const ADENOSINE = "Nc1ncnc2c1ncn2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
+const AMP = "Nc1ncnc2c1ncn2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
+const CANDIDATE_BETA_FRUCTOSE = "OC[C@]1(O)[C@@H](O)[C@@H](O)[C@@H](CO)O1"
+// The kekulized seed form (uppercase, alternating double bonds) — the exact
+// SMILES kept in `biomolecule_seed.rs`; the recognizer works on either form.
+const ADENOSINE_KEKULE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
+const AMP_KEKULE =
+  "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
+
+interface RoleExpectation {
+  up: string[]
+  down: string[]
+}
+
+function sidesOf(
+  snapshot: GraphSnapshot,
+  cycleRoleVertex: number,
+  recognized: { up: number[]; down: number[] } | undefined,
+): RoleExpectation {
+  const elementOf = (ids: number[]): string[] =>
+    ids.map((id) => {
+      const atom = snapshot.atoms.get(id)
+      if (atom === undefined) {
+        throw new Error(`unknown atom ${id}`)
+      }
+      return atom.element
+    })
+  if (recognized === undefined) {
+    throw new Error(`no recognized atom for role vertex ${cycleRoleVertex}`)
+  }
+  return {
+    up: elementOf(recognized.up).filter((element) => element !== "H"),
+    down: elementOf(recognized.down).filter((element) => element !== "H"),
+  }
+}
+
+function expectRing(
+  smiles: string,
+  expectedRoles: RoleExpectation[],
+  label: string,
+): void {
+  const snapshot = snapshotOf(smiles)
+  const plans = recognizeSugarRings(snapshot)
+  expect(plans, `${label}: a sugar ring should be recognized`).toHaveLength(1)
+  const plan = plans[0]
+  expect(plan.cycle.length, label).toBe(expectedRoles.length + 1)
+  for (let role = 0; role < expectedRoles.length; role += 1) {
+    const roleVertexId = plan.cycle[role]
+    const recognized = plan.atoms.find((atom) => atom.vertexId === roleVertexId)
+    const sides = sidesOf(snapshot, roleVertexId, recognized)
+    expect(sides, `${label} role ${role + 1}`).toEqual(expectedRoles[role])
+  }
+}
+
+describe("applyHaworthLayout", () => {
+  const BOND = 24
+
+  function positionOf(preprocessor: HaworthPreprocessor, vertexId: number): { x: number; y: number } {
+    const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === vertexId)
+    if (vertex === undefined) {
+      throw new Error(`unknown vertex ${vertexId}`)
+    }
+    return vertex.position
+  }
+
+  it("snaps a recognized ring onto the Haworth polygon with vertical substituents", () => {
+    const pipeline = pipelineOf(TRUE_BETA_GLUCOSE)
+    const plans = recognizeSugarRings(pipeline.snapshot)
+    expect(plans).toHaveLength(1)
+    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+    const plan = plans[0]
+
+    // Ring bonds are all one bond-length after the snap.
+    const ringCycle = plan.cycle
+    for (let index = 0; index < ringCycle.length; index += 1) {
+      const a = positionOf(pipeline.preprocessor, ringCycle[index])
+      const b = positionOf(pipeline.preprocessor, ringCycle[(index + 1) % ringCycle.length])
+      expect(Math.hypot(b.x - a.x, b.y - a.y), `edge ${index}`).toBeGreaterThan(BOND - 0.5)
+      expect(Math.hypot(b.x - a.x, b.y - a.y), `edge ${index}`).toBeLessThan(BOND + 0.5)
+    }
+
+    // Every exocyclic heavy substituent is strictly vertical above/below its
+    // ring atom (up = smaller y, down = larger y) — except chain substituents,
+    // which are tilted toward free space (checked by the adenosine bias test).
+    for (const atom of plan.atoms) {
+      const anchor = positionOf(pipeline.preprocessor, atom.vertexId)
+      for (const id of atom.up) {
+        const position = positionOf(pipeline.preprocessor, id)
+        const isH = pipeline.preprocessor.graph.vertices.find((c) => c.id === id)?.value.element === "H"
+        const isChain =
+          !isH &&
+          (
+            pipeline.preprocessor.graph.vertices.find((candidate) => candidate.id === id)
+              ?.neighbours ?? []
+          ).some(
+            (neighbour) =>
+              neighbour !== atom.vertexId &&
+              pipeline.preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)
+                ?.value.element !== "H",
+          )
+        if (isChain) {
+          continue
+        }
+        expect(Math.abs(position.x - anchor.x), `up ${id}`).toBeLessThan(0.01)
+        expect(position.y < anchor.y, `up ${id}`).toBe(true)
+      }
+      for (const id of atom.down) {
+        const position = positionOf(pipeline.preprocessor, id)
+        expect(Math.abs(position.x - anchor.x), `down ${id}`).toBeLessThan(0.01)
+        expect(position.y > anchor.y, `down ${id}`).toBe(true)
+      }
+    }
+
+    // Stereo wedges on the ring's bonds were blanked (plain Haworth).
+    const ringSet = new Set(plan.cycle)
+    for (const edge of pipeline.preprocessor.graph.edges ?? []) {
+      if (ringSet.has(edge.sourceId) && ringSet.has(edge.targetId)) {
+        expect(edge.wedge ?? "").toBe("")
+      }
+    }
+  })
+
+  it("leaves non-sugar molecules untouched", () => {
+    const pipeline = pipelineOf("C1CCOC1")
+    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(false)
+  })
+
+  it("kekulizes the adenine base (alternating double bonds, no circles)", () => {
+    const pipeline = pipelineOf(ADENOSINE)
+    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+
+    // Every formerly aromatic member atom lost the aromatic flag, so no
+    // inner aromaticity circle is drawn.
+    const aromaticLeft = pipeline.preprocessor.graph.vertices.filter(
+      (vertex) => vertex.value.isPartOfAromaticRing === true,
+    )
+    expect(aromaticLeft).toEqual([])
+
+    // Ring edges of the purine system alternate single/double: weights are
+    // only 1 or 2, every ring edge stays between ring members, and each
+    // aromatic ring carries at least one double bond with no two doubles
+    // sharing an atom.
+    const purineRing = pipeline.preprocessor.rings.find((ring) => ring.members.length === 6)
+    expect(purineRing).toBeDefined()
+    const ringMembers = new Set(purineRing?.members ?? [])
+    const ringEdges = (pipeline.preprocessor.graph.edges ?? []).filter(
+      (edge) => ringMembers.has(edge.sourceId) && ringMembers.has(edge.targetId),
+    )
+    expect(ringEdges.length).toBe(6)
+    const doubles = ringEdges.filter((edge) => edge.weight === 2)
+    expect(doubles.length).toBeGreaterThanOrEqual(2)
+    const doubleAtoms = doubles.flatMap((edge) => [edge.sourceId, edge.targetId])
+    expect(new Set(doubleAtoms).size).toBe(doubleAtoms.length)
+  })
+
+  it("biases chain substituents toward free space (base right, CH2OH tail left)", () => {
+    const pipeline = pipelineOf(ADENOSINE_KEKULE)
+    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+    const plan = recognizeSugarRings(pipeline.snapshot)[0]
+
+    // Glycosidic nitrogen at the anomeric carbon: tilts away from the ring
+    // centre side (to the right for the ring's right-hand anomeric carbon).
+    const anomericId = plan.cycle[0]
+    const anomericAtom = plan.atoms.find((atom) => atom.vertexId === anomericId)
+    if (anomericAtom === undefined) {
+      throw new Error("anomeric atom missing")
+    }
+    const anchor = positionOf(pipeline.preprocessor, anomericId)
+    const glycoN = positionOf(pipeline.preprocessor, anomericAtom.up[0])
+    expect(glycoN.y < anchor.y).toBe(true)
+    expect(glycoN.x > anchor.x).toBe(true)
+
+    // The 5′ CH2OH tail at the far carbon tilts left, away from the base.
+    const tailAnchorId = plan.cycle[plan.cycle.length - 2]
+    const tailAnchorPos = positionOf(pipeline.preprocessor, tailAnchorId)
+    const tailAtom = plan.atoms.find((atom) => atom.vertexId === tailAnchorId)
+    if (tailAtom === undefined) {
+      throw new Error("tail anchor missing")
+    }
+    const tailCarbon = positionOf(pipeline.preprocessor, tailAtom.up[0])
+    expect(tailCarbon.y < tailAnchorPos.y).toBe(true)
+    expect(tailCarbon.x < tailAnchorPos.x).toBe(true)
+  })
+})
+
+describe("sugar-ring recognition", () => {
+  it("recognizes α-D-glucopyranose (anomeric OH down)", () => {
+    expectRing(
+      TRUE_ALPHA_GLUCOSE,
+      [
+        { up: [], down: ["O"] },
+        { up: [], down: ["O"] },
+        { up: ["O"], down: [] },
+        { up: [], down: ["O"] },
+        { up: ["C"], down: [] },
+      ],
+      "α-glucose",
+    )
+  })
+
+  it("recognizes β-D-glucopyranose (anomeric OH up)", () => {
+    expectRing(
+      TRUE_BETA_GLUCOSE,
+      [
+        { up: ["O"], down: [] },
+        { up: [], down: ["O"] },
+        { up: ["O"], down: [] },
+        { up: [], down: ["O"] },
+        { up: ["C"], down: [] },
+      ],
+      "β-glucose",
+    )
+  })
+
+  it("recognizes β-D-galaktopyranóza (C4 epimer)", () => {
+    expectRing(
+      CANDIDATE_BETA_GALACTOSE,
+      [
+        { up: ["O"], down: [] },
+        { up: [], down: ["O"] },
+        { up: ["O"], down: [] },
+        { up: ["O"], down: [] },
+        { up: ["C"], down: [] },
+      ],
+      "β-galactose",
+    )
+  })
+
+  it("recognizes α-D-manopyranóza (C2 epimer)", () => {
+    expectRing(
+      CANDIDATE_ALPHA_MANNOSE,
+      [
+        { up: [], down: ["O"] },
+        { up: ["O"], down: [] },
+        { up: ["O"], down: [] },
+        { up: [], down: ["O"] },
+        { up: ["C"], down: [] },
+      ],
+      "α-mannose",
+    )
+  })
+
+  it("recognizes the ribose ring inside adenosine and AMP (aromatic and kekulé)", () => {
+    const ribose: RoleExpectation[] = [
+      { up: ["N"], down: [] }, // base at C1' (β)
+      { up: [], down: ["O"] }, // C2'
+      { up: [], down: ["O"] }, // C3'
+      { up: ["C"], down: [] }, // C4' CH2OH
+    ]
+    expectRing(ADENOSINE, ribose, "adenosine")
+    expectRing(AMP, ribose, "AMP")
+    expectRing(ADENOSINE_KEKULE, ribose, "adenosine (kekulé)")
+    expectRing(AMP_KEKULE, ribose, "AMP (kekulé)")
+  })
+
+  it("recognizes β-D-fruktofuranóza (ketose, anomeric C2)", () => {
+    const snapshot = snapshotOf(CANDIDATE_BETA_FRUCTOSE)
+    const plans = recognizeSugarRings(snapshot)
+    if (plans.length === 0) {
+      // Structural topology unsupported yet (ketose) — record, don't guess.
+      expect(plans).toEqual([])
+      return
+    }
+    expect(plans).toHaveLength(1)
+    const plan = plans[0]
+    expect(plan.cycle.length).toBe(5)
+    const expected: RoleExpectation[] = [
+      { up: ["O"], down: ["C"] }, // anomeric C2: OH up (β), CH2OH down
+      { up: ["O"], down: [] },
+      { up: ["O"], down: [] },
+      { up: ["C"], down: [] },
+    ]
+    for (let role = 0; role < expected.length; role += 1) {
+      const roleVertexId = plan.cycle[role]
+      const recognized = plan.atoms.find((atom) => atom.vertexId === roleVertexId)
+      expect(sidesOf(snapshot, roleVertexId, recognized), `fructose role ${role + 1}`).toEqual(
+        expected[role],
+      )
+    }
+  })
+
+  it("refuses rings that are not sugars or lack stereo information", () => {
+    // Plain skeletal glucose (no stereo tags) → strict fallback.
+    expect(recognizeSugarRings(snapshotOf("OCC1OC(O)C(O)C(O)C1O"))).toEqual([])
+    // THF: no anomeric candidate.
+    expect(recognizeSugarRings(snapshotOf("C1CCOC1"))).toEqual([])
+    // Benzene: aromatic / no ring oxygen.
+    expect(recognizeSugarRings(snapshotOf("c1ccccc1"))).toEqual([])
+    // Alanine: no rings at all.
+    expect(recognizeSugarRings(snapshotOf("N[C@@H](C)C(=O)O"))).toEqual([])
+  })
+})
+

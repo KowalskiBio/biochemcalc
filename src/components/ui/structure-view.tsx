@@ -3,6 +3,7 @@ import SmilesDrawer from "smiles-drawer"
 
 import { ProjectionView } from "@/components/ui/projection-view"
 import { type Point, transformPoints } from "@/lib/molecules/orientation"
+import { applyHaworthLayout, type HaworthPreprocessor } from "@/lib/molecules/render/haworth-layout"
 import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/stores/ui-store"
@@ -182,7 +183,21 @@ function SmilesStructureView({
         const originalProcessGraph = preprocessor.processGraph
         preprocessor.processGraph = () => {
           originalProcessGraph.call(preprocessor)
-          applyOrientation(preprocessor, orientationDeg, mirror)
+          // Sugar rings first: recognized rings snap into the canonical
+          // Haworth skeleton (nucleotides & co. keep their full library
+          // layout for the rest). Recognized sugars stay canonical — no
+          // random orientation — while an explicit enantiomer mirror still
+          // applies to the whole drawing (mirror decoys work on projections).
+          const recognized = applyHaworthLayout(
+            preprocessor as unknown as HaworthPreprocessor,
+          )
+          if (recognized) {
+            if (mirror) {
+              applyOrientation(preprocessor, 0, true)
+            }
+          } else {
+            applyOrientation(preprocessor, orientationDeg, mirror)
+          }
         }
 
         try {
