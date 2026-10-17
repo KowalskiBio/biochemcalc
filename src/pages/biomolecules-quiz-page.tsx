@@ -110,8 +110,11 @@ function MicroLabel({ children }: { children: string }) {
 function PromptView({ prompt }: { prompt: QuizPrompt }) {
   if (prompt.kind === "structure" && prompt.smiles) {
     return (
+      // A parsed projection, when the target molecule carries one, takes
+      // precedence over its SMILES inside StructureView.
       <StructureView
         smiles={prompt.smiles}
+        projection={prompt.projection}
         orientationDeg={prompt.orientationDeg}
         size={220}
         title={quizStrings.promptStructureLabel}
@@ -176,8 +179,11 @@ function OptionButton({
     >
       {option.display === "structure" ? (
         <div aria-hidden="true">
+          {/* The same option carries smiles+orientationDeg+mirror as always;
+              a projection, when present, wins inside StructureView. */}
           <StructureView
             smiles={option.smiles ?? ""}
+            projection={option.projection}
             orientationDeg={option.orientationDeg}
             mirror={option.mirror}
             size={150}

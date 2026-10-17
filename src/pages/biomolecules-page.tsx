@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ProjectionView } from "@/components/ui/projection-view"
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import {
   getCategoryQuizConfig,
   type QuizQuestionType,
 } from "@/lib/molecules/quiz"
+import { parseProjection, type ProjectionSpec } from "@/lib/molecules/render/projection"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
 import {
@@ -308,6 +310,17 @@ function traitLabel(map: Record<string, string>, value: string | undefined): str
   return value ? map[value] : undefined
 }
 
+/**
+ * Reads a sugar trait (`anomer`/`ringForm`/`deoxy`) straight off the record,
+ * with `traitOf`'s guard against blank values. These keys aren't part of the
+ * shared TRAIT vocabulary yet (that lands with lane B), so the constant
+ * lookup can't be used.
+ */
+function rawTrait(molecule: Biomolecule, key: string): string | undefined {
+  const value = molecule.traits[key]
+  return value && value.trim().length > 0 ? value : undefined
+}
+
 const aminoAcidBits: CategoryBits = {
   cardCodeLine: (molecule) => codeLine(molecule, true),
   cardBadges: (molecule) => (
@@ -417,6 +430,8 @@ const customBits: CategoryBits = {
       traitLabel(labels.chargeLabels, traitOf(molecule, TRAIT.charge)),
       traitLabel(labels.sideChainLabels, traitOf(molecule, TRAIT.sideChain)),
       traitLabel(labels.ringSystemLabels, traitOf(molecule, TRAIT.ringSystem)),
+      traitLabel(labels.anomerLabels, rawTrait(molecule, "anomer")),
+      traitLabel(labels.ringFormLabels, rawTrait(molecule, "ringForm")),
     ]
       .filter(Boolean)
       .join(" · "),
@@ -434,6 +449,15 @@ const customBits: CategoryBits = {
     if (sideChain) rows.push(labelRow(labels.detail.sideChainLabel, sideChain))
     const ringSystem = traitLabel(labels.ringSystemLabels, traitOf(molecule, TRAIT.ringSystem))
     if (ringSystem) rows.push(labelRow(labels.detail.ringSystemLabel, ringSystem))
+    // Sugar traits ride the same row plumbing (labels + value maps in
+    // `cs.biomolekuly`); each row only appears when the molecule carries
+    // the trait, so teacher-made categories are unaffected.
+    const anomer = traitLabel(labels.anomerLabels, rawTrait(molecule, "anomer"))
+    if (anomer) rows.push(labelRow(labels.detail.anomerLabel, anomer))
+    const ringForm = traitLabel(labels.ringFormLabels, rawTrait(molecule, "ringForm"))
+    if (ringForm) rows.push(labelRow(labels.detail.ringFormLabel, ringForm))
+    const deoxy = traitLabel(labels.deoxyLabels, rawTrait(molecule, "deoxy"))
+    if (deoxy) rows.push(labelRow(labels.detail.deoxyLabel, deoxy))
     if (
       traitOf(molecule, TRAIT.essential) === "true" ||
       traitOf(molecule, TRAIT.sulfur) === "true"
@@ -504,6 +528,18 @@ function MoleculeBrowser({
     }
   }
 
+  // Raw projection strings parse once per dataset change; a card or the
+  // detail dialog then draws the molecule's Haworth projection whenever it
+  // carries one.
+  const projections = useMemo(() => {
+    const map = new Map<string, ProjectionSpec>()
+    for (const molecule of molecules) {
+      const spec = parseProjection(molecule.projection)
+      if (spec !== null) map.set(molecule.id, spec)
+    }
+    return map
+  }, [molecules])
+
   const facts = selected ? moleculeFacts(selected) : []
 
   return (
@@ -522,7 +558,12 @@ function MoleculeBrowser({
             )}
           >
             <div aria-hidden="true" className="flex items-center justify-center">
-              <StructureView smiles={molecule.smiles} size={140} title={molecule.name} />
+              <StructureView
+                smiles={molecule.smiles}
+                projection={projections.get(molecule.id)}
+                size={140}
+                title={molecule.name}
+              />
             </div>
             <div className="flex flex-col gap-1">
               <div className="text-sm font-semibold tracking-tight">{molecule.name}</div>
@@ -550,7 +591,12 @@ function MoleculeBrowser({
               </DialogHeader>
 
               <div className="flex justify-center">
-                <StructureView smiles={selected.smiles} size={260} title={selected.name} />
+                <StructureView
+                  smiles={selected.smiles}
+                  projection={projections.get(selected.id)}
+                  size={260}
+                  title={selected.name}
+                />
               </div>
 
               {/* Meta rows */}
@@ -672,6 +718,13 @@ function MoleculeFormDialog({
   const [facts, setFacts] = useState("")
   const [saving, setSaving] = useState(false)
 
+  // The saved record's projection, parsed once per molecule: when present it
+  // — not the SMILES field — is the structure the preview must show.
+  const savedProjection = useMemo(
+    () => parseProjection(molecule?.projection),
+    [molecule?.projection],
+  )
+
   useEffect(() => {
     if (!open) return
     setName(molecule?.name ?? "")
@@ -722,7 +775,9 @@ function MoleculeFormDialog({
     try {
       setSaving(true)
       if (molecule) {
-        await updateMolecule(molecule.id, name.trim(), smiles.trim(), traits)
+        // Forward the stored projection so an ordinary name/SMILES/traits
+        // edit can't silently wipe a molecule's Haworth depiction.
+        await updateMolecule(molecule.id, name.trim(), smiles.trim(), traits, molecule.projection)
       } else {
         await createMolecule(categoryId, name.trim(), smiles.trim(), traits)
       }
@@ -790,9 +845,18 @@ function MoleculeFormDialog({
               maxLength={300}
               className={cn("font-mono", !smilesValid && "border-destructive")}
             />
-            {/* Keep the preview mounted for ANY non-empty SMILES — only a
-                mounted StructureView can report validity again after a typo. */}
-            {smiles.trim() ? (
+            {/* A saved projection outranks the typed SMILES in the preview —
+                the spec itself is read-only here, so a hint says so. */}
+            {savedProjection ? (
+              <div className="flex justify-center rounded-[4px] border p-3">
+                <ProjectionView
+                  spec={savedProjection}
+                  ariaLabel={name.trim() || smiles.trim()}
+                />
+              </div>
+            ) : smiles.trim() ? (
+              // Keep the preview mounted for ANY non-empty SMILES — only a
+              // mounted StructureView can report validity again after a typo.
               <div className="flex justify-center rounded-[4px] border p-3">
                 <StructureView
                   smiles={smiles.trim()}
@@ -802,6 +866,22 @@ function MoleculeFormDialog({
                 />
               </div>
             ) : null}
+            {/* With a projection on screen the visible preview no longer
+                reports SMILES validity, so a hidden StructureView keeps the
+                save-guard (`canSave`) alive for the typed SMILES. */}
+            {savedProjection && smiles.trim() !== "" && (
+              <div className="hidden" aria-hidden="true">
+                <StructureView
+                  smiles={smiles.trim()}
+                  size={180}
+                  title={smiles.trim()}
+                  onValidityChange={setSmilesValid}
+                />
+              </div>
+            )}
+            {savedProjection && (
+              <p className="text-xs text-muted-foreground">{manage.projectionReadonlyHint}</p>
+            )}
             {smiles.trim() && !smilesValid && (
               <p className="text-sm text-destructive">{manage.smilesInvalid}</p>
             )}

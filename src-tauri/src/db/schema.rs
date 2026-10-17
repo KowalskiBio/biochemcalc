@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 49;
+const CURRENT_USER_VERSION: u32 = 50;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -251,6 +251,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 49 {
         apply_migration_v49(conn)?;
         conn.pragma_update(None, "user_version", "49")?;
+    }
+
+    if user_version < 50 {
+        apply_migration_v50(conn)?;
+        conn.pragma_update(None, "user_version", "50")?;
     }
 
     Ok(())
@@ -1504,8 +1509,8 @@ fn apply_migration_v46(conn: &Connection) -> Result<(), rusqlite::Error> {
 /// SMILES are mandatory per molecule, the per-category slug keeps quiz URLs
 /// and leaderboard rows stable. `biomolecule_traits` carries the optional,
 /// code-validated characteristics (abbreviation, charge, polarity, letter
-/// codes, side-chain class, …) as key/value pairs. The two curated
-/// categories (amino acids, nitrogen bases) are seeded here with
+/// codes, side-chain class, …) as key/value pairs. The curated categories
+/// (amino acids, nitrogen bases, saccharides) are seeded here with
 /// `built_in = 1` and remain fully editable; any name/description a teacher
 /// overrode through v44's `biomolecule_category_overrides` is folded into
 /// the new rows before that table is dropped.
@@ -1531,6 +1536,9 @@ fn apply_migration_v47(conn: &Connection) -> Result<(), rusqlite::Error> {
             slug TEXT NOT NULL,
             name TEXT NOT NULL,
             smiles TEXT NOT NULL,
+            -- Optional raw JSON Haworth projection spec (v50; also created
+            -- here so a fresh database seeds its saccharides in one pass).
+            projection TEXT,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
@@ -1618,6 +1626,28 @@ fn apply_migration_v49(conn: &Connection) -> Result<(), rusqlite::Error> {
         ON biomolecule_streak_runs(kind, user_id);
         ",
     )?;
+    Ok(())
+}
+
+/// Optional Haworth projection spec (raw JSON) for molecules whose structure
+/// is easier to draw from a small declarative payload than from SMILES.
+/// Validated lightly at write time in `commands::biomolecules`; NULL means the
+/// molecule uses the SMILES depiction only.
+fn apply_migration_v50(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // Fresh databases already get the column from v47's CREATE TABLE (so the
+    // seed can fill it); older ones need the additive ALTER here.
+    let has_projection: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('biomolecules') WHERE name = 'projection')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_projection {
+        conn.execute_batch(
+            "
+            ALTER TABLE biomolecules ADD COLUMN projection TEXT NULL;
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -2793,6 +2823,60 @@ mod tests {
     }
 
     #[test]
+    fn v50_adds_a_nullable_projection_column_to_a_pre_v50_library() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // A database that already ran the original v47: no projection column.
+        conn.execute_batch(
+            "
+            CREATE TABLE biomolecules (
+                id BLOB PRIMARY KEY NOT NULL,
+                category_slug TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                name TEXT NOT NULL,
+                smiles TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                created_by BLOB,
+                updated_at TEXT NOT NULL,
+                updated_by BLOB,
+                UNIQUE (category_slug, slug)
+            );
+            INSERT INTO biomolecules
+                (id, category_slug, slug, name, smiles, created_at, updated_at)
+            VALUES
+                (randomblob(16), 'sacharidy', 'glukoza-a', 'α-D-glukóza',
+                 'OCC1OC(O)C(O)C(O)C1O', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .expect("pre-v50 library");
+        conn.pragma_update(None, "user_version", "49")
+            .expect("set version");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (notnull, dflt): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT \"notnull\", dflt_value FROM pragma_table_info('biomolecules')
+                 WHERE name = 'projection'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("projection must exist after v50");
+        assert_eq!(notnull, 0, "projection must be nullable");
+        assert_eq!(dflt, None, "projection must default to NULL");
+
+        let projection: Option<String> = conn
+            .query_row(
+                "SELECT projection FROM biomolecules WHERE slug = 'glukoza-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("old row readable after v50");
+        assert_eq!(projection, None, "existing molecules keep no projection");
+    }
+
+    #[test]
     fn v47_seeds_the_builtin_biomolecule_library() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
@@ -2803,12 +2887,12 @@ mod tests {
                 row.get(0)
             })
             .expect("count categories");
-        assert_eq!(categories, 2);
+        assert_eq!(categories, 3);
 
         let molecules: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
             .expect("count molecules");
-        assert_eq!(molecules, 25);
+        assert_eq!(molecules, 34);
 
         let traits: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecule_traits", [], |row| row.get(0))
@@ -2833,6 +2917,6 @@ mod tests {
         let molecules_after: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
             .expect("count again");
-        assert_eq!(molecules_after, 25);
+        assert_eq!(molecules_after, 34);
     }
 }

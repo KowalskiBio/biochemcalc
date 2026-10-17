@@ -39,6 +39,7 @@ interface BiomoleculeDataState {
     name: string,
     smiles: string,
     traits: BiomoleculeTraits,
+    projection?: string | null,
   ) => Promise<void>
   deleteMolecule: (moleculeId: string) => Promise<void>
 }
@@ -81,8 +82,8 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
     set({ categories: data.categories, molecules: data.molecules })
   },
 
-  updateMolecule: async (moleculeId, name, smiles, traits) => {
-    const data = await biomoleculesApi.updateMolecule(moleculeId, name, smiles, traits)
+  updateMolecule: async (moleculeId, name, smiles, traits, projection) => {
+    const data = await biomoleculesApi.updateMolecule(moleculeId, name, smiles, traits, projection)
     set({ categories: data.categories, molecules: data.molecules })
   },
 

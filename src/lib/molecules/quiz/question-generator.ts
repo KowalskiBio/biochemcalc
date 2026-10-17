@@ -1,3 +1,4 @@
+import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 import { createSeededRandom, pick, randomInt, shuffle } from "@/lib/molecules/quiz/random"
 
 export type QuizQuestionType =
@@ -45,6 +46,11 @@ export interface QuizMolecule {
   classKey?: string
   /** Enantiomer decoys are only allowed when this is false/undefined. */
   achiral?: boolean
+  /**
+   * Declarative teaching projection (e.g. Haworth for cyclic saccharides).
+   * When present it takes rendering precedence over `smiles` everywhere.
+   */
+  projection?: ProjectionSpec
 }
 
 /** A named predicate plus its molecule test, supplied by the category adapter. */
@@ -65,6 +71,8 @@ export interface QuizOption {
   orientationDeg?: number
   /** Present only when `display === "structure"`; true only on enantiomer decoys. */
   mirror?: boolean
+  /** Present when the option's molecule carries a teaching projection. */
+  projection?: ProjectionSpec
 }
 
 export interface QuizPrompt {
@@ -77,6 +85,8 @@ export interface QuizPrompt {
   orientationDeg?: number
   /** Present only when `kind === "characteristic"`; the page localizes it. */
   predicate?: CharacteristicPredicate
+  /** Present when the prompt's molecule carries a teaching projection. */
+  projection?: ProjectionSpec
 }
 
 /**
@@ -266,8 +276,9 @@ function makeOption(
       moleculeId: molecule.id,
       correct,
       smiles: molecule.smiles,
-      orientationDeg: randomInt(rng, 0, 360),
+      orientationDeg: orientationForStructure(molecule, rng),
       mirror: false,
+      projection: molecule.projection,
     }
   }
   return { key: molecule.id, display, moleculeId: molecule.id, correct }
@@ -280,9 +291,22 @@ function makeMirrorDecoy(target: QuizMolecule, rng: () => number): QuizOption {
     moleculeId: target.id,
     correct: false,
     smiles: target.smiles,
-    orientationDeg: randomInt(rng, 0, 360),
+    orientationDeg: orientationForStructure(target, rng),
     mirror: true,
+    projection: target.projection,
   }
+}
+
+/**
+ * Projection depictions stay in their canonical orientation (Haworth keeps
+ * the reading convention, so no rotation at all); SMILES molecules keep the
+ * fully random orientation.
+ */
+function orientationForStructure(molecule: QuizMolecule, rng: () => number): number {
+  if (molecule.projection !== undefined) {
+    return 0
+  }
+  return randomInt(rng, 0, 360)
 }
 
 /**
@@ -320,7 +344,8 @@ function buildPrompt(target: QuizMolecule, type: QuizQuestionType, rng: () => nu
         kind: "structure",
         text: "",
         smiles: target.smiles,
-        orientationDeg: randomInt(rng, 0, 360),
+        orientationDeg: orientationForStructure(target, rng),
+        projection: target.projection,
       }
     case "characteristic":
       // Built by buildCharacteristicQuestion, which knows the predicate.
@@ -346,10 +371,13 @@ function buildOptions(
   // Enantiomer decoy: same molecule id as the target, but drawn mirrored, so
   // its depiction is the opposite enantiomer. Only for structure options of a
   // chiral target (an achiral molecule would look identical when mirrored).
+  // Projection-bearing molecules (saccharides) stay excluded: their depiction
+  // is canonical and their stereochemistry lives in the declared sides.
   if (
     mirrorDecoys &&
     STRUCTURE_OPTION_TYPES.has(type) &&
     !target.achiral &&
+    target.projection === undefined &&
     rng() < MIRROR_DECOY_PROBABILITY
   ) {
     const replaceIndex = randomInt(rng, 1, options.length)

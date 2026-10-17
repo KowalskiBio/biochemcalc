@@ -473,6 +473,17 @@ export const cs = {
       hydrophobic: "Hydrofobní",
       hydrophilic: "Hydrofilní",
     },
+    anomerLabels: {
+      alpha: "α",
+      beta: "β",
+    },
+    ringFormLabels: {
+      pyranose: "pyranóza",
+      furanose: "furanóza",
+    },
+    deoxyLabels: {
+      true: "ano",
+    },
     backToCategories: "Zpět na kategorie",
     categoryCount: "{count} molekul",
     categories: {
@@ -523,6 +534,11 @@ export const cs = {
         "charge:positive": "Která z těchto molekul je při pH 7 kladně nabitá?",
         "charge:neutral": "Která z těchto molekul je při pH 7 bez náboje?",
         "charge:negative": "Která z těchto molekul je při pH 7 záporně nabitá?",
+        "anomer:alpha": "Která z těchto molekul je α-anomer?",
+        "anomer:beta": "Která z těchto molekul je β-anomer?",
+        "ringForm:pyranose": "Která z těchto molekul je pyranóza?",
+        "ringForm:furanose": "Která z těchto molekul je furanóza?",
+        "deoxy:true": "Která z těchto molekul je deoxysacharid?",
       } as Record<string, string>,
       noTypesHint: "Vyberte alespoň jeden typ otázky.",
       noHardTypesHint: "Tato kategorie nemá žádné typy otázek pro těžkou obtížnost.",
@@ -562,6 +578,9 @@ export const cs = {
       abbreviationLabel: "Zkratka",
       polarityLabel: "Polarita",
       ringSystemLabel: "Kruhový systém",
+      anomerLabel: "Anomer",
+      ringFormLabel: "Cyklus",
+      deoxyLabel: "Deoxy",
       pairingLabel: "Páruje s",
       occurrenceLabel: "Výskyt",
       factsLabel: "Zajímavosti",
@@ -588,6 +607,8 @@ export const cs = {
       smilesLabel: "Struktura (SMILES)",
       smilesPlaceholder: "např. C[C@@H](C(=O)O)N",
       smilesInvalid: "SMILES se nepodařilo vykreslit — zkontrolujte zápis.",
+      projectionReadonlyHint:
+        "Náhled vykresluje uloženou Haworthovu projekci (zatím pouze ke čtení) — SMILES zůstává záložním zápisem struktury.",
       abbreviationLabel: "Zkratka",
       abbreviationPlaceholder: "např. Ala",
       oneLetterLabel: "Jednopísmenný kód",

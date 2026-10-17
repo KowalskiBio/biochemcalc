@@ -109,9 +109,11 @@ function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: bool
     return (
       // Mistr draws structures colorlessly — atom color coding would give
       // away part of what the open answer is supposed to test. The arbitrary
-      // variant grays only the svg, never the error fallback.
+      // variant grays only the svg, never the error fallback; a projection,
+      // when the molecule carries one, is a plain svg and grays the same.
       <StructureView
         smiles={prompt.smiles}
+        projection={prompt.projection}
         orientationDeg={prompt.orientationDeg}
         size={220}
         title={quizStrings.promptStructureLabel}
@@ -180,6 +182,7 @@ function OptionButton({
         <div aria-hidden="true">
           <StructureView
             smiles={option.smiles ?? ""}
+            projection={option.projection}
             orientationDeg={option.orientationDeg}
             mirror={option.mirror}
             size={150}

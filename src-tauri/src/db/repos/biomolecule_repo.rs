@@ -23,7 +23,7 @@ impl CategoryField {
 }
 
 /// One Biomolekuly category with its molecule count, in hub order.
-/// `built_in` marks the two seeded curated categories — they are editable
+/// `built_in` marks the seeded curated categories — they are editable
 /// like any other, the flag only distinguishes them on the hub.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +47,9 @@ pub struct BiomoleculeInfo {
     pub name: String,
     pub smiles: String,
     pub position: i64,
+    /// Raw JSON Haworth projection spec, when the molecule has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projection: Option<String>,
     pub traits: HashMap<String, String>,
 }
 
@@ -86,7 +89,7 @@ impl BiomoleculeRepo {
     /// Every molecule with its traits, ordered per category.
     pub fn list_molecules(conn: &Connection) -> Result<Vec<BiomoleculeInfo>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, category_slug, slug, name, smiles, position
+            "SELECT id, category_slug, slug, name, smiles, position, projection
              FROM biomolecules ORDER BY category_slug, position, slug",
         )?;
         let molecules = stmt
@@ -98,6 +101,7 @@ impl BiomoleculeRepo {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -123,13 +127,14 @@ impl BiomoleculeRepo {
         Ok(molecules
             .into_iter()
             .map(
-                |(id, category_slug, slug, name, smiles, position)| BiomoleculeInfo {
+                |(id, category_slug, slug, name, smiles, position, projection)| BiomoleculeInfo {
                     id,
                     category_slug,
                     slug,
                     name,
                     smiles,
                     position,
+                    projection,
                     traits: traits_by_molecule.remove(&id).unwrap_or_default().into_iter()
                         .collect(),
                 },
@@ -299,6 +304,7 @@ impl BiomoleculeRepo {
         slug: &str,
         name: &str,
         smiles: &str,
+        projection: Option<&str>,
         position: i64,
         traits: &[(String, String)],
         created_by: &Uuid,
@@ -308,9 +314,9 @@ impl BiomoleculeRepo {
         let now = Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO biomolecules
-                 (id, category_slug, slug, name, smiles, position, created_at, created_by, updated_at, updated_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?7, ?8)",
-            params![id, category_slug, slug, name, smiles, position, now, created_by],
+                 (id, category_slug, slug, name, smiles, projection, position, created_at, created_by, updated_at, updated_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?8, ?9)",
+            params![id, category_slug, slug, name, smiles, projection, position, now, created_by],
         )?;
         for (trait_key, value) in traits {
             tx.execute(
@@ -331,15 +337,16 @@ impl BiomoleculeRepo {
         id: &Uuid,
         name: &str,
         smiles: &str,
+        projection: Option<&str>,
         traits: &[(String, String)],
         updated_by: &Uuid,
     ) -> Result<(), DbError> {
         let tx = conn.unchecked_transaction()?;
         let changed = tx.execute(
             "UPDATE biomolecules
-             SET name = ?2, smiles = ?3, updated_at = ?4, updated_by = ?5
+             SET name = ?2, smiles = ?3, projection = ?4, updated_at = ?5, updated_by = ?6
              WHERE id = ?1",
-            params![id, name, smiles, Utc::now().to_rfc3339(), updated_by],
+            params![id, name, smiles, projection, Utc::now().to_rfc3339(), updated_by],
         )?;
         if changed == 0 {
             return Err(DbError::NotFound(format!("Molecule {id} not found")));

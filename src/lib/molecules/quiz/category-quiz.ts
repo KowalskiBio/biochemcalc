@@ -16,11 +16,13 @@ import {
   hasTraitFlag,
   isAchiral,
   NITROGEN_BASES_SLUG,
+  SACCHARIDES_SLUG,
   TRAIT,
   type TraitKey,
   traitOf,
 } from "@/lib/molecules"
 import type { CharacteristicDef, QuizMolecule } from "@/lib/molecules/quiz/question-generator"
+import { parseProjection } from "@/lib/molecules/render/projection"
 
 export interface CategoryQuizConfig {
   molecules: QuizMolecule[]
@@ -38,6 +40,9 @@ function baseQuizMolecule(
   classKey?: string,
   aliases?: string[],
 ): QuizMolecule {
+  // A declarative projection carries stereochemistry by definition, so the
+  // molecule is chiral even when its (skeletal fallback) SMILES has no `@`.
+  const projection = parseProjection(molecule.projection)
   return {
     id: molecule.slug,
     name: molecule.name,
@@ -45,7 +50,8 @@ function baseQuizMolecule(
     oneLetter: letter,
     aliases,
     classKey,
-    achiral: isAchiral(molecule),
+    achiral: projection !== null ? false : isAchiral(molecule),
+    projection: projection ?? undefined,
   }
 }
 
@@ -104,6 +110,50 @@ function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
     molecules: molecules.map((molecule) =>
       baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringSystem)),
     ),
+  }
+}
+
+/**
+ * Saccharides (Haworth projections): name↔structure plus trait predicates
+ * (anomer, ring form, deoxy); the ring form groups same-class distractors.
+ * Predicates that can't fill three distractors are dropped, exactly like the
+ * generic adapter does.
+ */
+function saccharidesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
+  const quizMolecules = molecules.map((molecule) =>
+    baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringForm)),
+  )
+  const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
+  const traitIs =
+    (key: TraitKey, value: string) =>
+    (quiz: QuizMolecule): boolean => {
+      const molecule = byId.get(quiz.id)
+      return molecule !== undefined && traitOf(molecule, key) === value
+    }
+
+  const candidates: CharacteristicDef[] = [
+    { predicate: traitPredicate(TRAIT.anomer, "alpha"), matches: traitIs(TRAIT.anomer, "alpha") },
+    { predicate: traitPredicate(TRAIT.anomer, "beta"), matches: traitIs(TRAIT.anomer, "beta") },
+    {
+      predicate: traitPredicate(TRAIT.ringForm, "pyranose"),
+      matches: traitIs(TRAIT.ringForm, "pyranose"),
+    },
+    {
+      predicate: traitPredicate(TRAIT.ringForm, "furanose"),
+      matches: traitIs(TRAIT.ringForm, "furanose"),
+    },
+    {
+      predicate: traitPredicate(TRAIT.deoxy, "true"),
+      matches: (quiz) => {
+        const source = byId.get(quiz.id)
+        return source !== undefined && hasTraitFlag(source, TRAIT.deoxy)
+      },
+    },
+  ]
+
+  return {
+    molecules: quizMolecules,
+    characteristics: candidates.filter((def) => qualifies(quizMolecules, def.matches)),
   }
 }
 
@@ -189,6 +239,9 @@ export function getCategoryQuizConfig(
   }
   if (categoryId === NITROGEN_BASES_SLUG) {
     return nitrogenBasesQuizConfig(molecules)
+  }
+  if (categoryId === SACCHARIDES_SLUG) {
+    return saccharidesQuizConfig(molecules)
   }
   return genericQuizConfig(molecules)
 }

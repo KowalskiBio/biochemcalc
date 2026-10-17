@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from "react"
 import SmilesDrawer from "smiles-drawer"
 
+import { ProjectionView } from "@/components/ui/projection-view"
 import { type Point, transformPoints } from "@/lib/molecules/orientation"
+import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/stores/ui-store"
 
 export interface StructureViewProps {
   smiles: string
+  /**
+   * Parsed projection (Haworth, …). When set, the projection is drawn
+   * INSTEAD of the SMILES pipeline below: `smiles` only survives as the
+   * accessible-name fallback, and `size`/`theme` don't apply (a projection
+   * draws at its natural size and follows `currentColor`). Raw projection
+   * strings are parsed upstream with `parseProjection`.
+   */
+  projection?: ProjectionSpec
   /** Square canvas side length in px. */
   size?: number
   /**
@@ -71,13 +81,54 @@ function applyOrientation(
 }
 
 /**
- * Renders a 2D skeletal depiction of a SMILES string with `smiles-drawer`.
+ * The projection branch of StructureView. Validity is a settled question —
+ * a `ProjectionSpec` only exists once `parseProjection` accepted the raw
+ * string — so it reports `true` once per spec change, mirroring the SMILES
+ * path's `onValidityChange` contract.
+ */
+function ProjectionStructureView({
+  projection,
+  orientationDeg,
+  mirror,
+  className,
+  title,
+  smiles,
+  onValidityChange,
+}: StructureViewProps & { projection: ProjectionSpec }) {
+  useEffect(() => {
+    onValidityChange?.(true)
+    // Same reasoning as the SMILES effect: only the real input re-fires.
+  }, [projection])
+
+  return (
+    <ProjectionView
+      spec={projection}
+      orientationDeg={orientationDeg}
+      mirror={mirror}
+      className={className}
+      ariaLabel={title ?? smiles}
+    />
+  )
+}
+
+/**
+ * Renders a 2D skeletal depiction of a molecule: its Haworth-style
+ * `projection` when one is given, otherwise the SMILES with `smiles-drawer`.
  *
  * The wrapper has a transparent background, so the caller decides the surface
  * the depiction sits on; the drawing theme (light/dark) is chosen to stay
  * legible against it.
  */
-export function StructureView({
+export function StructureView(props: StructureViewProps) {
+  // No hooks here: the two branches are distinct components, so a
+  // projection↔SMILES flip reconciles as a plain remount.
+  if (props.projection) {
+    return <ProjectionStructureView {...props} projection={props.projection} />
+  }
+  return <SmilesStructureView {...props} />
+}
+
+function SmilesStructureView({
   smiles,
   size = 160,
   orientationDeg = 0,

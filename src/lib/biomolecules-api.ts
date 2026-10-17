@@ -24,6 +24,8 @@ export interface Biomolecule {
   slug: string
   name: string
   smiles: string
+  /** Raw JSON Haworth projection spec, when the molecule has one. */
+  projection?: string | null
   position: number
   traits: BiomoleculeTraits
 }
@@ -91,25 +93,29 @@ export const biomoleculesApi = {
     name: string,
     smiles: string,
     traits: BiomoleculeTraits,
+    projection?: string | null,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/create-molecule", {
       categoryId,
       name,
       smiles,
+      projection: projection ?? null,
       traits,
     }),
 
-  /** Teacher: update a molecule's name, SMILES, and trait set (wholesale). */
+  /** Teacher: update a molecule's name, SMILES, trait set (wholesale), and projection. */
   updateMolecule: (
     moleculeId: string,
     name: string,
     smiles: string,
     traits: BiomoleculeTraits,
+    projection?: string | null,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/update-molecule", {
       moleculeId,
       name,
       smiles,
+      projection: projection ?? null,
       traits,
     }),
 

@@ -59,6 +59,9 @@ pub mod traits {
     pub const ESSENTIAL: &str = "essential";
     pub const SULFUR: &str = "sulfur";
     pub const RING_SYSTEM: &str = "ringSystem";
+    pub const ANOMER: &str = "anomer";
+    pub const RING_FORM: &str = "ringForm";
+    pub const DEOXY: &str = "deoxy";
     pub const PAIRS_WITH: &str = "pairsWith";
     pub const IN_DNA: &str = "inDna";
     pub const IN_RNA: &str = "inRna";
@@ -72,7 +75,9 @@ pub mod traits {
     const POLARITY_VALUES: &[&str] = &["hydrophobic", "hydrophilic"];
     const SIDE_CHAIN_VALUES: &[&str] = &["nonpolar", "polar", "aromatic", "acidic", "basic"];
     const RING_SYSTEM_VALUES: &[&str] = &["purine", "pyrimidine"];
-    const FLAG_VALUES: &[&str] = &[ESSENTIAL, SULFUR, IN_DNA, IN_RNA];
+    const ANOMER_VALUES: &[&str] = &["alpha", "beta"];
+    const RING_FORM_VALUES: &[&str] = &["pyranose", "furanose"];
+    const FLAG_VALUES: &[&str] = &[ESSENTIAL, SULFUR, DEOXY, IN_DNA, IN_RNA];
 
     pub fn is_unique_per_category(key: &str) -> bool {
         UNIQUE_PER_CATEGORY.contains(&key)
@@ -110,6 +115,8 @@ pub mod traits {
             k if k == POLARITY => validate_enum(key, trimmed, POLARITY_VALUES),
             k if k == SIDE_CHAIN => validate_enum(key, trimmed, SIDE_CHAIN_VALUES),
             k if k == RING_SYSTEM => validate_enum(key, trimmed, RING_SYSTEM_VALUES),
+            k if k == ANOMER => validate_enum(key, trimmed, ANOMER_VALUES),
+            k if k == RING_FORM => validate_enum(key, trimmed, RING_FORM_VALUES),
             k if FLAG_VALUES.contains(&k) => {
                 if trimmed != "true" {
                     return Err(DbError::Validation(format!(
@@ -302,6 +309,39 @@ fn validate_smiles(smiles: &str) -> Result<&str, DbError> {
     Ok(trimmed)
 }
 
+/// The optional Haworth projection is a raw JSON spec stored as text; the
+/// frontend owns the full drawing vocabulary, so the server only checks that
+/// it is a JSON object of the expected shape. `None` (or blank) clears it.
+fn validate_projection(projection: Option<&str>) -> Result<Option<String>, DbError> {
+    let Some(raw) = projection.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return Ok(None);
+    };
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|_| DbError::Validation("Projection must be valid JSON".into()))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| DbError::Validation("Projection must be a JSON object".into()))?;
+    if object.get("type").and_then(|v| v.as_str()) != Some("haworth") {
+        return Err(DbError::Validation(
+            "Projection type must be \"haworth\"".into(),
+        ));
+    }
+    if !matches!(
+        object.get("ringSize").and_then(|v| v.as_i64()),
+        Some(5 | 6)
+    ) {
+        return Err(DbError::Validation(
+            "Projection ringSize must be 5 or 6".into(),
+        ));
+    }
+    if !object.get("substituents").is_some_and(|v| v.is_array()) {
+        return Err(DbError::Validation(
+            "Projection substituents must be an array".into(),
+        ));
+    }
+    Ok(Some(raw.to_string()))
+}
+
 pub fn do_list_data(conn: &Connection) -> Result<BiomoleculeData, DbError> {
     BiomoleculeRepo::list_data(conn)
 }
@@ -387,6 +427,9 @@ pub struct CreateMoleculePayload {
     pub category_id: String,
     pub name: String,
     pub smiles: String,
+    /// Optional raw JSON Haworth spec (see `validate_projection`).
+    #[serde(default)]
+    pub projection: Option<String>,
     #[serde(default)]
     pub traits: HashMap<String, String>,
 }
@@ -396,14 +439,16 @@ fn validate_molecule_input(
     category_id: &str,
     name: &str,
     smiles: &str,
+    projection: Option<&str>,
     raw_traits: &HashMap<String, String>,
     exclude_id: Option<Uuid>,
-) -> Result<(String, String, Vec<(String, String)>), DbError> {
+) -> Result<(String, String, Option<String>, Vec<(String, String)>), DbError> {
     if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
         return Err(DbError::NotFound(format!("Category {category_id} not found")));
     }
     let name = validate_molecule_name(name)?;
     let smiles = validate_smiles(smiles)?;
+    let projection = validate_projection(projection)?;
     let traits = traits::normalize(raw_traits)?;
     if BiomoleculeRepo::molecule_name_taken(conn, category_id, name, exclude_id)? {
         return Err(DbError::Validation(format!(
@@ -419,7 +464,7 @@ fn validate_molecule_input(
             )));
         }
     }
-    Ok((name.to_string(), smiles.to_string(), traits))
+    Ok((name.to_string(), smiles.to_string(), projection, traits))
 }
 
 pub fn do_create_molecule(
@@ -428,11 +473,12 @@ pub fn do_create_molecule(
     payload: CreateMoleculePayload,
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim().to_string();
-    let (name, smiles, traits) = validate_molecule_input(
+    let (name, smiles, projection, traits) = validate_molecule_input(
         conn,
         &category_id,
         &payload.name,
         &payload.smiles,
+        payload.projection.as_deref(),
         &payload.traits,
         None,
     )?;
@@ -446,6 +492,7 @@ pub fn do_create_molecule(
         &slug,
         &name,
         &smiles,
+        projection.as_deref(),
         position,
         &traits,
         teacher_id,
@@ -459,6 +506,9 @@ pub struct UpdateMoleculePayload {
     pub molecule_id: Uuid,
     pub name: String,
     pub smiles: String,
+    /// Optional raw JSON Haworth spec; `None` clears it.
+    #[serde(default)]
+    pub projection: Option<String>,
     #[serde(default)]
     pub traits: HashMap<String, String>,
 }
@@ -470,11 +520,12 @@ pub fn do_update_molecule(
 ) -> Result<BiomoleculeData, DbError> {
     let category_slug = BiomoleculeRepo::molecule_category(conn, &payload.molecule_id)?
         .ok_or_else(|| DbError::NotFound(format!("Molecule {} not found", payload.molecule_id)))?;
-    let (name, smiles, traits) = validate_molecule_input(
+    let (name, smiles, projection, traits) = validate_molecule_input(
         conn,
         &category_slug,
         &payload.name,
         &payload.smiles,
+        payload.projection.as_deref(),
         &payload.traits,
         Some(payload.molecule_id),
     )?;
@@ -483,6 +534,7 @@ pub fn do_update_molecule(
         &payload.molecule_id,
         &name,
         &smiles,
+        projection.as_deref(),
         &traits,
         teacher_id,
     )?;
@@ -718,6 +770,7 @@ mod tests {
             category_id: category.into(),
             name: name.into(),
             smiles: smiles.into(),
+            projection: None,
             traits: HashMap::new(),
         }
     }
@@ -726,12 +779,15 @@ mod tests {
     fn seeded_categories_are_listed() {
         let conn = setup_conn();
         let data = do_list_data(&conn).expect("list");
-        assert_eq!(data.categories.len(), 2);
+        assert_eq!(data.categories.len(), 3);
         assert_eq!(data.categories[0].slug, "aminokyseliny");
         assert!(data.categories[0].built_in);
         assert_eq!(data.categories[0].molecule_count, 20);
         assert_eq!(data.categories[1].slug, "dusikate-baze");
         assert_eq!(data.categories[1].molecule_count, 5);
+        assert_eq!(data.categories[2].slug, "sacharidy");
+        assert!(data.categories[2].built_in);
+        assert_eq!(data.categories[2].molecule_count, 9);
         let ala = data
             .molecules
             .iter()
@@ -739,6 +795,130 @@ mod tests {
             .expect("alanine seeded");
         assert_eq!(ala.traits.get("oneLetter").map(String::as_str), Some("A"));
         assert_eq!(ala.traits.get("sideChain").map(String::as_str), Some("nonpolar"));
+    }
+
+    #[test]
+    fn seeded_saccharides_carry_parseable_haworth_projections() {
+        let conn = setup_conn();
+        let data = do_list_data(&conn).expect("list");
+        let saccharides: Vec<_> = data
+            .molecules
+            .iter()
+            .filter(|m| m.category_slug == "sacharidy")
+            .collect();
+        assert_eq!(saccharides.len(), 9);
+
+        // The seven free sugars carry an explicit Haworth spec; the two
+        // nucleotides rely on the client-side ring recognizer instead and
+        // therefore carry only their full isomeric SMILES.
+        let with_projection: Vec<_> = saccharides
+            .iter()
+            .filter(|m| m.projection.is_some())
+            .collect();
+        assert_eq!(with_projection.len(), 7);
+
+        for molecule in &with_projection {
+            let raw = molecule.projection.as_deref().expect("projection present");
+            let projection: serde_json::Value =
+                serde_json::from_str(raw).unwrap_or_else(|e| panic!("{}: {e}", molecule.slug));
+            assert_eq!(projection["type"], "haworth", "{}", molecule.slug);
+            let ring_size = projection["ringSize"]
+                .as_i64()
+                .unwrap_or_else(|| panic!("{} has an integer ringSize", molecule.slug));
+            assert!(
+                matches!(ring_size, 5 | 6),
+                "{} ringSize must be 5 or 6",
+                molecule.slug
+            );
+            assert!(
+                projection["substituents"].is_array(),
+                "{} substituents must be an array",
+                molecule.slug
+            );
+        }
+
+        // The nucleotides keep full structures — the recognizer needs the
+        // isomeric tags to lay the ribose out as Haworth.
+        for slug in ["adenosin", "amp"] {
+            let molecule = saccharides
+                .iter()
+                .find(|m| m.slug == slug)
+                .unwrap_or_else(|| panic!("{slug} seeded"));
+            assert!(
+                molecule.smiles.contains('@'),
+                "{slug} must carry an isomeric SMILES"
+            );
+        }
+
+        let deoxy = saccharides
+            .iter()
+            .find(|m| m.slug == "deoxyriboza-b")
+            .expect("deoxyribose seeded");
+        assert_eq!(deoxy.traits.get("ringForm").map(String::as_str), Some("furanose"));
+        assert_eq!(deoxy.traits.get("anomer").map(String::as_str), Some("beta"));
+        assert_eq!(deoxy.traits.get("deoxy").map(String::as_str), Some("true"));
+    }
+
+    #[test]
+    fn saccharide_traits_validate() {
+        let normalize = |key: &str, value: &str| {
+            let mut traits = HashMap::new();
+            traits.insert(key.to_string(), value.to_string());
+            traits::normalize(&traits)
+        };
+        for (key, value) in [
+            ("anomer", "alpha"),
+            ("anomer", "beta"),
+            ("ringForm", "pyranose"),
+            ("ringForm", "furanose"),
+            ("deoxy", "true"),
+        ] {
+            normalize(key, value).unwrap_or_else(|e| panic!("{key}={value}: {e:?}"));
+        }
+        for (key, value) in [
+            ("anomer", "gamma"),
+            ("ringForm", "hexose"),
+            ("deoxy", "false"),
+            ("deoxy", "1"),
+        ] {
+            assert!(
+                matches!(normalize(key, value), Err(DbError::Validation(_))),
+                "{key}={value} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn molecule_projection_must_be_a_valid_haworth_spec() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let create = |name: &str, projection: &str| {
+            let mut payload = molecule_payload("sacharidy", name, "CCO");
+            payload.projection = Some(projection.into());
+            do_create_molecule(&conn, &teacher, payload)
+        };
+
+        for bad in [
+            "not json",
+            "{}",
+            r#"{"type":"chair","ringSize":6,"substituents":[]}"#,
+            r#"{"type":"haworth","ringSize":7,"substituents":[]}"#,
+            r#"{"type":"haworth","ringSize":6,"substituents":{}}"#,
+        ] {
+            assert!(
+                matches!(create("Testin", bad), Err(DbError::Validation(_))),
+                "garbage projection must be rejected: {bad}"
+            );
+        }
+
+        let good = r#"{"type":"haworth","ringSize":6,"anomericCarbon":1,"substituents":[],"showHydrogens":false}"#;
+        let data = create("Testin", good).expect("valid projection");
+        let created = data
+            .molecules
+            .iter()
+            .find(|m| m.name == "Testin")
+            .expect("created");
+        assert_eq!(created.projection.as_deref(), Some(good));
     }
 
     #[test]
@@ -918,6 +1098,7 @@ mod tests {
                 category_id: "aminokyseliny".into(),
                 name: "Watsonin".into(),
                 smiles: "C[C@@H](C(=O)O)N".into(),
+                projection: None,
                 traits,
             },
         )
@@ -952,6 +1133,7 @@ mod tests {
                     category_id: "aminokyseliny".into(),
                     name: "Testin".into(),
                     smiles: "CCO".into(),
+                    projection: None,
                     traits: letter,
                 },
             ),
@@ -968,6 +1150,7 @@ mod tests {
                 molecule_id: created.id,
                 name: "Watsonin II".into(),
                 smiles: "CCO".into(),
+                projection: None,
                 traits: new_traits,
             },
         )
@@ -1002,6 +1185,7 @@ mod tests {
                     category_id: "aminokyseliny".into(),
                     name: "Testin".into(),
                     smiles: "CCO".into(),
+                    projection: None,
                     traits,
                 },
             )

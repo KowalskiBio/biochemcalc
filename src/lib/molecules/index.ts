@@ -12,6 +12,8 @@ import type { Biomolecule, BiomoleculeTraits } from "@/lib/biomolecules-api"
 export const AMINO_ACIDS_SLUG = "aminokyseliny"
 /** Route slug of the seeded nitrogenous-bases category. */
 export const NITROGEN_BASES_SLUG = "dusikate-baze"
+/** Route slug of the seeded saccharides category (Haworth projections). */
+export const SACCHARIDES_SLUG = "sacharidy"
 
 /** The trait keys validated server-side (mirrors `commands::biomolecules::traits`). */
 export const TRAIT = {
@@ -36,6 +38,12 @@ export const TRAIT = {
   pairsWith: "pairsWith",
   /** Czech teaching facts, one per line. */
   facts: "facts",
+  /** Saccharides: alpha | beta — cross-checked against the Haworth spec. */
+  anomer: "anomer",
+  /** Saccharide ring form: pyranose | furanose. */
+  ringForm: "ringForm",
+  /** Flag: the sugar is a deoxy sugar (value "true" when present). */
+  deoxy: "deoxy",
 } as const
 
 export type TraitKey = (typeof TRAIT)[keyof typeof TRAIT]
@@ -60,10 +68,15 @@ export function moleculeFacts(molecule: Biomolecule): string[] {
 }
 
 /**
- * Mirror decoys flip the depiction's stereochemistry, so they are only
- * honest for molecules with no stereocenters. SMILES marks chirality with
- * `@`/`@@`, so its absence is the achirality signal — for the curated sets
- * this matches the old hand-maintained flags exactly (only glycine).
+ * Mirror decoys flip the depiction's stereochemistry; mirroring a CHIRAL
+ * molecule yields its mirror image — the enantiomer, a genuinely different
+ * molecule and therefore a fair decoy. Mirroring an ACHIRAL molecule would
+ * yield the identical drawing, so achiral copies are excluded. SMILES marks
+ * chirality with `@`/`@@`, so its absence is the achirality signal — for the
+ * curated sets this matches the old hand-maintained flags exactly (only
+ * glycine). Molecules with a declarative projection spec (saccharides) carry
+ * stereochemistry by definition and are treated as chiral upstream
+ * (`baseQuizMolecule`), regardless of what their skeletal SMILES contains.
  */
 export function isAchiral(molecule: Pick<Biomolecule, "smiles">): boolean {
   return !molecule.smiles.includes("@")
