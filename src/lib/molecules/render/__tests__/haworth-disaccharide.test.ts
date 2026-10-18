@@ -182,13 +182,19 @@ describe("disaccharide Haworth layout", () => {
       Math.PI
     expect(Math.abs(angleDegrees - -72)).toBeLessThanOrEqual(6)
 
-    // Acceptor arrival: bridge comes in from the left, one full bond long.
-    expect(acceptorAnchor.x).toBeGreaterThan(bridgePosition.x)
+    // Acceptor arrival: the glc C4 bond goes down and 18° toward the left —
+    // a normal Haworth substituent on the acceptor ring, one full bond long.
+    expect(bridgePosition.x).toBeLessThan(acceptorAnchor.x)
+    expect(bridgePosition.y).toBeGreaterThan(acceptorAnchor.y)
     const acceptorLength = Math.hypot(
       acceptorAnchor.x - bridgePosition.x,
       acceptorAnchor.y - bridgePosition.y,
     )
     expect(Math.abs(acceptorLength - BOND)).toBeLessThanOrEqual(1.2)
+    const acceptorAngle =
+      (Math.atan2(bridgePosition.y - acceptorAnchor.y, bridgePosition.x - acceptorAnchor.x) * 180) /
+      Math.PI
+    expect(Math.abs(acceptorAngle - 108)).toBeLessThanOrEqual(6)
 
     expectDisjointX(
       positionsOf(pipeline.preprocessor, donor.cycle),
@@ -240,18 +246,71 @@ describe("disaccharide Haworth layout", () => {
     const [bridgePosition] = positionsOf(pipeline.preprocessor, [bridge])
     const [fructoseAnchor] = positionsOf(pipeline.preprocessor, [fructose.cycle[0]])
 
-    // α points down (larger y); both bridge bonds are a full bond length.
+    // Glucose donor: α points down (larger y), one full bond.
     expect(bridgePosition.y).toBeGreaterThan(glucoseAnchor.y)
     const donorLength = Math.hypot(
       bridgePosition.x - glucoseAnchor.x,
       bridgePosition.y - glucoseAnchor.y,
     )
     expect(Math.abs(donorLength - BOND)).toBeLessThanOrEqual(1.2)
+
+    // Fructose acceptor: the mirrored ring draws its canonical up bridge on
+    // the DOWN side — below the anomeric carbon, tilted 18° left — and a
+    // downward bond keeps the full bond length.
+    expect(bridgePosition.x).toBeLessThan(fructoseAnchor.x)
+    expect(bridgePosition.y).toBeGreaterThan(fructoseAnchor.y)
     const acceptorLength = Math.hypot(
       fructoseAnchor.x - bridgePosition.x,
       fructoseAnchor.y - bridgePosition.y,
     )
     expect(Math.abs(acceptorLength - BOND)).toBeLessThanOrEqual(1.2)
+    const acceptorAngle =
+      (Math.atan2(bridgePosition.y - fructoseAnchor.y, bridgePosition.x - fructoseAnchor.x) * 180) /
+      Math.PI
+    expect(Math.abs(acceptorAngle - 108)).toBeLessThanOrEqual(6)
+
+    // The x-mirrored fructose must still read as D: every drawn side is
+    // swapped back, so C5 CH2OH is down, C3-OH down, C4-OH up, the C2
+    // CH2OH carbon up, and the glycosidic (C2) oxygen down.
+    const elementOf = (id: number): string => {
+      const atom = pipeline.snapshot.atoms.get(id)
+      if (atom === undefined) {
+        throw new Error(`unknown atom ${id}`)
+      }
+      return atom.element
+    }
+    const recognized = (vertexId: number) => {
+      const atom = fructose.atoms.find((candidate) => candidate.vertexId === vertexId)
+      if (atom === undefined) {
+        throw new Error(`no recognized atom for ${vertexId}`)
+      }
+      return atom
+    }
+    const substituentWithElement = (vertexId: number, element: string): number => {
+      const atom = recognized(vertexId)
+      const match = [...atom.up, ...atom.down].find((id) => elementOf(id) === element)
+      if (match === undefined) {
+        throw new Error(`no ${element} substituent on ${vertexId}`)
+      }
+      return match
+    }
+    const yOf = (id: number): number => positionsOf(pipeline.preprocessor, [id])[0].y
+
+    // cycle[0]=C2 anomeric, [1]=C3, [2]=C4, [3]=C5, [4]=ring O.
+    const c5Chain = substituentWithElement(fructose.cycle[3], "C")
+    expect(yOf(c5Chain), "C5 CH2OH drawn below C5").toBeGreaterThan(yOf(fructose.cycle[3]))
+    const c3Hydroxyl = substituentWithElement(fructose.cycle[1], "O")
+    expect(yOf(c3Hydroxyl), "C3-OH drawn below C3").toBeGreaterThan(yOf(fructose.cycle[1]))
+    const c4Hydroxyl = substituentWithElement(fructose.cycle[2], "O")
+    expect(yOf(c4Hydroxyl), "C4-OH drawn above C4").toBeLessThan(yOf(fructose.cycle[2]))
+    const c2Chain = [...recognized(fructose.cycle[0]).up, ...recognized(fructose.cycle[0]).down]
+      .filter((id) => id !== bridge)
+      .find((id) => elementOf(id) === "C")
+    if (c2Chain === undefined) {
+      throw new Error("no C2 CH2OH carbon")
+    }
+    expect(yOf(c2Chain), "C2 CH2OH drawn above C2").toBeLessThan(yOf(fructose.cycle[0]))
+    expect(yOf(bridge), "glycosidic O drawn below C2").toBeGreaterThan(yOf(fructose.cycle[0]))
 
     expectDisjointX(
       positionsOf(pipeline.preprocessor, glucose.cycle),

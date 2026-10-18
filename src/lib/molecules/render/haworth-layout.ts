@@ -192,12 +192,19 @@ function placeCanonicalPlan(
 }
 
 /**
- * Place the acceptor ring so its anchor vertex sits one full bond on the
- * free side of the bridge. If the canonical polygon puts the anchor vertex
- * on the wrong x side (facing away from the bridge) the polygon is mirrored
- * in x about its centroid — Haworth up/down sides are y-based, so mirroring
- * x preserves the stereochemistry reading and yields the textbook flipped
- * furanose of sucrose.
+ * Place the acceptor ring so its anchor vertex lands one acceptor-side bond
+ * (LB) back along the tilted-substituent ray from the bridge — side-aware,
+ * with the same 18° CHAIN_BIAS toward free space as the donor. If the
+ * canonical polygon puts the anchor vertex on the wrong x side (facing away
+ * from the bridge) the polygon is mirrored in x about its centroid. A pure
+ * x-mirror flips the effective chirality reading, so a mirrored ring also
+ * swaps up/down on every substituent (two flips compose to identity),
+ * keeping each stereocentre's R/S — the textbook flipped furanose of
+ * sucrose.
+ *
+ * With opposite anchor sides the donor and acceptor tilts are parallel, so
+ * the bridge draws as one straight diagonal (the classic β1→4 / sucrose
+ * look); with equal sides the two rays meet in a sharp V (α links).
  */
 function placeLinkedPlan(
   preprocessor: HaworthPreprocessor,
@@ -205,8 +212,9 @@ function placeLinkedPlan(
   anchorB: number,
   bridgePosition: Point,
   direction: number,
+  sideB: number,
   bondLength: number,
-): Map<number, Point> {
+): { positions: Map<number, Point>; mirrored: boolean } {
   const polygon = HAWORTH_POLYGON[planB.cycle.length as 5 | 6]
   const polygonCenter = centroid(polygon)
   const role = planB.cycle.indexOf(anchorB)
@@ -216,9 +224,19 @@ function placeLinkedPlan(
   const localAnchor = mirror
     ? { x: 2 * polygonCenter.x - polygonAnchor.x, y: polygonAnchor.y }
     : polygonAnchor
+  // Anchor x-side after mirroring; fallback points away from the donor.
+  const drawnOutward = anchorSide !== 0 ? (mirror ? -anchorSide : anchorSide) : -direction
+  // The canonical side is read from the unmirrored recognition; a mirrored
+  // ring draws it swapped (see the mirror-in-x note above).
+  const drawnSideB = mirror ? -sideB : sideB
+  const LB = bondLength * (drawnSideB < 0 ? 0.9 : 1)
+  const desiredB =
+    drawnOutward !== 0
+      ? Math.atan2(drawnSideB, drawnOutward * Math.tan(Math.PI / 10))
+      : (drawnSideB * Math.PI) / 2
   const targetAnchor = {
-    x: bridgePosition.x + direction * bondLength,
-    y: bridgePosition.y,
+    x: bridgePosition.x - Math.cos(desiredB) * LB,
+    y: bridgePosition.y - Math.sin(desiredB) * LB,
   }
   const offset = {
     x: targetAnchor.x - localAnchor.x * bondLength,
@@ -235,7 +253,7 @@ function placeLinkedPlan(
     positions.set(vertexId, target)
     place(preprocessor, vertexId, target)
   })
-  return positions
+  return { positions, mirrored: mirror }
 }
 
 /**
@@ -250,6 +268,7 @@ function applyPlan(
   plan: SugarRingRecognition,
   bondLength: number,
   protectedIds: Set<number>,
+  mirrorThis: boolean,
 ): void {
   const ringIds = plan.cycle
   // Final coordinates from the global placement pass (never a pre-placement
@@ -278,10 +297,17 @@ function applyPlan(
       continue
     }
     const outwardX = Math.sign(anchor.x - ringCenterWorld.x)
-    const groups: { ids: number[]; direction: number }[] = [
-      { ids: atom.up, direction: -1 },
-      { ids: atom.down, direction: 1 },
-    ]
+    // A ring mirrored in x has its chirality reading flipped; swapping the
+    // two drawn arms restores it (mirror + swap = identity on every centre).
+    const groups: { ids: number[]; direction: number }[] = mirrorThis
+      ? [
+          { ids: atom.up, direction: 1 },
+          { ids: atom.down, direction: -1 },
+        ]
+      : [
+          { ids: atom.up, direction: -1 },
+          { ids: atom.down, direction: 1 },
+        ]
     for (const group of groups) {
       for (const substituentId of group.ids) {
         // Glycosidic bridges were positioned by the link pass — rotating or
@@ -443,6 +469,8 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
 
   // 1. Ring placement: BFS over links, BEFORE any substituent layout.
   const placed = plans.map(() => false)
+  // Which plans were x-mirrored by the link pass (root/unreachable: false).
+  const mirrored = plans.map(() => false)
   const ringPositions = new Map<number, Point>()
   const remember = (positions: Map<number, Point>): void => {
     for (const [id, position] of positions) {
@@ -480,26 +508,39 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
         outwardX = 1
       }
       // Existing chain-bias tilt (18°), honoring the anomeric up/down side.
+      // A mirrored donor draws its canonical side swapped.
+      const drawnSide = mirrored[planIndex] ? -side : side
       const desired =
-        outwardX !== 0 ? Math.atan2(side, outwardX * Math.tan(Math.PI / 10)) : (side * Math.PI) / 2
-      const length = bondLength * (side < 0 ? 0.9 : 1)
+        outwardX !== 0
+          ? Math.atan2(drawnSide, outwardX * Math.tan(Math.PI / 10))
+          : (drawnSide * Math.PI) / 2
+      const length = bondLength * (drawnSide < 0 ? 0.9 : 1)
       const bridgePosition = {
         x: anchor.x + Math.cos(desired) * length,
         y: anchor.y + Math.sin(desired) * length,
       }
       place(preprocessor, link.bridge, bridgePosition)
-      // Acceptor lands one full bond on the free side of the bridge; its
+      // Acceptor-side anomeric up/down side (unknown fallback is down, +1).
+      const acceptorPlan = plans[link.planB]
+      const acceptorAnchorAtom = acceptorPlan.atoms.find((atom) => atom.vertexId === link.anchorB)
+      const sideB = acceptorAnchorAtom?.up.includes(link.bridge)
+        ? -1
+        : acceptorAnchorAtom?.down.includes(link.bridge)
+          ? 1
+          : 1
+      // Acceptor lands one side-aware bond back along its tilted ray; its
       // polygon is x-mirrored when the anchor vertex faces the wrong way.
-      remember(
-        placeLinkedPlan(
-          preprocessor,
-          plans[link.planB],
-          link.anchorB,
-          bridgePosition,
-          outwardX,
-          bondLength,
-        ),
+      const acceptorLayout = placeLinkedPlan(
+        preprocessor,
+        acceptorPlan,
+        link.anchorB,
+        bridgePosition,
+        outwardX,
+        sideB,
+        bondLength,
       )
+      remember(acceptorLayout.positions)
+      mirrored[link.planB] = acceptorLayout.mirrored
       placed[link.planB] = true
       queue.push(link.planB)
     }
@@ -515,9 +556,9 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
   })
 
   // 2. Substituent pass + per-plan wedges/ring centre, after ALL rings land.
-  for (const plan of plans) {
-    applyPlan(preprocessor, plan, bondLength, protectedIds)
-  }
+  plans.forEach((plan, index) => {
+    applyPlan(preprocessor, plan, bondLength, protectedIds, mirrored[index])
+  })
   return true
 }
 
