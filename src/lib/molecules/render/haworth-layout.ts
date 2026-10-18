@@ -532,13 +532,14 @@ export interface HOHint {
  * Collect the "HO"-swap hints for a freshly laid-out drawing: for every
  * terminal hydroxyl substituent (-OH, single bond, no other heavy atoms) of
  * every recognized sugar ring, decide by its position relative to the ring
- * centroid which side the label should read from. Left-half OHs become "HO"
- * — the classic idiom (hexose C4 is always left — and it pulls the label
- * into free space, easing overlaps).
+ * centroid which side the label should read from. OHs on the ring's left
+ * edge become "HO" — the classic idiom (hexose C4) — and the label extends
+ * into free space, easing overlaps.
  */
 export function collectOhLabelHints(preprocessor: HaworthPreprocessor): HOHint[] {
   const snapshot = snapshotFromPreprocessor(preprocessor)
   const plans = recognizeSugarRings(snapshot)
+  const bondLength = preprocessor.opts?.bondLength ?? 24
   const hints: HOHint[] = []
   for (const plan of plans) {
     const positions = plan.cycle
@@ -564,10 +565,16 @@ export function collectOhLabelHints(preprocessor: HaworthPreprocessor): HOHint[]
         if (heavyNeighbours.length > 1) {
           continue
         }
+        // Only the ring EDGE flips, not everything left of the centre. At
+        // bond 24 the canonical pyranose C4 hydroxyl sits ~27.6 px left of
+        // the centroid, while pyranose C3 and the furanose third vertex
+        // (ribose C3 / fructose C4) sit only ~13.8 px left. A −0.75 bond
+        // (−18 px) boundary separates the two positionally, with no
+        // per-sugar semantics needed.
         hints.push({
           x: substituent.position.x,
           y: substituent.position.y,
-          side: substituent.position.x < centroidX ? "HO" : "OH",
+          side: substituent.position.x < centroidX - 0.75 * bondLength ? "HO" : "OH",
         })
       }
     }
@@ -576,31 +583,104 @@ export function collectOhLabelHints(preprocessor: HaworthPreprocessor): HOHint[]
 }
 
 /**
- * Post-draw label fix: applies the "HO" swap to the hydroxyl <text> nodes
- * the library drew, matching hints to the closest "OH" text node within a
- * few pixels and anchoring the label left so it hangs off the ring.
+ * Post-draw label fix for left-edge hydroxyls. The library draws every atom
+ * label as a `<text class="element">` inside a `<g>` whose vertex position is
+ * baked into `style` as `transform: translateX(<x>px) translateY(<y>px)`.
+ * The `<text>` itself has no x/y anchors (up/down labels instead stack their
+ * tspans vertically via `x="0px"` and `y="±0.9i em"`), and an "OH" label is a
+ * text with two tspans ("O", "H"). We therefore match candidates by the
+ * parent g's translate and drop the tspan stacking attributes.
+ *
+ * A right/up/down label's g-translate x is the vertex x MINUS half the
+ * measured element width, whereas the library's own left-direction labels
+ * use vertex x PLUS half the width — centred on the bond end. To reproduce
+ * that without measuring text, capture the candidate's original gx and set
+ * the new translate x to `hint.x + |hint.x - gx|`: the same half-glyph shift
+ * on the correct side, so the O glyph sits on the bond and the H extends
+ * left. Keeping translate y = hint.y preserves the true vertex height.
+ * Finally the existing tspans are re-appended in H→O order (preserving each
+ * letter's fill colour) with `text-anchor="end"`, so the whole "HO" grows
+ * leftward into free space.
  */
 export function applyHaworthHOLabels(svgRoot: SVGSVGElement, hints: HOHint[]): void {
-  const texts = Array.from(svgRoot.querySelectorAll("text"))
-  const ohTexts = texts.filter((node) => (node.textContent ?? "").trim() === "OH")
+  const STYLE_TRANSLATE = /translateX\((-?[\d.]+)px\)\s*translateY\((-?[\d.]+)px\)/
+  interface Candidate {
+    text: Element
+    parent: Element
+    gx: number
+    gy: number
+  }
+  const candidates: Candidate[] = []
+  for (const text of Array.from(svgRoot.querySelectorAll("text"))) {
+    if ((text.textContent ?? "").trim() !== "OH") {
+      continue
+    }
+    const parent = text.parentElement
+    if (parent === null || parent.localName !== "g") {
+      continue
+    }
+    const match = STYLE_TRANSLATE.exec(parent.getAttribute("style") ?? "")
+    if (match === null) {
+      continue
+    }
+    candidates.push({ text, parent, gx: Number(match[1]), gy: Number(match[2]) })
+  }
+
+  const remaining = [...candidates]
   for (const hint of hints) {
     if (hint.side !== "HO") {
       continue
     }
-    let nearest: Element | null = null
+    let nearestIndex = -1
     let nearestDistance = Number.POSITIVE_INFINITY
-    for (const node of ohTexts) {
-      const x = Number(node.getAttribute("x") ?? Number.NaN)
-      const y = Number(node.getAttribute("y") ?? Number.NaN)
-      const distance = Math.hypot(x - hint.x, y - hint.y)
+    remaining.forEach((candidate, index) => {
+      const distance = Math.hypot(candidate.gx - hint.x, candidate.gy - hint.y)
       if (distance < nearestDistance) {
         nearestDistance = distance
-        nearest = node
+        nearestIndex = index
       }
+    })
+    // The g-translate x differs from the vertex x by half the "O" glyph width
+    // (≈4–6 px); sibling hydroxyl labels are >25 px apart at bond length 24,
+    // so 9 px is unambiguous.
+    if (nearestIndex < 0 || nearestDistance >= 9) {
+      continue
     }
-    if (nearest !== null && nearestDistance < 5) {
-      nearest.textContent = "HO"
-      nearest.setAttribute("text-anchor", "end")
+    const candidate = remaining[nearestIndex]
+    const tspans = Array.from(candidate.text.children).filter(
+      (child) => child.localName === "tspan",
+    )
+    const first = (tspans[0]?.textContent ?? "").trim()
+    const second = (tspans[1]?.textContent ?? "").trim()
+    const isHydroxyl =
+      tspans.length === 2 &&
+      ((first === "O" && second === "H") || (first === "H" && second === "O"))
+    if (!isHydroxyl) {
+      // Never corrupt a label whose internals don't look like O + H.
+      continue
     }
+    remaining.splice(nearestIndex, 1)
+
+    // Keep the library's half-glyph shift so the O glyph stays centred on the
+    // bond; the abs also works for a rare left-direction candidate (gx =
+    // vertex + half width).
+    const centeredX = hint.x + Math.abs(hint.x - candidate.gx)
+    candidate.parent.setAttribute(
+      "style",
+      `transform: translateX(${centeredX}px) translateY(${hint.y}px)`,
+    )
+    const oxygen = tspans.find((tspan) => (tspan.textContent ?? "").trim() === "O")
+    const hydrogen = tspans.find((tspan) => (tspan.textContent ?? "").trim() === "H")
+    if (oxygen === undefined || hydrogen === undefined) {
+      continue
+    }
+    for (const tspan of tspans) {
+      tspan.removeAttribute("x")
+      tspan.removeAttribute("y")
+    }
+    // appendChild moves the existing nodes, keeping their per-letter colours.
+    candidate.text.appendChild(hydrogen)
+    candidate.text.appendChild(oxygen)
+    candidate.text.setAttribute("text-anchor", "end")
   }
 }
