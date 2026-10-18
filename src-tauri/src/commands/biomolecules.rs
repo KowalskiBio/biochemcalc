@@ -6,7 +6,8 @@
 //! (the frontend caches the whole library per session); every mutation is
 //! teacher-only (the HTTP layer gates it) and returns the full fresh dataset
 //! so the client's copy stays in sync. The quiz is still graded client-side,
-//! so recorded scores are only sanity-checked — and the category must exist.
+//! so recorded scores are only sanity-checked — and the recorded scope must
+//! reference an existing category or topic (or the all-ungrouped sentinel).
 
 use crate::db::repos::biomolecule_repo::{BiomoleculeData, CategoryField, TopicField};
 use crate::db::repos::{
@@ -707,16 +708,29 @@ pub struct BiomoleculeLeaderboardEntry {
     pub points: i64,
 }
 
+/// Scope sentinel for a run over "all ungrouped/no-topic categories". Topic
+/// runs and this sentinel share the overall leaderboard total with category
+/// runs; the per-category board only matches the exact slug.
+const ALL_UNGROUPED_SCOPE: &str = "*";
+
 /// Store the score of one finished quiz for the acting user. The quiz is
 /// graded client-side, so this can only sanity-check the numbers — and the
-/// category must exist, or junk slugs would pollute the leaderboard.
+/// scope must be an existing category slug, an existing topic slug, or the
+/// all-ungrouped sentinel, or junk slugs would pollute the leaderboard.
 pub fn do_record_quiz_result(
     conn: &Connection,
     user_id: &Uuid,
     payload: RecordQuizResultPayload,
 ) -> Result<(), DbError> {
     let category_id = payload.category_id.trim();
-    if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
+    let scope_valid = if category_id == ALL_UNGROUPED_SCOPE {
+        true
+    } else {
+        is_valid_slug(category_id)
+            && (BiomoleculeRepo::category_exists(conn, category_id)?
+                || BiomoleculeRepo::topic_exists(conn, category_id)?)
+    };
+    if !scope_valid {
         return Err(DbError::Validation(format!(
             "Invalid category: {category_id}"
         )));
@@ -1586,6 +1600,83 @@ mod tests {
         assert_eq!(board.len(), 1);
         assert_eq!(board[0].correct_count, 7);
         assert_eq!(board[0].answered_count, 10);
+    }
+
+    #[test]
+    fn record_quiz_result_accepts_category_topic_and_all_scopes() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "student");
+        let record = |category: &str| {
+            do_record_quiz_result(
+                &conn,
+                &student,
+                RecordQuizResultPayload {
+                    category_id: category.into(),
+                    correct_count: 5,
+                    total_count: 5,
+                    mode: "easy".into(),
+                },
+            )
+        };
+
+        record("aminokyseliny").expect("existing category scope");
+        record("nukleove-kyseliny").expect("existing topic scope");
+        record("*").expect("all-ungrouped sentinel");
+
+        for bogus in ["neexistuje", "../etc", ""] {
+            assert!(
+                matches!(record(bogus), Err(DbError::Validation(_))),
+                "{bogus:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn leaderboard_sums_all_scopes_and_category_filter_excludes_them() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "student");
+        let record = |category: &str, correct, total, mode: &str| {
+            do_record_quiz_result(
+                &conn,
+                &student,
+                RecordQuizResultPayload {
+                    category_id: category.into(),
+                    correct_count: correct,
+                    total_count: total,
+                    mode: mode.into(),
+                },
+            )
+            .expect("record quiz");
+        };
+
+        record("aminokyseliny", 7, 10, "easy");
+        record("nukleove-kyseliny", 5, 5, "hard");
+        record("*", 3, 4, "easy");
+
+        // No filter: category, topic and "*" runs all count into one total.
+        let board =
+            do_quiz_leaderboard(&conn, &QuizLeaderboardPayload::default()).expect("leaderboard");
+        assert_eq!(board.len(), 1);
+        assert_eq!(board[0].correct_count, 15);
+        assert_eq!(board[0].answered_count, 19);
+        assert_eq!(board[0].quiz_count, 3);
+        // 7 (easy) + 5*2 (hard) + 3 (easy).
+        assert_eq!(board[0].points, 20);
+
+        // A per-category filter matches the exact slug, so topic and "*"
+        // rows are excluded.
+        let aminokyseliny = do_quiz_leaderboard(
+            &conn,
+            &QuizLeaderboardPayload {
+                category_id: Some("aminokyseliny".into()),
+            },
+        )
+        .expect("filtered leaderboard");
+        assert_eq!(aminokyseliny.len(), 1);
+        assert_eq!(aminokyseliny[0].correct_count, 7);
+        assert_eq!(aminokyseliny[0].answered_count, 10);
+        assert_eq!(aminokyseliny[0].quiz_count, 1);
+        assert_eq!(aminokyseliny[0].points, 7);
     }
 
     #[test]

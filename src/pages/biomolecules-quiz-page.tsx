@@ -684,6 +684,7 @@ export function BiomoleculesQuizPage() {
   // state can never skew a session's molecules, mode, or scoring category.
   const [activeQuiz, setActiveQuiz] = useState<{
     slug: string
+    scope: string
     config: CategoryQuizConfig
     mode: QuizMode
   } | null>(null)
@@ -782,7 +783,15 @@ export function BiomoleculesQuizPage() {
     })
     if (questions.length === 0) return
     dispatch({ type: "restart", questions })
-    setActiveQuiz({ slug, config: entry.config, mode })
+    setActiveQuiz({
+      slug,
+      // Topic-wide runs score under the topic slug ("*" when the pool spans
+      // ungrouped categories); category runs under their own slug. Every run
+      // counts in the overall leaderboard.
+      scope: slug === ALL_CATEGORIES_VALUE ? (topicSlug ?? "*") : slug,
+      config: entry.config,
+      mode,
+    })
   }
 
   const toggleType = (type: QuizQuestionType) => {
@@ -820,8 +829,6 @@ export function BiomoleculesQuizPage() {
   const recordedQuestionsRef = useRef<QuizQuestion[] | null>(null)
   useEffect(() => {
     if (!activeQuiz || !session.finished || session.questions.length === 0) return
-    // Topic-wide runs aren't scored: leaderboards stay per category.
-    if (activeQuiz.slug === ALL_CATEGORIES_VALUE) return
     if (recordedQuestionsRef.current === session.questions) return
     recordedQuestionsRef.current = session.questions
     const correct = session.answers.filter(Boolean).length
@@ -829,7 +836,7 @@ export function BiomoleculesQuizPage() {
     // results screen the student is looking at.
     biomoleculesApi
       .recordQuizResult({
-        categoryId: activeQuiz.slug,
+        categoryId: activeQuiz.scope,
         correctCount: correct,
         totalCount: session.questions.length,
         mode: activeQuiz.mode,
@@ -924,11 +931,12 @@ export function BiomoleculesQuizPage() {
     )
   }
 
-  // A topic-wide run has no category page to return to; the picker is its
-  // home (the URL stays on the plain practice route throughout).
+  // A topic-wide run has no category page to return to; it ran on the plain
+  // picker URL, so the hub is used instead — navigating to the current route
+  // would look like a dead link.
   const runBackHref =
     activeQuiz.slug === ALL_CATEGORIES_VALUE
-      ? "/biomolekuly/procvicovani"
+      ? "/biomolekuly"
       : `/biomolekuly/${activeQuiz.slug}`
   const runBackLabel =
     activeQuiz.slug === ALL_CATEGORIES_VALUE
