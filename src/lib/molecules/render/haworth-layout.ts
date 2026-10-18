@@ -655,6 +655,140 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
   return true
 }
 
+/**
+ * Half-thickness of a tapered (thin) front edge, in viewBox user units.
+ * Matches the drawer's default bond thickness (1.0) closely enough that the
+ * tapered end blends into the underlying plain ring-bond stroke.
+ */
+const HAWORTH_FRONT_EDGE_THIN = 1.1
+/** Half-thickness of the thick front edge, in viewBox user units (1.1 + (4.5−1.1)/3 — a third of the original wedge strength). */
+const HAWORTH_FRONT_EDGE_THICK = 2.2
+
+/**
+ * The drawer paints plain bonds as `<line>` elements carrying a `stroke`
+ * attribute (SvgWrapper.drawLine), coloring each half by its endpoint atom —
+ * so a stroke sampled blindly from somewhere in the drawing can be an
+ * oxygen-coloured half instead of the neutral C–C ring bond. Per front edge,
+ * take the stroke of the bond line whose own midpoint is closest to the
+ * segment's midpoint; fall back to the drawing's first stroked bond, then
+ * `currentColor`, when nothing coordinates-bearing is found nearby.
+ */
+function bondStrokeNear(svgRoot: SVGSVGElement, x: number, y: number): string | null {
+  let bestStroke: string | null = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const element of Array.from(svgRoot.querySelectorAll("line"))) {
+    const stroke = element.getAttribute("stroke")
+    if (stroke === null || stroke.trim() === "" || stroke.trim() === "none") {
+      continue
+    }
+    const x1 = Number(element.getAttribute("x1"))
+    const y1 = Number(element.getAttribute("y1"))
+    const x2 = Number(element.getAttribute("x2"))
+    const y2 = Number(element.getAttribute("y2"))
+    if ([x1, y1, x2, y2].some((value) => Number.isNaN(value))) {
+      continue
+    }
+    const distance = Math.hypot((x1 + x2) / 2 - x, (y1 + y2) / 2 - y)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestStroke = stroke
+    }
+  }
+  return bestStroke
+}
+
+function sampleBondStroke(svgRoot: SVGSVGElement): string {
+  for (const element of Array.from(svgRoot.querySelectorAll("line, path"))) {
+    const stroke = element.getAttribute("stroke")
+    if (stroke !== null && stroke.trim() !== "" && stroke.trim() !== "none") {
+      return stroke
+    }
+  }
+  return "currentColor"
+}
+
+/**
+ * Post-draw pass: render the three front ring bonds of every recognized sugar
+ * as graduated bold quads (the classic Haworth "wedge" cue). Both canonical
+ * polygons put roles 0–3 on the bottom/front edge, so the same role pairs work
+ * for pyranose and furanose rings:
+ *
+ *   0 → 1  thin at C1, thick at C2
+ *   1 → 2  thick at both ends (thickest, uniform)
+ *   2 → 3  thick at C3, thin at C4
+ *
+ * The quads are built from the FINAL preprocessor coordinates (the same world
+ * units the drawer bakes into the viewBox) and appended to the svg root. The
+ * drawer's own thin ring-bond strokes stay in place: the tapered ends are
+ * chosen to match that stroke width, so the bold shape blends into the plain
+ * line instead of floating over it.
+ */
+export function applyHaworthBoldFrontEdges(
+  svgRoot: SVGSVGElement,
+  preprocessor: HaworthPreprocessor,
+): void {
+  const plans = recognizeSugarRings(snapshotFromPreprocessor(preprocessor))
+  if (plans.length === 0) {
+    return
+  }
+  const fallbackFill = sampleBondStroke(svgRoot)
+  const segments: { a: number; b: number; ta: number; tb: number }[] = [
+    { a: 0, b: 1, ta: HAWORTH_FRONT_EDGE_THIN, tb: HAWORTH_FRONT_EDGE_THICK },
+    { a: 1, b: 2, ta: HAWORTH_FRONT_EDGE_THICK, tb: HAWORTH_FRONT_EDGE_THICK },
+    { a: 2, b: 3, ta: HAWORTH_FRONT_EDGE_THICK, tb: HAWORTH_FRONT_EDGE_THIN },
+  ]
+  for (const plan of plans) {
+    const ring: Point[] = []
+    for (const vertexId of plan.cycle) {
+      const position = positionOf(preprocessor, vertexId)
+      if (position === undefined) {
+        ring.length = 0
+        break
+      }
+      ring.push({ x: position.x, y: position.y })
+    }
+    if (ring.length < 4) {
+      continue
+    }
+    const ringCenter = centroid(ring)
+    for (const segment of segments) {
+      const from = ring[segment.a]
+      const to = ring[segment.b]
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      const length = Math.hypot(dx, dy)
+      if (length === 0) {
+        continue
+      }
+      // Unit normal of the bond, flipped to point OUT of the ring (away from
+      // the centroid) so the wedge flares outward instead of covering the
+      // ring interior. An x-mirrored acceptor only flips x, so this stays
+      // correct for mirrored rings (y is unchanged).
+      let nx = -dy / length
+      let ny = dx / length
+      const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
+      if (nx * (midpoint.x - ringCenter.x) + ny * (midpoint.y - ringCenter.y) < 0) {
+        nx = -nx
+        ny = -ny
+      }
+      const points = [
+        { x: from.x + nx * segment.ta, y: from.y + ny * segment.ta },
+        { x: to.x + nx * segment.tb, y: to.y + ny * segment.tb },
+        { x: to.x - nx * segment.tb, y: to.y - ny * segment.tb },
+        { x: from.x - nx * segment.ta, y: from.y - ny * segment.ta },
+      ]
+      const polygon = svgRoot.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "polygon")
+      polygon.setAttribute("points", points.map((point) => `${point.x},${point.y}`).join(" "))
+      // Fill from THIS edge's own bond line, not an arbitrary bond elsewhere —
+      // atom-coloured bond halves (e.g. around the ring oxygen) would tint it.
+      polygon.setAttribute("fill", bondStrokeNear(svgRoot, midpoint.x, midpoint.y) ?? fallbackFill)
+      polygon.setAttribute("stroke", "none")
+      polygon.setAttribute("class", "haworth-front-edge")
+      svgRoot.appendChild(polygon)
+    }
+  }
+}
+
 /** Post-draw label hint: swap a terminal hydroxyl label to "HO" on left-of-ring-centroid. */
 export interface HOHint {
   x: number

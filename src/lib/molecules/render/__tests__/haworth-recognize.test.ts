@@ -7,6 +7,7 @@
 import SmilesDrawer from "smiles-drawer"
 import { describe, expect, it } from "vitest"
 import {
+  applyHaworthBoldFrontEdges,
   applyHaworthHOLabels,
   applyHaworthLayout,
   collectOhLabelHints,
@@ -71,6 +72,10 @@ const CANDIDATE_BETA_DEOXYRIBOSE = "OC[C@H]1O[C@@H](O)C[C@@H]1O"
 // SMILES kept in `biomolecule_seed.rs`; the recognizer works on either form.
 const ADENOSINE_KEKULE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
 const AMP_KEKULE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
+// PubChem isomeric SMILES (CID 5988, Glcα1↔2βFru) — duplicated from the
+// disaccharide suite so this file stays self-contained.
+const SUCROSE =
+  "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O[C@]2([C@H]([C@@H]([C@H](O2)CO)O)O)CO)O)O)O)O"
 
 interface RoleExpectation {
   up: string[]
@@ -406,46 +411,48 @@ describe("applyHaworthLayout", () => {
   })
 })
 
+/**
+ * Draw `smiles` exactly like the app does (Haworth reshape in the
+ * processGraph hook, label fix + bold front edges immediately after draw) and
+ * keep the live svg attached to the document so the DOM can be inspected.
+ */
+function labeledSvgOf(smiles: string): {
+  svg: SVGSVGElement
+  preprocessor: HaworthPreprocessor
+} {
+  let captured: { svg: SVGSVGElement; preprocessor: HaworthPreprocessor } | null = null
+  SmilesDrawer.parse(smiles, (tree: unknown) => {
+    const drawer = new SmilesDrawer.SvgDrawer({ width: 400, height: 300, bondLength: 24 })
+    const preprocessor = (
+      drawer as unknown as {
+        preprocessor: HaworthPreprocessor & { processGraph: (...args: unknown[]) => void }
+      }
+    ).preprocessor
+    const original = preprocessor.processGraph
+    preprocessor.processGraph = ((...args: unknown[]) => {
+      const result = original.apply(preprocessor, args)
+      // Same order as the app: reshape the sugar ring, then label after draw.
+      applyHaworthLayout(preprocessor)
+      return result
+    }) as typeof original
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    document.body.appendChild(svg)
+    drawer.draw(tree, svg, "light")
+    // Hints must come from the same preprocessor instance that drew the svg
+    // so their coordinates line up with the emitted label translates.
+    applyHaworthHOLabels(svg, collectOhLabelHints(preprocessor))
+    // Same final step as the app: bold graduated front ring edges.
+    applyHaworthBoldFrontEdges(svg, preprocessor)
+    captured = { svg, preprocessor }
+  })
+  if (captured === null) {
+    throw new Error(`no svg captured for ${smiles}`)
+  }
+  return captured
+}
+
 describe("applyHaworthHOLabels", () => {
   const STYLE_TRANSLATE = /translateX\((-?[\d.]+)px\)\s*translateY\((-?[\d.]+)px\)/
-
-  /**
-   * Draw `smiles` exactly like the app does (Haworth reshape in the
-   * processGraph hook, label fix immediately after draw) and keep the live
-   * svg attached to the document so the DOM can be inspected.
-   */
-  function labeledSvgOf(smiles: string): {
-    svg: SVGSVGElement
-    preprocessor: HaworthPreprocessor
-  } {
-    let captured: { svg: SVGSVGElement; preprocessor: HaworthPreprocessor } | null = null
-    SmilesDrawer.parse(smiles, (tree: unknown) => {
-      const drawer = new SmilesDrawer.SvgDrawer({ width: 400, height: 300, bondLength: 24 })
-      const preprocessor = (
-        drawer as unknown as {
-          preprocessor: HaworthPreprocessor & { processGraph: (...args: unknown[]) => void }
-        }
-      ).preprocessor
-      const original = preprocessor.processGraph
-      preprocessor.processGraph = ((...args: unknown[]) => {
-        const result = original.apply(preprocessor, args)
-        // Same order as the app: reshape the sugar ring, then label after draw.
-        applyHaworthLayout(preprocessor)
-        return result
-      }) as typeof original
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-      document.body.appendChild(svg)
-      drawer.draw(tree, svg, "light")
-      // Hints must come from the same preprocessor instance that drew the svg
-      // so their coordinates line up with the emitted label translates.
-      applyHaworthHOLabels(svg, collectOhLabelHints(preprocessor))
-      captured = { svg, preprocessor }
-    })
-    if (captured === null) {
-      throw new Error(`no svg captured for ${smiles}`)
-    }
-    return captured
-  }
 
   function translatedPositionOf(text: Element): { x: number; y: number } | null {
     const parent = text.parentElement
@@ -547,6 +554,293 @@ describe("applyHaworthHOLabels", () => {
     const { svg } = labeledSvgOf("N[C@@H](C)C(=O)O")
     try {
       expect(textOf(svg, "HO")).toHaveLength(0)
+    } finally {
+      svg.remove()
+    }
+  })
+})
+
+describe("applyHaworthBoldFrontEdges", () => {
+  type Vec = { x: number; y: number }
+
+  interface QuadGeometry {
+    vertices: Vec[]
+    endA: Vec
+    endB: Vec
+    halfThicknessA: number
+    halfThicknessB: number
+    midpoint: Vec
+    areaCentroid: Vec
+  }
+
+  function frontEdgeQuads(svg: SVGSVGElement): Element[] {
+    return Array.from(svg.querySelectorAll("polygon.haworth-front-edge"))
+  }
+
+  function polygonCentroid(vertices: Vec[]): Vec {
+    let twiceArea = 0
+    let x = 0
+    let y = 0
+    for (let index = 0; index < vertices.length; index += 1) {
+      const current = vertices[index]
+      const next = vertices[(index + 1) % vertices.length]
+      const cross = current.x * next.y - next.x * current.y
+      twiceArea += cross
+      x += (current.x + next.x) * cross
+      y += (current.y + next.y) * cross
+    }
+    if (Math.abs(twiceArea) < 1e-9) {
+      const sum = vertices.reduce((acc, vertex) => ({ x: acc.x + vertex.x, y: acc.y + vertex.y }), {
+        x: 0,
+        y: 0,
+      })
+      return { x: sum.x / vertices.length, y: sum.y / vertices.length }
+    }
+    return { x: x / (3 * twiceArea), y: y / (3 * twiceArea) }
+  }
+
+  /**
+   * Recover the geometry from the emitted `points`: the quad is built as
+   * [A+n·tA, B+n·tB, B−n·tB, A−n·tA], so opposite point pairs straddle each
+   * bond end (their distance is twice the local half-thickness).
+   */
+  function quadGeometry(polygon: Element): QuadGeometry {
+    const numbers = (polygon.getAttribute("points") ?? "")
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number)
+    if (numbers.length !== 8 || numbers.some((value) => Number.isNaN(value))) {
+      throw new Error("malformed haworth-front-edge polygon")
+    }
+    const vertices = [0, 2, 4, 6].map((index) => ({
+      x: numbers[index],
+      y: numbers[index + 1],
+    }))
+    const [p0, p1, p2, p3] = vertices
+    const endA = { x: (p0.x + p3.x) / 2, y: (p0.y + p3.y) / 2 }
+    const endB = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+    return {
+      vertices,
+      endA,
+      endB,
+      halfThicknessA: Math.hypot(p0.x - p3.x, p0.y - p3.y) / 2,
+      halfThicknessB: Math.hypot(p1.x - p2.x, p1.y - p2.y) / 2,
+      midpoint: { x: (endA.x + endB.x) / 2, y: (endA.y + endB.y) / 2 },
+      areaCentroid: polygonCentroid(vertices),
+    }
+  }
+
+  function ringPositionsOf(preprocessor: HaworthPreprocessor, plan: { cycle: number[] }): Vec[] {
+    return plan.cycle.map((id) => {
+      const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
+      if (vertex === undefined) {
+        throw new Error(`unknown ring vertex ${id}`)
+      }
+      return { x: vertex.position.x, y: vertex.position.y }
+    })
+  }
+
+  function centroidOf(points: Vec[]): Vec {
+    const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), {
+      x: 0,
+      y: 0,
+    })
+    return { x: sum.x / points.length, y: sum.y / points.length }
+  }
+
+  function distance(a: Vec, b: Vec): number {
+    return Math.hypot(a.x - b.x, a.y - b.y)
+  }
+
+  function nearestRole(ring: Vec[], point: Vec): number {
+    let nearest = -1
+    let nearestDistance = Number.POSITIVE_INFINITY
+    ring.forEach((position, role) => {
+      const candidate = distance(position, point)
+      if (candidate < nearestDistance) {
+        nearestDistance = candidate
+        nearest = role
+      }
+    })
+    return nearest
+  }
+
+  /**
+   * The wedge must flare to the OUTSIDE of the ring (and downward, front side).
+   *
+   * NOTE: the emitted quad is symmetric about its bond line, so its AREA
+   * centroid always lies exactly ON that line (for the uniform middle edge it
+   * coincides with the bond midpoint). A radial "centroid farther than
+   * midpoint" check is therefore geometrically impossible here; the robust
+   * perpendicular-sign guard compares the outer and inner edges of the quad.
+   */
+  function expectFlaresOutward(geometry: QuadGeometry, ringCenter: Vec, label: string): void {
+    const [p0, p1, p2, p3] = geometry.vertices
+    const outwardMidpoint = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
+    const innerMidpoint = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 }
+    expect(distance(outwardMidpoint, ringCenter), `${label}: flares outward`).toBeGreaterThan(
+      distance(innerMidpoint, ringCenter),
+    )
+    // The outward edge sits on the far side of the bond line from the ring
+    // centroid: dot(offset, away-from-centre) > 0.
+    const away = { x: geometry.midpoint.x - ringCenter.x, y: geometry.midpoint.y - ringCenter.y }
+    const outwardOffset = {
+      x: outwardMidpoint.x - geometry.midpoint.x,
+      y: outwardMidpoint.y - geometry.midpoint.y,
+    }
+    expect(
+      outwardOffset.x * away.x + outwardOffset.y * away.y,
+      `${label}: perpendicular sign`,
+    ).toBeGreaterThan(0)
+    expect(outwardMidpoint.y, `${label}: flares down (front side)`).toBeGreaterThan(innerMidpoint.y)
+    // Sanity check backing the NOTE above: the symmetric quad's area centroid
+    // is collinear with the bond (offset ~0 perpendicular to it).
+    const bond = { x: geometry.endB.x - geometry.endA.x, y: geometry.endB.y - geometry.endA.y }
+    const centroidOffset = {
+      x: geometry.areaCentroid.x - geometry.midpoint.x,
+      y: geometry.areaCentroid.y - geometry.midpoint.y,
+    }
+    const perpendicularOffset =
+      Math.abs(bond.x * centroidOffset.y - bond.y * centroidOffset.x) / Math.hypot(bond.x, bond.y)
+    expect(perpendicularOffset, `${label}: area centroid on bond line`).toBeLessThan(1e-6)
+  }
+
+  it("draws the three graduated front edges on β-D-glucose (thin C1/C4, thick C2/C3)", () => {
+    const { svg, preprocessor } = labeledSvgOf(TRUE_BETA_GLUCOSE)
+    try {
+      const quads = frontEdgeQuads(svg)
+      expect(quads).toHaveLength(3)
+      const plan = recognizeSugarRings(snapshotFromPreprocessor(preprocessor))[0]
+      const ring = ringPositionsOf(preprocessor, plan)
+      const ringCenter = centroidOf(ring)
+
+      const edges = quads.map((quad) => {
+        const geometry = quadGeometry(quad)
+        const roleA = nearestRole(ring, geometry.endA)
+        const roleB = nearestRole(ring, geometry.endB)
+        return { key: `${roleA}-${roleB}`, geometry }
+      })
+      const edgeOf = (key: string): QuadGeometry => {
+        const edge = edges.find((candidate) => candidate.key === key)
+        if (edge === undefined) {
+          throw new Error(`missing front edge ${key}`)
+        }
+        return edge.geometry
+      }
+      const close = (actual: number, expected: number): void => {
+        expect(Math.abs(actual - expected)).toBeLessThanOrEqual(0.3)
+      }
+
+      // C1 → C2: thin at the anomeric C1 (role 0), thick at C2.
+      const first = edgeOf("0-1")
+      close(first.halfThicknessA, 1.1)
+      close(first.halfThicknessB, 2.2)
+      // C2 → C3: uniformly thickest.
+      const middle = edgeOf("1-2")
+      close(middle.halfThicknessA, 2.2)
+      close(middle.halfThicknessB, 2.2)
+      expect(Math.abs(middle.halfThicknessA - middle.halfThicknessB)).toBeLessThan(0.1)
+      // C3 → C4: thick at C3, thin at C4 (role 3).
+      const last = edgeOf("2-3")
+      close(last.halfThicknessA, 2.2)
+      close(last.halfThicknessB, 1.1)
+
+      for (const [index, geometry] of edges.map((edge) => edge.geometry).entries()) {
+        expectFlaresOutward(geometry, ringCenter, `glucose edge ${index}`)
+      }
+    } finally {
+      svg.remove()
+    }
+  })
+
+  it("draws 3 tapers on each sucrose ring, with the mirrored fructose flaring outward-down", () => {
+    const { svg, preprocessor } = labeledSvgOf(SUCROSE)
+    try {
+      const quads = frontEdgeQuads(svg)
+      expect(quads).toHaveLength(6)
+      const plans = recognizeSugarRings(snapshotFromPreprocessor(preprocessor))
+      expect(plans).toHaveLength(2)
+      const centers = plans.map((plan) => centroidOf(ringPositionsOf(preprocessor, plan)))
+      const fructoseIndex = plans.findIndex((plan) => plan.cycle.length === 5)
+      expect(fructoseIndex).toBeGreaterThanOrEqual(0)
+
+      const counts = [0, 0]
+      let fructoseQuads = 0
+      for (const quad of quads) {
+        const geometry = quadGeometry(quad)
+        const distances = centers.map((center) => distance(geometry.midpoint, center))
+        const owner = distances[0] <= distances[1] ? 0 : 1
+        counts[owner] += 1
+        if (owner === fructoseIndex) {
+          fructoseQuads += 1
+        }
+        // Every quad (including the x-mirrored fructose ones) flares out of
+        // its own ring and toward the down/front side.
+        expectFlaresOutward(geometry, centers[owner], `sucrose ring ${owner}`)
+      }
+      expect(counts).toEqual([3, 3])
+      expect(fructoseQuads).toBe(3)
+    } finally {
+      svg.remove()
+    }
+  })
+
+  it("adds front edges to a nucleotide furanose without touching the base", () => {
+    const { svg } = labeledSvgOf(ADENOSINE_KEKULE)
+    try {
+      expect(frontEdgeQuads(svg)).toHaveLength(3)
+      // The adenine base contributes no polygons of its own: the only
+      // polygons in the whole drawing are the three furanose front edges.
+      expect(svg.querySelectorAll("polygon")).toHaveLength(3)
+    } finally {
+      svg.remove()
+    }
+  })
+
+  it("fills each taper from its own bond line, not an oxygen-coloured bond elsewhere", () => {
+    const { svg } = labeledSvgOf(SUCROSE)
+    try {
+      // Stroke of the <line> whose midpoint is closest to `point` — the same
+      // rule the pass must follow, so this stays valid if the implementation
+      // changes (it fails for the old "first stroked bond in the whole svg").
+      const nearestLineStroke = (point: { x: number; y: number }): string | null => {
+        let bestStroke: string | null = null
+        let bestDistance = Number.POSITIVE_INFINITY
+        for (const element of Array.from(svg.querySelectorAll("line"))) {
+          const stroke = element.getAttribute("stroke")
+          if (stroke === null || stroke.trim() === "" || stroke.trim() === "none") {
+            continue
+          }
+          const x1 = Number(element.getAttribute("x1"))
+          const y1 = Number(element.getAttribute("y1"))
+          const x2 = Number(element.getAttribute("x2"))
+          const y2 = Number(element.getAttribute("y2"))
+          if ([x1, y1, x2, y2].some((value) => Number.isNaN(value))) {
+            continue
+          }
+          const distance = Math.hypot((x1 + x2) / 2 - point.x, (y1 + y2) / 2 - point.y)
+          if (distance < bestDistance) {
+            bestDistance = distance
+            bestStroke = stroke
+          }
+        }
+        return bestStroke
+      }
+      const quads = frontEdgeQuads(svg)
+      expect(quads.length).toBeGreaterThan(0)
+      const fills = new Set<string>()
+      for (const quad of quads) {
+        const stroke = nearestLineStroke(quadGeometry(quad).midpoint)
+        expect(stroke, "nearest bond line carries a stroke").not.toBeNull()
+        expect(quad.getAttribute("fill"), "taper fill matches its own bond line").toBe(stroke)
+        const fill = quad.getAttribute("fill")
+        if (fill !== null) {
+          fills.add(fill)
+        }
+      }
+      // The front C–C ring bonds share one neutral colour: oxygen-coloured
+      // bond halves from O-adjacent bonds must never tint a taper.
+      expect(fills.size).toBe(1)
     } finally {
       svg.remove()
     }

@@ -5,6 +5,7 @@ import { computeDepictionBounds } from "@/components/ui/depiction-bounds"
 import { ProjectionView } from "@/components/ui/projection-view"
 import { type Point, transformPoints } from "@/lib/molecules/orientation"
 import {
+  applyHaworthBoldFrontEdges,
   applyHaworthHOLabels,
   applyHaworthLayout,
   collectOhLabelHints,
@@ -280,6 +281,10 @@ function SmilesStructureView({
               svg,
               collectOhLabelHints(preprocessor as unknown as HaworthPreprocessor),
             )
+            // Graduated bold front ring bonds (thin C1→C2, thick C2→C3,
+            // thick→thin C3→C4) — pyranose and furanose alike. Runs on the
+            // final coordinates, so the quads land exactly on the ring.
+            applyHaworthBoldFrontEdges(svg, preprocessor as unknown as HaworthPreprocessor)
           }
           if (grow) {
             // Fully drawn (labels included): the viewBox now holds the
