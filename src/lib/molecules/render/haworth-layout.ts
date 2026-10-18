@@ -107,6 +107,80 @@ function collectSubtree(
   return out
 }
 
+/** Heavy (non-H) neighbours of `id`, optionally excluding the atom we came from. */
+function heavyNeighboursOf(
+  preprocessor: HaworthPreprocessor,
+  id: number,
+  excludeId?: number,
+): number[] {
+  return (
+    preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.neighbours ?? []
+  ).filter(
+    (neighbour) =>
+      neighbour !== excludeId &&
+      preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value.element !==
+        "H",
+  )
+}
+
+/**
+ * Walk a chain substituent outward from its already-placed first bond. Every
+ * linear continuation turns the same 60° off vertical toward the free side
+ * and is normalized to a full bond length, so long tails (AMP's phosphate,
+ * acetyl-CoA) march diagonally away from the ring instead of stacking into a
+ * clump. The walk stops before ANY ring (sugar or aromatic), at a protected
+ * atom (glycosidic bridge / another plan), and at branch points; a branch
+ * point's remaining subtree keeps the last rigid transform.
+ */
+function walkChainOutward(
+  preprocessor: HaworthPreprocessor,
+  startId: number,
+  previousId: number,
+  target: number,
+  bondLength: number,
+  ringMembers: Set<number>,
+  blocked: Set<number>,
+): void {
+  let currentId = startId
+  let previous = previousId
+  for (;;) {
+    const continuations = heavyNeighboursOf(preprocessor, currentId, previous)
+    if (continuations.length !== 1) {
+      return
+    }
+    const nextId = continuations[0]
+    if (ringMembers.has(nextId) || blocked.has(nextId)) {
+      return
+    }
+    const current = positionOf(preprocessor, currentId)
+    const next = positionOf(preprocessor, nextId)
+    if (current === undefined || next === undefined) {
+      return
+    }
+    const pivot = { x: current.x, y: current.y }
+    const heading = Math.atan2(next.y - pivot.y, next.x - pivot.x)
+    const subtree = collectSubtree(preprocessor, nextId, new Set(blocked))
+    rotatePositions(preprocessor, subtree, pivot, target - heading)
+    const rotatedNext = positionOf(preprocessor, nextId)
+    if (rotatedNext !== undefined) {
+      const shiftX = pivot.x + Math.cos(target) * bondLength - rotatedNext.x
+      const shiftY = pivot.y + Math.sin(target) * bondLength - rotatedNext.y
+      if (Math.abs(shiftX) > 0.01 || Math.abs(shiftY) > 0.01) {
+        for (const id of subtree) {
+          const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
+          if (vertex !== undefined) {
+            vertex.position.x += shiftX
+            vertex.position.y += shiftY
+          }
+        }
+      }
+    }
+    blocked.add(nextId)
+    previous = currentId
+    currentId = nextId
+  }
+}
+
 /**
  * A glycosidic-style connection between two recognized rings: a non-ring
  * atom (O, S, N — no element restriction) with exactly two heavy
@@ -283,13 +357,25 @@ function applyPlan(
   // Exocyclic substituents strictly vertical; subtrees rotated to follow.
   // Chain substituents (CH2OH, N-linked bases, phosphate tails) are biased
   // toward their free side relative to the ring centroid so they clear the
-  // ring. Bond lengths are side-aware: upward substituents are shortened so
-  // their labels never reach into the ring interior.
+  // ring. After that first bond, a linear chain is laid out as an outward
+  // 60° diagonal walk (each continuation turns the same 60° off vertical
+  // toward free space, full bond length): rings and branch points stop the
+  // walk, leaving their remaining subtree with the last rigid transform.
+  // Bond lengths are side-aware: plain upward substituents are shortened so
+  // their labels never reach into the ring interior; chain links (first bond
+  // and continuations) keep the full bond length.
   const blocked = new Set(protectedIds)
+  // Every ring atom (sugar AND aromatic base rings) fences the walk off.
+  const ringMembers = new Set<number>()
+  for (const ring of preprocessor.rings) {
+    for (const id of ring.members) {
+      ringMembers.add(id)
+    }
+  }
   const ringCenterWorld = centroid([...ringPositions.values()])
   const CHAIN_BIAS = Math.PI / 10 // tilt chains ±18° toward free space
   const UP_BOND_FACTOR = 0.9
-  /** Pure -CH2OH tails: continuation bond turns 60° off the chain, i.e. the textbook 120° interior angle. */
+  /** Every chain continuation turns 60° off vertical toward free space (the textbook 120° interior angle for -CH2OH tails). */
   const CH2OH_TURN = Math.PI / 3
   for (const atom of plan.atoms) {
     const anchor = ringPositions.get(atom.vertexId)
@@ -321,29 +407,15 @@ function applyPlan(
         if (atomInfo === undefined) {
           continue
         }
-        const continuationIds = (atomInfo.neighbours ?? []).filter(
-          (neighbour) =>
-            neighbour !== atom.vertexId &&
-            preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value
-              .element !== "H",
-        )
+        const continuationIds = heavyNeighboursOf(preprocessor, substituentId, atom.vertexId)
         const isChain = outwardX !== 0 && continuationIds.length > 0
         // Pure -CH2OH tail: the chain atom carries exactly one heavy
         // continuation (the terminal OH) — draw its first bond strictly
         // vertical (textbook), no tilt.
         const continuationId = isChain ? continuationIds[0] : undefined
-        const continuationAtom =
-          continuationId === undefined
-            ? undefined
-            : preprocessor.graph.vertices.find((c) => c.id === continuationId)
         const isPureTail =
-          continuationAtom !== undefined &&
-          (continuationAtom.neighbours ?? []).filter(
-            (n) =>
-              n !== substituentId &&
-              preprocessor.graph.vertices.find((candidate) => candidate.id === n)?.value.element !==
-                "H",
-          ).length === 0
+          continuationId !== undefined &&
+          heavyNeighboursOf(preprocessor, continuationId, substituentId).length === 0
         const isTiltedChain = isChain && !isPureTail
         // Rotate the whole subtree around the ring atom so the bond becomes
         // vertical (tilted chains lean 18° toward free space; pure CH2OH
@@ -358,7 +430,11 @@ function applyPlan(
 
         const rotated = preprocessor.graph.vertices.find((c) => c.id === substituentId)
         if (rotated !== undefined) {
-          const targetLength = bondLength * (group.direction < 0 ? UP_BOND_FACTOR : 1)
+          // Plain upward substituents stay short so labels clear the ring;
+          // chain links keep the full bond length because the walk now sends
+          // them outward (this also makes the first tail link match the rest).
+          const targetLength =
+            bondLength * (group.direction < 0 && !isTiltedChain ? UP_BOND_FACTOR : 1)
           const target = {
             x: anchor.x + Math.cos(desired) * targetLength,
             y: anchor.y + Math.sin(desired) * targetLength,
@@ -405,6 +481,23 @@ function applyPlan(
                 ),
             )
           }
+        } else if (isTiltedChain) {
+          // General chain: continue outward in 60°-off-vertical steps so
+          // the rest of the tail marches diagonally away from the ring.
+          // Rings, protected atoms and branch points stop the walk.
+          const walkTarget = Math.atan2(
+            group.direction,
+            (outwardX === 0 ? 1 : outwardX) * Math.tan(CH2OH_TURN),
+          )
+          walkChainOutward(
+            preprocessor,
+            substituentId,
+            atom.vertexId,
+            walkTarget,
+            bondLength,
+            ringMembers,
+            blocked,
+          )
         }
         blocked.add(substituentId)
       }

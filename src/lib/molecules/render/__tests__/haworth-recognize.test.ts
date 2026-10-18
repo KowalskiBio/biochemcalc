@@ -312,6 +312,87 @@ describe("applyHaworthLayout", () => {
     }
   })
 
+  it("walks the AMP 5′ phosphate up-left, away from the adenine base", () => {
+    const pipeline = pipelineOf(AMP_KEKULE)
+    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+    const plan = recognizeSugarRings(pipeline.snapshot)[0]
+    const graph = pipeline.preprocessor.graph
+    const elementOf = (id: number): string | undefined =>
+      graph.vertices.find((candidate) => candidate.id === id)?.value.element
+    const neighboursOf = (id: number): number[] =>
+      graph.vertices.find((candidate) => candidate.id === id)?.neighbours ?? []
+
+    // C4′ is the tail anchor; C5′ → O → P is the phosphate chain.
+    const ringSet = new Set(plan.cycle)
+    const anchorId = plan.cycle[plan.cycle.length - 2]
+    const c5Id = neighboursOf(anchorId).find((id) => !ringSet.has(id) && elementOf(id) === "C")
+    if (c5Id === undefined) {
+      throw new Error("AMP 5′ carbon missing")
+    }
+    const oxygenId = neighboursOf(c5Id).find((id) => id !== anchorId && elementOf(id) === "O")
+    if (oxygenId === undefined) {
+      throw new Error("AMP 5′ oxygen missing")
+    }
+    const phosphorusId = neighboursOf(oxygenId).find((id) => id !== c5Id && elementOf(id) === "P")
+    if (phosphorusId === undefined) {
+      throw new Error("AMP phosphorus missing")
+    }
+
+    const anchor = positionOf(pipeline.preprocessor, anchorId)
+    const c5 = positionOf(pipeline.preprocessor, c5Id)
+    const oxygen = positionOf(pipeline.preprocessor, oxygenId)
+    const phosphorus = positionOf(pipeline.preprocessor, phosphorusId)
+    const ringPositions = plan.cycle.map((id) => positionOf(pipeline.preprocessor, id))
+    const ringCentroid = {
+      x: ringPositions.reduce((sum, point) => sum + point.x, 0) / ringPositions.length,
+      y: ringPositions.reduce((sum, point) => sum + point.y, 0) / ringPositions.length,
+    }
+
+    // The phosphate marches out to the LEFT of C4′ and well clear of the
+    // base / sugar ring (not stacked underneath it).
+    expect(phosphorus.x).toBeLessThan(anchor.x)
+    expect(phosphorus.x).toBeLessThan(ringCentroid.x - 1.5 * BOND)
+
+    // The whole adenine system stays to the RIGHT of the sugar: every base
+    // ring atom is right of the ring centroid, and the base is right of the
+    // phosphate (unchanged right-side placement, now guarded).
+    const baseRings = pipeline.preprocessor.rings.filter(
+      (ring) => !ring.members.some((id) => ringSet.has(id)),
+    )
+    expect(baseRings.length).toBeGreaterThan(0)
+    const basePositions = baseRings.flatMap((ring) =>
+      ring.members.map((id) => positionOf(pipeline.preprocessor, id)),
+    )
+    for (const basePosition of basePositions) {
+      expect(basePosition.x).toBeGreaterThan(ringCentroid.x)
+    }
+    expect(Math.min(...basePositions.map((point) => point.x))).toBeGreaterThan(phosphorus.x)
+
+    // Every link of the tail is a full bond length: the first tilted link and
+    // both continuation links (which are normalized by the outward walk).
+    const distance = (from: { x: number; y: number }, to: { x: number; y: number }): number =>
+      Math.hypot(to.x - from.x, to.y - from.y)
+    for (const [from, to] of [
+      [anchor, c5],
+      [c5, oxygen],
+      [oxygen, phosphorus],
+    ] as const) {
+      expect(Math.abs(distance(from, to) - BOND)).toBeLessThanOrEqual(0.05 * BOND)
+    }
+
+    // Both continuation links turn 60° off vertical toward free space:
+    // atan2(−1, −tan 60°) = −150° (up-left).
+    const angleDegrees = (from: { x: number; y: number }, to: { x: number; y: number }): number =>
+      (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI
+    const expected = (Math.atan2(-1, -Math.tan(Math.PI / 3)) * 180) / Math.PI
+    for (const [from, to] of [
+      [c5, oxygen],
+      [oxygen, phosphorus],
+    ] as const) {
+      expect(Math.abs(angleDegrees(from, to) - expected)).toBeLessThanOrEqual(6)
+    }
+  })
+
   it("flags only the left ring-edge hydroxyls for the HO label convention", () => {
     const pipeline = pipelineOf(CANDIDATE_BETA_GALACTOSE)
     expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
