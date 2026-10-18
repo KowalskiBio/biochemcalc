@@ -27,6 +27,13 @@ import { parseProjection } from "@/lib/molecules/render/projection"
 export interface CategoryQuizConfig {
   molecules: QuizMolecule[]
   characteristics?: CharacteristicDef[]
+  /**
+   * Every characteristic candidate the adapter knows about, before filtering
+   * to the ones that qualified on this category alone. Used by the merged
+   * (topic-wide) config, where a larger molecule pool can supply the
+   * distractors a narrow predicate lacked.
+   */
+  characteristicCandidates?: CharacteristicDef[]
 }
 
 /** The predicate id a generic trait value quizzes on ("charge:positive"). */
@@ -101,7 +108,7 @@ function aminoAcidsQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
     },
   ]
 
-  return { molecules: quizMolecules, characteristics }
+  return { molecules: quizMolecules, characteristics, characteristicCandidates: characteristics }
 }
 
 /** Nitrogen bases: name↔structure only, ring-system distractor grouping. */
@@ -154,6 +161,7 @@ function saccharidesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   return {
     molecules: quizMolecules,
     characteristics: candidates.filter((def) => qualifies(quizMolecules, def.matches)),
+    characteristicCandidates: candidates,
   }
 }
 
@@ -202,22 +210,62 @@ function genericQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
       return molecule !== undefined && traitOf(molecule, key) === value
     }
 
-  const characteristics: CharacteristicDef[] = []
+  const candidates: CharacteristicDef[] = []
   for (const value of ["hydrophobic", "hydrophilic"]) {
     const matches = traitIs(TRAIT.polarity, value)
-    if (qualifies(quizMolecules, matches)) {
-      characteristics.push({ predicate: traitPredicate(TRAIT.polarity, value), matches })
-    }
+    candidates.push({ predicate: traitPredicate(TRAIT.polarity, value), matches })
   }
   for (const value of ["positive", "neutral", "negative"]) {
     const matches = traitIs(TRAIT.charge, value)
-    if (qualifies(quizMolecules, matches)) {
-      characteristics.push({ predicate: traitPredicate(TRAIT.charge, value), matches })
-    }
+    candidates.push({ predicate: traitPredicate(TRAIT.charge, value), matches })
   }
+  const characteristics = candidates.filter((def) => qualifies(quizMolecules, def.matches))
 
   return {
     molecules: quizMolecules,
+    characteristics: characteristics.length > 0 ? characteristics : undefined,
+    characteristicCandidates: candidates,
+  }
+}
+
+/**
+ * Build one quiz configuration out of several categories, for the
+ * topic-wide picker entry ("all categories in the topic"). Each entry is
+ * adapted by its own category adapter first, so per-category quiz letters and
+ * distractor classes survive the merge; the characteristics are then
+ * re-qualified against the merged molecule pool, where the extra molecules
+ * often supply the distractors a narrowly-scoped predicate lacked.
+ */
+export function getMergedQuizConfig(
+  entries: { categoryId: string; molecules: Biomolecule[] }[],
+): CategoryQuizConfig | undefined {
+  const configs: CategoryQuizConfig[] = []
+  for (const entry of entries) {
+    const config = getCategoryQuizConfig(entry.categoryId, entry.molecules)
+    if (config !== undefined) configs.push(config)
+  }
+  if (configs.length === 0) {
+    return undefined
+  }
+
+  // Molecule ids are the quiz identity; a defensive dedupe keeps the first
+  // occurrence if two entries ever point at the same molecule.
+  const molecules: QuizMolecule[] = []
+  const seen = new Set<string>()
+  for (const config of configs) {
+    for (const molecule of config.molecules) {
+      if (seen.has(molecule.id)) continue
+      seen.add(molecule.id)
+      molecules.push(molecule)
+    }
+  }
+
+  const characteristics = configs
+    .flatMap((config) => config.characteristicCandidates ?? config.characteristics ?? [])
+    .filter((definition) => qualifies(molecules, definition.matches))
+
+  return {
+    molecules,
     characteristics: characteristics.length > 0 ? characteristics : undefined,
   }
 }

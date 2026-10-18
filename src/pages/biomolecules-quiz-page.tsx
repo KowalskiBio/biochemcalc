@@ -5,7 +5,6 @@ import { Link, Navigate, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { Slider } from "@/components/ui/slider"
 import {
   Select,
   SelectContent,
@@ -14,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Slider } from "@/components/ui/slider"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
 import { biomoleculesApi } from "@/lib/biomolecules-api"
@@ -23,6 +23,7 @@ import {
   generatableQuizTypes,
   generateQuizSession,
   getCategoryQuizConfig,
+  getMergedQuizConfig,
   isOpenAnswerCorrect,
   normalizeQuizAnswer,
   type QuizMode,
@@ -39,6 +40,8 @@ import {
   useBiomoleculeDataStore,
   useCategoryNames,
   useMoleculeCategories,
+  useMoleculeTopics,
+  useTopicText,
 } from "@/stores/biomolecule-data-store"
 
 const quizStrings = cs.biomolekuly.quiz
@@ -51,6 +54,11 @@ const QUESTION_COUNT_DEFAULT = 10
 
 const QUIZ_MODES: QuizMode[] = ["easy", "hard"]
 
+/** Category-select sentinel for "every category in the chosen topic". */
+const ALL_CATEGORIES_VALUE = "*"
+/** Topic-select sentinel for the "Ostatní" (no topic) pseudo-topic. */
+const NO_TOPIC_SELECT_VALUE = "__no_topic__"
+
 const FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
@@ -59,6 +67,15 @@ interface CategoryQuizEntry {
   config: CategoryQuizConfig
   easy: QuizQuestionType[]
   hard: QuizQuestionType[]
+}
+
+/** Derive the per-mode type lists for a config (single category or merged topic). */
+function createQuizEntry(config: CategoryQuizConfig): CategoryQuizEntry {
+  return {
+    config,
+    easy: generatableQuizTypes(config.molecules, config.characteristics),
+    hard: generatableQuizTypes(config.molecules, config.characteristics, "hard"),
+  }
 }
 
 /** Text options carry no display string — resolve name/letter from the config molecules. */
@@ -266,6 +283,9 @@ function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
 interface SetupScreenProps {
   backHref: string
   backLabel: string
+  topicOptions: { value: string; label: string }[]
+  selectedTopic: string
+  onSelectTopic: (value: string) => void
   categoryOptions: { slug: string; name: string }[]
   selectedCategory: string | null
   onSelectCategory: (slug: string) => void
@@ -282,6 +302,9 @@ interface SetupScreenProps {
 function SetupScreen({
   backHref,
   backLabel,
+  topicOptions,
+  selectedTopic,
+  onSelectTopic,
   categoryOptions,
   selectedCategory,
   onSelectCategory,
@@ -307,6 +330,23 @@ function SetupScreen({
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           {quizStrings.title}
         </h1>
+      </div>
+
+      {/* Topic */}
+      <div className="space-y-2">
+        <MicroLabel>{quizStrings.topicPickerLabel}</MicroLabel>
+        <Select value={selectedTopic} onValueChange={onSelectTopic}>
+          <SelectTrigger aria-label={quizStrings.topicPickerLabel} className="sm:w-80">
+            <SelectValue placeholder={quizStrings.topicPickerLabel} />
+          </SelectTrigger>
+          <SelectContent>
+            {topicOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Category */}
@@ -436,6 +476,7 @@ function SetupScreen({
 
 interface QuestionScreenProps {
   backHref: string
+  backLabel: string
   question: QuizQuestion
   molecules: QuizMolecule[]
   index: number
@@ -450,6 +491,7 @@ interface QuestionScreenProps {
 
 function QuestionScreen({
   backHref,
+  backLabel,
   question,
   molecules,
   index,
@@ -473,7 +515,7 @@ function QuestionScreen({
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <div className="flex items-center justify-between gap-4">
-        <BackLink href={backHref} label={quizStrings.backToCategory} />
+        <BackLink href={backHref} label={backLabel} />
         <span className="whitespace-nowrap font-mono tabular text-sm text-muted-foreground">
           {progressText}
         </span>
@@ -537,12 +579,13 @@ interface ResultsScreenProps {
     questions: QuizQuestion[]
     answers: boolean[]
   }
-  categoryId: string
+  backHref: string
+  backLabel: string
   mode: QuizMode
   onRestart: () => void
 }
 
-function ResultsScreen({ session, categoryId, mode, onRestart }: ResultsScreenProps) {
+function ResultsScreen({ session, backHref, backLabel, mode, onRestart }: ResultsScreenProps) {
   const total = session.questions.length
   const score = session.answers.filter(Boolean).length
   const percentage = total === 0 ? 0 : Math.round((score / total) * 100)
@@ -592,7 +635,7 @@ function ResultsScreen({ session, categoryId, mode, onRestart }: ResultsScreenPr
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={onRestart}>{quizStrings.tryAgain}</Button>
         <Button variant="outline" asChild>
-          <Link to={`/biomolekuly/${categoryId}`}>{quizStrings.backToCategory}</Link>
+          <Link to={backHref}>{backLabel}</Link>
         </Button>
       </div>
     </div>
@@ -606,6 +649,8 @@ export function BiomoleculesQuizPage() {
   const categories = useMoleculeCategories()
   const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const nameOf = useCategoryNames()
+  const topics = useMoleculeTopics()
+  const { nameOf: topicNameOf } = useTopicText()
 
   // Each category's quiz material, used for the picker's eligibility filter
   // and (for the chosen category) the chips and sessions themselves.
@@ -628,6 +673,9 @@ export function BiomoleculesQuizPage() {
 
   const [mode, setMode] = useState<QuizMode>("easy")
   const [slug, setSlug] = useState<string | null>(paramSlug)
+  // The topic step above the category picker. `null` is the "Ostatní"
+  // pseudo-topic that collects categories without a (known) topic.
+  const [topicSlug, setTopicSlug] = useState<string | null>(null)
   // null = "all of the above" — the chips start fully selected, but only
   // once the category+mode pair lands (before that allTypes is still empty).
   const [chosenTypes, setChosenTypes] = useState<QuizQuestionType[] | null>(null)
@@ -641,17 +689,85 @@ export function BiomoleculesQuizPage() {
   } | null>(null)
   const [session, dispatch] = useReducer(quizSessionReducer, EMPTY_QUESTIONS, createQuizSession)
 
+  // Categories grouped exactly like the hub: a category pointing at a topic
+  // that isn't in the payload falls into the "Ostatní" bucket.
+  const knownTopicSlugs = new Set(topics.map((topic) => topic.slug))
+  const categoriesByTopic = new Map<string, typeof categories>()
+  for (const category of categories) {
+    if (!category.topicSlug || !knownTopicSlugs.has(category.topicSlug)) continue
+    const bucket = categoriesByTopic.get(category.topicSlug) ?? []
+    bucket.push(category)
+    categoriesByTopic.set(category.topicSlug, bucket)
+  }
+  const ungroupedCategories = categories.filter(
+    (category) => !category.topicSlug || !knownTopicSlugs.has(category.topicSlug),
+  )
+
+  const topicCategories = (topic: string | null) =>
+    topic === null ? ungroupedCategories : (categoriesByTopic.get(topic) ?? [])
+  const hasTypesInMode = (categorySlug: string) =>
+    (quizByCategory.get(categorySlug)?.[mode].length ?? 0) > 0
+  const topicOfCategory = (categorySlug: string): string | null => {
+    const category = categories.find((candidate) => candidate.slug === categorySlug)
+    return category?.topicSlug && knownTopicSlugs.has(category.topicSlug)
+      ? category.topicSlug
+      : null
+  }
+
+  // The topic step only offers topics whose categories can quiz in the
+  // current mode; the currently selected topic stays listed even when a mode
+  // change would otherwise hide it. "Ostatní" sits at the end.
+  const availableTopicSlugs = topics
+    .filter((topic) =>
+      (categoriesByTopic.get(topic.slug) ?? []).some((category) => hasTypesInMode(category.slug)),
+    )
+    .map((topic) => topic.slug)
+  const hasUngroupedQuiz = ungroupedCategories.some((category) => hasTypesInMode(category.slug))
+  const defaultTopicSlug = availableTopicSlugs[0] ?? null
+
+  const [prevParamSlug, setPrevParamSlug] = useState(paramSlug)
+  // A deep link arrives with its category's topic already selected; the plain
+  // picker only preselects a topic (the category keeps its "choose one"
+  // state until the student picks a category or changes the topic).
+  // Adjusting during render keeps the stale (empty) selection from painting.
+  const [topicReady, setTopicReady] = useState(false)
+  if (loaded && !topicReady) {
+    setTopicReady(true)
+    setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
+  }
+
   // Navigating between deep links (or off one) re-arms the setup
   // (adjust-state-during-render, so the stale selection never commits).
-  const [prevParamSlug, setPrevParamSlug] = useState(paramSlug)
   if (prevParamSlug !== paramSlug) {
     setPrevParamSlug(paramSlug)
     setSlug(paramSlug)
+    setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
     setChosenTypes(null)
     setActiveQuiz(null)
   }
 
-  const entry = slug === null ? undefined : quizByCategory.get(slug)
+  // The topic-wide entry: each eligible category keeps its own adapter
+  // output (letters, distractor classes), then the pool and its
+  // characteristics are merged and re-qualified.
+  const mergedEntry = (() => {
+    if (slug !== ALL_CATEGORIES_VALUE) return undefined
+    const sources = topicCategories(topicSlug).filter((category) => hasTypesInMode(category.slug))
+    if (sources.length === 0) return undefined
+    const config = getMergedQuizConfig(
+      sources.map((category) => ({
+        categoryId: category.slug,
+        molecules: allMolecules.filter((molecule) => molecule.categorySlug === category.slug),
+      })),
+    )
+    return config ? createQuizEntry(config) : undefined
+  })()
+
+  const entry =
+    slug === null
+      ? undefined
+      : slug === ALL_CATEGORIES_VALUE
+        ? mergedEntry
+        : quizByCategory.get(slug)
   const allTypes = entry ? entry[mode] : []
   const selectedTypes = chosenTypes ?? allTypes
 
@@ -684,6 +800,15 @@ export function BiomoleculesQuizPage() {
     setSlug(next)
     setChosenTypes(null)
   }
+  // Changing the topic re-arms the category step on the topic-wide run; the
+  // topic's own categories stay one click away below it.
+  const selectTopic = (value: string) => {
+    const next = value === NO_TOPIC_SELECT_VALUE ? null : value
+    if (next === topicSlug) return
+    setTopicSlug(next)
+    setSlug(ALL_CATEGORIES_VALUE)
+    setChosenTypes(null)
+  }
   const selectMode = (next: QuizMode) => {
     if (next === mode) return
     setMode(next)
@@ -695,6 +820,8 @@ export function BiomoleculesQuizPage() {
   const recordedQuestionsRef = useRef<QuizQuestion[] | null>(null)
   useEffect(() => {
     if (!activeQuiz || !session.finished || session.questions.length === 0) return
+    // Topic-wide runs aren't scored: leaderboards stay per category.
+    if (activeQuiz.slug === ALL_CATEGORIES_VALUE) return
     if (recordedQuestionsRef.current === session.questions) return
     recordedQuestionsRef.current = session.questions
     const correct = session.answers.filter(Boolean).length
@@ -750,20 +877,38 @@ export function BiomoleculesQuizPage() {
   }
 
   if (!activeQuiz) {
-    // The picker lists categories that have at least one generatable type in
-    // the chosen mode; a deep-linked preselection stays visible even when the
-    // mode filter would hide it (the types section explains with a hint).
-    const categoryOptions = categories
-      .filter(
-        (category) =>
-          category.slug === slug || (quizByCategory.get(category.slug)?.[mode].length ?? 0) > 0,
-      )
-      .map((category) => ({ slug: category.slug, name: nameOf(category.slug) }))
+    // The topic step lists topics with quiz material in the active mode (the
+    // selected one stays put across a mode switch). The category step lists
+    // that topic's eligible categories, "all of them" first; a deep-linked
+    // preselection stays visible even when the mode filter would hide it.
+    const topicOptions = topics
+      .filter((topic) => availableTopicSlugs.includes(topic.slug) || topic.slug === topicSlug)
+      .map((topic) => ({ value: topic.slug, label: topicNameOf(topic.slug) }))
+    if (hasUngroupedQuiz || topicSlug === null) {
+      topicOptions.push({ value: NO_TOPIC_SELECT_VALUE, label: cs.biomolekuly.noTopic })
+    }
+
+    const categoryOptions = [
+      { slug: ALL_CATEGORIES_VALUE, name: quizStrings.allCategoriesInTopic },
+      ...topicCategories(topicSlug)
+        .filter((category) => category.slug === slug || hasTypesInMode(category.slug))
+        .map((category) => ({ slug: category.slug, name: nameOf(category.slug) })),
+    ]
+
+    const backHref =
+      slug === null || slug === ALL_CATEGORIES_VALUE ? "/biomolekuly" : `/biomolekuly/${slug}`
+    const backLabel =
+      slug === null || slug === ALL_CATEGORIES_VALUE
+        ? cs.biomolekuly.backToCategories
+        : quizStrings.backToCategory
 
     return (
       <SetupScreen
-        backHref={slug === null ? "/biomolekuly" : `/biomolekuly/${slug}`}
-        backLabel={slug === null ? cs.biomolekuly.backToCategories : quizStrings.backToCategory}
+        backHref={backHref}
+        backLabel={backLabel}
+        topicOptions={topicOptions}
+        selectedTopic={topicSlug ?? NO_TOPIC_SELECT_VALUE}
+        onSelectTopic={selectTopic}
         categoryOptions={categoryOptions}
         selectedCategory={slug}
         onSelectCategory={selectCategory}
@@ -779,11 +924,23 @@ export function BiomoleculesQuizPage() {
     )
   }
 
+  // A topic-wide run has no category page to return to; the picker is its
+  // home (the URL stays on the plain practice route throughout).
+  const runBackHref =
+    activeQuiz.slug === ALL_CATEGORIES_VALUE
+      ? "/biomolekuly/procvicovani"
+      : `/biomolekuly/${activeQuiz.slug}`
+  const runBackLabel =
+    activeQuiz.slug === ALL_CATEGORIES_VALUE
+      ? cs.biomolekuly.backToCategories
+      : quizStrings.backToCategory
+
   if (session.finished) {
     return (
       <ResultsScreen
         session={session}
-        categoryId={activeQuiz.slug}
+        backHref={runBackHref}
+        backLabel={runBackLabel}
         mode={activeQuiz.mode}
         onRestart={startQuiz}
       />
@@ -811,7 +968,8 @@ export function BiomoleculesQuizPage() {
 
   return (
     <QuestionScreen
-      backHref={`/biomolekuly/${activeQuiz.slug}`}
+      backHref={runBackHref}
+      backLabel={runBackLabel}
       question={question}
       molecules={activeQuiz.config.molecules}
       index={session.index}

@@ -534,6 +534,8 @@ export const cs = {
       countLabel: "Počet otázek",
       categoryLabel: "Kategorie",
       categoryPlaceholder: "Vyberte kategorii",
+      topicPickerLabel: "Téma",
+      allCategoriesInTopic: "Všechny kategorie v tématu",
       modeLabel: "Obtížnost",
       mode: {
         easy: "Lehká",

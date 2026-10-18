@@ -5,7 +5,7 @@
 // this file when it changes.
 
 import type { Biomolecule } from "@/lib/biomolecules-api"
-import { AMINO_ACIDS_SLUG, NITROGEN_BASES_SLUG } from "@/lib/molecules"
+import { AMINO_ACIDS_SLUG, NITROGEN_BASES_SLUG, SACCHARIDES_SLUG } from "@/lib/molecules"
 
 interface SeedMolecule {
   slug: string
@@ -363,3 +363,63 @@ export const TEST_NITROGEN_BASES: Biomolecule[] = toBiomolecules(
   NITROGEN_BASES_SLUG,
   NITROGEN_BASE_SEED,
 )
+
+const SACCHARIDE_SEED: SeedMolecule[] = [
+  {
+    slug: "glukoza-a",
+    name: "α-D-glukóza",
+    smiles: "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O)O",
+    traits: { ringForm: "pyranose", anomer: "alpha" },
+  },
+  {
+    slug: "glukoza-b",
+    name: "β-D-glukóza",
+    smiles: "C([C@@H]1[C@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O",
+    traits: { ringForm: "pyranose", anomer: "beta" },
+  },
+  {
+    slug: "galaktoza-b",
+    name: "β-D-galaktóza",
+    smiles: "C([C@@H]1[C@@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O",
+    traits: { ringForm: "pyranose", anomer: "beta" },
+  },
+  {
+    slug: "manoza-a",
+    name: "α-D-manóza",
+    smiles: "C([C@@H]1[C@H]([C@@H]([C@@H]([C@H](O1)O)O)O)O)O",
+    traits: { ringForm: "pyranose", anomer: "alpha" },
+  },
+  {
+    slug: "fruktoza-b",
+    name: "β-D-fruktóza",
+    smiles: "OC[C@]1(O)[C@@H](O)[C@@H](O)[C@@H](CO)O1",
+    traits: { ringForm: "furanose", anomer: "beta" },
+  },
+  {
+    slug: "riboza-b",
+    name: "β-D-ribóza",
+    smiles: "OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O",
+    traits: { ringForm: "furanose", anomer: "beta" },
+  },
+  {
+    slug: "deoxyriboza-b",
+    name: "2-deoxy-β-D-ribóza",
+    smiles: "OC[C@H]1O[C@@H](O)C[C@@H]1O",
+    traits: { ringForm: "furanose", anomer: "beta", deoxy: "true" },
+  },
+  {
+    slug: "adenosin",
+    name: "Adenosin",
+    smiles: "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O",
+    traits: { ringForm: "furanose", anomer: "beta" },
+  },
+  {
+    slug: "amp",
+    name: "Adenosinmonofosfát (AMP)",
+    smiles: "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O",
+    traits: { ringForm: "furanose", anomer: "beta" },
+  },
+]
+
+/** The 9 seeded saccharides/nucleotides as frontend Biomolecule rows. */
+export const TEST_SACCHARIDES: Biomolecule[] = toBiomolecules(SACCHARIDES_SLUG, SACCHARIDE_SEED)
