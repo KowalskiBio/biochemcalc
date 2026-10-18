@@ -54,11 +54,16 @@ function place(preprocessor: HaworthPreprocessor, vertexId: number, target: Poin
   }
 }
 
+/** Read a vertex's current (post-placement) position. */
+function positionOf(preprocessor: HaworthPreprocessor, vertexId: number): Point | undefined {
+  return preprocessor.graph.vertices.find((candidate) => candidate.id === vertexId)?.position
+}
+
 function centroid(points: Point[]): Point {
-  const sum = points.reduce(
-    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
-    { x: 0, y: 0 },
-  )
+  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), {
+    x: 0,
+    y: 0,
+  })
   return { x: sum.x / points.length, y: sum.y / points.length }
 }
 
@@ -84,7 +89,7 @@ function rotatePositions(
   }
 }
 
-/** DFS from `start` without re-entering the ring atoms of `plan`. */
+/** DFS from `start`, never entering a blocked atom (ring atoms / bridges). */
 function collectSubtree(
   preprocessor: HaworthPreprocessor,
   start: number,
@@ -93,7 +98,8 @@ function collectSubtree(
 ): number[] {
   out.push(start)
   blocked.add(start)
-  for (const neighbour of preprocessor.graph.vertices.find((v) => v.id === start)?.neighbours ?? []) {
+  for (const neighbour of preprocessor.graph.vertices.find((v) => v.id === start)?.neighbours ??
+    []) {
     if (!blocked.has(neighbour)) {
       collectSubtree(preprocessor, neighbour, blocked, out)
     }
@@ -101,44 +107,167 @@ function collectSubtree(
   return out
 }
 
-/** Apply one recognized plan onto the preprocessor's coordinates. */
-function applyPlan(
+/**
+ * A glycosidic-style connection between two recognized rings: a non-ring
+ * atom (O, S, N — no element restriction) with exactly two heavy
+ * neighbours, each a ring atom of a different plan. `planA` is the lower
+ * plan index (links are recorded first-come, and plans are scanned in
+ * order), so a BFS from plans[0] walks the whole connected glycan.
+ */
+interface SugarLink {
+  planA: number
+  anchorA: number
+  bridge: number
+  planB: number
+  anchorB: number
+}
+
+function detectSugarLinks(
+  preprocessor: HaworthPreprocessor,
+  plans: SugarRingRecognition[],
+): SugarLink[] {
+  const ringPlanOf = new Map<number, number>()
+  plans.forEach((plan, planIndex) => {
+    for (const id of plan.cycle) {
+      ringPlanOf.set(id, planIndex)
+    }
+  })
+  const elementOf = (id: number): string | undefined =>
+    preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.value.element
+  const links: SugarLink[] = []
+  const seenBridges = new Set<number>()
+  plans.forEach((plan, planA) => {
+    for (const anchorA of plan.cycle) {
+      const neighbours =
+        preprocessor.graph.vertices.find((candidate) => candidate.id === anchorA)?.neighbours ?? []
+      for (const bridge of neighbours) {
+        if (ringPlanOf.has(bridge) || seenBridges.has(bridge)) {
+          continue
+        }
+        const bridgeNeighbours =
+          preprocessor.graph.vertices.find((candidate) => candidate.id === bridge)?.neighbours ?? []
+        const heavy = bridgeNeighbours.filter((id) => elementOf(id) !== "H")
+        if (heavy.length !== 2 || !heavy.includes(anchorA)) {
+          continue
+        }
+        const anchorB = heavy.find((id) => id !== anchorA)
+        if (anchorB === undefined) {
+          continue
+        }
+        const planB = ringPlanOf.get(anchorB)
+        if (planB === undefined || planB === planA) {
+          continue
+        }
+        seenBridges.add(bridge)
+        links.push({ planA, anchorA, bridge, planB, anchorB })
+      }
+    }
+  })
+  return links
+}
+
+/** Snap one ring onto the canonical polygon at its current centroid. */
+function placeCanonicalPlan(
   preprocessor: HaworthPreprocessor,
   plan: SugarRingRecognition,
   bondLength: number,
-): void {
+): Map<number, Point> {
   const polygon = HAWORTH_POLYGON[plan.cycle.length as 5 | 6]
-  const ringIds = plan.cycle
-  const currentPositions = ringIds.map((id) => {
-    const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
-    return vertex?.position ?? { x: 0, y: 0 }
-  })
   const polygonCenter = centroid(polygon)
+  const currentPositions = plan.cycle.map((id) => positionOf(preprocessor, id) ?? { x: 0, y: 0 })
   const offset = {
     x: centroid(currentPositions).x - polygonCenter.x * bondLength,
     y: centroid(currentPositions).y - polygonCenter.y * bondLength,
   }
-
-  // 1. Ring atoms onto the canonical polygon.
-  const ringPositions = new Map<number, Point>()
-  ringIds.forEach((vertexId, role) => {
+  const positions = new Map<number, Point>()
+  plan.cycle.forEach((vertexId, role) => {
     const target = {
       x: offset.x + polygon[role].x * bondLength,
       y: offset.y + polygon[role].y * bondLength,
     }
-    ringPositions.set(vertexId, target)
+    positions.set(vertexId, target)
     place(preprocessor, vertexId, target)
   })
-  // 2. Exocyclic substituents strictly vertical; subtrees rotated to follow.
+  return positions
+}
+
+/**
+ * Place the acceptor ring so its anchor vertex sits one full bond on the
+ * free side of the bridge. If the canonical polygon puts the anchor vertex
+ * on the wrong x side (facing away from the bridge) the polygon is mirrored
+ * in x about its centroid — Haworth up/down sides are y-based, so mirroring
+ * x preserves the stereochemistry reading and yields the textbook flipped
+ * furanose of sucrose.
+ */
+function placeLinkedPlan(
+  preprocessor: HaworthPreprocessor,
+  planB: SugarRingRecognition,
+  anchorB: number,
+  bridgePosition: Point,
+  direction: number,
+  bondLength: number,
+): Map<number, Point> {
+  const polygon = HAWORTH_POLYGON[planB.cycle.length as 5 | 6]
+  const polygonCenter = centroid(polygon)
+  const role = planB.cycle.indexOf(anchorB)
+  const polygonAnchor = polygon[role] ?? polygonCenter
+  const anchorSide = Math.sign(polygonAnchor.x - polygonCenter.x)
+  const mirror = anchorSide !== 0 && anchorSide === direction
+  const localAnchor = mirror
+    ? { x: 2 * polygonCenter.x - polygonAnchor.x, y: polygonAnchor.y }
+    : polygonAnchor
+  const targetAnchor = {
+    x: bridgePosition.x + direction * bondLength,
+    y: bridgePosition.y,
+  }
+  const offset = {
+    x: targetAnchor.x - localAnchor.x * bondLength,
+    y: targetAnchor.y - localAnchor.y * bondLength,
+  }
+  const positions = new Map<number, Point>()
+  planB.cycle.forEach((vertexId, index) => {
+    const local = polygon[index]
+    const mirrored = mirror ? { x: 2 * polygonCenter.x - local.x, y: local.y } : local
+    const target = {
+      x: offset.x + mirrored.x * bondLength,
+      y: offset.y + mirrored.y * bondLength,
+    }
+    positions.set(vertexId, target)
+    place(preprocessor, vertexId, target)
+  })
+  return positions
+}
+
+/**
+ * Verticalize one plan's exocyclic substituents after EVERY ring has been
+ * placed. `protectedIds` covers all plans' ring atoms plus the glycosidic
+ * bridges: subtree walks stop before a neighbouring ring and pre-placed
+ * bridges are skipped outright, so a disaccharide's second ring can no
+ * longer be rotated by the first ring's substituent pass.
+ */
+function applyPlan(
+  preprocessor: HaworthPreprocessor,
+  plan: SugarRingRecognition,
+  bondLength: number,
+  protectedIds: Set<number>,
+): void {
+  const ringIds = plan.cycle
+  // Final coordinates from the global placement pass (never a pre-placement
+  // snapshot — a linked ring may have been moved after the root snapped).
+  const ringPositions = new Map<number, Point>()
+  for (const id of ringIds) {
+    const position = positionOf(preprocessor, id)
+    if (position !== undefined) {
+      ringPositions.set(id, { x: position.x, y: position.y })
+    }
+  }
+  // Exocyclic substituents strictly vertical; subtrees rotated to follow.
   // Chain substituents (CH2OH, N-linked bases, phosphate tails) are biased
   // toward their free side relative to the ring centroid so they clear the
   // ring. Bond lengths are side-aware: upward substituents are shortened so
   // their labels never reach into the ring interior.
-  const blocked = new Set(ringIds)
-  const ringCenterWorld = {
-    x: offset.x + polygonCenter.x * bondLength,
-    y: offset.y + polygonCenter.y * bondLength,
-  }
+  const blocked = new Set(protectedIds)
+  const ringCenterWorld = centroid([...ringPositions.values()])
   const CHAIN_BIAS = Math.PI / 10 // tilt chains ±18° toward free space
   const UP_BOND_FACTOR = 0.9
   /** Pure -CH2OH tails: continuation bond turns 60° off the chain, i.e. the textbook 120° interior angle. */
@@ -155,6 +284,11 @@ function applyPlan(
     ]
     for (const group of groups) {
       for (const substituentId of group.ids) {
+        // Glycosidic bridges were positioned by the link pass — rotating or
+        // shifting their subtree here would drag the whole other ring.
+        if (protectedIds.has(substituentId)) {
+          continue
+        }
         const atomInfo = preprocessor.graph.vertices.find(
           (candidate) => candidate.id === substituentId,
         )
@@ -181,8 +315,8 @@ function applyPlan(
           (continuationAtom.neighbours ?? []).filter(
             (n) =>
               n !== substituentId &&
-              preprocessor.graph.vertices.find((candidate) => candidate.id === n)?.value
-                .element !== "H",
+              preprocessor.graph.vertices.find((candidate) => candidate.id === n)?.value.element !==
+                "H",
           ).length === 0
         const isTiltedChain = isChain && !isPureTail
         // Rotate the whole subtree around the ring atom so the bond becomes
@@ -251,7 +385,7 @@ function applyPlan(
     }
   }
 
-  // 3. Blank stereo wedges on every touched bond (Haworth draws plain lines).
+  // Blank stereo wedges on every touched bond (Haworth draws plain lines).
   const touched = new Set<number>([...ringIds])
   for (const atom of plan.atoms) {
     for (const id of [...atom.up, ...atom.down]) {
@@ -264,7 +398,7 @@ function applyPlan(
     }
   }
 
-  // 4. Recompute the ring center (aromatic circle / label placement).
+  // Recompute the ring center (aromatic circle / label placement).
   const ring = preprocessor.rings.find((candidate) => candidate.id === plan.ringId)
   const newPositions = ringIds
     .map((id) => preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.position)
@@ -291,8 +425,98 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
   // (nucleotide bases): alternating double bonds instead of inner circles.
   kekulizeAromaticRings(preprocessor)
   const bondLength = preprocessor.opts?.bondLength ?? 24
+
+  // Glycosidic links between recognized rings (O / S / N bridges alike).
+  // Every ring atom and every bridge is protected for the whole pass: ring
+  // placement coordinates all rings first, then each substituent walk is
+  // fenced off from every ring, not just its own.
+  const links = detectSugarLinks(preprocessor, plans)
+  const protectedIds = new Set<number>()
   for (const plan of plans) {
-    applyPlan(preprocessor, plan, bondLength)
+    for (const id of plan.cycle) {
+      protectedIds.add(id)
+    }
+  }
+  for (const link of links) {
+    protectedIds.add(link.bridge)
+  }
+
+  // 1. Ring placement: BFS over links, BEFORE any substituent layout.
+  const placed = plans.map(() => false)
+  const ringPositions = new Map<number, Point>()
+  const remember = (positions: Map<number, Point>): void => {
+    for (const [id, position] of positions) {
+      ringPositions.set(id, position)
+    }
+  }
+  // Root ring: canonical polygon at its current library-layout centroid.
+  remember(placeCanonicalPlan(preprocessor, plans[0], bondLength))
+  placed[0] = true
+  const queue: number[] = [0]
+  while (queue.length > 0) {
+    const planIndex = queue.shift()
+    if (planIndex === undefined) {
+      break
+    }
+    const plan = plans[planIndex]
+    for (const link of links) {
+      if (link.planA !== planIndex || placed[link.planB]) {
+        continue
+      }
+      const anchorAtom = plan.atoms.find((atom) => atom.vertexId === link.anchorA)
+      // Anomeric up/down side; unknown fallback is down (+1).
+      const side = anchorAtom?.up.includes(link.bridge)
+        ? -1
+        : anchorAtom?.down.includes(link.bridge)
+          ? 1
+          : 1
+      const anchor = positionOf(preprocessor, link.anchorA) ?? { x: 0, y: 0 }
+      const placedRing = plan.cycle
+        .map((id) => ringPositions.get(id))
+        .filter((position): position is Point => position !== undefined)
+      const centerA = centroid(placedRing)
+      let outwardX = Math.sign(anchor.x - centerA.x)
+      if (outwardX === 0) {
+        outwardX = 1
+      }
+      // Existing chain-bias tilt (18°), honoring the anomeric up/down side.
+      const desired =
+        outwardX !== 0 ? Math.atan2(side, outwardX * Math.tan(Math.PI / 10)) : (side * Math.PI) / 2
+      const length = bondLength * (side < 0 ? 0.9 : 1)
+      const bridgePosition = {
+        x: anchor.x + Math.cos(desired) * length,
+        y: anchor.y + Math.sin(desired) * length,
+      }
+      place(preprocessor, link.bridge, bridgePosition)
+      // Acceptor lands one full bond on the free side of the bridge; its
+      // polygon is x-mirrored when the anchor vertex faces the wrong way.
+      remember(
+        placeLinkedPlan(
+          preprocessor,
+          plans[link.planB],
+          link.anchorB,
+          bridgePosition,
+          outwardX,
+          bondLength,
+        ),
+      )
+      placed[link.planB] = true
+      queue.push(link.planB)
+    }
+  }
+  // Rings not reachable through a link keep the plain monosaccharide
+  // treatment (canonical at current centroid, no mirror).
+  plans.forEach((plan, index) => {
+    if (placed[index]) {
+      return
+    }
+    remember(placeCanonicalPlan(preprocessor, plan, bondLength))
+    placed[index] = true
+  })
+
+  // 2. Substituent pass + per-plan wedges/ring centre, after ALL rings land.
+  for (const plan of plans) {
+    applyPlan(preprocessor, plan, bondLength, protectedIds)
   }
   return true
 }
