@@ -487,6 +487,21 @@ export const cs = {
     },
     backToCategories: "Zpět na kategorie",
     categoryCount: "{count} molekul",
+    topicsHeading: "Témata",
+    noTopic: "Ostatní",
+    newTopic: "Nové téma",
+    editTopic: "Upravit téma",
+    deleteTopic: "Smazat téma",
+    deleteTopicConfirm: "Opravdu smazat toto téma? Kategorie v něm zůstanou, jen ztratí zařazení.",
+    topicLabel: "Téma",
+    newTopicDescription: "Vytvořte nové téma pro seskupení kategorií.",
+    editTopicDescription: "Upravte název a popis tématu.",
+    topicNameLabel: "Název tématu",
+    topicNamePlaceholder: "např. Vitamíny",
+    topicDescriptionLabel: "Popis (nepovinný)",
+    topicDescriptionPlaceholder: "Stručný popis tématu",
+    createTopic: "Vytvořit téma",
+    createTopicSuccess: "Téma vytvořeno.",
     categories: {
       aminokyseliny: {
         name: "Aminokyseliny",
@@ -495,6 +510,20 @@ export const cs = {
       "dusikate-baze": {
         name: "Dusíkaté báze",
         description: "Pět základních bází DNA a RNA — názvy, zkratky a strukturní vzorce.",
+      },
+    },
+    topics: {
+      aminokyseliny: {
+        name: "Aminokyseliny",
+        description: "Proteinogenní aminokyseliny a jejich vlastnosti.",
+      },
+      "nukleove-kyseliny": {
+        name: "Nukleové kyseliny",
+        description: "Dusíkaté báze a nukleotidy — stavební kameny nukleových kyselin.",
+      },
+      sacharidy: {
+        name: "Sacharidy",
+        description: "Monosacharidy a další cukry — struktura a označení.",
       },
     },
     quiz: {

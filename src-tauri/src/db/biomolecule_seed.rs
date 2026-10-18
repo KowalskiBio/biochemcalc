@@ -14,11 +14,42 @@ pub const AMINO_ACIDS_SLUG: &str = "aminokyseliny";
 pub const NITROGEN_BASES_SLUG: &str = "dusikate-baze";
 pub const SACCHARIDES_SLUG: &str = "sacharidy";
 
-struct SeedCategory {
+pub const AMINO_ACIDS_TOPIC_SLUG: &str = "aminokyseliny";
+pub const NUCLEIC_ACIDS_TOPIC_SLUG: &str = "nukleove-kyseliny";
+pub const SACCHARIDES_TOPIC_SLUG: &str = "sacharidy";
+
+struct SeedTopic {
     slug: &'static str,
     name: &'static str,
     description: &'static str,
 }
+
+struct SeedCategory {
+    slug: &'static str,
+    name: &'static str,
+    description: &'static str,
+    topic_slug: &'static str,
+}
+
+/// Built-in topic grouping (v51). Kept here so any code path that seeds a
+/// fresh library produces the same shape as a migrated database.
+const SEED_TOPICS: &[SeedTopic] = &[
+    SeedTopic {
+        slug: AMINO_ACIDS_TOPIC_SLUG,
+        name: "Aminokyseliny",
+        description: "Proteinogenní aminokyseliny a jejich vlastnosti.",
+    },
+    SeedTopic {
+        slug: NUCLEIC_ACIDS_TOPIC_SLUG,
+        name: "Nukleové kyseliny",
+        description: "Dusíkaté báze a nukleotidy — stavební kameny nukleových kyselin.",
+    },
+    SeedTopic {
+        slug: SACCHARIDES_TOPIC_SLUG,
+        name: "Sacharidy",
+        description: "Monosacharidy a další cukry — struktura a označení.",
+    },
+];
 
 struct SeedMolecule {
     slug: &'static str,
@@ -33,18 +64,21 @@ const AMINO_ACIDS_CATEGORY: SeedCategory = SeedCategory {
     slug: AMINO_ACIDS_SLUG,
     name: "Aminokyseliny",
     description: "Dvacet proteinogenních aminokyselin — názvy, zkratky a strukturní vzorce.",
+    topic_slug: AMINO_ACIDS_TOPIC_SLUG,
 };
 
 const NITROGEN_BASES_CATEGORY: SeedCategory = SeedCategory {
     slug: NITROGEN_BASES_SLUG,
     name: "Dusíkaté báze",
     description: "Pět základních bází DNA a RNA — názvy, zkratky a strukturní vzorce.",
+    topic_slug: NUCLEIC_ACIDS_TOPIC_SLUG,
 };
 
 const SACCHARIDES_CATEGORY: SeedCategory = SeedCategory {
     slug: SACCHARIDES_SLUG,
     name: "Sacharidy",
     description: "Vybrané monosacharidy a nukleotidy — Haworthovy projekce a strukturní vzorce.",
+    topic_slug: SACCHARIDES_TOPIC_SLUG,
 };
 
 /// The 20 proteinogenic L-amino acids. SMILES are the PubChem canonical
@@ -271,9 +305,10 @@ const SACCHARIDES: &[SeedMolecule] = &[
     },
 ];
 
-/// Insert the built-in categories and molecules. No-op when any category row
-/// already exists — migration v47 runs once per database and callers must not
-/// resurrect data a teacher deleted, so emptiness is the only safe gate.
+/// Insert the built-in topics, categories, and molecules. No-op when any
+/// category row already exists — migration v47 runs once per database and
+/// callers must not resurrect data a teacher deleted, so emptiness is the only
+/// safe gate.
 pub fn seed_builtins_if_empty(conn: &Connection) -> Result<(), rusqlite::Error> {
     let already_seeded: bool = conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM biomolecule_categories LIMIT 1)",
@@ -284,8 +319,36 @@ pub fn seed_builtins_if_empty(conn: &Connection) -> Result<(), rusqlite::Error> 
         return Ok(());
     }
 
+    // v47 calls this before the topics table and `topic_slug` column exist;
+    // v51 adds both right afterwards. Detect the shape so the same function
+    // stays correct on fresh and already-migrated databases alike.
+    let has_topics: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'biomolecule_topics')",
+        [],
+        |row| row.get(0),
+    )?;
+    let has_topic_slug: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('biomolecule_categories')
+                        WHERE name = 'topic_slug')",
+        [],
+        |row| row.get(0),
+    )?;
+
     let tx = conn.unchecked_transaction()?;
     let now = chrono::Utc::now().to_rfc3339();
+
+    if has_topics {
+        for (position, topic) in SEED_TOPICS.iter().enumerate() {
+            tx.execute(
+                "INSERT OR IGNORE INTO biomolecule_topics
+                     (slug, name, description, position, built_in, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)",
+                params![topic.slug, topic.name, topic.description, position as i64, now],
+            )?;
+        }
+    }
+
     for (position, (category, molecules)) in [
         (&AMINO_ACIDS_CATEGORY, AMINO_ACIDS),
         (&NITROGEN_BASES_CATEGORY, NITROGEN_BASES),
@@ -294,12 +357,28 @@ pub fn seed_builtins_if_empty(conn: &Connection) -> Result<(), rusqlite::Error> 
     .into_iter()
     .enumerate()
     {
-        tx.execute(
-            "INSERT INTO biomolecule_categories
-                 (slug, name, description, position, built_in, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)",
-            params![category.slug, category.name, category.description, position as i64, now],
-        )?;
+        if has_topic_slug {
+            tx.execute(
+                "INSERT INTO biomolecule_categories
+                     (slug, name, description, topic_slug, position, built_in, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
+                params![
+                    category.slug,
+                    category.name,
+                    category.description,
+                    category.topic_slug,
+                    position as i64,
+                    now
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO biomolecule_categories
+                     (slug, name, description, position, built_in, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)",
+                params![category.slug, category.name, category.description, position as i64, now],
+            )?;
+        }
         for (molecule_position, molecule) in molecules.iter().enumerate() {
             let molecule_id = Uuid::new_v4();
             tx.execute(

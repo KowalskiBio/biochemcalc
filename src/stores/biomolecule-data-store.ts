@@ -5,9 +5,12 @@ import {
   type Biomolecule,
   type BiomoleculeCategoryInfo,
   type BiomoleculeData,
+  type BiomoleculeTopicInfo,
   type BiomoleculeTraits,
   biomoleculesApi,
   type CategoryField,
+  type CategoryMetaField,
+  type TopicField,
 } from "@/lib/biomolecules-api"
 
 /**
@@ -17,15 +20,23 @@ import {
  * full dataset and replaces the local copy atomically.
  */
 interface BiomoleculeDataState {
+  topics: BiomoleculeTopicInfo[]
   categories: BiomoleculeCategoryInfo[]
   molecules: Biomolecule[]
   status: "idle" | "loading" | "loaded"
   load: () => Promise<void>
-  createCategory: (name: string, description: string | null) => Promise<BiomoleculeData>
+  createTopic: (name: string, description?: string) => Promise<BiomoleculeData>
+  updateTopicMeta: (topicId: string, field: TopicField, value?: string) => Promise<void>
+  deleteTopic: (topicId: string) => Promise<void>
+  createCategory: (
+    name: string,
+    description: string | null,
+    topicId?: string,
+  ) => Promise<BiomoleculeData>
   updateCategoryMeta: (
     categoryId: string,
-    field: CategoryField,
-    value: string | null,
+    field: CategoryMetaField,
+    value?: string | null,
   ) => Promise<void>
   deleteCategory: (categoryId: string) => Promise<void>
   createMolecule: (
@@ -45,6 +56,7 @@ interface BiomoleculeDataState {
 }
 
 export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) => ({
+  topics: [],
   categories: [],
   molecules: [],
   status: "idle",
@@ -54,58 +66,100 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
     set({ status: "loading" })
     try {
       const data = await biomoleculesApi.data()
-      set({ categories: data.categories, molecules: data.molecules, status: "loaded" })
+      set({
+        topics: data.topics,
+        categories: data.categories,
+        molecules: data.molecules,
+        status: "loaded",
+      })
     } catch {
       // The built-in fallback text still works; try again next time.
       set({ status: "idle" })
     }
   },
 
-  createCategory: async (name, description) => {
-    const data = await biomoleculesApi.createCategory(name, description)
-    set({ categories: data.categories, molecules: data.molecules, status: "loaded" })
+  createTopic: async (name, description) => {
+    const data = await biomoleculesApi.createTopic(name, description)
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
+    return data
+  },
+
+  updateTopicMeta: async (topicId, field, value) => {
+    const data = await biomoleculesApi.updateTopicMeta(topicId, field, value)
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
+  },
+
+  deleteTopic: async (topicId) => {
+    const data = await biomoleculesApi.deleteTopic(topicId)
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
+  },
+
+  createCategory: async (name, description, topicId) => {
+    const data = await biomoleculesApi.createCategory(name, description, topicId)
+    set({
+      topics: data.topics,
+      categories: data.categories,
+      molecules: data.molecules,
+      status: "loaded",
+    })
     return data
   },
 
   updateCategoryMeta: async (categoryId, field, value) => {
     const data = await biomoleculesApi.updateCategoryMeta(categoryId, field, value)
-    set({ categories: data.categories, molecules: data.molecules })
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
   deleteCategory: async (categoryId) => {
     const data = await biomoleculesApi.deleteCategory(categoryId)
-    set({ categories: data.categories, molecules: data.molecules })
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
   createMolecule: async (categoryId, name, smiles, traits) => {
     const data = await biomoleculesApi.createMolecule(categoryId, name, smiles, traits)
-    set({ categories: data.categories, molecules: data.molecules })
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
   updateMolecule: async (moleculeId, name, smiles, traits, projection) => {
     const data = await biomoleculesApi.updateMolecule(moleculeId, name, smiles, traits, projection)
-    set({ categories: data.categories, molecules: data.molecules })
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
   deleteMolecule: async (moleculeId) => {
     const data = await biomoleculesApi.deleteMolecule(moleculeId)
-    set({ categories: data.categories, molecules: data.molecules })
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 }))
 
 const BUILT_IN: Record<string, { name: string; description: string } | undefined> =
   cs.biomolekuly.categories
 
+const BUILT_IN_TOPICS: Record<string, { name: string; description: string } | undefined> =
+  cs.biomolekuly.topics
+
 /** The text shipped in cs — the pre-load fallback and the "reset" spelling of built-ins. */
 export function builtInCategoryText(categoryId: string, field: CategoryField): string {
   const copy = BUILT_IN[categoryId]
   if (field === "name") return copy?.name ?? categoryId
-  return copy?.description ?? ""
+  if (field === "description") return copy?.description ?? ""
+  return ""
 }
 
 /** The built-in name — kept for callers that only deal with names. */
 export function builtInCategoryName(categoryId: string): string {
   return builtInCategoryText(categoryId, "name")
+}
+
+/** The topic text shipped in cs — the pre-load / ungrouped fallback. */
+export function builtInTopicText(topicId: string, field: TopicField): string {
+  const copy = BUILT_IN_TOPICS[topicId]
+  if (field === "name") return copy?.name ?? topicId
+  return copy?.description ?? ""
+}
+
+/** The built-in topic name. */
+export function builtInTopicName(topicId: string): string {
+  return builtInTopicText(topicId, "name")
 }
 
 function useLoadedData(): BiomoleculeDataState {
@@ -126,6 +180,17 @@ export function useMoleculeCategories(): BiomoleculeCategoryInfo[] {
 export function useMoleculeCategory(categoryId: string): BiomoleculeCategoryInfo | undefined {
   const { categories } = useLoadedData()
   return categories.find((category) => category.slug === categoryId)
+}
+
+/** All topics in hub order (empty until the first load lands). */
+export function useMoleculeTopics(): BiomoleculeTopicInfo[] {
+  return useLoadedData().topics
+}
+
+/** One topic's row, or undefined while loading / for an unknown slug. */
+export function useMoleculeTopic(topicSlug: string): BiomoleculeTopicInfo | undefined {
+  const { topics } = useLoadedData()
+  return topics.find((topic) => topic.slug === topicSlug)
 }
 
 /** One category's molecules, in display order. */
@@ -164,4 +229,34 @@ export function useCategoryNames(): (categoryId: string) => string {
 /** `(categoryId) => display description`, honouring teacher edits. */
 export function useCategoryDescriptions(): (categoryId: string) => string {
   return useCategoryText("description")
+}
+
+/**
+ * `nameOf` / `descriptionOf` lookups for topics, honouring teacher edits.
+ * Built-in slugs fall back to the cs names before the dataset loads (and when
+ * a built-in topic is missing from the payload).
+ */
+export function useTopicText(): {
+  nameOf: (topicSlug: string) => string
+  descriptionOf: (topicSlug: string) => string
+} {
+  const { topics } = useLoadedData()
+
+  const nameOf = useCallback(
+    (topicSlug: string) => {
+      const topic = topics.find((candidate) => candidate.slug === topicSlug)
+      return topic?.name || builtInTopicText(topicSlug, "name")
+    },
+    [topics],
+  )
+
+  const descriptionOf = useCallback(
+    (topicSlug: string) => {
+      const topic = topics.find((candidate) => candidate.slug === topicSlug)
+      return topic?.description || builtInTopicText(topicSlug, "description")
+    },
+    [topics],
+  )
+
+  return { nameOf, descriptionOf }
 }

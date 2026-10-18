@@ -28,18 +28,25 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError } from "@/lib/api"
-import type { Biomolecule, BiomoleculeTraits, CategoryField } from "@/lib/biomolecules-api"
+import type {
+  Biomolecule,
+  BiomoleculeCategoryInfo,
+  BiomoleculeTopicInfo,
+  BiomoleculeTraits,
+  CategoryField,
+} from "@/lib/biomolecules-api"
 import { moleculeFacts, TRAIT, traitOf } from "@/lib/molecules"
 import {
   generatableQuizTypes,
   getCategoryQuizConfig,
   type QuizQuestionType,
 } from "@/lib/molecules/quiz"
-import { parseProjection, type ProjectionSpec } from "@/lib/molecules/render/projection"
+import { type ProjectionSpec, parseProjection } from "@/lib/molecules/render/projection"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
 import {
   builtInCategoryText,
+  builtInTopicText,
   useBiomoleculeDataLoaded,
   useBiomoleculeDataStore,
   useCategoryDescriptions,
@@ -47,6 +54,8 @@ import {
   useCategoryNames,
   useMoleculeCategories,
   useMoleculeCategory,
+  useMoleculeTopics,
+  useTopicText,
 } from "@/stores/biomolecule-data-store"
 
 const quizStrings = cs.biomolekuly.quiz
@@ -65,6 +74,11 @@ const cardButtonClass = cn(
 const FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
+const categoryGridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3"
+
+/** Radix Select can't use an empty string as a value — sentinel for "no topic". */
+const NO_TOPIC_VALUE = "none"
+
 /** Which display/management variant a category uses (protected slugs). */
 type CategoryKind = "aminoAcids" | "nitrogenBases" | "custom"
 
@@ -74,16 +88,34 @@ function categoryKind(categoryId: string): CategoryKind {
   return "custom"
 }
 
-/** Hub: one card per category, plus the teacher's new-category card. */
+/** One hub section: a topic (or `null` = the ungrouped "Ostatní" row) + its categories. */
+interface HubSection {
+  topic: BiomoleculeTopicInfo | null
+  categories: BiomoleculeCategoryInfo[]
+}
+
+/**
+ * Hub: category cards grouped under topic headings. Ungrouped categories go
+ * last under "Ostatní"; teachers additionally see empty topic sections (so
+ * they can manage them) plus the new-topic/new-category affordances.
+ */
 export function BiomoleculesPage() {
   const navigate = useNavigate()
+  const { toast } = useToast()
   const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
   const categories = useMoleculeCategories()
+  const topics = useMoleculeTopics()
   const loaded = useBiomoleculeDataLoaded()
   const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const nameOf = useCategoryNames()
   const descriptionOf = useCategoryDescriptions()
+  const { nameOf: topicNameOf, descriptionOf: topicDescriptionOf } = useTopicText()
+  const deleteTopic = useBiomoleculeDataStore((s) => s.deleteTopic)
   const [createOpen, setCreateOpen] = useState(false)
+  const [topicFormOpen, setTopicFormOpen] = useState(false)
+  const [editingTopic, setEditingTopic] = useState<BiomoleculeTopicInfo | null>(null)
+  const [deletingTopic, setDeletingTopic] = useState<BiomoleculeTopicInfo | null>(null)
+  const [topicDeleting, setTopicDeleting] = useState(false)
 
   // The hub-level practice link applies only while some category can actually
   // generate questions. Students only: TeacherRoutes has no
@@ -103,6 +135,84 @@ export function BiomoleculesPage() {
     [categories, allMolecules],
   )
 
+  // Group categories under their topic, keeping the server's topic order. A
+  // category pointing at a topic that isn't in the payload lands in "Ostatní".
+  const sections = useMemo(() => {
+    const byTopic = new Map<string, BiomoleculeCategoryInfo[]>()
+    const ungrouped: BiomoleculeCategoryInfo[] = []
+    for (const category of categories) {
+      const bucket = category.topicSlug ? byTopic.get(category.topicSlug) : undefined
+      if (bucket) {
+        bucket.push(category)
+      } else if (category.topicSlug && topics.some((topic) => topic.slug === category.topicSlug)) {
+        byTopic.set(category.topicSlug, [category])
+      } else {
+        ungrouped.push(category)
+      }
+    }
+    const grouped: HubSection[] = topics.map((topic) => ({
+      topic,
+      categories: byTopic.get(topic.slug) ?? [],
+    }))
+    if (ungrouped.length > 0) grouped.push({ topic: null, categories: ungrouped })
+    return grouped
+  }, [categories, topics])
+
+  // Students skip empty topic sections; teachers see them so they can manage.
+  const visibleSections = sections.filter(
+    (section) => section.categories.length > 0 || (isTeacher && section.topic !== null),
+  )
+
+  const handleDeleteTopic = async () => {
+    if (!deletingTopic || topicDeleting) return
+    try {
+      setTopicDeleting(true)
+      await deleteTopic(deletingTopic.slug)
+      setDeletingTopic(null)
+      toast({ title: manage.deleteSuccess })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: manage.deleteError, description: message, variant: "destructive" })
+    } finally {
+      setTopicDeleting(false)
+    }
+  }
+
+  const categoryCard = (category: BiomoleculeCategoryInfo) => (
+    <button
+      key={category.slug}
+      type="button"
+      onClick={() => navigate(`/biomolekuly/${category.slug}`)}
+      className={cardButtonClass}
+    >
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <span className="font-semibold tracking-tight">{nameOf(category.slug)}</span>
+        <span className="font-mono tabular text-xs text-muted-foreground">
+          {moleculeCountLabel(category.moleculeCount)}
+        </span>
+        <span className="text-sm text-muted-foreground">{descriptionOf(category.slug)}</span>
+      </div>
+      <ChevronRight
+        className="ml-auto mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
+        strokeWidth={1.75}
+      />
+    </button>
+  )
+
+  const newCategoryCard = isTeacher ? (
+    <button
+      type="button"
+      onClick={() => setCreateOpen(true)}
+      className={cn(
+        cardButtonClass,
+        "items-center justify-center border-dashed text-muted-foreground",
+      )}
+    >
+      <Plus className="size-4 shrink-0" strokeWidth={1.75} />
+      <span className="text-sm font-medium">{manage.addCategory}</span>
+    </button>
+  ) : null
+
   return (
     <div className="space-y-6">
       {/* Page header */}
@@ -113,6 +223,21 @@ export function BiomoleculesPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">{cs.biomolekuly.pageDescription}</p>
         </div>
+        {isTeacher && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-1 shrink-0"
+            onClick={() => {
+              setEditingTopic(null)
+              setTopicFormOpen(true)
+            }}
+          >
+            <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
+            {cs.biomolekuly.newTopic}
+          </Button>
+        )}
         {!isTeacher && anyQuizTypes && (
           <Button asChild size="sm" className="mt-1 shrink-0">
             <Link to="/biomolekuly/procvicovani">{quizStrings.practice}</Link>
@@ -120,50 +245,223 @@ export function BiomoleculesPage() {
         )}
       </div>
 
-      {/* Category grid */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-        {!loaded && categories.length === 0
-          ? [1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-[4px]" />)
-          : categories.map((category) => (
-              <button
-                key={category.slug}
-                type="button"
-                onClick={() => navigate(`/biomolekuly/${category.slug}`)}
-                className={cardButtonClass}
-              >
-                <div className="flex min-w-0 flex-col gap-1.5">
-                  <span className="font-semibold tracking-tight">{nameOf(category.slug)}</span>
-                  <span className="font-mono tabular text-xs text-muted-foreground">
-                    {moleculeCountLabel(category.moleculeCount)}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {descriptionOf(category.slug)}
-                  </span>
-                </div>
-                <ChevronRight
-                  className="ml-auto mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
-                  strokeWidth={1.75}
-                />
-              </button>
-            ))}
-
-        {isTeacher && (
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className={cn(
-              cardButtonClass,
-              "items-center justify-center border-dashed text-muted-foreground",
-            )}
-          >
-            <Plus className="size-4 shrink-0" strokeWidth={1.75} />
-            <span className="text-sm font-medium">{manage.addCategory}</span>
-          </button>
-        )}
-      </div>
+      {visibleSections.length > 0 ? (
+        /* One section per topic; ungrouped categories last under "Ostatní". */
+        <div className="space-y-8">
+          {visibleSections.map((section, index) => (
+            <section key={section.topic?.slug ?? "no-topic"} className="space-y-3">
+              <HubSectionHeading
+                name={section.topic ? topicNameOf(section.topic.slug) : cs.biomolekuly.noTopic}
+                description={
+                  section.topic ? topicDescriptionOf(section.topic.slug) || undefined : undefined
+                }
+                topic={section.topic}
+                onEdit={(topic) => {
+                  setEditingTopic(topic)
+                  setTopicFormOpen(true)
+                }}
+                onDelete={setDeletingTopic}
+              />
+              <div className={categoryGridClass}>
+                {section.categories.map(categoryCard)}
+                {index === visibleSections.length - 1 && newCategoryCard}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        /* No topics yet — the flat pre-grouping grid. */
+        <div className={categoryGridClass}>
+          {!loaded && categories.length === 0
+            ? [1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-[4px]" />)
+            : categories.map(categoryCard)}
+          {newCategoryCard}
+        </div>
+      )}
 
       <CreateCategoryDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <TopicFormDialog open={topicFormOpen} onOpenChange={setTopicFormOpen} topic={editingTopic} />
+      <ConfirmDialog
+        open={deletingTopic !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingTopic(null)
+        }}
+        title={cs.biomolekuly.deleteTopic}
+        description={cs.biomolekuly.deleteTopicConfirm}
+        confirmLabel={manage.deleteAction}
+        cancelLabel={manage.cancelAction}
+        onConfirm={() => void handleDeleteTopic()}
+      />
     </div>
+  )
+}
+
+/**
+ * A topic's heading row above its hub section. Teachers get small edit/delete
+ * icon buttons; the "Ostatní" section (`topic === null`) shows no controls.
+ */
+function HubSectionHeading({
+  name,
+  description,
+  topic,
+  onEdit,
+  onDelete,
+}: {
+  name: string
+  description?: string
+  topic: BiomoleculeTopicInfo | null
+  onEdit: (topic: BiomoleculeTopicInfo) => void
+  onDelete: (topic: BiomoleculeTopicInfo) => void
+}) {
+  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  return (
+    <div>
+      <div className="flex items-center gap-1.5">
+        <h2 className="text-lg font-semibold tracking-tight text-foreground">{name}</h2>
+        {isTeacher && topic && (
+          <div className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={cs.biomolekuly.editTopic}
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => onEdit(topic)}
+            >
+              <Pencil className="size-3.5" strokeWidth={1.75} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={cs.biomolekuly.deleteTopic}
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => onDelete(topic)}
+            >
+              <Trash2 className="size-3.5" strokeWidth={1.75} />
+            </Button>
+          </div>
+        )}
+      </div>
+      {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
+    </div>
+  )
+}
+
+/** Teacher's topic create/edit dialog. `topic === null` = create mode. */
+function TopicFormDialog({
+  open,
+  onOpenChange,
+  topic,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  topic: BiomoleculeTopicInfo | null
+}) {
+  const { toast } = useToast()
+  const createTopic = useBiomoleculeDataStore((s) => s.createTopic)
+  const updateTopicMeta = useBiomoleculeDataStore((s) => s.updateTopicMeta)
+  const { nameOf, descriptionOf } = useTopicText()
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    // Prefill from the displayed text, so a built-in's cs fallback is the draft.
+    setName(topic ? nameOf(topic.slug) : "")
+    setDescription(topic ? descriptionOf(topic.slug) : "")
+  }, [open, topic, nameOf, descriptionOf])
+
+  const handleSubmit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || saving) return
+    const trimmedDescription = description.trim()
+    try {
+      setSaving(true)
+      if (topic) {
+        // Only write what changed; typing the built-in cs text back clears
+        // the DB override, like the category header's inline edit.
+        if (trimmed !== nameOf(topic.slug)) {
+          await updateTopicMeta(
+            topic.slug,
+            "name",
+            trimmed === builtInTopicText(topic.slug, "name") ? undefined : trimmed,
+          )
+        }
+        if (trimmedDescription !== descriptionOf(topic.slug)) {
+          await updateTopicMeta(
+            topic.slug,
+            "description",
+            !trimmedDescription ||
+              trimmedDescription === builtInTopicText(topic.slug, "description")
+              ? undefined
+              : trimmedDescription,
+          )
+        }
+        toast({ title: manage.saveSuccess })
+      } else {
+        await createTopic(trimmed, trimmedDescription || undefined)
+        toast({ title: cs.biomolekuly.createTopicSuccess })
+      }
+      onOpenChange(false)
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({
+        title: topic ? manage.saveError : manage.createError,
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{topic ? cs.biomolekuly.editTopic : cs.biomolekuly.newTopic}</DialogTitle>
+          <DialogDescription>
+            {topic ? cs.biomolekuly.editTopicDescription : cs.biomolekuly.newTopicDescription}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="topic-name">{cs.biomolekuly.topicNameLabel}</Label>
+            <Input
+              id="topic-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={cs.biomolekuly.topicNamePlaceholder}
+              maxLength={80}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleSubmit()
+              }}
+              autoFocus
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="topic-description">{cs.biomolekuly.topicDescriptionLabel}</Label>
+            <Input
+              id="topic-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={cs.biomolekuly.topicDescriptionPlaceholder}
+              maxLength={300}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              {manage.cancelAction}
+            </Button>
+            <Button onClick={() => void handleSubmit()} disabled={!name.trim() || saving}>
+              {topic ? cs.common.save : cs.biomolekuly.createTopic}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -178,14 +476,18 @@ function CreateCategoryDialog({
   const { toast } = useToast()
   const navigate = useNavigate()
   const createCategory = useBiomoleculeDataStore((s) => s.createCategory)
+  const topics = useMoleculeTopics()
+  const { nameOf: topicNameOf } = useTopicText()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [topicSlug, setTopicSlug] = useState(NO_TOPIC_VALUE)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
       setName("")
       setDescription("")
+      setTopicSlug(NO_TOPIC_VALUE)
     }
   }, [open])
 
@@ -194,7 +496,11 @@ function CreateCategoryDialog({
     if (!trimmed || saving) return
     try {
       setSaving(true)
-      const data = await createCategory(trimmed, description.trim() || null)
+      const data = await createCategory(
+        trimmed,
+        description.trim() || null,
+        topicSlug === NO_TOPIC_VALUE ? undefined : topicSlug,
+      )
       setCreateOpenSafe(false)
       toast({ title: manage.createCategorySuccess })
       const created = data.categories.find((category) => category.name === trimmed)
@@ -241,6 +547,24 @@ function CreateCategoryDialog({
               maxLength={300}
             />
           </div>
+          {topics.length > 0 && (
+            <div className="space-y-2">
+              <Label>{cs.biomolekuly.topicLabel}</Label>
+              <Select value={topicSlug} onValueChange={setTopicSlug}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_TOPIC_VALUE}>{cs.biomolekuly.noTopic}</SelectItem>
+                  {topics.map((topic) => (
+                    <SelectItem key={topic.slug} value={topic.slug}>
+                      {topicNameOf(topic.slug)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               {manage.cancelAction}
@@ -849,10 +1173,7 @@ function MoleculeFormDialog({
                 the spec itself is read-only here, so a hint says so. */}
             {savedProjection ? (
               <div className="flex justify-center rounded-[4px] border p-3">
-                <ProjectionView
-                  spec={savedProjection}
-                  ariaLabel={name.trim() || smiles.trim()}
-                />
+                <ProjectionView spec={savedProjection} ariaLabel={name.trim() || smiles.trim()} />
               </div>
             ) : smiles.trim() ? (
               // Keep the preview mounted for ANY non-empty SMILES — only a
@@ -1168,10 +1489,14 @@ export function BiomoleculesCategoryPage() {
   const molecules = useCategoryMolecules(categoryId)
   const nameOf = useCategoryNames()
   const descriptionOf = useCategoryDescriptions()
+  const topics = useMoleculeTopics()
+  const { nameOf: topicNameOf } = useTopicText()
   const deleteCategory = useBiomoleculeDataStore((s) => s.deleteCategory)
+  const updateCategoryMeta = useBiomoleculeDataStore((s) => s.updateCategoryMeta)
   const [addOpen, setAddOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [topicSaving, setTopicSaving] = useState(false)
 
   const kind = categoryKind(categoryId)
   const bits = bitsFor(kind)
@@ -1194,6 +1519,24 @@ export function BiomoleculesCategoryPage() {
       toast({ title: manage.deleteError, description: message, variant: "destructive" })
     } finally {
       setDeleting(false)
+    }
+  }
+
+  // Teacher's inline topic reassignment; the dataset refresh repaints the
+  // select and the topic line from the server's fresh category row.
+  const handleTopicChange = async (value: string) => {
+    if (!category || topicSaving) return
+    const next = value === NO_TOPIC_VALUE ? null : value
+    if (next === (category.topicSlug ?? null)) return
+    try {
+      setTopicSaving(true)
+      await updateCategoryMeta(category.slug, "topic", next)
+      toast({ title: manage.saveSuccess })
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : String(err)
+      toast({ title: manage.saveError, description: message, variant: "destructive" })
+    } finally {
+      setTopicSaving(false)
     }
   }
 
@@ -1228,6 +1571,9 @@ export function BiomoleculesCategoryPage() {
 
       {/* Category header */}
       <div>
+        {category.topicSlug && (
+          <p className="mb-1 text-xs text-muted-foreground">{topicNameOf(category.topicSlug)}</p>
+        )}
         <div className="flex items-baseline justify-between gap-4">
           <InlineCategoryText
             categoryId={category.slug}
@@ -1264,6 +1610,27 @@ export function BiomoleculesCategoryPage() {
           field="description"
           value={descriptionOf(category.slug)}
         />
+        {isTeacher && topics.length > 0 && (
+          <div className="mt-2 max-w-xs">
+            <Select
+              value={category.topicSlug ?? NO_TOPIC_VALUE}
+              onValueChange={(value) => void handleTopicChange(value)}
+              disabled={topicSaving}
+            >
+              <SelectTrigger className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_TOPIC_VALUE}>{cs.biomolekuly.noTopic}</SelectItem>
+                {topics.map((topic) => (
+                  <SelectItem key={topic.slug} value={topic.slug}>
+                    {topicNameOf(topic.slug)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <MoleculeBrowser categoryId={category.slug} kind={kind} molecules={molecules} bits={bits} />

@@ -8,7 +8,7 @@
 //! so the client's copy stays in sync. The quiz is still graded client-side,
 //! so recorded scores are only sanity-checked — and the category must exist.
 
-use crate::db::repos::biomolecule_repo::{BiomoleculeData, CategoryField};
+use crate::db::repos::biomolecule_repo::{BiomoleculeData, CategoryField, TopicField};
 use crate::db::repos::{
     BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
     BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo,
@@ -273,6 +273,17 @@ fn validate_category_name(name: &str) -> Result<&str, DbError> {
     Ok(trimmed)
 }
 
+/// Topics are navigation labels with the same bounds as category names.
+fn validate_topic_name(name: &str) -> Result<&str, DbError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > MAX_CATEGORY_NAME_CHARS {
+        return Err(DbError::Validation(format!(
+            "Topic name must be 1-{MAX_CATEGORY_NAME_CHARS} characters"
+        )));
+    }
+    Ok(trimmed)
+}
+
 fn validate_description(description: Option<&str>) -> Result<Option<String>, DbError> {
     match description.map(str::trim) {
         None | Some("") => Ok(None),
@@ -281,6 +292,21 @@ fn validate_description(description: Option<&str>) -> Result<Option<String>, DbE
         )),
         Some(v) => Ok(Some(v.to_string())),
     }
+}
+
+/// Optional topic reference: blank/absent means "no topic". A non-blank value
+/// must be an existing topic slug.
+fn validate_optional_topic(
+    conn: &Connection,
+    topic_id: Option<&str>,
+) -> Result<Option<String>, DbError> {
+    let Some(topic_id) = topic_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    if !is_valid_slug(topic_id) || !BiomoleculeRepo::topic_exists(conn, topic_id)? {
+        return Err(DbError::NotFound(format!("Topic {topic_id} not found")));
+    }
+    Ok(Some(topic_id.to_string()))
 }
 
 fn validate_molecule_name(name: &str) -> Result<&str, DbError> {
@@ -352,6 +378,9 @@ pub struct CreateCategoryPayload {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Optional topic to place the new category under.
+    #[serde(default)]
+    pub topic_id: Option<String>,
 }
 
 /// Teacher-only (the HTTP layer gates it). The slug is derived from the
@@ -364,11 +393,20 @@ pub fn do_create_category(
 ) -> Result<BiomoleculeData, DbError> {
     let name = validate_category_name(&payload.name)?;
     let description = validate_description(payload.description.as_deref())?;
+    let topic_slug = validate_optional_topic(conn, payload.topic_id.as_deref())?;
     let slug = unique_slug(name, "kategorie", |slug| {
         BiomoleculeRepo::category_exists(conn, slug)
     })?;
     let position = BiomoleculeRepo::next_category_position(conn)?;
-    BiomoleculeRepo::insert_category(conn, &slug, name, description.as_deref(), position, teacher_id)?;
+    BiomoleculeRepo::insert_category(
+        conn,
+        &slug,
+        name,
+        description.as_deref(),
+        topic_slug.as_deref(),
+        position,
+        teacher_id,
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -396,6 +434,7 @@ pub fn do_update_category_meta(
             Some(validate_category_name(payload.value.as_deref().unwrap_or(""))?.to_string())
         }
         CategoryField::Description => validate_description(payload.value.as_deref())?,
+        CategoryField::Topic => validate_optional_topic(conn, payload.value.as_deref())?,
     };
     BiomoleculeRepo::update_category_field(conn, category_id, payload.field, value.as_deref(), teacher_id)?;
     BiomoleculeRepo::list_data(conn)
@@ -418,6 +457,90 @@ pub fn do_delete_category(
         return Err(DbError::NotFound(format!("Category {category_id} not found")));
     }
     BiomoleculeRepo::delete_category(conn, category_id)?;
+    BiomoleculeRepo::list_data(conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTopicPayload {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Teacher-only. Slugs are derived server-side, exactly like categories.
+pub fn do_create_topic(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    payload: CreateTopicPayload,
+) -> Result<BiomoleculeData, DbError> {
+    let name = validate_topic_name(&payload.name)?;
+    let description = validate_description(payload.description.as_deref())?;
+    let slug = unique_slug(name, "tema", |slug| BiomoleculeRepo::topic_exists(conn, slug))?;
+    let position = BiomoleculeRepo::next_topic_position(conn)?;
+    BiomoleculeRepo::insert_topic(
+        conn,
+        &slug,
+        name,
+        description.as_deref(),
+        position,
+        teacher_id,
+    )?;
+    BiomoleculeRepo::list_data(conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTopicMetaPayload {
+    pub topic_id: String,
+    pub field: TopicField,
+    /// `None`/blank clears a description; a name must stay non-empty.
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+pub fn do_update_topic_meta(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    payload: UpdateTopicMetaPayload,
+) -> Result<BiomoleculeData, DbError> {
+    let topic_id = payload.topic_id.trim();
+    if !is_valid_slug(topic_id) || !BiomoleculeRepo::topic_exists(conn, topic_id)? {
+        return Err(DbError::NotFound(format!("Topic {topic_id} not found")));
+    }
+    let value: Option<String> = match payload.field {
+        TopicField::Name => {
+            Some(validate_topic_name(payload.value.as_deref().unwrap_or(""))?.to_string())
+        }
+        TopicField::Description => validate_description(payload.value.as_deref())?,
+    };
+    BiomoleculeRepo::update_topic_field(
+        conn,
+        topic_id,
+        payload.field,
+        value.as_deref(),
+        teacher_id,
+    )?;
+    BiomoleculeRepo::list_data(conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteTopicPayload {
+    pub topic_id: String,
+}
+
+/// Deletes the grouping only — its categories survive and become topic-less
+/// (`ON DELETE SET NULL`).
+pub fn do_delete_topic(
+    conn: &Connection,
+    payload: DeleteTopicPayload,
+) -> Result<BiomoleculeData, DbError> {
+    let topic_id = payload.topic_id.trim();
+    if !is_valid_slug(topic_id) || !BiomoleculeRepo::topic_exists(conn, topic_id)? {
+        return Err(DbError::NotFound(format!("Topic {topic_id} not found")));
+    }
+    BiomoleculeRepo::delete_topic(conn, topic_id)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -904,6 +1027,7 @@ mod tests {
             CreateCategoryPayload {
                 name: "  Vitamíny  ".into(),
                 description: Some("  Mastné vitamíny  ".into()),
+                topic_id: None,
             },
         )
         .expect("create");
@@ -923,6 +1047,7 @@ mod tests {
             CreateCategoryPayload {
                 name: "Vitaminy".into(),
                 description: None,
+                topic_id: None,
             },
         )
         .expect("create second");
@@ -935,6 +1060,7 @@ mod tests {
             CreateCategoryPayload {
                 name: "Aminokyseliny".into(),
                 description: None,
+                topic_id: None,
             },
         )
         .expect("create third");
@@ -953,6 +1079,7 @@ mod tests {
                     CreateCategoryPayload {
                         name: bad.into(),
                         description: None,
+                        topic_id: None,
                     },
                 ),
                 Err(DbError::Validation(_))
@@ -965,10 +1092,246 @@ mod tests {
                 CreateCategoryPayload {
                     name: "Ok".into(),
                     description: Some("a".repeat(MAX_DESCRIPTION_CHARS + 1)),
+                    topic_id: None,
                 },
             ),
             Err(DbError::Validation(_))
         ));
+    }
+
+    #[test]
+    fn seeded_topics_group_the_builtin_categories() {
+        let conn = setup_conn();
+        let data = do_list_data(&conn).expect("list");
+
+        assert_eq!(data.topics.len(), 3);
+        assert_eq!(data.topics[0].slug, "aminokyseliny");
+        assert_eq!(data.topics[0].name, "Aminokyseliny");
+        assert!(data.topics[0].built_in);
+        assert_eq!(data.topics[1].slug, "nukleove-kyseliny");
+        assert_eq!(data.topics[2].slug, "sacharidy");
+
+        let topic_of = |slug: &str| {
+            data.categories
+                .iter()
+                .find(|c| c.slug == slug)
+                .unwrap_or_else(|| panic!("category {slug} seeded"))
+                .topic_slug
+                .as_deref()
+        };
+        assert_eq!(topic_of("aminokyseliny"), Some("aminokyseliny"));
+        assert_eq!(topic_of("dusikate-baze"), Some("nukleove-kyseliny"));
+        assert_eq!(topic_of("sacharidy"), Some("sacharidy"));
+    }
+
+    #[test]
+    fn create_update_and_delete_topic() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        let data = do_create_topic(
+            &conn,
+            &teacher,
+            CreateTopicPayload {
+                name: "  Vitamíny  ".into(),
+                description: Some("  Mastné vitamíny  ".into()),
+            },
+        )
+        .expect("create topic");
+        let topic = data
+            .topics
+            .iter()
+            .find(|t| t.slug == "vitaminy")
+            .expect("created topic");
+        assert_eq!(topic.name, "Vitamíny");
+        assert_eq!(topic.description.as_deref(), Some("Mastné vitamíny"));
+        assert!(!topic.built_in);
+
+        // Duplicate names get a uniquified slug, mirroring categories.
+        let data = do_create_topic(
+            &conn,
+            &teacher,
+            CreateTopicPayload {
+                name: "Vitaminy".into(),
+                description: None,
+            },
+        )
+        .expect("create duplicate");
+        assert!(data.topics.iter().any(|t| t.slug == "vitaminy-2"));
+
+        let data = do_update_topic_meta(
+            &conn,
+            &teacher,
+            UpdateTopicMetaPayload {
+                topic_id: "vitaminy".into(),
+                field: TopicField::Name,
+                value: Some("  Vitaminy II  ".into()),
+            },
+        )
+        .expect("rename topic");
+        assert_eq!(
+            data.topics.iter().find(|t| t.slug == "vitaminy").unwrap().name,
+            "Vitaminy II"
+        );
+
+        let data = do_update_topic_meta(
+            &conn,
+            &teacher,
+            UpdateTopicMetaPayload {
+                topic_id: "vitaminy".into(),
+                field: TopicField::Description,
+                value: Some("   ".into()),
+            },
+        )
+        .expect("clear description");
+        assert_eq!(
+            data.topics.iter().find(|t| t.slug == "vitaminy").unwrap().description,
+            None
+        );
+
+        // Blank names stay rejected.
+        assert!(matches!(
+            do_update_topic_meta(
+                &conn,
+                &teacher,
+                UpdateTopicMetaPayload {
+                    topic_id: "vitaminy".into(),
+                    field: TopicField::Name,
+                    value: Some("   ".into()),
+                },
+            ),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            do_create_topic(
+                &conn,
+                &teacher,
+                CreateTopicPayload {
+                    name: "".into(),
+                    description: None,
+                },
+            ),
+            Err(DbError::Validation(_))
+        ));
+
+        let data = do_delete_topic(
+            &conn,
+            DeleteTopicPayload {
+                topic_id: "vitaminy".into(),
+            },
+        )
+        .expect("delete topic");
+        assert!(!data.topics.iter().any(|t| t.slug == "vitaminy"));
+        assert!(matches!(
+            do_delete_topic(
+                &conn,
+                DeleteTopicPayload {
+                    topic_id: "vitaminy".into(),
+                },
+            ),
+            Err(DbError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn category_can_be_created_under_a_topic_and_moved_or_ungrouped() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        let data = do_create_category(
+            &conn,
+            &teacher,
+            CreateCategoryPayload {
+                name: "Nukleotidy".into(),
+                description: None,
+                topic_id: Some("nukleove-kyseliny".into()),
+            },
+        )
+        .expect("create with topic");
+        let category = data.categories.iter().find(|c| c.slug == "nukleotidy").unwrap();
+        assert_eq!(category.topic_slug.as_deref(), Some("nukleove-kyseliny"));
+
+        // An unknown topic reference is refused.
+        assert!(matches!(
+            do_create_category(
+                &conn,
+                &teacher,
+                CreateCategoryPayload {
+                    name: "Nukleotidy 2".into(),
+                    description: None,
+                    topic_id: Some("neexistuje".into()),
+                },
+            ),
+            Err(DbError::NotFound(_))
+        ));
+
+        // Move it under another topic.
+        let data = do_update_category_meta(
+            &conn,
+            &teacher,
+            UpdateCategoryMetaPayload {
+                category_id: "nukleotidy".into(),
+                field: CategoryField::Topic,
+                value: Some("sacharidy".into()),
+            },
+        )
+        .expect("move topic");
+        assert_eq!(
+            data.categories.iter().find(|c| c.slug == "nukleotidy").unwrap().topic_slug.as_deref(),
+            Some("sacharidy")
+        );
+
+        // Missing/null value ungroups it.
+        let data = do_update_category_meta(
+            &conn,
+            &teacher,
+            UpdateCategoryMetaPayload {
+                category_id: "nukleotidy".into(),
+                field: CategoryField::Topic,
+                value: None,
+            },
+        )
+        .expect("ungroup");
+        assert_eq!(
+            data.categories.iter().find(|c| c.slug == "nukleotidy").unwrap().topic_slug,
+            None
+        );
+
+        // And an unknown topic is refused there too.
+        assert!(matches!(
+            do_update_category_meta(
+                &conn,
+                &teacher,
+                UpdateCategoryMetaPayload {
+                    category_id: "nukleotidy".into(),
+                    field: CategoryField::Topic,
+                    value: Some("neexistuje".into()),
+                },
+            ),
+            Err(DbError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn deleting_a_topic_keeps_its_categories_and_ungroups_them() {
+        let conn = setup_conn();
+        let data = do_delete_topic(
+            &conn,
+            DeleteTopicPayload {
+                topic_id: "nukleove-kyseliny".into(),
+            },
+        )
+        .expect("delete topic");
+        assert!(!data.topics.iter().any(|t| t.slug == "nukleove-kyseliny"));
+
+        let bases = data
+            .categories
+            .iter()
+            .find(|c| c.slug == "dusikate-baze")
+            .expect("category survives");
+        assert_eq!(bases.topic_slug, None);
+        assert_eq!(bases.molecule_count, 5);
+        assert!(data.molecules.iter().any(|m| m.category_slug == "dusikate-baze"));
     }
 
     #[test]

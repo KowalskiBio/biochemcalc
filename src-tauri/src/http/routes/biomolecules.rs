@@ -4,13 +4,14 @@
 //! teacher-only. Recording a quiz score needs Biomolekuly access.
 
 use crate::commands::biomolecules::{
-    do_create_category, do_create_molecule, do_delete_category, do_delete_molecule, do_list_data,
-    do_quiz_leaderboard, do_record_quiz_result, do_record_streak_result, do_streak_leaderboard,
-    do_update_category_meta, do_update_molecule, BiomoleculeLeaderboardEntry,
-    BiomoleculeStreakLeaderboardEntry, CreateCategoryPayload, CreateMoleculePayload,
-    DeleteCategoryPayload, DeleteMoleculePayload, QuizLeaderboardPayload, RecordQuizResultPayload,
+    do_create_category, do_create_molecule, do_create_topic, do_delete_category, do_delete_molecule,
+    do_delete_topic, do_list_data, do_quiz_leaderboard, do_record_quiz_result,
+    do_record_streak_result, do_streak_leaderboard, do_update_category_meta, do_update_molecule,
+    do_update_topic_meta, BiomoleculeLeaderboardEntry, BiomoleculeStreakLeaderboardEntry,
+    CreateCategoryPayload, CreateMoleculePayload, CreateTopicPayload, DeleteCategoryPayload,
+    DeleteMoleculePayload, DeleteTopicPayload, QuizLeaderboardPayload, RecordQuizResultPayload,
     RecordStreakResultPayload, StreakLeaderboardPayload, UpdateCategoryMetaPayload,
-    UpdateMoleculePayload,
+    UpdateMoleculePayload, UpdateTopicMetaPayload,
 };
 use crate::db::repos::biomolecule_repo::BiomoleculeData;
 use crate::db::AppState;
@@ -50,6 +51,32 @@ async fn delete_category(
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
     Ok(Json(do_delete_category(&conn, payload)?))
+}
+
+async fn create_topic(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<CreateTopicPayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_create_topic(&conn, &user.id, payload)?))
+}
+
+async fn update_topic_meta(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<UpdateTopicMetaPayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_update_topic_meta(&conn, &user.id, payload)?))
+}
+
+async fn delete_topic(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DeleteTopicPayload>,
+) -> Result<Json<BiomoleculeData>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_delete_topic(&conn, payload)?))
 }
 
 async fn create_molecule(
@@ -132,6 +159,9 @@ pub fn quiz_router() -> Router<Arc<AppState>> {
 /// Teacher only.
 pub fn teacher_router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/create-topic", post(create_topic))
+        .route("/update-topic-meta", post(update_topic_meta))
+        .route("/delete-topic", post(delete_topic))
         .route("/create-category", post(create_category))
         .route("/update-category-meta", post(update_category_meta))
         .route("/delete-category", post(delete_category))

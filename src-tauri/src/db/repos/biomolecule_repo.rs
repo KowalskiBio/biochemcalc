@@ -5,12 +5,32 @@ use serde::Serialize;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Which piece of a topic's display text an update touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TopicField {
+    Name,
+    Description,
+}
+
+impl TopicField {
+    fn column(self) -> &'static str {
+        match self {
+            TopicField::Name => "name",
+            TopicField::Description => "description",
+        }
+    }
+}
+
 /// Which piece of a category's display text an update touches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CategoryField {
     Name,
     Description,
+    /// Moves the category under another topic (`value` = topic slug) or clears
+    /// its topic assignment (`value` = None).
+    Topic,
 }
 
 impl CategoryField {
@@ -18,8 +38,22 @@ impl CategoryField {
         match self {
             CategoryField::Name => "name",
             CategoryField::Description => "description",
+            CategoryField::Topic => "topic_slug",
         }
     }
+}
+
+/// One topic grouping (Aminokyseliny / Nukleové kyseliny / …) above the
+/// categories. `built_in` distinguishes the seeded topics only; they are
+/// editable and deletable like any other.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTopicInfo {
+    pub slug: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub built_in: bool,
 }
 
 /// One Biomolekuly category with its molecule count, in hub order.
@@ -34,6 +68,8 @@ pub struct BiomoleculeCategoryInfo {
     pub description: Option<String>,
     pub built_in: bool,
     pub molecule_count: i64,
+    /// Topic grouping this category belongs to, or NULL when ungrouped.
+    pub topic_slug: Option<String>,
 }
 
 /// One molecule with its traits (the optional, code-validated
@@ -58,19 +94,39 @@ pub struct BiomoleculeInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BiomoleculeData {
+    pub topics: Vec<BiomoleculeTopicInfo>,
     pub categories: Vec<BiomoleculeCategoryInfo>,
     pub molecules: Vec<BiomoleculeInfo>,
 }
 
-/// Biomolekuly categories, molecules, and traits (migration v47).
+/// Biomolekuly topics, categories, molecules, and traits (migrations v47/v51).
 pub struct BiomoleculeRepo;
 
 impl BiomoleculeRepo {
+    /// Every topic in hub order.
+    pub fn list_topics(conn: &Connection) -> Result<Vec<BiomoleculeTopicInfo>, DbError> {
+        let mut stmt = conn.prepare(
+            "SELECT slug, name, description, built_in
+             FROM biomolecule_topics
+             ORDER BY position, slug",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(BiomoleculeTopicInfo {
+                slug: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                built_in: row.get::<_, i64>(3)? != 0,
+            })
+        })?;
+        rows.map(|r| r.map_err(DbError::Sqlite)).collect()
+    }
+
     /// Every category with its molecule count, in hub order.
     pub fn list_categories(conn: &Connection) -> Result<Vec<BiomoleculeCategoryInfo>, DbError> {
         let mut stmt = conn.prepare(
             "SELECT c.slug, c.name, c.description, c.position, c.built_in,
-                    (SELECT COUNT(*) FROM biomolecules m WHERE m.category_slug = c.slug)
+                    (SELECT COUNT(*) FROM biomolecules m WHERE m.category_slug = c.slug),
+                    c.topic_slug
              FROM biomolecule_categories c
              ORDER BY c.position, c.slug",
         )?;
@@ -81,6 +137,7 @@ impl BiomoleculeRepo {
                 description: row.get(2)?,
                 built_in: row.get::<_, i64>(4)? != 0,
                 molecule_count: row.get(5)?,
+                topic_slug: row.get(6)?,
             })
         })?;
         rows.map(|r| r.map_err(DbError::Sqlite)).collect()
@@ -145,9 +202,107 @@ impl BiomoleculeRepo {
     /// The full dataset the client caches per session.
     pub fn list_data(conn: &Connection) -> Result<BiomoleculeData, DbError> {
         Ok(BiomoleculeData {
+            topics: Self::list_topics(conn)?,
             categories: Self::list_categories(conn)?,
             molecules: Self::list_molecules(conn)?,
         })
+    }
+
+    pub fn topic_exists(conn: &Connection, slug: &str) -> Result<bool, DbError> {
+        Ok(conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM biomolecule_topics WHERE slug = ?1)",
+            params![slug],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// True when another topic already carries this name (case-insensitive).
+    /// Kept for callers that want a friendly duplicate-name error; the create
+    /// path itself mirrors categories and uniquifies the slug instead.
+    #[allow(dead_code)]
+    pub fn topic_name_taken(
+        conn: &Connection,
+        name: &str,
+        exclude_slug: Option<&str>,
+    ) -> Result<bool, DbError> {
+        Ok(conn.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM biomolecule_topics
+                 WHERE name = ?1 COLLATE NOCASE
+                   AND (?2 IS NULL OR slug != ?2))",
+            params![name, exclude_slug],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Next free position among the topics.
+    pub fn next_topic_position(conn: &Connection) -> Result<i64, DbError> {
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM biomolecule_topics",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn insert_topic(
+        conn: &Connection,
+        slug: &str,
+        name: &str,
+        description: Option<&str>,
+        position: i64,
+        created_by: &Uuid,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO biomolecule_topics
+                 (slug, name, description, position, built_in, created_at, created_by, updated_at, updated_by)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?5, ?6)",
+            params![
+                slug,
+                name,
+                description,
+                position,
+                Utc::now().to_rfc3339(),
+                created_by
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Name writes refuse blank (topics must stay addressable); a blank
+    /// description stores NULL.
+    pub fn update_topic_field(
+        conn: &Connection,
+        slug: &str,
+        field: TopicField,
+        value: Option<&str>,
+        updated_by: &Uuid,
+    ) -> Result<(), DbError> {
+        let column = field.column();
+        let changed = conn.execute(
+            &format!(
+                "UPDATE biomolecule_topics
+                 SET {column} = ?2, updated_at = ?3, updated_by = ?4
+                 WHERE slug = ?1"
+            ),
+            params![slug, value, Utc::now().to_rfc3339(), updated_by],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("Topic {slug} not found")));
+        }
+        Ok(())
+    }
+
+    /// Removes the topic only. Categories keep existing; the FK's
+    /// `ON DELETE SET NULL` clears their `topic_slug`.
+    pub fn delete_topic(conn: &Connection, slug: &str) -> Result<(), DbError> {
+        let changed = conn.execute(
+            "DELETE FROM biomolecule_topics WHERE slug = ?1",
+            params![slug],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("Topic {slug} not found")));
+        }
+        Ok(())
     }
 
     pub fn category_exists(conn: &Connection, slug: &str) -> Result<bool, DbError> {
@@ -180,17 +335,19 @@ impl BiomoleculeRepo {
         slug: &str,
         name: &str,
         description: Option<&str>,
+        topic_slug: Option<&str>,
         position: i64,
         created_by: &Uuid,
     ) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO biomolecule_categories
-                 (slug, name, description, position, built_in, created_at, created_by, updated_at, updated_by)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?5, ?6)",
+                 (slug, name, description, topic_slug, position, built_in, created_at, created_by, updated_at, updated_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?6, ?7)",
             params![
                 slug,
                 name,
                 description,
+                topic_slug,
                 position,
                 Utc::now().to_rfc3339(),
                 created_by

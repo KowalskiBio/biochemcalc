@@ -7,6 +7,14 @@ import { httpRequest } from "./http"
  */
 export type BiomoleculeTraits = Record<string, string>
 
+/** One Biomolekuly topic — the grouping level above categories. */
+export interface BiomoleculeTopicInfo {
+  slug: string
+  name: string
+  description?: string
+  builtIn: boolean
+}
+
 /** One Biomolekuly category, as listed on the hub. */
 export interface BiomoleculeCategoryInfo {
   slug: string
@@ -14,6 +22,8 @@ export interface BiomoleculeCategoryInfo {
   description?: string
   builtIn: boolean
   moleculeCount: number
+  /** The topic this category is grouped under, if any. */
+  topicSlug?: string | null
 }
 
 /** One molecule. `name` and `smiles` are mandatory, traits optional. */
@@ -32,11 +42,17 @@ export interface Biomolecule {
 
 /** The whole Biomolekuly library; every mutation returns a fresh copy. */
 export interface BiomoleculeData {
+  topics: BiomoleculeTopicInfo[]
   categories: BiomoleculeCategoryInfo[]
   molecules: Biomolecule[]
 }
 
 export type CategoryField = "name" | "description"
+
+/** Fields editable through `updateCategoryMeta`; `"topic"` moves the category. */
+export type CategoryMetaField = CategoryField | "topic"
+
+export type TopicField = "name" | "description"
 
 /** One user's summed Biomolekuly quiz scores. */
 export interface BiomoleculeLeaderboardEntry {
@@ -67,15 +83,39 @@ export const biomoleculesApi = {
   /** Any logged-in user: the full category + molecule dataset. */
   data: (): Promise<BiomoleculeData> => httpRequest<BiomoleculeData>("/api/biomolecules/data"),
 
-  /** Teacher: create a category (the server derives its slug from the name). */
-  createCategory: (name: string, description: string | null): Promise<BiomoleculeData> =>
-    httpRequest<BiomoleculeData>("/api/biomolecules/create-category", { name, description }),
+  /** Teacher: create a topic (the server derives its slug from the name). */
+  createTopic: (name: string, description?: string): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/create-topic", { name, description }),
 
-  /** Teacher: rename a category or change its description. */
+  /** Teacher: rename a topic or change its description. */
+  updateTopicMeta: (topicId: string, field: TopicField, value?: string): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/update-topic-meta", {
+      topicId,
+      field,
+      value,
+    }),
+
+  /** Teacher: delete a topic; its categories remain, just ungrouped. */
+  deleteTopic: (topicId: string): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/delete-topic", { topicId }),
+
+  /** Teacher: create a category (the server derives its slug from the name). */
+  createCategory: (
+    name: string,
+    description: string | null,
+    topicId?: string,
+  ): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/create-category", {
+      name,
+      description,
+      topicId,
+    }),
+
+  /** Teacher: rename a category, change its description, or move it to a topic. */
   updateCategoryMeta: (
     categoryId: string,
-    field: CategoryField,
-    value: string | null,
+    field: CategoryMetaField,
+    value?: string | null,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/update-category-meta", {
       categoryId,
@@ -144,9 +184,7 @@ export const biomoleculesApi = {
   }): Promise<void> => httpRequest<void>("/api/biomolecules/record-streak-result", args),
 
   /** Any logged-in user. Each user's single best finished run of `kind`. */
-  streakLeaderboard: (
-    kind: BiomoleculeStreakKind,
-  ): Promise<BiomoleculeStreakLeaderboardEntry[]> =>
+  streakLeaderboard: (kind: BiomoleculeStreakKind): Promise<BiomoleculeStreakLeaderboardEntry[]> =>
     httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/streak-leaderboard", {
       kind,
     }),

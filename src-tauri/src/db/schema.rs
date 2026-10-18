@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 50;
+const CURRENT_USER_VERSION: u32 = 51;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -256,6 +256,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 50 {
         apply_migration_v50(conn)?;
         conn.pragma_update(None, "user_version", "50")?;
+    }
+
+    if user_version < 51 {
+        apply_migration_v51(conn)?;
+        conn.pragma_update(None, "user_version", "51")?;
     }
 
     Ok(())
@@ -1651,6 +1656,112 @@ fn apply_migration_v50(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Adds a "topic" grouping level above the Biomolekuly categories: a topic is
+/// a pure navigation grouping (Aminokyseliny / Nukleové kyseliny / Sacharidy)
+/// and owns no molecules itself. Deleting a topic must never delete its
+/// categories — the FK is `ON DELETE SET NULL`, so they simply become
+/// topic-less. The three built-in topics are seeded here and the existing
+/// built-in categories are attached by slug; the UPDATEs are no-ops when a
+/// teacher already deleted one of those categories, exactly like the original
+/// seed gate.
+fn apply_migration_v51(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_topics (
+            slug TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
+            updated_at TEXT NOT NULL,
+            updated_by BLOB REFERENCES users(id) ON DELETE SET NULL
+        );
+        ",
+    )?;
+
+    // Fresh databases created at v51 do not exist yet (v47 predates this),
+    // so the column is always added by ALTER; guard it for idempotency. A
+    // synthetic pre-v47 database (some migration tests) has no categories
+    // table at all — then there is nothing to alter or assign.
+    let has_categories: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'biomolecule_categories')",
+        [],
+        |row| row.get(0),
+    )?;
+    let has_topic_slug: bool = has_categories
+        && conn.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM pragma_table_info('biomolecule_categories')
+                 WHERE name = 'topic_slug')",
+            [],
+            |row| row.get(0),
+        )?;
+    if has_categories && !has_topic_slug {
+        conn.execute_batch(
+            "
+            ALTER TABLE biomolecule_categories
+                ADD COLUMN topic_slug TEXT
+                REFERENCES biomolecule_topics(slug) ON DELETE SET NULL;
+            ",
+        )?;
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let has_users: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'users')",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_users {
+        for (position, (slug, name, description)) in [
+            (
+                "aminokyseliny",
+                "Aminokyseliny",
+                "Proteinogenní aminokyseliny a jejich vlastnosti.",
+            ),
+            (
+                "nukleove-kyseliny",
+                "Nukleové kyseliny",
+                "Dusíkaté báze a nukleotidy — stavební kameny nukleových kyselin.",
+            ),
+            (
+                "sacharidy",
+                "Sacharidy",
+                "Monosacharidy a další cukry — struktura a označení.",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            conn.execute(
+                "INSERT OR IGNORE INTO biomolecule_topics
+                     (slug, name, description, position, built_in,
+                      created_at, created_by, updated_at, updated_by)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5, NULL, ?5, NULL)",
+                rusqlite::params![slug, name, description, position as i64, now],
+            )?;
+        }
+    }
+
+    if has_categories && has_users {
+        conn.execute_batch(
+            "
+            UPDATE biomolecule_categories SET topic_slug = 'aminokyseliny'
+                WHERE slug = 'aminokyseliny';
+            UPDATE biomolecule_categories SET topic_slug = 'nukleove-kyseliny'
+                WHERE slug = 'dusikate-baze';
+            UPDATE biomolecule_categories SET topic_slug = 'sacharidy'
+                WHERE slug = 'sacharidy';
+            ",
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2774,6 +2885,9 @@ mod tests {
         // table, version already past 44. v15 supplies the `users` table the
         // overrides table references.
         apply_migration_v15(&conn).expect("v15");
+        // v45 supplied `biomolecule_quiz_results`, which the v48 ALTER below
+        // assumes; a real database at version 45 always has it.
+        apply_migration_v45(&conn).expect("v45");
         conn.execute_batch(
             "
             CREATE TABLE biomolecule_category_names (
@@ -2918,5 +3032,64 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
             .expect("count again");
         assert_eq!(molecules_after, 34);
+    }
+
+    #[test]
+    fn v51_seeds_the_builtin_topics_and_groups_the_builtin_categories() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), 51);
+
+        let topics: Vec<(String, String, i64)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT slug, name, built_in FROM biomolecule_topics
+                     ORDER BY position, slug",
+                )
+                .expect("prepare topics");
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .expect("query topics");
+            rows.collect::<Result<_, _>>().expect("collect topics")
+        };
+        assert_eq!(
+            topics,
+            vec![
+                ("aminokyseliny".into(), "Aminokyseliny".into(), 1),
+                ("nukleove-kyseliny".into(), "Nukleové kyseliny".into(), 1),
+                ("sacharidy".into(), "Sacharidy".into(), 1),
+            ]
+        );
+
+        let assignments: Vec<(String, Option<String>)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT slug, topic_slug FROM biomolecule_categories
+                     ORDER BY position, slug",
+                )
+                .expect("prepare categories");
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("query categories");
+            rows.collect::<Result<_, _>>().expect("collect categories")
+        };
+        assert_eq!(
+            assignments,
+            vec![
+                ("aminokyseliny".into(), Some("aminokyseliny".into())),
+                ("dusikate-baze".into(), Some("nukleove-kyseliny".into())),
+                ("sacharidy".into(), Some("sacharidy".into())),
+            ]
+        );
+
+        // A rerun neither duplicates topics nor moves categories.
+        run_migrations(&conn).expect("migrations again");
+        let topic_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_topics", [], |row| row.get(0))
+            .expect("count topics again");
+        assert_eq!(topic_count, 3);
+        assert_eq!(user_version(&conn), 51);
     }
 }
