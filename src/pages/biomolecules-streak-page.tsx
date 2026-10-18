@@ -111,11 +111,14 @@ function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: bool
       // away part of what the open answer is supposed to test. The arbitrary
       // variant grays only the svg, never the error fallback; a projection,
       // when the molecule carries one, is a plain svg and grays the same.
+      // Like the quiz prompt, this is a single-molecule context, so `grow`
+      // keeps large molecules at 1:1 bonds instead of an unreadable square.
       <StructureView
         smiles={prompt.smiles}
         projection={prompt.projection}
         orientationDeg={prompt.orientationDeg}
         size={220}
+        grow
         title={quizStrings.promptStructureLabel}
         className={cn("mx-auto", grayscale && "[&_svg]:grayscale")}
       />

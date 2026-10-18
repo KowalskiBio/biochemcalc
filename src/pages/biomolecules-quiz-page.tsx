@@ -128,12 +128,15 @@ function PromptView({ prompt }: { prompt: QuizPrompt }) {
   if (prompt.kind === "structure" && prompt.smiles) {
     return (
       // A parsed projection, when the target molecule carries one, takes
-      // precedence over its SMILES inside StructureView.
+      // precedence over its SMILES inside StructureView. The prompt is a
+      // single-molecule context: `grow` lets large molecules draw at 1:1
+      // bonds instead of shrinking into the question's square.
       <StructureView
         smiles={prompt.smiles}
         projection={prompt.projection}
         orientationDeg={prompt.orientationDeg}
         size={220}
+        grow
         title={quizStrings.promptStructureLabel}
         className="mx-auto"
       />

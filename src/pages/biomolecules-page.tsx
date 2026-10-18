@@ -915,10 +915,14 @@ function MoleculeBrowser({
               </DialogHeader>
 
               <div className="flex justify-center">
+                {/* The dialog is a single-molecule context: `grow` keeps big
+                    molecules (acetyl-CoA, peptides) at 1:1 bonds. The dialog's
+                    own width is the width cap, so the depiction can't burst it. */}
                 <StructureView
                   smiles={selected.smiles}
                   projection={projections.get(selected.id)}
                   size={260}
+                  grow
                   title={selected.name}
                 />
               </div>

@@ -65,9 +65,14 @@ export function BiomoleculesProjectionPage() {
           {trimmed !== "" && (
             <div className="flex flex-wrap items-start gap-6">
               <div className="space-y-2">
+                {/* Single-molecule preview: `grow` keeps 1:1 bonds. The
+                    wrapping flex item is shrink-to-fit, so its width would
+                    feed back on the grown depiction — cap with maxWidth. */}
                 <StructureView
                   smiles={trimmed}
                   size={320}
+                  grow
+                  maxWidth={640}
                   onValidityChange={setDrawingValid}
                 />
               </div>
