@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
@@ -35,7 +35,7 @@ import type {
   BiomoleculeTraits,
   CategoryField,
 } from "@/lib/biomolecules-api"
-import { moleculeFacts, TRAIT, traitOf } from "@/lib/molecules"
+import { moleculeAliases, moleculeFacts, TRAIT, traitOf } from "@/lib/molecules"
 import {
   generatableQuizTypes,
   getCategoryQuizConfig,
@@ -1000,6 +1000,9 @@ function MoleculeBrowser({
   )
 }
 
+/** Cap on alternative-name rows per molecule — extras the quiz also accepts. */
+const MAX_ALIASES = 8
+
 /** Shared class for the toggle buttons of flag traits. */
 const flagButtonClass = (active: boolean) =>
   cn(
@@ -1033,6 +1036,7 @@ function MoleculeFormDialog({
   const [smiles, setSmiles] = useState("")
   const [smilesValid, setSmilesValid] = useState(true)
   const [abbreviation, setAbbreviation] = useState("")
+  const [aliases, setAliases] = useState<string[]>([])
   const [oneLetter, setOneLetter] = useState("")
   const [charge, setCharge] = useState("")
   const [polarity, setPolarity] = useState("")
@@ -1059,6 +1063,7 @@ function MoleculeFormDialog({
     setSmiles(molecule?.smiles ?? "")
     setSmilesValid(true)
     setAbbreviation(molecule ? (traitOf(molecule, TRAIT.abbreviation) ?? "") : "")
+    setAliases(molecule ? moleculeAliases(molecule) : [])
     setOneLetter(molecule ? (traitOf(molecule, TRAIT.oneLetter) ?? "") : "")
     setCharge(molecule ? (traitOf(molecule, TRAIT.charge) ?? "") : "")
     setPolarity(molecule ? (traitOf(molecule, TRAIT.polarity) ?? "") : "")
@@ -1081,6 +1086,13 @@ function MoleculeFormDialog({
       if (value.trim()) traits[key] = value.trim()
     }
     put(TRAIT.abbreviation, abbreviation)
+    put(
+      TRAIT.aliases,
+      aliases
+        .map((a) => a.trim())
+        .filter((a) => a.length > 0)
+        .join("\n"),
+    )
     if (kind === "aminoAcids") {
       put(TRAIT.oneLetter, oneLetter)
       put(TRAIT.sideChain, sideChain)
@@ -1158,6 +1170,51 @@ function MoleculeFormDialog({
                 className="font-mono"
               />
             </div>
+          </div>
+
+          {/* Alternative names: optional extra accepted quiz answers, kept
+              visually subordinate to the primary name above (quiet ghost
+              controls, no framing). Capped at MAX_ALIASES rows; empty rows
+              are dropped on save. */}
+          <div className="space-y-2">
+            <Label>{manage.aliasesLabel}</Label>
+            <p className="text-xs text-muted-foreground">{manage.aliasesHint}</p>
+            {aliases.map((alias, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional — aliases are user text that may repeat, and the fully controlled inputs only ever append/remove
+              <div key={index} className="flex items-center gap-2">
+                <Input
+                  value={alias}
+                  onChange={(e) =>
+                    setAliases((prev) => prev.map((a, i) => (i === index ? e.target.value : a)))
+                  }
+                  placeholder={manage.aliasPlaceholder}
+                  maxLength={80}
+                  aria-label={`${manage.aliasesLabel} ${index + 1}`}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={manage.removeAliasLabel}
+                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                  onClick={() => setAliases((prev) => prev.filter((_, i) => i !== index))}
+                >
+                  <X className="size-3.5" strokeWidth={1.75} />
+                </Button>
+              </div>
+            ))}
+            {aliases.length < MAX_ALIASES && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => setAliases((prev) => [...prev, ""])}
+              >
+                <Plus className="size-3.5" strokeWidth={1.75} />
+                {manage.addAliasLabel}
+              </Button>
+            )}
           </div>
 
           <div className="space-y-2">

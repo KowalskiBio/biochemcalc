@@ -153,6 +153,21 @@ describe("hard-mode openAnswer content", () => {
 })
 
 describe("aliases propagation", () => {
+  /** Alanine carries a two-line `aliases` trait on top of its code. */
+  function aliasedAminoAcids() {
+    return TEST_AMINO_ACIDS.map((molecule) =>
+      molecule.slug === "ala"
+        ? {
+            ...molecule,
+            traits: {
+              ...molecule.traits,
+              aliases: "  Alfa  \n\n Aminokyselina alanin \n",
+            },
+          }
+        : molecule,
+    )
+  }
+
   it("gives amino acids their three-letter code as an alias", () => {
     const alanine = AMINO_ACIDS.molecules.find((molecule) => molecule.id === "ala")
     expect(alanine?.aliases).toEqual(["Ala"])
@@ -166,6 +181,46 @@ describe("aliases propagation", () => {
     for (const molecule of NITROGEN_BASES.molecules) {
       expect(molecule.aliases).toBeUndefined()
     }
+  })
+
+  it("appends aliases-trait names after the abbreviation alias", () => {
+    const config = getCategoryQuizConfig(AMINO_ACIDS_SLUG, aliasedAminoAcids())
+    if (config === undefined) {
+      throw new Error("expected a quiz config for the amino acids")
+    }
+    const alanine = config.molecules.find((molecule) => molecule.id === "ala")
+    expect(alanine?.aliases).toEqual(["Ala", "Alfa", "Aminokyselina alanin"])
+
+    // Molecules without the trait keep exactly their abbreviation alias.
+    const glycine = config.molecules.find((molecule) => molecule.id === "gly")
+    expect(glycine?.aliases).toEqual(["Gly"])
+  })
+
+  it("accepts a trait alias for a name question", () => {
+    const config = getCategoryQuizConfig(AMINO_ACIDS_SLUG, aliasedAminoAcids())
+    if (config === undefined) {
+      throw new Error("expected a quiz config for the amino acids")
+    }
+    let question: QuizQuestion | undefined
+    for (let seed = 0; seed < 100; seed++) {
+      const candidate = generateQuizSession(config.molecules, {
+        types: ["structureToName"],
+        questionCount: 1,
+        seed,
+        characteristics: config.characteristics,
+        mode: "hard",
+      })[0]
+      if (candidate?.targetId === "ala") {
+        question = candidate
+        break
+      }
+    }
+    if (question === undefined) {
+      throw new Error("expected a hard-mode question targeting alanine")
+    }
+    expect(isOpenAnswerCorrect(question, "Aminokyselina alanin")).toBe(true)
+    expect(isOpenAnswerCorrect(question, "alfa")).toBe(true)
+    expect(isOpenAnswerCorrect(question, "Ala")).toBe(true)
   })
 })
 

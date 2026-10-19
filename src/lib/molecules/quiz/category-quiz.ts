@@ -15,6 +15,7 @@ import {
   AMINO_ACIDS_SLUG,
   hasTraitFlag,
   isAchiral,
+  moleculeAliases,
   NITROGEN_BASES_SLUG,
   SACCHARIDES_SLUG,
   TRAIT,
@@ -39,6 +40,31 @@ export interface CategoryQuizConfig {
 /** The predicate id a generic trait value quizzes on ("charge:positive"). */
 export function traitPredicate(trait: string, value: string): string {
   return `${trait}:${value}`
+}
+
+/**
+ * Combine an abbreviation-derived alias with the molecule's `aliases` trait.
+ * The abbreviation stays first, duplicates are dropped case-insensitively,
+ * any alias equal to the molecule name is ignored, and an empty result is
+ * `undefined` (the engine's "no aliases" shape).
+ */
+function quizAliases(
+  molecule: Biomolecule,
+  abbreviationAlias?: string,
+): string[] | undefined {
+  const name = molecule.name.trim().toLowerCase()
+  const seen = new Set<string>()
+  const aliases: string[] = []
+  for (const alias of [
+    ...(abbreviationAlias !== undefined ? [abbreviationAlias] : []),
+    ...moleculeAliases(molecule),
+  ]) {
+    const key = alias.trim().toLowerCase()
+    if (key === name || seen.has(key)) continue
+    seen.add(key)
+    aliases.push(alias)
+  }
+  return aliases.length > 0 ? aliases : undefined
 }
 
 function baseQuizMolecule(
@@ -67,13 +93,13 @@ function aminoAcidsQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   const quizMolecules = molecules.map((molecule) => {
     // The three-letter code spells the answer a student may type in hard mode.
     const abbreviation = traitOf(molecule, TRAIT.abbreviation)
-    const aliases =
-      abbreviation !== undefined && abbreviation.length > 1 ? [abbreviation] : undefined
+    const abbreviationAlias =
+      abbreviation !== undefined && abbreviation.length > 1 ? abbreviation : undefined
     return baseQuizMolecule(
       molecule,
       traitOf(molecule, TRAIT.oneLetter),
       traitOf(molecule, TRAIT.sideChain),
-      aliases,
+      quizAliases(molecule, abbreviationAlias),
     )
   })
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
@@ -115,7 +141,12 @@ function aminoAcidsQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
 function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   return {
     molecules: molecules.map((molecule) =>
-      baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringSystem)),
+      baseQuizMolecule(
+        molecule,
+        undefined,
+        traitOf(molecule, TRAIT.ringSystem),
+        quizAliases(molecule),
+      ),
     ),
   }
 }
@@ -128,7 +159,12 @@ function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
  */
 function saccharidesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   const quizMolecules = molecules.map((molecule) =>
-    baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringForm)),
+    baseQuizMolecule(
+      molecule,
+      undefined,
+      traitOf(molecule, TRAIT.ringForm),
+      quizAliases(molecule),
+    ),
   )
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
   const traitIs =
@@ -191,15 +227,15 @@ function genericQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
     const oneLetter = everyHasAbbreviation ? abbreviation : undefined
     // A multi-character abbreviation that isn't already the quiz letter is an
     // accepted alternative spelling.
-    const aliases =
+    const abbreviationAlias =
       abbreviation !== undefined && abbreviation.length > 1 && abbreviation !== oneLetter
-        ? [abbreviation]
+        ? abbreviation
         : undefined
     return baseQuizMolecule(
       molecule,
       oneLetter,
       traitOf(molecule, TRAIT.polarity) ?? traitOf(molecule, TRAIT.charge),
-      aliases,
+      quizAliases(molecule, abbreviationAlias),
     )
   })
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))

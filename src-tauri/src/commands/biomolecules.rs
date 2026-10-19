@@ -25,6 +25,7 @@ const MAX_DESCRIPTION_CHARS: usize = 300;
 const MAX_MOLECULE_NAME_CHARS: usize = 80;
 const MAX_SMILES_CHARS: usize = 300;
 const MAX_ABBREVIATION_CHARS: usize = 12;
+const MAX_ALIASES_CHARS: usize = 80;
 const MAX_FACTS_CHARS: usize = 1000;
 
 /// Generous upper bound on one quiz's length — the "all molecules" option of
@@ -67,6 +68,7 @@ pub mod traits {
     pub const IN_DNA: &str = "inDna";
     pub const IN_RNA: &str = "inRna";
     pub const FACTS: &str = "facts";
+    pub const ALIASES: &str = "aliases";
 
     /// Traits whose value must be unique within a category — letter-based
     /// quiz options would otherwise be ambiguous.
@@ -92,7 +94,7 @@ pub mod traits {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     }
 
-    fn validate(key: &str, value: &str) -> Result<String, DbError> {
+    pub(super) fn validate(key: &str, value: &str) -> Result<String, DbError> {
         let trimmed = value.trim();
         match key {
             k if k == ABBREVIATION => {
@@ -141,6 +143,25 @@ pub mod traits {
                     ));
                 }
                 Ok(parts.join(","))
+            }
+            k if k == ALIASES => {
+                let aliases: Vec<&str> = trimmed
+                    .split('\n')
+                    .map(str::trim)
+                    .filter(|alias| !alias.is_empty())
+                    .collect();
+                if aliases.is_empty()
+                    || aliases.len() > 8
+                    || !aliases
+                        .iter()
+                        .all(|alias| alias.chars().count() <= super::MAX_ALIASES_CHARS)
+                {
+                    return Err(DbError::Validation(format!(
+                        "Aliases must be 1-8 newline-separated names, each 1-{} characters",
+                        super::MAX_ALIASES_CHARS
+                    )));
+                }
+                Ok(aliases.join("\n"))
             }
             k if k == FACTS => {
                 if trimmed.is_empty() || trimmed.chars().count() > super::MAX_FACTS_CHARS {
@@ -996,6 +1017,42 @@ mod tests {
                 "{key}={value} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn aliases_trait_normalizes_and_validates() {
+        use traits::{validate, ALIASES};
+
+        // Valid multi-line value: each line is trimmed and blank lines dropped.
+        let mut input = HashMap::new();
+        input.insert(ALIASES.to_string(), "  alfa  \n\n beta \n".to_string());
+        assert_eq!(
+            traits::normalize(&input).expect("valid aliases"),
+            vec![(ALIASES.to_string(), "alfa\nbeta".to_string())]
+        );
+
+        // An empty value (after trimming) is rejected.
+        assert!(matches!(
+            validate(ALIASES, "  \n \n"),
+            Err(DbError::Validation(_))
+        ));
+
+        // More than eight names is rejected.
+        let too_many = (1..=9)
+            .map(|n| format!("alias{n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(matches!(
+            validate(ALIASES, &too_many),
+            Err(DbError::Validation(_))
+        ));
+
+        // A single name longer than MAX_ALIASES_CHARS is rejected.
+        let overlong = "a".repeat(MAX_ALIASES_CHARS + 1);
+        assert!(matches!(
+            validate(ALIASES, &overlong),
+            Err(DbError::Validation(_))
+        ));
     }
 
     #[test]

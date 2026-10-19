@@ -38,6 +38,11 @@ export const TRAIT = {
   pairsWith: "pairsWith",
   /** Czech teaching facts, one per line. */
   facts: "facts",
+  /**
+   * Alternative names accepted as correct name answers in hard-mode quizzes,
+   * one per line.
+   */
+  aliases: "aliases",
   /** Saccharides: alpha | beta — cross-checked against the Haworth spec. */
   anomer: "anomer",
   /** Saccharide ring form: pyranose | furanose. */
@@ -65,6 +70,14 @@ export function moleculeFacts(molecule: Biomolecule): string[] {
     .split("\n")
     .map((fact) => fact.trim())
     .filter((fact) => fact.length > 0)
+}
+
+/** A molecule's alternative answer names (the `aliases` trait, one per line). */
+export function moleculeAliases(molecule: Biomolecule): string[] {
+  return (traitOf(molecule, TRAIT.aliases) ?? "")
+    .split("\n")
+    .map((alias) => alias.trim())
+    .filter((alias) => alias.length > 0)
 }
 
 /**
