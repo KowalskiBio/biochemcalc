@@ -8,7 +8,12 @@ import {
   type PreprocessorLike,
   snapshotFromPreprocessor,
 } from "@/lib/molecules/render/pipeline-snapshot"
+import {
+  applyPorphyrinLayout,
+  type PorphyrinPreprocessor,
+} from "@/lib/molecules/render/porphyrin-layout"
 import { recognizeSugarRings } from "@/lib/molecules/render/recognize"
+import { recognizeTetrapyrrole } from "@/lib/molecules/render/recognize-porphyrin"
 
 export type RecognitionVerdict =
   | { status: "invalid" }
@@ -36,6 +41,11 @@ export function previewRecognition(smiles: string): RecognitionVerdict {
         const result = original.apply(preprocessor, args)
         const snapshot = snapshotFromPreprocessor(preprocessor)
         const plans = recognizeSugarRings(snapshot)
+        // Keep the preview's internal drawing consistent with the live
+        // StructureView (the verdict below remains Haworth-specific).
+        if (plans.length === 0 && recognizeTetrapyrrole(snapshot) !== null) {
+          applyPorphyrinLayout(preprocessor as unknown as PorphyrinPreprocessor)
+        }
         verdict =
           plans.length === 0
             ? { status: "none" }

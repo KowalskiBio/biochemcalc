@@ -11,6 +11,10 @@ import {
   collectOhLabelHints,
   type HaworthPreprocessor,
 } from "@/lib/molecules/render/haworth-layout"
+import {
+  applyPorphyrinCoordinationLines,
+  applyPorphyrinLayout,
+} from "@/lib/molecules/render/porphyrin-layout"
 import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/stores/ui-store"
@@ -252,17 +256,22 @@ function SmilesStructureView({
         // draw — `preprocessor` is per-instance.
         const preprocessor = drawer.preprocessor as unknown as PreprocessorShim
         const originalProcessGraph = preprocessor.processGraph
-        let recognized = false
+        let haworthLayout = false
+        let porphyrinLayout = false
         preprocessor.processGraph = () => {
           originalProcessGraph.call(preprocessor)
-          // Sugar rings first: recognized rings snap into the canonical
-          // Haworth skeleton (nucleotides & co. keep their full library
-          // layout for the rest). Recognized sugars stay canonical — no
-          // random orientation — while an explicit enantiomer mirror still
-          // applies to the whole drawing.
-          recognized = applyHaworthLayout(
+          // Post-layout idealizers, mutually exclusive: the sugar recognizer
+          // rejects N-in-ring, so a tetrapyrrole can never also be a sugar.
+          // Recognized skeletons stay canonical — no random orientation —
+          // while an explicit enantiomer mirror still applies to the whole
+          // drawing.
+          haworthLayout = applyHaworthLayout(
             preprocessor as unknown as HaworthPreprocessor,
           )
+          porphyrinLayout =
+            !haworthLayout &&
+            applyPorphyrinLayout(preprocessor as unknown as HaworthPreprocessor)
+          const recognized = haworthLayout || porphyrinLayout
           if (recognized) {
             if (mirror) {
               applyOrientation(preprocessor, 0, true)
@@ -274,7 +283,7 @@ function SmilesStructureView({
 
         try {
           drawer.draw(tree, svg, resolvedTheme)
-          if (recognized) {
+          if (haworthLayout) {
             // Left-half ring hydroxyls read "HO", anchored off the ring —
             // the hexose C4 idiom that also frees up crowded space.
             applyHaworthHOLabels(
@@ -285,6 +294,14 @@ function SmilesStructureView({
             // thick→thin C3→C4) — pyranose and furanose alike. Runs on the
             // final coordinates, so the quads land exactly on the ring.
             applyHaworthBoldFrontEdges(svg, preprocessor as unknown as HaworthPreprocessor)
+          }
+          if (porphyrinLayout) {
+            // Isolated metals (heme Fe) have no graph bond to the nitrogens;
+            // append the four shortened coordination strokes after drawing.
+            applyPorphyrinCoordinationLines(
+              svg,
+              preprocessor as unknown as HaworthPreprocessor,
+            )
           }
           if (grow) {
             // Fully drawn (labels included): the viewBox now holds the

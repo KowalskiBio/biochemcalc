@@ -18,168 +18,20 @@ import {
   recognizeSugarRings,
   type SugarRingRecognition,
 } from "@/lib/molecules/render/recognize"
+import {
+  centroid,
+  collectSubtree,
+  heavyNeighboursOf,
+  type LayoutPreprocessor,
+  place,
+  positionOf,
+  recomputeRingCenter,
+  rotatePositions,
+  walkChainOutward,
+} from "@/lib/molecules/render/subtree"
 
-interface PositionedVertex {
-  id: number
-  position: Point
-  value: {
-    element: string
-    chirality?: string
-    isPartOfAromaticRing?: boolean
-  }
-  neighbours: number[]
-}
-
-export interface HaworthPreprocessor {
-  graph: {
-    vertices: PositionedVertex[]
-    edges?: {
-      sourceId: number
-      targetId: number
-      weight?: number
-      wedge?: string
-      isPartOfAromaticRing?: boolean
-    }[]
-  }
-  rings: { id: number; members: number[]; center: Point }[]
-  opts?: { bondLength?: number }
-}
-
-/** Move a vertex to an absolute position (positions are Vector2-like). */
-function place(preprocessor: HaworthPreprocessor, vertexId: number, target: Point): void {
-  const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === vertexId)
-  if (vertex !== undefined) {
-    vertex.position.x = target.x
-    vertex.position.y = target.y
-  }
-}
-
-/** Read a vertex's current (post-placement) position. */
-function positionOf(preprocessor: HaworthPreprocessor, vertexId: number): Point | undefined {
-  return preprocessor.graph.vertices.find((candidate) => candidate.id === vertexId)?.position
-}
-
-function centroid(points: Point[]): Point {
-  const sum = points.reduce((acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }), {
-    x: 0,
-    y: 0,
-  })
-  return { x: sum.x / points.length, y: sum.y / points.length }
-}
-
-/** Rotate all `ids` around `pivot` by `delta` radians (screen-space, y-down). */
-function rotatePositions(
-  preprocessor: HaworthPreprocessor,
-  ids: number[],
-  pivot: Point,
-  delta: number,
-): void {
-  const cos = Math.cos(delta)
-  const sin = Math.sin(delta)
-  for (const id of ids) {
-    const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
-    if (vertex === undefined) {
-      continue
-    }
-    const dx = vertex.position.x - pivot.x
-    const dy = vertex.position.y - pivot.y
-    // Screen-space rotation (y-down): same convention as orientation.ts.
-    vertex.position.x = pivot.x + dx * cos - dy * sin
-    vertex.position.y = pivot.y + dx * sin + dy * cos
-  }
-}
-
-/** DFS from `start`, never entering a blocked atom (ring atoms / bridges). */
-function collectSubtree(
-  preprocessor: HaworthPreprocessor,
-  start: number,
-  blocked: Set<number>,
-  out: number[] = [],
-): number[] {
-  out.push(start)
-  blocked.add(start)
-  for (const neighbour of preprocessor.graph.vertices.find((v) => v.id === start)?.neighbours ??
-    []) {
-    if (!blocked.has(neighbour)) {
-      collectSubtree(preprocessor, neighbour, blocked, out)
-    }
-  }
-  return out
-}
-
-/** Heavy (non-H) neighbours of `id`, optionally excluding the atom we came from. */
-function heavyNeighboursOf(
-  preprocessor: HaworthPreprocessor,
-  id: number,
-  excludeId?: number,
-): number[] {
-  return (
-    preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.neighbours ?? []
-  ).filter(
-    (neighbour) =>
-      neighbour !== excludeId &&
-      preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value.element !==
-        "H",
-  )
-}
-
-/**
- * Walk a chain substituent outward from its already-placed first bond. Every
- * linear continuation turns the same 60° off vertical toward the free side
- * and is normalized to a full bond length, so long tails (AMP's phosphate,
- * acetyl-CoA) march diagonally away from the ring instead of stacking into a
- * clump. The walk stops before ANY ring (sugar or aromatic), at a protected
- * atom (glycosidic bridge / another plan), and at branch points; a branch
- * point's remaining subtree keeps the last rigid transform.
- */
-function walkChainOutward(
-  preprocessor: HaworthPreprocessor,
-  startId: number,
-  previousId: number,
-  target: number,
-  bondLength: number,
-  ringMembers: Set<number>,
-  blocked: Set<number>,
-): void {
-  let currentId = startId
-  let previous = previousId
-  for (;;) {
-    const continuations = heavyNeighboursOf(preprocessor, currentId, previous)
-    if (continuations.length !== 1) {
-      return
-    }
-    const nextId = continuations[0]
-    if (ringMembers.has(nextId) || blocked.has(nextId)) {
-      return
-    }
-    const current = positionOf(preprocessor, currentId)
-    const next = positionOf(preprocessor, nextId)
-    if (current === undefined || next === undefined) {
-      return
-    }
-    const pivot = { x: current.x, y: current.y }
-    const heading = Math.atan2(next.y - pivot.y, next.x - pivot.x)
-    const subtree = collectSubtree(preprocessor, nextId, new Set(blocked))
-    rotatePositions(preprocessor, subtree, pivot, target - heading)
-    const rotatedNext = positionOf(preprocessor, nextId)
-    if (rotatedNext !== undefined) {
-      const shiftX = pivot.x + Math.cos(target) * bondLength - rotatedNext.x
-      const shiftY = pivot.y + Math.sin(target) * bondLength - rotatedNext.y
-      if (Math.abs(shiftX) > 0.01 || Math.abs(shiftY) > 0.01) {
-        for (const id of subtree) {
-          const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
-          if (vertex !== undefined) {
-            vertex.position.x += shiftX
-            vertex.position.y += shiftY
-          }
-        }
-      }
-    }
-    blocked.add(nextId)
-    previous = currentId
-    currentId = nextId
-  }
-}
+/** The live smiles-drawer graph shape shared by both post-layout passes. */
+export type HaworthPreprocessor = LayoutPreprocessor
 
 /**
  * A glycosidic-style connection between two recognized rings: a non-ring
@@ -518,14 +370,7 @@ function applyPlan(
   }
 
   // Recompute the ring center (aromatic circle / label placement).
-  const ring = preprocessor.rings.find((candidate) => candidate.id === plan.ringId)
-  const newPositions = ringIds
-    .map((id) => preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.position)
-    .filter((position): position is Point => position !== undefined)
-  if (ring !== undefined && newPositions.length === ringIds.length) {
-    ring.center.x = centroid(newPositions).x
-    ring.center.y = centroid(newPositions).y
-  }
+  recomputeRingCenter(preprocessor, plan.ringId, ringIds)
 }
 
 /**
@@ -673,7 +518,7 @@ const HAWORTH_FRONT_EDGE_THICK = 2.2
  * segment's midpoint; fall back to the drawing's first stroked bond, then
  * `currentColor`, when nothing coordinates-bearing is found nearby.
  */
-function bondStrokeNear(svgRoot: SVGSVGElement, x: number, y: number): string | null {
+export function bondStrokeNear(svgRoot: SVGSVGElement, x: number, y: number): string | null {
   let bestStroke: string | null = null
   let bestDistance = Number.POSITIVE_INFINITY
   for (const element of Array.from(svgRoot.querySelectorAll("line"))) {
@@ -697,7 +542,7 @@ function bondStrokeNear(svgRoot: SVGSVGElement, x: number, y: number): string | 
   return bestStroke
 }
 
-function sampleBondStroke(svgRoot: SVGSVGElement): string {
+export function sampleBondStroke(svgRoot: SVGSVGElement): string {
   for (const element of Array.from(svgRoot.querySelectorAll("line, path"))) {
     const stroke = element.getAttribute("stroke")
     if (stroke !== null && stroke.trim() !== "" && stroke.trim() !== "none") {
