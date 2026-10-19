@@ -1084,6 +1084,8 @@ function MoleculeFormDialog({
     if (kind === "aminoAcids") {
       put(TRAIT.oneLetter, oneLetter)
       put(TRAIT.sideChain, sideChain)
+      put(TRAIT.charge, charge)
+      put(TRAIT.polarity, polarity)
       if (sulfur) traits[TRAIT.sulfur] = "true"
       if (essential) traits[TRAIT.essential] = "true"
     }
@@ -1093,11 +1095,6 @@ function MoleculeFormDialog({
       if (inDna) traits[TRAIT.inDna] = "true"
       if (inRna) traits[TRAIT.inRna] = "true"
     }
-    if (kind === "custom") {
-      put(TRAIT.polarity, polarity)
-      if (essential) traits[TRAIT.essential] = "true"
-    }
-    put(TRAIT.charge, charge)
     put(TRAIT.facts, facts)
 
     try {
@@ -1274,23 +1271,23 @@ function MoleculeFormDialog({
             </>
           )}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>{manage.chargeLabel}</Label>
-              <Select
-                value={charge || "unset"}
-                onValueChange={(v) => setCharge(v === "unset" ? "" : v)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unset">{manage.unsetOption}</SelectItem>
-                  {enumOptions(labels.chargeLabels)}
-                </SelectContent>
-              </Select>
-            </div>
-            {kind === "custom" && (
+          {kind === "aminoAcids" && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>{manage.chargeLabel}</Label>
+                <Select
+                  value={charge || "unset"}
+                  onValueChange={(v) => setCharge(v === "unset" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">{manage.unsetOption}</SelectItem>
+                    {enumOptions(labels.chargeLabels)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2">
                 <Label>{manage.polarityLabel}</Label>
                 <Select
@@ -1306,12 +1303,12 @@ function MoleculeFormDialog({
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {(kind === "aminoAcids" || kind === "nitrogenBases" || kind === "custom") && (
+          {(kind === "aminoAcids" || kind === "nitrogenBases") && (
             <div className="flex flex-wrap gap-2">
-              {kind !== "nitrogenBases" && (
+              {kind === "aminoAcids" && (
                 <button
                   type="button"
                   aria-pressed={essential}
