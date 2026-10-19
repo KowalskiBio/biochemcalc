@@ -44,7 +44,7 @@ export interface QuizMolecule {
   aliases?: string[]
   /** Groups molecules for the same-class distractor preference. */
   classKey?: string
-  /** Enantiomer decoys are only allowed when this is false/undefined. */
+  /** True when the molecule has no stereocenter; backs the `achiral` predicate. */
   achiral?: boolean
   /**
    * Declarative teaching projection (e.g. Haworth for cyclic saccharides).
@@ -60,7 +60,7 @@ export interface CharacteristicDef {
 }
 
 export interface QuizOption {
-  /** Unique within the question, e.g. the molecule id or `${id}:mirror`. */
+  /** Unique within the question, e.g. the molecule id. */
   key: string
   display: "name" | "letter" | "structure"
   moleculeId: string
@@ -69,8 +69,6 @@ export interface QuizOption {
   smiles?: string
   /** Present only when `display === "structure"`; random angle in `[0, 360)`. */
   orientationDeg?: number
-  /** Present only when `display === "structure"`; true only on enantiomer decoys. */
-  mirror?: boolean
   /** Present when the option's molecule carries a teaching projection. */
   projection?: ProjectionSpec
 }
@@ -113,8 +111,6 @@ export interface GenerateQuizConfig {
   types: QuizQuestionType[]
   questionCount: number
   seed: number
-  /** Enantiomer decoys, default true. */
-  mirrorDecoys?: boolean
   /** Same-class grouping for distractor preference; default reads `m.classKey`. */
   classKeyOf?: (molecule: QuizMolecule) => string | undefined
   /** A non-empty list enables the "characteristic" question type. */
@@ -167,14 +163,6 @@ const LETTER_QUIZ_TYPES: ReadonlySet<QuizQuestionType> = new Set([
   "letterToStructure",
   "structureToLetter",
 ])
-
-/** Types whose answer options are structures (eligible for mirror decoys). */
-const STRUCTURE_OPTION_TYPES: ReadonlySet<QuizQuestionType> = new Set([
-  "nameToStructure",
-  "letterToStructure",
-])
-
-const MIRROR_DECOY_PROBABILITY = 0.5
 
 type ClassKeyOf = (molecule: QuizMolecule) => string | undefined
 
@@ -277,24 +265,10 @@ function makeOption(
       correct,
       smiles: molecule.smiles,
       orientationDeg: orientationForStructure(molecule, rng),
-      mirror: false,
       projection: molecule.projection,
     }
   }
   return { key: molecule.id, display, moleculeId: molecule.id, correct }
-}
-
-function makeMirrorDecoy(target: QuizMolecule, rng: () => number): QuizOption {
-  return {
-    key: `${target.id}:mirror`,
-    display: "structure",
-    moleculeId: target.id,
-    correct: false,
-    smiles: target.smiles,
-    orientationDeg: orientationForStructure(target, rng),
-    mirror: true,
-    projection: target.projection,
-  }
 }
 
 /**
@@ -358,7 +332,6 @@ function buildOptions(
   target: QuizMolecule,
   type: QuizQuestionType,
   rng: () => number,
-  mirrorDecoys: boolean,
   classKeyOf: ClassKeyOf,
 ): QuizOption[] {
   const display = optionDisplayFor(type)
@@ -367,22 +340,6 @@ function buildOptions(
     makeOption(display, target, true, rng),
     ...distractors.map((molecule) => makeOption(display, molecule, false, rng)),
   ]
-
-  // Enantiomer decoy: same molecule id as the target, but drawn mirrored, so
-  // its depiction is the opposite enantiomer. Only for structure options of a
-  // chiral target (an achiral molecule would look identical when mirrored).
-  // Projection-bearing molecules (saccharides) stay excluded: their depiction
-  // is canonical and their stereochemistry lives in the declared sides.
-  if (
-    mirrorDecoys &&
-    STRUCTURE_OPTION_TYPES.has(type) &&
-    !target.achiral &&
-    target.projection === undefined &&
-    rng() < MIRROR_DECOY_PROBABILITY
-  ) {
-    const replaceIndex = randomInt(rng, 1, options.length)
-    options[replaceIndex] = makeMirrorDecoy(target, rng)
-  }
 
   return shuffle(rng, options)
 }
@@ -425,7 +382,6 @@ function buildQuestion(
   target: QuizMolecule,
   type: QuizQuestionType,
   rng: () => number,
-  mirrorDecoys: boolean,
   classKeyOf: ClassKeyOf,
   characteristics: CharacteristicDef[] | undefined,
 ): QuizQuestion {
@@ -436,7 +392,7 @@ function buildQuestion(
     type,
     targetId: target.id,
     prompt: buildPrompt(target, type, rng),
-    options: buildOptions(molecules, target, type, rng, mirrorDecoys, classKeyOf),
+    options: buildOptions(molecules, target, type, rng, classKeyOf),
   }
 }
 
@@ -502,7 +458,6 @@ export function generateQuizSession(
   }
 
   const rng = createSeededRandom(config.seed)
-  const mirrorDecoys = config.mirrorDecoys !== false
   const classKeyOf = config.classKeyOf ?? defaultClassKeyOf
   const mode = config.mode ?? "easy"
   const available = availableQuizTypes(molecules, config.characteristics)
@@ -555,7 +510,6 @@ export function generateQuizSession(
       target,
       type,
       rng,
-      mirrorDecoys,
       classKeyOf,
       config.characteristics,
     )

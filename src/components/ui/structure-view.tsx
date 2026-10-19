@@ -259,7 +259,7 @@ function SmilesStructureView({
           // Haworth skeleton (nucleotides & co. keep their full library
           // layout for the rest). Recognized sugars stay canonical — no
           // random orientation — while an explicit enantiomer mirror still
-          // applies to the whole drawing (mirror decoys work on projections).
+          // applies to the whole drawing.
           recognized = applyHaworthLayout(
             preprocessor as unknown as HaworthPreprocessor,
           )

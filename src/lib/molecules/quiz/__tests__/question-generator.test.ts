@@ -139,15 +139,12 @@ describe("question invariants", () => {
       expect(questions).toHaveLength(7)
 
       for (const question of questions) {
-        const target = getAminoAcid(question.targetId)
-
         expect(question.options).toHaveLength(4)
         expect(new Set(question.options.map((option) => option.key)).size).toBe(4)
 
         const correctOptions = question.options.filter((option) => option.correct)
         expect(correctOptions).toHaveLength(1)
         expect(correctOptions[0].moleculeId).toBe(question.targetId)
-        expect(correctOptions[0].mirror === true).toBe(false)
 
         for (const option of question.options) {
           if (option.display === "structure") {
@@ -158,61 +155,16 @@ describe("question invariants", () => {
             expect(angle).toBeGreaterThanOrEqual(0)
             expect(angle).toBeLessThan(360)
             expect(option.smiles).toBeDefined()
-            expect(typeof option.mirror).toBe("boolean")
-            if (option.mirror === true) {
-              expect(option.correct).toBe(false)
-              expect(option.moleculeId).toBe(question.targetId)
-              expect(target.achiral).toBe(false)
-            }
-          } else {
-            expect(option.mirror === true).toBe(false)
           }
         }
 
-        const distractors = question.options.filter((option) => !option.correct)
-        const plainDistractorIds = distractors
-          .filter((option) => option.mirror !== true)
+        const distractorIds = question.options
+          .filter((option) => !option.correct)
           .map((option) => option.moleculeId)
-        for (const id of plainDistractorIds) {
+        for (const id of distractorIds) {
           expect(id).not.toBe(question.targetId)
         }
-        expect(new Set(plainDistractorIds).size).toBe(plainDistractorIds.length)
-      }
-    }
-  })
-
-  it("can produce mirror decoys for chiral targets but never for glycine", () => {
-    let sawMirror = false
-
-    for (let seed = 0; seed < 60; seed++) {
-      const questions = generateQuizSession(
-        AMINO_ACIDS_QUIZ.molecules,
-        aaConfig(["nameToStructure", "letterToStructure"], 8, seed),
-      )
-      for (const question of questions) {
-        const target = getAminoAcid(question.targetId)
-        for (const option of question.options) {
-          if (option.mirror === true) {
-            sawMirror = true
-            expect(option.correct).toBe(false)
-            expect(option.moleculeId).toBe(question.targetId)
-            expect(target.achiral).toBe(false)
-          }
-        }
-      }
-    }
-
-    expect(sawMirror).toBe(true)
-  })
-
-  it("omits mirror decoys when disabled", () => {
-    for (let seed = 0; seed < 40; seed++) {
-      const questions = generateQuizSession(
-        AMINO_ACIDS_QUIZ.molecules,
-        aaConfig(["nameToStructure", "letterToStructure"], 6, seed, { mirrorDecoys: false }),
-      )
-      for (const question of questions) {
-        expect(question.options.some((option) => option.mirror === true)).toBe(false)
+        expect(new Set(distractorIds).size).toBe(distractorIds.length)
       }
     }
   })
@@ -231,7 +183,7 @@ describe("distractor preference", () => {
       for (const question of questions) {
         const target = getAminoAcid(question.targetId)
         for (const option of question.options) {
-          if (option.correct || option.mirror === true) {
+          if (option.correct) {
             continue
           }
           distractorCount++
@@ -312,7 +264,7 @@ describe("nitrogen bases category", () => {
     expect([...types].sort()).toEqual([...BASE_TYPES].sort())
   })
 
-  it("holds question invariants with zero mirror decoys across 50 seeds", () => {
+  it("holds question invariants across 50 seeds", () => {
     for (let seed = 0; seed < 50; seed++) {
       const questions = generateQuizSession(NITROGEN_BASES_QUIZ.molecules, {
         types: BASE_TYPES,
@@ -332,7 +284,6 @@ describe("nitrogen bases category", () => {
         expect(correctOptions[0].moleculeId).toBe(question.targetId)
 
         for (const option of question.options) {
-          expect(option.mirror === true).toBe(false)
           if (option.display === "structure") {
             const angle = option.orientationDeg
             if (typeof angle !== "number") {

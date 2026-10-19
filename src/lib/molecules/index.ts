@@ -68,13 +68,10 @@ export function moleculeFacts(molecule: Biomolecule): string[] {
 }
 
 /**
- * Mirror decoys flip the depiction's stereochemistry; mirroring a CHIRAL
- * molecule yields its mirror image — the enantiomer, a genuinely different
- * molecule and therefore a fair decoy. Mirroring an ACHIRAL molecule would
- * yield the identical drawing, so achiral copies are excluded. SMILES marks
- * chirality with `@`/`@@`, so its absence is the achirality signal — for the
- * curated sets this matches the old hand-maintained flags exactly (only
- * glycine). Molecules with a declarative projection spec (saccharides) carry
+ * True when a molecule has no stereocenter. SMILES marks chirality with
+ * `@`/`@@`, so its absence is the achirality signal — for the curated sets
+ * this matches the old hand-maintained flags exactly (only glycine).
+ * Molecules with a declarative projection spec (saccharides) carry
  * stereochemistry by definition and are treated as chiral upstream
  * (`baseQuizMolecule`), regardless of what their skeletal SMILES contains.
  */

@@ -187,7 +187,6 @@ function OptionButton({
             smiles={option.smiles ?? ""}
             projection={option.projection}
             orientationDeg={option.orientationDeg}
-            mirror={option.mirror}
             size={150}
             className={cn(grayscale && "[&_svg]:grayscale")}
           />

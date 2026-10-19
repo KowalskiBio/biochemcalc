@@ -199,13 +199,12 @@ function OptionButton({
     >
       {option.display === "structure" ? (
         <div aria-hidden="true">
-          {/* The same option carries smiles+orientationDeg+mirror as always;
+          {/* The same option carries smiles+orientationDeg as always;
               a projection, when present, wins inside StructureView. */}
           <StructureView
             smiles={option.smiles ?? ""}
             projection={option.projection}
             orientationDeg={option.orientationDeg}
-            mirror={option.mirror}
             size={150}
           />
         </div>
