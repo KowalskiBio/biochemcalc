@@ -689,6 +689,17 @@ export const cs = {
       verdictInvalid: "SMILES se nepodařilo přečíst.",
       ringPyranose: "pyranózový prstenec",
       ringFuranose: "furanózový prstenec",
+      howItWorksTitle: "Jak rozpoznání funguje",
+      howItWorksP1:
+        "Cyklus o 5–6 atomech s jedním kyslíkem v kruhu (pyranóza / furanóza) se sestrojí jako Haworthova projekce, když všechny jeho substituované atomy mají v záznamu stereochemické značky (@ / @@), ze kterých lze odvodit strany vazeb.",
+      howItWorksP2:
+        "Chybí-li stereochemie (nebo cyklus není cukr), zůstává běžné skeletové zobrazení — nástroj nikdy neodhadne strany vazeb, raději nic nesestrojí.",
+      howItWorksP3:
+        "U disacharidů se přes glykosidický kyslík navzájem polohují obě cukrové jednotky; nerozpoznaný cyklus zůstává skeletový.",
+      examplesTitle: "Příklady",
+      examplesDescription: "Kliknutím na příklad vložíte jeho SMILES do vstupu výše.",
+      examplesRecognizedTitle: "Rozpoznáno (Haworth)",
+      examplesSkeletalTitle: "Nerozpoznáno (skeletové)",
     },
   },
 
