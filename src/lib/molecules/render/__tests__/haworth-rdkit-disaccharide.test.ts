@@ -1,54 +1,36 @@
-// @vitest-environment jsdom
-// Disaccharide Haworth layout: both recognized rings must land on their
-// canonical polygons without rotating each other, and the glycosidic bridge
-// must sit on the correct anomeric side at a full bond length.
+// @vitest-environment node
+// Disaccharide Haworth layout on RDKit coordinates: both recognized rings must
+// land on their canonical polygons without rotating each other, and the
+// glycosidic bridge must sit on the correct anomeric side at a full bond
+// length.
+//
+// Ported from `haworth-disaccharide.test.ts`; the geometry assertions are
+// unchanged, only the pipeline adapter is the RDKit one.
 
-import SmilesDrawer from "smiles-drawer"
-import { describe, expect, it } from "vitest"
-import { applyHaworthLayout, type HaworthPreprocessor } from "@/lib/molecules/render/haworth-layout"
+import { beforeAll, describe, expect, it } from "vitest"
 import {
-  type PreprocessorLike,
-  snapshotFromPreprocessor,
-} from "@/lib/molecules/render/pipeline-snapshot"
+  chiralityFromMol,
+  type HaworthLayoutResult,
+  haworthLayoutOf,
+  prepareStructureRender,
+} from "@/lib/molecules/render/haworth-rdkit"
+import { ensureRdkit, parseMol } from "@/lib/molecules/render/rdkit-engine"
 import {
-  type GraphSnapshot,
   HAWORTH_POLYGON,
   recognizeSugarRings,
   type SugarRingRecognition,
 } from "@/lib/molecules/render/recognize"
 
-interface Pipeline {
-  snapshot: GraphSnapshot
-  preprocessor: HaworthPreprocessor
-}
+beforeAll(async () => {
+  await ensureRdkit()
+})
 
-function pipelineOf(smiles: string): Pipeline {
-  let captured: Pipeline | null = null
-  SmilesDrawer.parse(smiles, (tree: unknown) => {
-    const drawer = new SmilesDrawer.SvgDrawer({ width: 400, height: 300, bondLength: 24 })
-    const preprocessor = (
-      drawer as unknown as {
-        preprocessor: HaworthPreprocessor & { processGraph: (...args: unknown[]) => void }
-      }
-    ).preprocessor
-    const original = preprocessor.processGraph
-    preprocessor.processGraph = ((...args: unknown[]) => {
-      const result = original.apply(preprocessor, args)
-      captured = {
-        snapshot: snapshotFromPreprocessor(preprocessor as PreprocessorLike),
-        preprocessor,
-      }
-      return result
-    }) as typeof original
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-    document.body.appendChild(svg)
-    drawer.draw(tree, svg, "light")
-    svg.remove()
-  })
-  if (captured === null) {
-    throw new Error(`no snapshot captured for ${smiles}`)
+function pipelineOf(smiles: string): HaworthLayoutResult {
+  const layout = haworthLayoutOf(smiles)
+  if (layout === null) {
+    throw new Error(`no layout captured for ${smiles}`)
   }
-  return captured
+  return layout
 }
 
 // PubChem isomeric SMILES (CID 6134, Galβ1→4Glc; CID 5988, Glcα1↔2βFru).
@@ -59,9 +41,9 @@ const SUCROSE =
 
 const BOND = 24
 
-function positionsOf(preprocessor: HaworthPreprocessor, ids: number[]): { x: number; y: number }[] {
+function positionsOf(pipeline: HaworthLayoutResult, ids: number[]): { x: number; y: number }[] {
   return ids.map((id) => {
-    const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
+    const vertex = pipeline.preprocessor.graph.vertices.find((candidate) => candidate.id === id)
     if (vertex === undefined) {
       throw new Error(`unknown vertex ${id}`)
     }
@@ -78,7 +60,10 @@ function centroidOf(points: { x: number; y: number }[]): { x: number; y: number 
 }
 
 /** O/S/N vertex adjacent to ring atoms of two different plans. */
-function findBridge(snapshot: GraphSnapshot, plans: SugarRingRecognition[]): number {
+function findBridge(
+  snapshot: HaworthLayoutResult["snapshot"],
+  plans: SugarRingRecognition[],
+): number {
   const ringPlanOf = new Map<number, number>()
   plans.forEach((plan, index) => {
     for (const id of plan.cycle) {
@@ -108,14 +93,14 @@ function findBridge(snapshot: GraphSnapshot, plans: SugarRingRecognition[]): num
  * polygon centroid, within half a pixel per component.
  */
 function expectRingOnPolygon(
-  preprocessor: HaworthPreprocessor,
+  pipeline: HaworthLayoutResult,
   plan: SugarRingRecognition,
   mirror: boolean,
   label: string,
 ): void {
   const polygon = HAWORTH_POLYGON[plan.cycle.length as 5 | 6]
   const polygonCenter = centroidOf(polygon)
-  const positions = positionsOf(preprocessor, plan.cycle)
+  const positions = positionsOf(pipeline, plan.cycle)
   const ringCenter = centroidOf(positions)
   positions.forEach((position, role) => {
     const expected = mirror
@@ -140,12 +125,12 @@ function expectDisjointX(
   expect(leftMax < rightMin || rightMax < leftMin, `${label}: ring x-bboxes disjoint`).toBe(true)
 }
 
-describe("disaccharide Haworth layout", () => {
+describe("disaccharide Haworth layout on RDKit coordinates", () => {
   it("places both lactose rings canonically with a β-up glycosidic bridge", () => {
     const pipeline = pipelineOf(LACTOSE)
     const plans = recognizeSugarRings(pipeline.snapshot)
     expect(plans).toHaveLength(2)
-    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+    expect(pipeline.recognized).toBe(true)
 
     const bridge = findBridge(pipeline.snapshot, plans)
     const bridgeNeighbours = pipeline.snapshot.adjacency.get(bridge) ?? []
@@ -156,17 +141,17 @@ describe("disaccharide Haworth layout", () => {
     const acceptor = plans[acceptorIndex]
 
     // Both rings sit on the canonical polygon up to translation.
-    expectRingOnPolygon(pipeline.preprocessor, donor, false, "lactose donor")
-    expectRingOnPolygon(pipeline.preprocessor, acceptor, false, "lactose acceptor")
+    expectRingOnPolygon(pipeline, donor, false, "lactose donor")
+    expectRingOnPolygon(pipeline, acceptor, false, "lactose acceptor")
 
     const donorAnchorId = donor.cycle[0]
     const acceptorAnchorId = acceptor.cycle.find((id) => bridgeNeighbours.includes(id))
     if (acceptorAnchorId === undefined) {
       throw new Error("acceptor anchor missing")
     }
-    const [donorAnchor] = positionsOf(pipeline.preprocessor, [donorAnchorId])
-    const [bridgePosition] = positionsOf(pipeline.preprocessor, [bridge])
-    const [acceptorAnchor] = positionsOf(pipeline.preprocessor, [acceptorAnchorId])
+    const [donorAnchor] = positionsOf(pipeline, [donorAnchorId])
+    const [bridgePosition] = positionsOf(pipeline, [bridge])
+    const [acceptorAnchor] = positionsOf(pipeline, [acceptorAnchorId])
 
     // Donor bond: β points up (smaller y), tilted toward +x at −72°.
     expect(bridgePosition.y).toBeLessThan(donorAnchor.y)
@@ -197,8 +182,8 @@ describe("disaccharide Haworth layout", () => {
     expect(Math.abs(acceptorAngle - 108)).toBeLessThanOrEqual(6)
 
     expectDisjointX(
-      positionsOf(pipeline.preprocessor, donor.cycle),
-      positionsOf(pipeline.preprocessor, acceptor.cycle),
+      positionsOf(pipeline, donor.cycle),
+      positionsOf(pipeline, acceptor.cycle),
       "lactose",
     )
 
@@ -216,7 +201,7 @@ describe("disaccharide Haworth layout", () => {
     const pipeline = pipelineOf(SUCROSE)
     const plans = recognizeSugarRings(pipeline.snapshot)
     expect(plans).toHaveLength(2)
-    expect(applyHaworthLayout(pipeline.preprocessor)).toBe(true)
+    expect(pipeline.recognized).toBe(true)
 
     const glucose = plans.find((plan) => plan.cycle.length === 6)
     const fructose = plans.find((plan) => plan.cycle.length === 5)
@@ -225,11 +210,11 @@ describe("disaccharide Haworth layout", () => {
     }
 
     // Glucose stays canonical; fructose lands on the x-mirrored polygon.
-    expectRingOnPolygon(pipeline.preprocessor, glucose, false, "sucrose glucose")
-    expectRingOnPolygon(pipeline.preprocessor, fructose, true, "sucrose fructose")
+    expectRingOnPolygon(pipeline, glucose, false, "sucrose glucose")
+    expectRingOnPolygon(pipeline, fructose, true, "sucrose fructose")
 
     // The fructose anomeric carbon faces the bridge: leftmost ring atom.
-    const fructosePositions = positionsOf(pipeline.preprocessor, fructose.cycle)
+    const fructosePositions = positionsOf(pipeline, fructose.cycle)
     const fructoseAnomeric = fructosePositions[0]
     for (let index = 1; index < fructosePositions.length; index += 1) {
       expect(fructoseAnomeric.x, "fructose anomeric is leftmost").toBeLessThan(
@@ -242,9 +227,9 @@ describe("disaccharide Haworth layout", () => {
     expect(bridgeNeighbours, "glucose anomeric on the bridge").toContain(glucose.cycle[0])
     expect(bridgeNeighbours, "fructose anomeric on the bridge").toContain(fructose.cycle[0])
 
-    const [glucoseAnchor] = positionsOf(pipeline.preprocessor, [glucose.cycle[0]])
-    const [bridgePosition] = positionsOf(pipeline.preprocessor, [bridge])
-    const [fructoseAnchor] = positionsOf(pipeline.preprocessor, [fructose.cycle[0]])
+    const [glucoseAnchor] = positionsOf(pipeline, [glucose.cycle[0]])
+    const [bridgePosition] = positionsOf(pipeline, [bridge])
+    const [fructoseAnchor] = positionsOf(pipeline, [fructose.cycle[0]])
 
     // Glucose donor: α points down (larger y), one full bond.
     expect(bridgePosition.y).toBeGreaterThan(glucoseAnchor.y)
@@ -294,7 +279,7 @@ describe("disaccharide Haworth layout", () => {
       }
       return match
     }
-    const yOf = (id: number): number => positionsOf(pipeline.preprocessor, [id])[0].y
+    const yOf = (id: number): number => positionsOf(pipeline, [id])[0].y
 
     // cycle[0]=C2 anomeric, [1]=C3, [2]=C4, [3]=C5, [4]=ring O.
     const c5Chain = substituentWithElement(fructose.cycle[3], "C")
@@ -313,9 +298,27 @@ describe("disaccharide Haworth layout", () => {
     expect(yOf(bridge), "glycosidic O drawn below C2").toBeGreaterThan(yOf(fructose.cycle[0]))
 
     expectDisjointX(
-      positionsOf(pipeline.preprocessor, glucose.cycle),
-      positionsOf(pipeline.preprocessor, fructose.cycle),
+      positionsOf(pipeline, glucose.cycle),
+      positionsOf(pipeline, fructose.cycle),
       "sucrose",
     )
+  })
+
+  it("keeps the disaccharide chemistry through the coordinate patch", () => {
+    for (const smiles of [LACTOSE, SUCROSE]) {
+      const layout = pipelineOf(smiles)
+      const prepared = prepareStructureRender(smiles)
+      expect(prepared?.recognized).toBe("haworth")
+      const reparsed = parseMol(prepared?.molblock ?? "")
+      expect(reparsed, `${smiles}: patched molblock reparses`).not.toBeNull()
+      if (reparsed === null) {
+        continue
+      }
+      try {
+        expect(chiralityFromMol(reparsed), `${smiles}: CIP codes survive`).toEqual(layout.chirality)
+      } finally {
+        reparsed.delete()
+      }
+    }
   })
 })

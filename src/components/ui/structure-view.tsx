@@ -1,21 +1,10 @@
 import { useEffect, useRef, useState } from "react"
-import SmilesDrawer from "smiles-drawer"
 
 import { computeDepictionBounds } from "@/components/ui/depiction-bounds"
 import { ProjectionView } from "@/components/ui/projection-view"
-import { type Point, transformPoints } from "@/lib/molecules/orientation"
-import {
-  applyHaworthBoldFrontEdges,
-  applyHaworthHOLabels,
-  applyHaworthLayout,
-  collectOhLabelHints,
-  type HaworthPreprocessor,
-} from "@/lib/molecules/render/haworth-layout"
-import {
-  applyPorphyrinCoordinationLines,
-  applyPorphyrinLayout,
-} from "@/lib/molecules/render/porphyrin-layout"
 import type { ProjectionSpec } from "@/lib/molecules/render/projection"
+import { renderStructure } from "@/lib/molecules/render/render-structure"
+import { ensureRdkit } from "@/lib/molecules/render/rdkit-engine"
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/stores/ui-store"
 
@@ -51,7 +40,8 @@ export interface StructureViewProps {
    * Rotation of the 2D layout, in degrees. Applied to the coordinates before
    * rendering (see `orientation.ts`), so atom labels always stay upright — a
    * positive angle is counter-clockwise in the y-up mathematical sense, which
-   * reads as clockwise on the downward-y SVG screen.
+   * reads as clockwise on the downward-y SVG screen. Recognised Haworth
+   * skeletons stay canonical and ignore it.
    */
   orientationDeg?: number
   /**
@@ -70,54 +60,13 @@ export interface StructureViewProps {
 }
 
 /**
- * Minimal local view of the private `DrawerBase` behind `SvgDrawer`.
- * smiles-drawer@2.4.1 does not publish `rings` on `DrawerBase` nor the
- * `Vector2` shape of `graph.vertices`, so we describe only what the
- * pre-render coordinate patch touches.
- */
-interface PreprocessorShim {
-  graph: { vertices: { position: Point }[] }
-  rings: { center: Point }[]
-  processGraph: () => void
-}
-
-/**
- * Mutate the laid-out coordinates in place, after `processGraph` and before
- * anything is drawn. Ring centers are transformed alongside the vertex
- * positions: `SvgDrawer.drawAromaticityRing` draws the circle at
- * `ring.center`, so leaving them behind would float the aromatic circles of
- * Phe/Tyr/Trp away from their rings.
- */
-function applyOrientation(
-  preprocessor: PreprocessorShim,
-  orientationDeg: number,
-  mirror: boolean,
-): void {
-  if (orientationDeg === 0 && !mirror) {
-    return
-  }
-
-  const points = [
-    ...preprocessor.graph.vertices.map((vertex) => vertex.position),
-    ...preprocessor.rings.map((ring) => ring.center),
-  ]
-  const transformed = transformPoints(points, orientationDeg, mirror)
-  for (let i = 0; i < points.length; i++) {
-    points[i].x = transformed[i].x
-    points[i].y = transformed[i].y
-  }
-}
-
-/**
- * Post-draw adaptive sizing (SMILES path only). Replaces the fixed `size`
- * square with the depiction's natural bounds: the viewBox the drawer just
- * wrote feeds `computeDepictionBounds`, and the result lands on the svg's
- * own width/height attributes plus the wrapper's style, so the error
- * overlay (`absolute inset-0` on the wrapper) keeps covering the drawing.
- * Orientation/mirror need no special-casing — they act on the coordinates
- * before rendering, so a 90° rotation simply swaps the viewBox dims. The
- * width cap is `maxWidth` or the parent container's width at draw time
- * (fallback 640 px); the height cap is 70% of the viewport (fallback 560).
+ * Post-draw adaptive sizing (SMILES path only). Measures the drawn content
+ * (falling back to the viewBox under jsdom, where `getBBox` is unavailable)
+ * and feeds `computeDepictionBounds`, then writes the result to the svg's own
+ * width/height attributes plus the wrapper's style, so the error overlay
+ * (`absolute inset-0` on the wrapper) keeps covering the drawing. The width
+ * cap is `maxWidth` or the parent container's width at draw time (fallback
+ * 640 px); the height cap is 70% of the viewport (fallback 560).
  */
 function applyGrowBounds(
   wrapper: HTMLDivElement | null,
@@ -125,9 +74,22 @@ function applyGrowBounds(
   size: number,
   maxWidth?: number,
 ): void {
-  const viewBox = (svg.getAttribute("viewBox") ?? "").trim().split(/\s+/).map(Number)
-  const vbw = viewBox[2] ?? 0
-  const vbh = viewBox[3] ?? 0
+  let vbw = 0
+  let vbh = 0
+  if (typeof svg.getBBox === "function") {
+    try {
+      const box = svg.getBBox()
+      vbw = box.width
+      vbh = box.height
+    } catch {
+      // jsdom: fall through to the viewBox.
+    }
+  }
+  if (!(vbw > 0) || !(vbh > 0)) {
+    const viewBox = (svg.getAttribute("viewBox") ?? "").trim().split(/\s+/).map(Number)
+    vbw = viewBox[2] ?? 0
+    vbh = viewBox[3] ?? 0
+  }
   const parentWidth = wrapper?.parentElement?.clientWidth ?? 0
   const capW = maxWidth ?? (parentWidth > 0 ? parentWidth : 640)
   const capH =
@@ -174,7 +136,8 @@ function ProjectionStructureView({
 
 /**
  * Renders a 2D skeletal depiction of a molecule: its Haworth-style
- * `projection` when one is given, otherwise the SMILES with `smiles-drawer`.
+ * `projection` when one is given, otherwise the SMILES with the RDKit
+ * pipeline (`renderStructure`).
  *
  * The wrapper has a transparent background, so the caller decides the surface
  * the depiction sits on; the drawing theme (light/dark) is chosen to stay
@@ -203,25 +166,42 @@ function SmilesStructureView({
 }: StructureViewProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const [ready, setReady] = useState(false)
   const [hasError, setHasError] = useState(false)
   const appTheme = useThemeStore()
   const resolvedTheme = theme ?? appTheme
 
   useEffect(() => {
+    let cancelled = false
+    ensureRdkit()
+      .then(() => {
+        if (!cancelled) {
+          setReady(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHasError(true)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     const svg = svgRef.current
-    if (svg === null) {
+    if (svg === null || !ready) {
       return
     }
 
-    // SvgWrapper is constructed with `clear: true` and empties the target, but
-    // clearing here too keeps a failed parse from leaving a stale drawing.
+    // Clear first, so a failed parse never leaves a stale drawing behind.
     svg.replaceChildren()
     setHasError(false)
 
-    // Re-anchor the element on the fixed square before every draw. React
-    // only writes the width/height attrs and style when the `size` PROP
-    // changes, so without this a grown draw (`grow` flipped off, or a grown
-    // redraw under a new SMILES) would leave the old dimensions behind.
+    // Re-anchor the element on the fixed square before every draw. React only
+    // writes the width/height attrs and style when the `size` PROP changes, so
+    // without this a grown draw would leave the old dimensions behind.
     const wrapper = wrapperRef.current
     svg.setAttribute("width", String(size))
     svg.setAttribute("height", String(size))
@@ -230,96 +210,32 @@ function SmilesStructureView({
       wrapper.style.height = `${size}px`
     }
 
-    SmilesDrawer.parse(
-      smiles,
-      (tree) => {
-        onValidityChange?.(true)
-        const drawer = new SmilesDrawer.SvgDrawer({
-          width: size,
-          height: size,
-          bondLength: 24,
-          padding: 12,
-          // `explicitHydrogens: false` suppresses terminal hydrogen atoms so
-          // small molecules keep a clean skeletal look. This does NOT hide
-          // the stereochemical wedge: DrawerBase.initHydrogens() keeps an H
-          // drawn whenever its neighbour is a stereocenter, so the wedge/dash
-          // of the chiral L-amino acids survives. Verified against 2.4.1.
-          explicitHydrogens: false,
-        })
+    const rendered = renderStructure(smiles, {
+      width: size,
+      height: size,
+      orientationDeg,
+      mirror,
+      theme: resolvedTheme,
+      bondLength: 24,
+    })
+    if (rendered === null) {
+      setHasError(true)
+      onValidityChange?.(false)
+      return
+    }
 
-        // Patch ONLY this drawer instance. `processGraph` computes the 2D
-        // layout; wrapping it lets us transform the coordinates in place after
-        // layout and before `draw()` emits bonds, wedge/dash marks, aromatic
-        // rings and the (upright) atom labels. The method is invoked against
-        // the real DrawerBase instance via `.call`, and the original is
-        // restored in a `finally` so the patch can never leak into another
-        // draw — `preprocessor` is per-instance.
-        const preprocessor = drawer.preprocessor as unknown as PreprocessorShim
-        const originalProcessGraph = preprocessor.processGraph
-        let haworthLayout = false
-        let porphyrinLayout = false
-        preprocessor.processGraph = () => {
-          originalProcessGraph.call(preprocessor)
-          // Post-layout idealizers, mutually exclusive: the sugar recognizer
-          // rejects N-in-ring, so a tetrapyrrole can never also be a sugar.
-          // Recognized skeletons stay canonical — no random orientation —
-          // while an explicit enantiomer mirror still applies to the whole
-          // drawing.
-          haworthLayout = applyHaworthLayout(
-            preprocessor as unknown as HaworthPreprocessor,
-          )
-          porphyrinLayout =
-            !haworthLayout &&
-            applyPorphyrinLayout(preprocessor as unknown as HaworthPreprocessor)
-          const recognized = haworthLayout || porphyrinLayout
-          if (recognized) {
-            if (mirror) {
-              applyOrientation(preprocessor, 0, true)
-            }
-          } else {
-            applyOrientation(preprocessor, orientationDeg, mirror)
-          }
-        }
-
-        try {
-          drawer.draw(tree, svg, resolvedTheme)
-          if (haworthLayout) {
-            // Left-half ring hydroxyls read "HO", anchored off the ring —
-            // the hexose C4 idiom that also frees up crowded space.
-            applyHaworthHOLabels(
-              svg,
-              collectOhLabelHints(preprocessor as unknown as HaworthPreprocessor),
-            )
-            // Graduated bold front ring bonds (thin C1→C2, thick C2→C3,
-            // thick→thin C3→C4) — pyranose and furanose alike. Runs on the
-            // final coordinates, so the quads land exactly on the ring.
-            applyHaworthBoldFrontEdges(svg, preprocessor as unknown as HaworthPreprocessor)
-          }
-          if (porphyrinLayout) {
-            // Isolated metals (heme Fe) have no graph bond to the nitrogens;
-            // append the four shortened coordination strokes after drawing.
-            applyPorphyrinCoordinationLines(
-              svg,
-              preprocessor as unknown as HaworthPreprocessor,
-            )
-          }
-          if (grow) {
-            // Fully drawn (labels included): the viewBox now holds the
-            // final bounds, so adaptive sizing can measure it.
-            applyGrowBounds(wrapper, svg, size, maxWidth)
-          }
-        } finally {
-          preprocessor.processGraph = originalProcessGraph
-        }
-      },
-      () => {
-        setHasError(true)
-        onValidityChange?.(false)
-      },
-    )
+    svg.setAttribute("viewBox", rendered.svg.getAttribute("viewBox") ?? `0 0 ${size} ${size}`)
+    for (const child of Array.from(rendered.svg.childNodes)) {
+      svg.appendChild(document.importNode(child, true))
+    }
+    onValidityChange?.(true)
+    if (grow) {
+      // Fully drawn (labels included): adaptive sizing can measure it.
+      applyGrowBounds(wrapper, svg, size, maxWidth)
+    }
     // onValidityChange is intentionally not a dependency: its identity can
     // change per parent render, and only real inputs should trigger a redraw.
-  }, [smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth])
+  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth])
 
   return (
     <div

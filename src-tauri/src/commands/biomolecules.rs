@@ -342,7 +342,7 @@ fn validate_molecule_name(name: &str) -> Result<&str, DbError> {
 }
 
 /// SMILES is the molecule's whole depiction — non-empty printable ASCII. A
-/// real parse happens client-side (smiles-drawer preview) before submit; the
+/// real parse happens client-side (legacy drawer preview) before submit; the
 /// server has no chemistry parser, so it only keeps the charset sane.
 fn validate_smiles(smiles: &str) -> Result<&str, DbError> {
     let trimmed = smiles.trim();

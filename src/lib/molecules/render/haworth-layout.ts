@@ -1,6 +1,6 @@
 // Haworth layout pass for SMILES-rendered structures.
 //
-// Runs AFTER smiles-drawer's own layout (inside the processGraph hook): any
+// Runs AFTER the graph's own layout: any
 // sugar ring the recognizer proved out gets snapped into the canonical
 // Haworth skeleton — ring atoms onto the fixed polygon, exocyclic
 // substituents strictly vertical above/below their ring atom, the
@@ -30,8 +30,15 @@ import {
   walkChainOutward,
 } from "@/lib/molecules/render/subtree"
 
-/** The live smiles-drawer graph shape shared by both post-layout passes. */
+/** The mutable graph shape shared by the Haworth passes. */
 export type HaworthPreprocessor = LayoutPreprocessor
+
+/** Post-draw label hint: swap a terminal hydroxyl label to "HO" on left-of-ring-centroid. */
+export interface HOHint {
+  x: number
+  y: number
+  side: "HO" | "OH"
+}
 
 /**
  * A glycosidic-style connection between two recognized rings: a non-ring
@@ -374,7 +381,7 @@ function applyPlan(
 }
 
 /**
- * Run sugar recognition + Haworth reshaping inside the processGraph hook.
+ * Run sugar recognition + Haworth reshaping on a preprocessor-shaped graph.
  * Returns true when at least one ring was reshaped — the caller then keeps
  * the drawing canonical (no random orientation) and lets any explicit
  * enantiomer mirror apply to the whole drawing as usual.
@@ -498,302 +505,4 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
     applyPlan(preprocessor, plan, bondLength, protectedIds, mirrored[index])
   })
   return true
-}
-
-/**
- * Half-thickness of a tapered (thin) front edge, in viewBox user units.
- * Matches the drawer's default bond thickness (1.0) closely enough that the
- * tapered end blends into the underlying plain ring-bond stroke.
- */
-const HAWORTH_FRONT_EDGE_THIN = 1.1
-/** Half-thickness of the thick front edge, in viewBox user units (1.1 + (4.5−1.1)/3 — a third of the original wedge strength). */
-const HAWORTH_FRONT_EDGE_THICK = 2.2
-
-/**
- * The drawer paints plain bonds as `<line>` elements carrying a `stroke`
- * attribute (SvgWrapper.drawLine), coloring each half by its endpoint atom —
- * so a stroke sampled blindly from somewhere in the drawing can be an
- * oxygen-coloured half instead of the neutral C–C ring bond. Per front edge,
- * take the stroke of the bond line whose own midpoint is closest to the
- * segment's midpoint; fall back to the drawing's first stroked bond, then
- * `currentColor`, when nothing coordinates-bearing is found nearby.
- */
-export function bondStrokeNear(svgRoot: SVGSVGElement, x: number, y: number): string | null {
-  let bestStroke: string | null = null
-  let bestDistance = Number.POSITIVE_INFINITY
-  for (const element of Array.from(svgRoot.querySelectorAll("line"))) {
-    const stroke = element.getAttribute("stroke")
-    if (stroke === null || stroke.trim() === "" || stroke.trim() === "none") {
-      continue
-    }
-    const x1 = Number(element.getAttribute("x1"))
-    const y1 = Number(element.getAttribute("y1"))
-    const x2 = Number(element.getAttribute("x2"))
-    const y2 = Number(element.getAttribute("y2"))
-    if ([x1, y1, x2, y2].some((value) => Number.isNaN(value))) {
-      continue
-    }
-    const distance = Math.hypot((x1 + x2) / 2 - x, (y1 + y2) / 2 - y)
-    if (distance < bestDistance) {
-      bestDistance = distance
-      bestStroke = stroke
-    }
-  }
-  return bestStroke
-}
-
-export function sampleBondStroke(svgRoot: SVGSVGElement): string {
-  for (const element of Array.from(svgRoot.querySelectorAll("line, path"))) {
-    const stroke = element.getAttribute("stroke")
-    if (stroke !== null && stroke.trim() !== "" && stroke.trim() !== "none") {
-      return stroke
-    }
-  }
-  return "currentColor"
-}
-
-/**
- * Post-draw pass: render the three front ring bonds of every recognized sugar
- * as graduated bold quads (the classic Haworth "wedge" cue). Both canonical
- * polygons put roles 0–3 on the bottom/front edge, so the same role pairs work
- * for pyranose and furanose rings:
- *
- *   0 → 1  thin at C1, thick at C2
- *   1 → 2  thick at both ends (thickest, uniform)
- *   2 → 3  thick at C3, thin at C4
- *
- * The quads are built from the FINAL preprocessor coordinates (the same world
- * units the drawer bakes into the viewBox) and appended to the svg root. The
- * drawer's own thin ring-bond strokes stay in place: the tapered ends are
- * chosen to match that stroke width, so the bold shape blends into the plain
- * line instead of floating over it.
- */
-export function applyHaworthBoldFrontEdges(
-  svgRoot: SVGSVGElement,
-  preprocessor: HaworthPreprocessor,
-): void {
-  const plans = recognizeSugarRings(snapshotFromPreprocessor(preprocessor))
-  if (plans.length === 0) {
-    return
-  }
-  const fallbackFill = sampleBondStroke(svgRoot)
-  const segments: { a: number; b: number; ta: number; tb: number }[] = [
-    { a: 0, b: 1, ta: HAWORTH_FRONT_EDGE_THIN, tb: HAWORTH_FRONT_EDGE_THICK },
-    { a: 1, b: 2, ta: HAWORTH_FRONT_EDGE_THICK, tb: HAWORTH_FRONT_EDGE_THICK },
-    { a: 2, b: 3, ta: HAWORTH_FRONT_EDGE_THICK, tb: HAWORTH_FRONT_EDGE_THIN },
-  ]
-  for (const plan of plans) {
-    const ring: Point[] = []
-    for (const vertexId of plan.cycle) {
-      const position = positionOf(preprocessor, vertexId)
-      if (position === undefined) {
-        ring.length = 0
-        break
-      }
-      ring.push({ x: position.x, y: position.y })
-    }
-    if (ring.length < 4) {
-      continue
-    }
-    const ringCenter = centroid(ring)
-    for (const segment of segments) {
-      const from = ring[segment.a]
-      const to = ring[segment.b]
-      const dx = to.x - from.x
-      const dy = to.y - from.y
-      const length = Math.hypot(dx, dy)
-      if (length === 0) {
-        continue
-      }
-      // Unit normal of the bond, flipped to point OUT of the ring (away from
-      // the centroid) so the wedge flares outward instead of covering the
-      // ring interior. An x-mirrored acceptor only flips x, so this stays
-      // correct for mirrored rings (y is unchanged).
-      let nx = -dy / length
-      let ny = dx / length
-      const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
-      if (nx * (midpoint.x - ringCenter.x) + ny * (midpoint.y - ringCenter.y) < 0) {
-        nx = -nx
-        ny = -ny
-      }
-      const points = [
-        { x: from.x + nx * segment.ta, y: from.y + ny * segment.ta },
-        { x: to.x + nx * segment.tb, y: to.y + ny * segment.tb },
-        { x: to.x - nx * segment.tb, y: to.y - ny * segment.tb },
-        { x: from.x - nx * segment.ta, y: from.y - ny * segment.ta },
-      ]
-      const polygon = svgRoot.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "polygon")
-      polygon.setAttribute("points", points.map((point) => `${point.x},${point.y}`).join(" "))
-      // Fill from THIS edge's own bond line, not an arbitrary bond elsewhere —
-      // atom-coloured bond halves (e.g. around the ring oxygen) would tint it.
-      polygon.setAttribute("fill", bondStrokeNear(svgRoot, midpoint.x, midpoint.y) ?? fallbackFill)
-      polygon.setAttribute("stroke", "none")
-      polygon.setAttribute("class", "haworth-front-edge")
-      svgRoot.appendChild(polygon)
-    }
-  }
-}
-
-/** Post-draw label hint: swap a terminal hydroxyl label to "HO" on left-of-ring-centroid. */
-export interface HOHint {
-  x: number
-  y: number
-  side: "HO" | "OH"
-}
-
-/**
- * Collect the "HO"-swap hints for a freshly laid-out drawing: for every
- * terminal hydroxyl substituent (-OH, single bond, no other heavy atoms) of
- * every recognized sugar ring, decide by its position relative to the ring
- * centroid which side the label should read from. OHs on the ring's left
- * edge become "HO" — the classic idiom (hexose C4) — and the label extends
- * into free space, easing overlaps.
- */
-export function collectOhLabelHints(preprocessor: HaworthPreprocessor): HOHint[] {
-  const snapshot = snapshotFromPreprocessor(preprocessor)
-  const plans = recognizeSugarRings(snapshot)
-  const bondLength = preprocessor.opts?.bondLength ?? 24
-  const hints: HOHint[] = []
-  for (const plan of plans) {
-    const positions = plan.cycle
-      .map((id) => preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.position)
-      .filter((position): position is { x: number; y: number } => position !== undefined)
-    if (positions.length === 0) {
-      continue
-    }
-    const centroidX = positions.reduce((sum, position) => sum + position.x, 0) / positions.length
-    for (const atom of plan.atoms) {
-      for (const substituentId of [...atom.up, ...atom.down]) {
-        const substituent = preprocessor.graph.vertices.find(
-          (candidate) => candidate.id === substituentId,
-        )
-        if (substituent === undefined || substituent.value.element !== "O") {
-          continue
-        }
-        const heavyNeighbours = (substituent.neighbours ?? []).filter(
-          (neighbour) =>
-            preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value
-              .element !== "H",
-        )
-        if (heavyNeighbours.length > 1) {
-          continue
-        }
-        // Only the ring EDGE flips, not everything left of the centre. At
-        // bond 24 the canonical pyranose C4 hydroxyl sits ~27.6 px left of
-        // the centroid, while pyranose C3 and the furanose third vertex
-        // (ribose C3 / fructose C4) sit only ~13.8 px left. A −0.75 bond
-        // (−18 px) boundary separates the two positionally, with no
-        // per-sugar semantics needed.
-        hints.push({
-          x: substituent.position.x,
-          y: substituent.position.y,
-          side: substituent.position.x < centroidX - 0.75 * bondLength ? "HO" : "OH",
-        })
-      }
-    }
-  }
-  return hints
-}
-
-/**
- * Post-draw label fix for left-edge hydroxyls. The library draws every atom
- * label as a `<text class="element">` inside a `<g>` whose vertex position is
- * baked into `style` as `transform: translateX(<x>px) translateY(<y>px)`.
- * The `<text>` itself has no x/y anchors (up/down labels instead stack their
- * tspans vertically via `x="0px"` and `y="±0.9i em"`), and an "OH" label is a
- * text with two tspans ("O", "H"). We therefore match candidates by the
- * parent g's translate and drop the tspan stacking attributes.
- *
- * A right/up/down label's g-translate x is the vertex x MINUS half the
- * measured element width, whereas the library's own left-direction labels
- * use vertex x PLUS half the width — centred on the bond end. To reproduce
- * that without measuring text, capture the candidate's original gx and set
- * the new translate x to `hint.x + |hint.x - gx|`: the same half-glyph shift
- * on the correct side, so the O glyph sits on the bond and the H extends
- * left. Keeping translate y = hint.y preserves the true vertex height.
- * Finally the existing tspans are re-appended in H→O order (preserving each
- * letter's fill colour) with `text-anchor="end"`, so the whole "HO" grows
- * leftward into free space.
- */
-export function applyHaworthHOLabels(svgRoot: SVGSVGElement, hints: HOHint[]): void {
-  const STYLE_TRANSLATE = /translateX\((-?[\d.]+)px\)\s*translateY\((-?[\d.]+)px\)/
-  interface Candidate {
-    text: Element
-    parent: Element
-    gx: number
-    gy: number
-  }
-  const candidates: Candidate[] = []
-  for (const text of Array.from(svgRoot.querySelectorAll("text"))) {
-    if ((text.textContent ?? "").trim() !== "OH") {
-      continue
-    }
-    const parent = text.parentElement
-    if (parent === null || parent.localName !== "g") {
-      continue
-    }
-    const match = STYLE_TRANSLATE.exec(parent.getAttribute("style") ?? "")
-    if (match === null) {
-      continue
-    }
-    candidates.push({ text, parent, gx: Number(match[1]), gy: Number(match[2]) })
-  }
-
-  const remaining = [...candidates]
-  for (const hint of hints) {
-    if (hint.side !== "HO") {
-      continue
-    }
-    let nearestIndex = -1
-    let nearestDistance = Number.POSITIVE_INFINITY
-    remaining.forEach((candidate, index) => {
-      const distance = Math.hypot(candidate.gx - hint.x, candidate.gy - hint.y)
-      if (distance < nearestDistance) {
-        nearestDistance = distance
-        nearestIndex = index
-      }
-    })
-    // The g-translate x differs from the vertex x by half the "O" glyph width
-    // (≈4–6 px); sibling hydroxyl labels are >25 px apart at bond length 24,
-    // so 9 px is unambiguous.
-    if (nearestIndex < 0 || nearestDistance >= 9) {
-      continue
-    }
-    const candidate = remaining[nearestIndex]
-    const tspans = Array.from(candidate.text.children).filter(
-      (child) => child.localName === "tspan",
-    )
-    const first = (tspans[0]?.textContent ?? "").trim()
-    const second = (tspans[1]?.textContent ?? "").trim()
-    const isHydroxyl =
-      tspans.length === 2 &&
-      ((first === "O" && second === "H") || (first === "H" && second === "O"))
-    if (!isHydroxyl) {
-      // Never corrupt a label whose internals don't look like O + H.
-      continue
-    }
-    remaining.splice(nearestIndex, 1)
-
-    // Keep the library's half-glyph shift so the O glyph stays centred on the
-    // bond; the abs also works for a rare left-direction candidate (gx =
-    // vertex + half width).
-    const centeredX = hint.x + Math.abs(hint.x - candidate.gx)
-    candidate.parent.setAttribute(
-      "style",
-      `transform: translateX(${centeredX}px) translateY(${hint.y}px)`,
-    )
-    const oxygen = tspans.find((tspan) => (tspan.textContent ?? "").trim() === "O")
-    const hydrogen = tspans.find((tspan) => (tspan.textContent ?? "").trim() === "H")
-    if (oxygen === undefined || hydrogen === undefined) {
-      continue
-    }
-    for (const tspan of tspans) {
-      tspan.removeAttribute("x")
-      tspan.removeAttribute("y")
-    }
-    // appendChild moves the existing nodes, keeping their per-letter colours.
-    candidate.text.appendChild(hydrogen)
-    candidate.text.appendChild(oxygen)
-    candidate.text.setAttribute("text-anchor", "end")
-  }
 }

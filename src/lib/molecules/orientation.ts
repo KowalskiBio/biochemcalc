@@ -1,16 +1,10 @@
 /**
  * Coordinate transforms for pre-render molecular orientations.
  *
- * smiles-drawer@2.4.1 emits atom labels with SVG `<text>` at draw time, at
- * orientations independent of the underlying 2D coordinates. Rotating the
- * finished SVG (e.g. a CSS `transform`) therefore turns the labels upside
- * down. Rotating the *coordinates* before the draw keeps every label upright,
- * which is what this module enables.
- *
- * Pinned to smiles-drawer@2.4.1: the caller patches `DrawerBase.processGraph`
- * (see structure-view.tsx) and feeds `graph.vertices[*].position` and
- * `rings[*].center` through {@link transformPoints} right after the layout has
- * been computed and before `SvgDrawer.draw()` emits any geometry.
+ * Rotating the finished SVG (e.g. a CSS `transform`) would also rotate the
+ * atom labels. Rotating the *coordinates* before the draw keeps every label
+ * upright, which is what this module enables: `render-structure.ts` feeds the
+ * RDKit atom positions through {@link transformPoints} before the final draw.
  */
 
 export interface Point {

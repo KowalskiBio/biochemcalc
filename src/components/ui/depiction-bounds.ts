@@ -1,7 +1,7 @@
 /**
  * Adaptive sizing for molecule depictions.
  *
- * smiles-drawer renders into a fixed square: the svg element is `size` ×
+ * The drawer fills a fixed square: the svg element is `size` ×
  * `size` while the molecule's natural bounds (bond length 24) sit in the
  * viewBox, so anything larger than the square downscales — acetyl-CoA ends
  * up as illegible lint. Grids and previews want that uniform square, so

@@ -1,6 +1,6 @@
 // Kekulization of aromatic rings for textbook-style depictions.
 //
-// smiles-drawer's default draws aromatic systems as a polygon with an inner
+// legacy drawer's default draws aromatic systems as a polygon with an inner
 // circle; textbooks (and the molecules' own chemistry cards here) show
 // alternating double bonds instead. This pass assigns alternating
 // single/double weights to the bonds of each fully aromatic ring (a maximum

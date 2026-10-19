@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
-import { previewRecognition } from "@/lib/molecules/render/preview"
+import { previewRecognition, type RecognitionVerdict } from "@/lib/molecules/render/preview"
 import { cn } from "@/lib/utils"
 
 const FOCUS_RING_CLASS =
@@ -107,9 +107,24 @@ function ProjectionExampleRow({
 export function BiomoleculesProjectionPage() {
   const [smiles, setSmiles] = useState("")
   const [drawingValid, setDrawingValid] = useState(false)
+  const [verdict, setVerdict] = useState<RecognitionVerdict | null>(null)
 
   const trimmed = smiles.trim()
-  const verdict = useMemo(() => (trimmed === "" ? null : previewRecognition(trimmed)), [trimmed])
+  useEffect(() => {
+    if (trimmed === "") {
+      setVerdict(null)
+      return
+    }
+    let cancelled = false
+    previewRecognition(trimmed).then((next) => {
+      if (!cancelled) {
+        setVerdict(next)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [trimmed])
 
   const ringText =
     verdict?.status === "recognized"
@@ -165,18 +180,20 @@ export function BiomoleculesProjectionPage() {
                 />
               </div>
               <div className="space-y-1 pt-2 text-sm">
-                {verdict?.status === "invalid" || !drawingValid ? (
+                {verdict === null ? null : verdict.status === "invalid" ? (
                   <p className="text-destructive">{cs.biomolekuly.projection.verdictInvalid}</p>
-                ) : verdict?.status === "recognized" && ringText !== null ? (
-                  <p>
-                    <span className="font-medium text-accent">
-                      {cs.biomolekuly.projection.verdictRecognized}
-                    </span>{" "}
-                    {ringText}
-                  </p>
-                ) : (
+                ) : verdict.status === "recognized" && ringText !== null ? (
+                  drawingValid ? (
+                    <p>
+                      <span className="font-medium text-accent">
+                        {cs.biomolekuly.projection.verdictRecognized}
+                      </span>{" "}
+                      {ringText}
+                    </p>
+                  ) : null
+                ) : drawingValid ? (
                   <p className="text-muted-foreground">{cs.biomolekuly.projection.verdictNone}</p>
-                )}
+                ) : null}
               </div>
             </div>
           )}

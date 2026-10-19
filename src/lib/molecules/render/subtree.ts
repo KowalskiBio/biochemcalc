@@ -1,9 +1,8 @@
 // Shared coordinate primitives for the post-layout idealizers.
 //
-// These helpers operate on smiles-drawer's live preprocessor graph (the same
-// structurally-typed view the Haworth pass uses) and are deliberately
-// side-effect-only: they move vertex positions / ring centers in place.
-// Extracted from `haworth-layout.ts` so the Haworth and porphyrin passes
+// These helpers operate on the preprocessor-shaped graph the Haworth pass uses
+// and are deliberately side-effect-only: they move vertex positions / ring
+// centers in place. Extracted from `haworth-layout.ts` so the layout passes
 // share one implementation of subtree walks, rigid rotations and bond
 // normalization.
 
@@ -45,10 +44,7 @@ export function place(preprocessor: LayoutPreprocessor, vertexId: number, target
 }
 
 /** Read a vertex's current (post-placement) position. */
-export function positionOf(
-  preprocessor: LayoutPreprocessor,
-  vertexId: number,
-): Point | undefined {
+export function positionOf(preprocessor: LayoutPreprocessor, vertexId: number): Point | undefined {
   return preprocessor.graph.vertices.find((candidate) => candidate.id === vertexId)?.position
 }
 

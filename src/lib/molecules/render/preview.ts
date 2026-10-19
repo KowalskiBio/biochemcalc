@@ -1,19 +1,8 @@
-// Recognition verdict for the teacher projection preview: runs the same
-// parse → snapshot → recognize pipeline the live StructureView uses,
-// without showing anything, and summarizes whether the SMILES gets the
-// Haworth treatment.
-import SmilesDrawer from "smiles-drawer"
-
-import {
-  type PreprocessorLike,
-  snapshotFromPreprocessor,
-} from "@/lib/molecules/render/pipeline-snapshot"
-import {
-  applyPorphyrinLayout,
-  type PorphyrinPreprocessor,
-} from "@/lib/molecules/render/porphyrin-layout"
-import { recognizeSugarRings } from "@/lib/molecules/render/recognize"
-import { recognizeTetrapyrrole } from "@/lib/molecules/render/recognize-porphyrin"
+// Recognition verdict for the teacher projection preview. Runs the same RDKit
+// pipeline the live StructureView uses, without showing anything, and
+// summarizes whether the SMILES gets the Haworth treatment.
+import { haworthLayoutOf, prepareStructureRender } from "@/lib/molecules/render/haworth-rdkit"
+import { ensureRdkit } from "@/lib/molecules/render/rdkit-engine"
 
 export type RecognitionVerdict =
   | { status: "invalid" }
@@ -21,52 +10,26 @@ export type RecognitionVerdict =
   | { status: "recognized"; forms: ("pyranose" | "furanose")[] }
 
 /**
- * Parse `smiles` and decide whether any sugar-like ring is recognized.
- * Independent, self-contained drawer instance — the preview page can call
- * this directly; the live drawing path is untouched.
+ * Prepare the depiction and decide whether any sugar-like ring is recognized.
+ * The engine has to be initialized first, hence the async signature; the
+ * preview page calls this directly and the live drawing path is untouched.
  */
-export function previewRecognition(smiles: string): RecognitionVerdict {
-  let verdict: RecognitionVerdict | null = null
-  SmilesDrawer.parse(
-    smiles,
-    (tree: unknown) => {
-      const drawer = new SmilesDrawer.SvgDrawer({ width: 320, height: 240, bondLength: 24 })
-      const preprocessor = (
-        drawer as unknown as {
-          preprocessor: PreprocessorLike & { processGraph: (...args: unknown[]) => void }
-        }
-      ).preprocessor
-      const original = preprocessor.processGraph
-      preprocessor.processGraph = ((...args: unknown[]) => {
-        const result = original.apply(preprocessor, args)
-        const snapshot = snapshotFromPreprocessor(preprocessor)
-        const plans = recognizeSugarRings(snapshot)
-        // Keep the preview's internal drawing consistent with the live
-        // StructureView (the verdict below remains Haworth-specific).
-        if (plans.length === 0 && recognizeTetrapyrrole(snapshot) !== null) {
-          applyPorphyrinLayout(preprocessor as unknown as PorphyrinPreprocessor)
-        }
-        verdict =
-          plans.length === 0
-            ? { status: "none" }
-            : {
-                status: "recognized",
-                forms: plans.map((plan) =>
-                  plan.cycle.length === 6 ? ("pyranose" as const) : ("furanose" as const),
-                ),
-              }
-        return result
-      }) as typeof original
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-      try {
-        drawer.draw(tree, svg, "light")
-      } finally {
-        preprocessor.processGraph = original
-      }
-    },
-    () => {
-      verdict = { status: "invalid" }
-    },
+export async function previewRecognition(smiles: string): Promise<RecognitionVerdict> {
+  try {
+    await ensureRdkit()
+  } catch {
+    return { status: "invalid" }
+  }
+  const prepared = prepareStructureRender(smiles, { width: 320, height: 240 })
+  if (prepared === null) {
+    return { status: "invalid" }
+  }
+  if (prepared.recognized !== "haworth") {
+    return { status: "none" }
+  }
+  const layout = haworthLayoutOf(smiles, { width: 320, height: 240 })
+  const forms = (layout?.plans ?? []).map((plan) =>
+    plan.cycle.length === 6 ? ("pyranose" as const) : ("furanose" as const),
   )
-  return verdict ?? { status: "invalid" }
+  return { status: "recognized", forms }
 }

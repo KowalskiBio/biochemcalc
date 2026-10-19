@@ -212,7 +212,7 @@ categories are editable seed data like everything else.
   theme-aware bonds (`theme` prop or `useUiStore` default).
   **Orientation model**: `orientationDeg`/`mirror` transform the 2D coordinates BEFORE
   rendering by patching the instance's `preprocessor.processGraph` (pinned to
-  smiles-drawer@2.4.1 internals; vertex positions + `rings[*].center` transformed so
+  legacy drawer@2.4.1 internals; vertex positions + `rings[*].center` transformed so
   aromatic circles stay put). Atom labels stay upright at ANY orientation — this is the
   quiz machinery for "same structure, random orientation". Mirror still flips
   chirality (achiral-only for honest display; enantiomer distractors = flipped SMILES).
@@ -256,7 +256,7 @@ categories are editable seed data like everything else.
 - Tests: quiz engine (`__tests__/question-generator.test.ts` + `quiz-session.test.ts`,
   driving configs from `__tests__/fixtures.ts` — a TS copy of the v47 seed; update both
   when the seed changes) + orientation (10).
-- smiles-drawer 2.4.1 (MIT, ~55 KB gzip) — chosen over RDKit.js (7.4 MB WASM); see §8.1
+- legacy drawer 2.4.1 (MIT, ~55 KB gzip) — chosen over RDKit.js (7.4 MB WASM); see §8.1
   note: TS formula engine is unrelated, no sync needed.
 - Dev-machine note: `npm run check` repo-wide shows ~110 pre-existing CRLF formatter
   errors on this Windows checkout (`core.autocrlf=true` vs repo LF); untouched-file noise,

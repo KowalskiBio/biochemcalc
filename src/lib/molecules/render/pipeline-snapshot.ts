@@ -1,4 +1,4 @@
-// Adapter: extract the recognizer's structural snapshot from smiles-drawer's
+// Adapter: extract the recognizer's structural snapshot from legacy drawer's
 // live preprocessor graph. Structurally typed over the library's internals
 // (no package imports) so it works in the browser hook and in vitest alike.
 
