@@ -1,0 +1,11 @@
+# Refreshes the cleaned, read-only DB snapshot other developers pull
+# (see deploy/dbpull-snapshot.sh and DEPLOY.md). Per-user unit, no root:
+#   cp deploy/biochemcalc-dbpull.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now biochemcalc-dbpull.timer
+[Unit]
+Description=BioCal cleaned database snapshot for read-only pulls
+
+[Service]
+Type=oneshot
+ExecStart=%h/biochemcalc-web/dbpull-snapshot.sh

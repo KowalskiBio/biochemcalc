@@ -11,7 +11,10 @@
 # Usage: npm run db:pull                 (or: bash scripts/db-pull.sh)
 #        npm run db:pull -- --force
 # Env:   VM_HOST (ssh alias, default proxmox1), VM_DB (snapshot path on the VM,
-#        relative to the ssh user's home or absolute).
+#        relative to the ssh user's home or absolute). Other developers pull
+#        the cleaned snapshot (all passwords: devpassword1) with
+#        VM_HOST=dbpull@147.251.22.180 VM_DB=/snapshot/biochemcalc.sqlite —
+#        see DEPLOY.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
