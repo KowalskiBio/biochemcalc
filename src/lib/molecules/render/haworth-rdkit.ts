@@ -23,6 +23,7 @@ import {
 } from "@/lib/molecules/render/haworth-layout"
 import { snapshotFromPreprocessor } from "@/lib/molecules/render/pipeline-snapshot"
 import {
+  drawWithNaturalSize,
   getMolBlock,
   type Mol,
   type MolGraphSnapshot,
@@ -80,12 +81,18 @@ export interface HaworthLayoutOptions {
   width?: number
   height?: number
   bondLength?: number
+  /**
+   * Draw at a constant on-screen bond length instead of scaling the molecule
+   * to fit `width` × `height`. Default false keeps the fixed-box preview.
+   */
+  natural?: boolean
 }
 
 interface ResolvedOptions {
   width: number
   height: number
   bondLength: number
+  natural: boolean
 }
 
 /** Recognition + post-layout geometry, useful for tests and diagnostics. */
@@ -231,7 +238,9 @@ export function prepareStructureRender(
     if (!session.recognized) {
       return {
         recognized: false,
-        svg: mol.get_svg(opts.width, opts.height),
+        svg: opts.natural
+          ? drawWithNaturalSize(mol, { bondLength: opts.bondLength, wedgeBonds: true })
+          : mol.get_svg(opts.width, opts.height),
         molblock: getMolBlock(mol),
       }
     }
@@ -263,7 +272,9 @@ export function prepareStructureRender(
       }
       return {
         recognized: "haworth",
-        svg: drawMol(placed, opts, false),
+        svg: opts.natural
+          ? drawWithNaturalSize(placed, { bondLength: opts.bondLength, wedgeBonds: false })
+          : drawMol(placed, opts, false),
         overlay: overlayOf(session, opts),
         molblock,
       }
@@ -560,5 +571,6 @@ function resolveOptions(options: HaworthLayoutOptions): ResolvedOptions {
     width: options.width ?? DEFAULT_WIDTH,
     height: options.height ?? DEFAULT_HEIGHT,
     bondLength: options.bondLength ?? DEFAULT_BOND_LENGTH,
+    natural: options.natural === true,
   }
 }

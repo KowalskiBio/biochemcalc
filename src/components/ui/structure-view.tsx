@@ -217,6 +217,7 @@ function SmilesStructureView({
       mirror,
       theme: resolvedTheme,
       bondLength: 24,
+      natural: grow,
     })
     if (rendered === null) {
       setHasError(true)

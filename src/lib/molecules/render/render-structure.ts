@@ -16,6 +16,7 @@
 import { transformPoints } from "@/lib/molecules/orientation"
 import { prepareStructureRender } from "@/lib/molecules/render/haworth-rdkit"
 import {
+  drawWithNaturalSize,
   type Mol,
   molblockWithPositions,
   parseMol,
@@ -45,6 +46,12 @@ export interface RenderStructureOptions {
   theme: "light" | "dark"
   /** Bond length used by the Haworth layout and coordination insets. */
   bondLength?: number
+  /**
+   * Draw at a constant on-screen bond length (default false). The natural
+   * canvas grows with the molecule instead of shrinking it to fit
+   * `width` × `height`; grids and option lists keep the fixed box.
+   */
+  natural?: boolean
 }
 
 export interface RenderedStructure {
@@ -60,10 +67,12 @@ export function renderStructure(
   smiles: string,
   options: RenderStructureOptions,
 ): RenderedStructure | null {
+  const natural = options.natural === true
   const prepared = prepareStructureRender(smiles, {
     width: options.width,
     height: options.height,
     bondLength: options.bondLength,
+    natural,
   })
   if (prepared === null) {
     return null
@@ -84,13 +93,27 @@ export function renderStructure(
     const flipped = sugarMolblock(molblock, mirror)
     if (flipped !== null) {
       molblock = flipped
-      markup = drawMolblock(molblock, options.width, options.height, false) ?? prepared.svg
+      markup =
+        drawMolblock(molblock, {
+          width: options.width,
+          height: options.height,
+          bondLength: options.bondLength,
+          wedgeBonds: false,
+          natural,
+        }) ?? prepared.svg
     }
   } else if (orientationDeg !== 0 || mirror) {
     const transformed = transformedMolblock(molblock, orientationDeg, mirror)
     if (transformed !== null) {
       molblock = transformed.molblock
-      markup = drawMolblock(molblock, options.width, options.height, true) ?? prepared.svg
+      markup =
+        drawMolblock(molblock, {
+          width: options.width,
+          height: options.height,
+          bondLength: options.bondLength,
+          wedgeBonds: true,
+          natural,
+        }) ?? prepared.svg
     }
   }
 
@@ -169,25 +192,40 @@ function sugarMolblock(molblock: string, mirror: boolean): string | null {
   return molblockWithPositions(molblock, transformed)
 }
 
-function drawMolblock(
-  molblock: string,
-  width: number,
-  height: number,
-  wedgeBonds: boolean,
-): string | null {
+interface DrawOptions {
+  width: number
+  height: number
+  bondLength?: number
+  wedgeBonds: boolean
+  natural: boolean
+}
+
+function drawMolblock(molblock: string, options: DrawOptions): string | null {
   const mol = parseMol(molblock)
   if (mol === null) {
     return null
   }
   try {
-    return drawMol(mol, width, height, wedgeBonds)
+    return drawMol(mol, options)
   } finally {
     mol.delete()
   }
 }
 
-function drawMol(mol: Mol, width: number, height: number, wedgeBonds: boolean): string {
-  return mol.get_svg_with_highlights(JSON.stringify({ width, height, wedgeBonds }))
+function drawMol(mol: Mol, options: DrawOptions): string {
+  if (options.natural) {
+    return drawWithNaturalSize(mol, {
+      bondLength: options.bondLength,
+      wedgeBonds: options.wedgeBonds,
+    })
+  }
+  return mol.get_svg_with_highlights(
+    JSON.stringify({
+      width: options.width,
+      height: options.height,
+      wedgeBonds: options.wedgeBonds,
+    }),
+  )
 }
 
 function snapshotOfMolblock(molblock: string) {

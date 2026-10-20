@@ -34,6 +34,9 @@ const BILIRUBIN =
   "CC1=C(C(=C(N1)C=C2C(=C(C(=O)N2)C)C=CC3=C(C(=C(N3)C=C4C(=C(C(=O)N4)C)C)CCC(=O)O)CCC(=O)O)CCC(=O)O)"
 const BROKEN_CHLOROPHYLL =
   "CCC1=C(C2=Cc3c(c(c4n3[Mg]56[N]2=C1C=C7N5C8=C(C(C(=O)C8=C7C)C(=O)OC)C9=[N]6C(=C4)C(C9CCC(=O)OCC=C(C)CCCC(C)CCCC(C)CCCC(C)C)C)C=C)C"
+const CHOLESTEROL =
+  "C[C@H](CCCC(C)C)[C@H]1CC[C@@H]2[C@@]1(CC[C@H]3[C@H]2CC=C4[C@@]3(CC[C@@H](C4)O)C)C"
+const CHLOROPHYLL_PUBCHEM = String.raw`CCC1=C(C2=NC1=CC3=C(C4=C([N-]3)C(=C5[C@H]([C@@H](C(=N5)C=C6C(=C(C(=C2)[N-]6)C=C)C)C)CCC(=O)OC/C=C(\C)/CCC[C@H](C)CCC[C@H](C)CCCC(C)C)[C@H](C4=O)C(=O)OC)C)C.[Mg+2]`
 
 function render(
   smiles: string,
@@ -152,6 +155,91 @@ function bondGeometry(svg: Element): string[] {
   return Array.from(svg.querySelectorAll("path"))
     .filter((path) => classTokens(path).some((token) => token.startsWith("bond-")))
     .map((path) => path.getAttribute("d") ?? "")
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
+/**
+ * Lengths of the drawn bond segments, in SVG user units (pixels here).
+ * Hashed stereobonds are drawn as a pile of tiny dash segments that carry the
+ * same `bond-N` class, so only segments close to the longest one count.
+ */
+function drawnBondLengths(svg: Element): number[] {
+  const lengths: number[] = []
+  for (const data of bondGeometry(svg)) {
+    const match = /M\s*(-?[\d.]+)[,\s]+(-?[\d.]+)\s*L\s*(-?[\d.]+)[,\s]+(-?[\d.]+)/.exec(data)
+    if (match === null) continue
+    const length = Math.hypot(
+      Number(match[3]) - Number(match[1]),
+      Number(match[4]) - Number(match[2]),
+    )
+    if (length > 1e-6) lengths.push(length)
+  }
+  if (lengths.length === 0) return []
+  const longest = Math.max(...lengths)
+  return lengths.filter((length) => length >= 0.5 * longest)
+}
+
+function drawnWidth(svg: Element): number {
+  return Number.parseFloat(svg.getAttribute("width") ?? "")
+}
+
+interface ViewBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+function viewBoxOf(svg: Element): ViewBox {
+  const [x, y, width, height] = (svg.getAttribute("viewBox") ?? "").trim().split(/\s+/).map(Number)
+  return { x, y, width, height }
+}
+
+function contentExtent(svg: Element, axis: 0 | 1): Extent | null {
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const path of Array.from(svg.querySelectorAll("path"))) {
+    const extent = pathExtent(path, axis)
+    if (extent === null) continue
+    min = Math.min(min, extent.min)
+    max = Math.max(max, extent.max)
+  }
+  for (const polygon of Array.from(svg.querySelectorAll("polygon"))) {
+    const numbers = numericCoordinates(polygon.getAttribute("points") ?? "")
+    for (let index = axis; index < numbers.length; index += 2) {
+      min = Math.min(min, numbers[index])
+      max = Math.max(max, numbers[index])
+    }
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
+}
+
+function expectInsideCanvas(svg: Element): void {
+  const viewBox = viewBoxOf(svg)
+  const x = contentExtent(svg, 0)
+  const y = contentExtent(svg, 1)
+  expect(x).not.toBeNull()
+  expect(y).not.toBeNull()
+  if (x === null || y === null) return
+  expect(x.min).toBeGreaterThanOrEqual(viewBox.x - 0.5)
+  expect(y.min).toBeGreaterThanOrEqual(viewBox.y - 0.5)
+  expect(x.max).toBeLessThanOrEqual(viewBox.x + viewBox.width + 0.5)
+  expect(y.max).toBeLessThanOrEqual(viewBox.y + viewBox.height + 0.5)
+}
+
+/** Stable 32-bit FNV-1a digest; enough to pin byte-identical markup. */
+function digest(value: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
 }
 
 interface Quad {
@@ -390,6 +478,60 @@ describe("isolated-metal coordination", () => {
   it("draws four coordination lines on vitamin B12 and none on bilirubin", () => {
     expect(render(B12).svg.querySelectorAll("line.porphyrin-coordination")).toHaveLength(4)
     expect(render(BILIRUBIN).svg.querySelectorAll("line.porphyrin-coordination")).toHaveLength(0)
+  })
+})
+
+describe("natural-size rendering", () => {
+  it("keeps fixed-size output byte-identical to the pre-change pipeline", () => {
+    // Digests recorded from the fixed-size path before natural sizing existed.
+    // The opt-in flag must not disturb grids, previews or option lists.
+    const golden: Record<string, string> = {
+      cholesterol: "ba9366cd",
+      chlorophyll: "80dcbf18",
+      glucose: "0d66270f",
+    }
+    expect(digest(render(CHOLESTEROL, { natural: false }).svg.outerHTML)).toBe(golden.cholesterol)
+    expect(digest(render(CHLOROPHYLL_PUBCHEM, { natural: false }).svg.outerHTML)).toBe(
+      golden.chlorophyll,
+    )
+    expect(digest(render(TRUE_BETA_GLUCOSE, { natural: false }).svg.outerHTML)).toBe(golden.glucose)
+    // The explicit false and the omitted default are the same code path.
+    expect(render(CHOLESTEROL).svg.outerHTML).toBe(
+      render(CHOLESTEROL, { natural: false }).svg.outerHTML,
+    )
+  })
+
+  it("draws large molecules at natural size instead of shrinking into the box", () => {
+    for (const smiles of [CHOLESTEROL, CHLOROPHYLL_PUBCHEM]) {
+      expect(drawnWidth(render(smiles, { natural: false }).svg)).toBe(160)
+      const natural = render(smiles, { natural: true }).svg
+      expect(drawnWidth(natural)).toBeGreaterThan(300)
+      expectInsideCanvas(natural)
+    }
+  })
+
+  it("keeps a constant ~24 px bond length for small and large molecules", () => {
+    for (const smiles of [CHOLESTEROL, CHLOROPHYLL_PUBCHEM, TRUE_BETA_GLUCOSE]) {
+      const lengths = drawnBondLengths(render(smiles, { natural: true }).svg)
+      expect(lengths.length).toBeGreaterThan(0)
+      const typical = median(lengths)
+      expect(typical).toBeGreaterThanOrEqual(21)
+      expect(typical).toBeLessThanOrEqual(27)
+    }
+  })
+
+  it("keeps the Haworth overlays and the drawing inside the natural canvas", () => {
+    const { svg, recognized } = render(TRUE_BETA_GLUCOSE, { natural: true })
+    expect(recognized).toBe("haworth")
+    expect(svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(3)
+    expectInsideCanvas(svg)
+  })
+
+  it("swaps the natural canvas dimensions for a 90 degree rotation", () => {
+    const upright = viewBoxOf(render(CHOLESTEROL, { natural: true }).svg)
+    const rotated = viewBoxOf(render(CHOLESTEROL, { natural: true, orientationDeg: 90 }).svg)
+    expect(Math.abs(rotated.width - upright.height) / upright.height).toBeLessThan(0.1)
+    expect(Math.abs(rotated.height - upright.width) / upright.width).toBeLessThan(0.1)
   })
 })
 

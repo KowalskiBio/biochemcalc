@@ -59,6 +59,21 @@ export interface RenderMoleculeOptions {
   fixedBondLength?: number
 }
 
+/** Natural-size draw settings: constant on-screen bond length, padded canvas. */
+export interface NaturalDrawOptions {
+  /** Target on-screen bond length in px (default 24). */
+  bondLength?: number
+  /** Uniform canvas padding in px (default 12, matching the old drawer). */
+  padding?: number
+  /** Draw stereochemistry wedges (default RDKit's own setting). */
+  wedgeBonds?: boolean
+}
+
+/** Matches the old drawer's constant 24 px bond length. */
+const DEFAULT_NATURAL_BOND_LENGTH = 24
+/** Matches the old `SvgDrawer` padding. */
+const DEFAULT_NATURAL_PADDING = 12
+
 interface RdkitJsonAtom {
   z?: number
   aromatic?: boolean
@@ -257,6 +272,94 @@ export function renderMoleculeSvg(smiles: string, opts: RenderMoleculeOptions): 
   } finally {
     mol.delete()
   }
+}
+
+/**
+ * Canvas dimensions that let RDKit draw `snapshot` at a constant on-screen
+ * bond length. Bonds are measured in the snapshot's coordinate units (RDKit
+ * layouts use ~1-unit bonds), scaled to `bondLength` px and padded like the
+ * old drawer. Call it with the molecule's FINAL coordinates, i.e. after any
+ * orientation/mirror/Haworth coordinate work.
+ */
+export function naturalCanvasSize(
+  snapshot: Pick<MolGraphSnapshot, "atoms" | "bonds">,
+  bondLength = DEFAULT_NATURAL_BOND_LENGTH,
+  padding = DEFAULT_NATURAL_PADDING,
+): { width: number; height: number } {
+  const median = medianBondLength(snapshot)
+  const scale = bondLength / (median > 0 ? median : 1)
+  const bounds = coordinateBounds(snapshot.atoms)
+  if (bounds === null) {
+    const side = Math.max(1, Math.ceil(2 * padding))
+    return { width: side, height: side }
+  }
+  return {
+    width: Math.max(1, Math.ceil(bounds.width * scale + 2 * padding)),
+    height: Math.max(1, Math.ceil(bounds.height * scale + 2 * padding)),
+  }
+}
+
+/**
+ * Draw a molecule at natural size: compute the padded canvas from its current
+ * coordinates, then pass that canvas together with `fixedBondLength` so RDKit
+ * draws at the target bond length instead of scaling the molecule to fit a
+ * fixed box.
+ */
+export function drawWithNaturalSize(mol: Mol, options: NaturalDrawOptions = {}): string {
+  const bondLength = options.bondLength ?? DEFAULT_NATURAL_BOND_LENGTH
+  const padding = options.padding ?? DEFAULT_NATURAL_PADDING
+  const snapshot = snapshotFromMol(mol)
+  const { width, height } = naturalCanvasSize(snapshot, bondLength, padding)
+  const details: Record<string, number | boolean> = {
+    width,
+    height,
+    fixedBondLength: bondLength,
+    // The canvas already carries the old drawer's 12 px margin, so RDKit's
+    // default 5% padding would otherwise force a slight fit-to-canvas shrink.
+    padding: 0,
+  }
+  if (options.wedgeBonds !== undefined) {
+    details.wedgeBonds = options.wedgeBonds
+  }
+  return mol.get_svg_with_highlights(JSON.stringify(details))
+}
+
+function coordinateBounds(atoms: MolAtomSnapshot[]): { width: number; height: number } | null {
+  if (atoms.length === 0) {
+    return null
+  }
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const atom of atoms) {
+    minX = Math.min(minX, atom.pos.x)
+    minY = Math.min(minY, atom.pos.y)
+    maxX = Math.max(maxX, atom.pos.x)
+    maxY = Math.max(maxY, atom.pos.y)
+  }
+  return { width: maxX - minX, height: maxY - minY }
+}
+
+function medianBondLength(snapshot: Pick<MolGraphSnapshot, "atoms" | "bonds">): number {
+  const lengths: number[] = []
+  for (const bond of snapshot.bonds) {
+    const begin = snapshot.atoms[bond.beginIdx]?.pos
+    const end = snapshot.atoms[bond.endIdx]?.pos
+    if (begin === undefined || end === undefined) {
+      continue
+    }
+    const length = Math.hypot(end.x - begin.x, end.y - begin.y)
+    if (length > 1e-9) {
+      lengths.push(length)
+    }
+  }
+  if (lengths.length === 0) {
+    return 1
+  }
+  lengths.sort((a, b) => a - b)
+  const middle = Math.floor(lengths.length / 2)
+  return lengths.length % 2 === 0 ? (lengths[middle - 1] + lengths[middle]) / 2 : lengths[middle]
 }
 
 async function initializeRdkit(): Promise<RdkitModule> {
