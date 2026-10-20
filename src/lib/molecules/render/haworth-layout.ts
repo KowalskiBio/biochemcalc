@@ -311,6 +311,68 @@ function applyPlan(
           }
         }
 
+        // Nucleobase on the anomeric carbon (purines, pyrimidines, pseudo-
+        // bases): the generic chain tilt aims only the glycosidic bond; the
+        // rigid aromatic subtree behind it keeps the source layout's heading
+        // AND handedness, so the same base can draw tilted-odd or mirrored
+        // (AMP/GMP) next to a canonical one (ATP). Snap the base's long axis
+        // (glyco N → farthest aromatic-ring atom) to the canonical anomer-
+        // side heading, then FLIP the whole subtree across that axis when its
+        // aromatic centroid sits on the mirrored side — the textbook mirror,
+        // never an in-between tilt. Pivoting on the glycosidic N leaves the
+        // just-placed glycosidic bond untouched.
+        if (
+          atom.vertexId === plan.cycle[0] &&
+          atomInfo.value.element === "N" &&
+          atomInfo.value.isPartOfAromaticRing === true
+        ) {
+          const aromaticIds = subtree.filter(
+            (id) =>
+              preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.value
+                .isPartOfAromaticRing === true,
+          )
+          const glycoNPosition = positionOf(preprocessor, substituentId)
+          if (glycoNPosition !== undefined && aromaticIds.length >= 4) {
+            let farthest = substituentId
+            let farthestDistance = -1
+            for (const id of aromaticIds) {
+              const point = positionOf(preprocessor, id)
+              if (point === undefined) {
+                continue
+              }
+              const distance = Math.hypot(point.x - glycoNPosition.x, point.y - glycoNPosition.y)
+              if (distance > farthestDistance) {
+                farthestDistance = distance
+                farthest = id
+              }
+            }
+            const farthestPosition = positionOf(preprocessor, farthest)
+            if (farthestPosition !== undefined) {
+              const targetHeading = group.direction * (Math.PI / 3)
+              const headingNow = Math.atan2(
+                farthestPosition.y - glycoNPosition.y,
+                farthestPosition.x - glycoNPosition.x,
+              )
+              rotatePositions(preprocessor, subtree, glycoNPosition, targetHeading - headingNow)
+              const aromaticCenter = centroid(
+                aromaticIds
+                  .map((id) => positionOf(preprocessor, id))
+                  .filter((point): point is Point => point !== undefined),
+              )
+              const axisUnit = { x: Math.cos(targetHeading), y: Math.sin(targetHeading) }
+              const curlSide =
+                axisUnit.x * (aromaticCenter.y - glycoNPosition.y) -
+                axisUnit.y * (aromaticCenter.x - glycoNPosition.x)
+              // Canonical pose (ATP reference): the ring system's curl sits on
+              // the anomeric direction's side; the opposite sign is a mirrored
+              // base, flipped back across the snapped axis.
+              if (curlSide * group.direction < 0) {
+                mirrorAcrossAxis(preprocessor, subtree, glycoNPosition, axisUnit)
+              }
+            }
+          }
+        }
+
         // Pure -CH2OH tail: after the chain atom lands vertically on its
         // ray, give its continuation →O bond a full 60° turn on the
         // away-from-ring side — the textbook 120° interior angle of the
@@ -378,6 +440,167 @@ function applyPlan(
 
   // Recompute the ring center (aromatic circle / label placement).
   recomputeRingCenter(preprocessor, plan.ringId, ringIds)
+}
+
+/** Reflect ids across the axis line through `pivot` (unit direction). */
+function mirrorAcrossAxis(
+  preprocessor: HaworthPreprocessor,
+  ids: number[],
+  pivot: Point,
+  axisUnit: Point,
+): void {
+  for (const id of ids) {
+    const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === id)
+    if (vertex === undefined) {
+      continue
+    }
+    const vx = vertex.position.x - pivot.x
+    const vy = vertex.position.y - pivot.y
+    const projection = vx * axisUnit.x + vy * axisUnit.y
+    vertex.position.x = pivot.x + 2 * projection * axisUnit.x - vx
+    vertex.position.y = pivot.y + 2 * projection * axisUnit.y - vy
+  }
+}
+
+/**
+ * Order a ring's members around its cycle, starting at `start`. Traversal
+ * prefers a non-sugar neighbour for the first step so a shared fused edge is
+ * walked last (closure order: sharedA → ring body → sharedB). Returns null
+ * when the members do not form a simple cycle.
+ */
+function orderedRingCycle(
+  preprocessor: HaworthPreprocessor,
+  members: number[],
+  start: number,
+  sugarSet: Set<number>,
+): number[] | null {
+  const memberSet = new Set(members)
+  const neighboursOf = (id: number): number[] =>
+    preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.neighbours ?? []
+  const ordered = [start]
+  let previous = -1
+  let current = start
+  while (ordered.length < members.length) {
+    const candidates = neighboursOf(current).filter(
+      (id) =>
+        memberSet.has(id) &&
+        id !== previous &&
+        (id !== start || ordered.length === members.length - 1),
+    )
+    const next = candidates.find((id) => id !== start && !sugarSet.has(id)) ?? candidates[0]
+    if (next === undefined) {
+      return null
+    }
+    ordered.push(next)
+    previous = current
+    current = next
+  }
+  return ordered
+}
+
+/**
+ * A fused 3′,5′-cyclic phosphodiester (cAMP family): its six-ring shares one
+ * sugar edge (C3′–C4′) and the generic substituent pass treats BOTH ring
+ * oxygens as independent chain tails, tearing the loop apart (the phosphorus
+ * lands on top of the base). Rebuild the loop as a regular hexagon fused on
+ * the shared edge on the side AWAY from the sugar centroid — the textbook
+ * cAMP bulge to the left. Exocyclic substituents on the moved atoms (P=O,
+ * P–OH) are dragged along rigidly.
+ */
+function rebuildCyclicDiesters(
+  preprocessor: HaworthPreprocessor,
+  plan: SugarRingRecognition,
+): void {
+  const sugarSet = new Set(plan.cycle)
+  const elementOf = (id: number): string | undefined =>
+    preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.value.element
+  for (const ring of preprocessor.rings) {
+    if (ring.members.length !== 6) {
+      continue
+    }
+    const shared = ring.members.filter((id) => sugarSet.has(id))
+    if (shared.length !== 2) {
+      continue
+    }
+    const neighboursOfA =
+      preprocessor.graph.vertices.find((candidate) => candidate.id === shared[0])?.neighbours ?? []
+    if (!neighboursOfA.includes(shared[1])) {
+      continue
+    }
+    const phosphorusIds = ring.members.filter((id) => elementOf(id) === "P")
+    if (phosphorusIds.length !== 1) {
+      continue
+    }
+    const ordered = orderedRingCycle(preprocessor, ring.members, shared[0], sugarSet)
+    if (ordered === null || ordered.length !== 6 || ordered[5] !== shared[1]) {
+      continue
+    }
+    const a = positionOf(preprocessor, shared[0])
+    const b = positionOf(preprocessor, shared[1])
+    if (a === undefined || b === undefined) {
+      continue
+    }
+    const side = Math.hypot(b.x - a.x, b.y - a.y)
+    if (side < 1e-6) {
+      continue
+    }
+    const sugarCentroid = centroid(
+      plan.cycle
+        .map((id) => positionOf(preprocessor, id))
+        .filter((point): point is Point => point !== undefined),
+    )
+    const direction = { x: (b.x - a.x) / side, y: (b.y - a.y) / side }
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    const perpendicular = { x: -direction.y, y: direction.x }
+    const external =
+      perpendicular.x * (mid.x - sugarCentroid.x) + perpendicular.y * (mid.y - sugarCentroid.y) > 0
+        ? perpendicular
+        : { x: -perpendicular.x, y: -perpendicular.y }
+    // Regular hexagon: circumradius equals its side, center apothem away.
+    const center = {
+      x: mid.x + (external.x * Math.sqrt(3) * side) / 2,
+      y: mid.y + (external.y * Math.sqrt(3) * side) / 2,
+    }
+    const angleA = Math.atan2(a.y - center.y, a.x - center.x)
+    const angleB = Math.atan2(b.y - center.y, b.x - center.x)
+    let delta = angleB - angleA
+    while (delta > Math.PI) {
+      delta -= 2 * Math.PI
+    }
+    while (delta < -Math.PI) {
+      delta += 2 * Math.PI
+    }
+    // From a, the five external steps sweep 300° around the center to reach b.
+    const stepSign = delta < 0 ? 1 : -1
+    const memberSet = new Set(ring.members)
+    for (let k = 1; k <= 4; k += 1) {
+      const id = ordered[k]
+      const angle = angleA + stepSign * (Math.PI / 3) * k
+      const target = {
+        x: center.x + side * Math.cos(angle),
+        y: center.y + side * Math.sin(angle),
+      }
+      const previousPosition = positionOf(preprocessor, id)
+      if (previousPosition !== undefined) {
+        const shift = { x: target.x - previousPosition.x, y: target.y - previousPosition.y }
+        const exocyclicNeighbours = (
+          preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.neighbours ?? []
+        ).filter((n) => !memberSet.has(n) && elementOf(n) !== "H")
+        for (const neighbour of exocyclicNeighbours) {
+          const dragged = collectSubtree(preprocessor, neighbour, new Set(memberSet))
+          for (const draggedId of dragged) {
+            const vertex = preprocessor.graph.vertices.find((c) => c.id === draggedId)
+            if (vertex !== undefined) {
+              vertex.position.x += shift.x
+              vertex.position.y += shift.y
+            }
+          }
+        }
+      }
+      place(preprocessor, id, target)
+    }
+    recomputeRingCenter(preprocessor, ring.id, ring.members)
+  }
 }
 
 /**
@@ -504,5 +727,12 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
   plans.forEach((plan, index) => {
     applyPlan(preprocessor, plan, bondLength, protectedIds, mirrored[index])
   })
+
+  // 3. Fused cyclic phosphodiesters (cAMP family): the substituent pass tore
+  // their six-member loop apart, so rebuild each as a fused hexagon last of
+  // all, on the external side of its shared sugar edge.
+  for (const plan of plans) {
+    rebuildCyclicDiesters(preprocessor, plan)
+  }
   return true
 }

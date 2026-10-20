@@ -682,3 +682,335 @@ describe("round-trip chemistry", () => {
     }
   })
 })
+
+// Nucleotide placement: the base goes up-RIGHT of the anomeric carbon, 5'
+// phosphate chains walk out to the LEFT, and a cyclic 3',5'-phosphodiester
+// (cAMP) fuses as a hexagon on the left of the sugar. Placement must depend
+// only on the canonical ring orientation, never on the engine's initial
+// heading — so the same invariants hold for every SMILES traversal/write-up
+// of the same molecule (PubChem canonical + kekulé seed forms).
+describe("nucleotide placement", () => {
+  const BOND = 24
+
+  // PubChem isomeric SMILES (canonical sources of the teaching molecules).
+  const PUBCHEM_ATP =
+    "C1=NC(=C2C(=N1)N(C=N2)[C@H]3[C@@H]([C@@H]([C@H](O3)COP(=O)(O)OP(=O)(O)OP(=O)(O)O)O)O)N"
+  const PUBCHEM_AMP = "C1=NC(=C2C(=N1)N(C=N2)[C@H]3[C@@H]([C@@H]([C@H](O3)COP(=O)(O)O)O)O)N"
+  const PUBCHEM_GMP = "C1=NC2=C(N1[C@H]3[C@@H]([C@@H]([C@H](O3)COP(=O)(O)O)O)O)N=C(NC2=O)N"
+  const PUBCHEM_CAMP = "C1[C@@H]2[C@H]([C@H]([C@@H](O2)N3C=NC4=C(N=CN=C43)N)O)OP(=O)(O1)O"
+  const PUBCHEM_FADH2 =
+    "CC1=CC2=C(C=C1C)N(C3=C(N2)C(=O)NC(=O)N3)C[C@@H]([C@@H]([C@@H](COP(=O)(O)OP(=O)(O)OC[C@@H]4[C@H]([C@H]([C@@H](O4)N5C=NC6=C(N=CN=C65)N)O)O)O)O)O"
+  const PUBCHEM_ACETYL_COA =
+    "CC(=O)SCCNC(=O)CCNC(=O)[C@@H](C(C)(C)COP(=O)(O)OP(=O)(O)OC[C@@H]1[C@H]([C@H]([C@@H](O1)N2C=NC3=C(N=CN=C32)N)O)OP(=O)(O)O)O"
+  // Second, differently-traversed kekulé write-up of 5'-GMP (guanine form of
+  // the AMP_KEKULE sugar fragment keeps the natural β-D-ribose config).
+  const GMP_KEKULE = "NC1=NC2=C(N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O)C(=O)N1"
+
+  interface NucleotideCase {
+    pipeline: HaworthLayoutResult
+    plan: NonNullable<HaworthLayoutResult["plans"]>[number]
+    rel: (id: number) => { dx: number; dy: number }
+    glycoRoot: number | undefined
+    glycosidicBase: Set<number>
+    phosphates: number[]
+    diesterRing: number[] | null
+  }
+
+  function minDistBetween(
+    pipeline: HaworthLayoutResult,
+    setA: Set<number>,
+    setB: Set<number>,
+  ): number {
+    let best = Number.POSITIVE_INFINITY
+    for (const a of setA) {
+      for (const b of setB) {
+        if ((pipeline.snapshot.adjacency.get(a) ?? []).includes(b)) {
+          continue
+        }
+        const pa = pipeline.positions.get(a)
+        const pb = pipeline.positions.get(b)
+        if (pa === undefined || pb === undefined) {
+          continue
+        }
+        best = Math.min(best, Math.hypot(pa.x - pb.x, pa.y - pb.y) / BOND)
+      }
+    }
+    return best
+  }
+
+  function analyzeNucleotide(smiles: string, label: string): NucleotideCase {
+    const pipeline = pipelineOf(smiles)
+    expect(pipeline.recognized, `${label}: sugar recognized`).toBe(true)
+    const plan = pipeline.plans[0]
+    const sugarSet = new Set(plan.cycle)
+    const ringPoints = plan.cycle.map((id) => pipeline.positions.get(id) ?? { x: 0, y: 0 })
+    const ringCentroid = {
+      x: ringPoints.reduce((sum, point) => sum + point.x, 0) / ringPoints.length,
+      y: ringPoints.reduce((sum, point) => sum + point.y, 0) / ringPoints.length,
+    }
+    const rel = (id: number) => {
+      const point = pipeline.positions.get(id) ?? { x: 0, y: 0 }
+      return {
+        dx: (point.x - ringCentroid.x) / BOND,
+        dy: (point.y - ringCentroid.y) / BOND,
+      }
+    }
+
+    // Glycosidic nucleobase: the aromatic N-linked subtree on the anomeric C.
+    const anomericAtom = plan.atoms.find((atom) => atom.vertexId === plan.cycle[0])
+    if (anomericAtom === undefined) {
+      throw new Error(`${label}: anomeric atom missing`)
+    }
+    const glycoRoot = [...anomericAtom.up, ...anomericAtom.down].find((id) => {
+      const atom = pipeline.snapshot.atoms.get(id)
+      return atom !== undefined && atom.element === "N" && atom.isAromatic
+    })
+    const glycosidicBase = new Set<number>()
+    if (glycoRoot !== undefined) {
+      const stack = [glycoRoot]
+      const seen = new Set<number>([glycoRoot])
+      while (stack.length > 0) {
+        const current = stack.pop() ?? -1
+        glycosidicBase.add(current)
+        for (const next of pipeline.snapshot.adjacency.get(current) ?? []) {
+          const atom = pipeline.snapshot.atoms.get(next)
+          if (!seen.has(next) && !sugarSet.has(next) && atom?.isAromatic === true) {
+            seen.add(next)
+            stack.push(next)
+          }
+        }
+      }
+    }
+    const phosphates: number[] = []
+    for (const [id, atom] of pipeline.snapshot.atoms) {
+      if (atom.element === "P") {
+        phosphates.push(id)
+      }
+    }
+    const diesterRing =
+      pipeline.preprocessor.rings.find((ring) => {
+        if (ring.members.length !== 6) {
+          return false
+        }
+        const shared = ring.members.filter((id) => sugarSet.has(id))
+        return shared.length === 2 && ring.members.some((id) => phosphates.includes(id))
+      })?.members ?? null
+
+    return { pipeline, plan, rel, glycoRoot, glycosidicBase, phosphates, diesterRing }
+  }
+
+  const BASE_RIGHT_CASES = [
+    ["ATP", PUBCHEM_ATP],
+    ["AMP (PubChem)", PUBCHEM_AMP],
+    ["AMP (kekulé)", AMP_KEKULE],
+    ["GMP (PubChem)", PUBCHEM_GMP],
+    ["GMP (kekulé)", GMP_KEKULE],
+    ["FADH2 (adenine)", PUBCHEM_FADH2],
+    ["acetyl-CoA", PUBCHEM_ACETYL_COA],
+    ["cAMP", PUBCHEM_CAMP],
+  ] as const
+
+  it("places every glycosidic nucleobase to the right of the sugar ring", () => {
+    for (const [label, smiles] of BASE_RIGHT_CASES) {
+      const analysis = analyzeNucleotide(smiles, label)
+      expect(analysis.glycosidicBase.size, `${label}: glycosidic base found`).toBeGreaterThan(3)
+      const dxs = [...analysis.glycosidicBase].map((id) => analysis.rel(id).dx)
+      const center = dxs.reduce((sum, value) => sum + value, 0) / dxs.length
+      expect(center, `${label}: base center right of the ring`).toBeGreaterThanOrEqual(0.5)
+      expect(Math.min(...dxs), `${label}: no base atom leans left of the ring`).toBeGreaterThan(
+        -0.1,
+      )
+    }
+  })
+
+  it("marches non-cyclic phosphate chains to the left of C4′", () => {
+    const cases = [
+      ["ATP", PUBCHEM_ATP],
+      ["AMP (PubChem)", PUBCHEM_AMP],
+      ["AMP (kekulé)", AMP_KEKULE],
+      ["GMP (PubChem)", PUBCHEM_GMP],
+      ["GMP (kekulé)", GMP_KEKULE],
+      ["acetyl-CoA", PUBCHEM_ACETYL_COA],
+    ] as const
+    for (const [label, smiles] of cases) {
+      const analysis = analyzeNucleotide(smiles, label)
+      expect(analysis.phosphates.length, `${label}: phosphate present`).toBeGreaterThan(0)
+      for (const phosphate of analysis.phosphates) {
+        expect(
+          analysis.rel(phosphate).dx,
+          `${label}: P#${phosphate} left of the ring`,
+        ).toBeLessThanOrEqual(-1.0)
+      }
+    }
+  })
+
+  it("keeps the base clear of its phosphate chains", () => {
+    const cases = [
+      ["ATP", PUBCHEM_ATP],
+      ["AMP (PubChem)", PUBCHEM_AMP],
+      ["AMP (kekulé)", AMP_KEKULE],
+      ["GMP (PubChem)", PUBCHEM_GMP],
+      ["GMP (kekulé)", GMP_KEKULE],
+      ["acetyl-CoA", PUBCHEM_ACETYL_COA],
+    ] as const
+    for (const [label, smiles] of cases) {
+      const analysis = analyzeNucleotide(smiles, label)
+      const phosphateGroup = new Set<number>()
+      for (const phosphate of analysis.phosphates) {
+        phosphateGroup.add(phosphate)
+        for (const oxygen of analysis.pipeline.snapshot.adjacency.get(phosphate) ?? []) {
+          if (analysis.pipeline.snapshot.atoms.get(oxygen)?.element === "O") {
+            phosphateGroup.add(oxygen)
+          }
+        }
+      }
+      expect(
+        minDistBetween(analysis.pipeline, analysis.glycosidicBase, phosphateGroup),
+        `${label}: base clear of phosphate`,
+      ).toBeGreaterThanOrEqual(0.85)
+    }
+  })
+
+  it("rebuilds the cAMP 3′,5′-cyclic diester as a fused hexagon left of the sugar", () => {
+    const analysis = analyzeNucleotide(PUBCHEM_CAMP, "cAMP")
+    expect(analysis.diesterRing, "cAMP: cyclic diester ring detected").not.toBeNull()
+    const members = analysis.diesterRing ?? []
+    const memberSet = new Set(members)
+
+    // The phosphorus bulges LEFT of the sugar ring.
+    expect(analysis.rel(analysis.phosphates[0]).dx, "cAMP: P left of the ring").toBeLessThan(0)
+
+    // Every diester bond is exactly one bond (regular fused hexagon).
+    const edges: [number, number][] = []
+    for (const a of members) {
+      for (const b of analysis.pipeline.snapshot.adjacency.get(a) ?? []) {
+        if (b > a && memberSet.has(b)) {
+          edges.push([a, b])
+        }
+      }
+    }
+    expect(edges, "cAMP: six ring bonds").toHaveLength(6)
+    for (const [index, [a, b]] of edges.entries()) {
+      const pa = analysis.pipeline.positions.get(a) ?? { x: 0, y: 0 }
+      const pb = analysis.pipeline.positions.get(b) ?? { x: 0, y: 0 }
+      const length = Math.hypot(pb.x - pa.x, pb.y - pa.y) / BOND
+      expect(length, `cAMP: diester edge ${index}`).toBeGreaterThan(0.88)
+      expect(length, `cAMP: diester edge ${index}`).toBeLessThan(1.12)
+    }
+
+    // The hexagon fuses on the side opposite the sugar centroid.
+    const sugarSet = new Set(analysis.plan.cycle)
+    const shared = members.filter((id) => sugarSet.has(id))
+    expect(shared, "cAMP: shares one sugar edge").toHaveLength(2)
+    const mid = {
+      dx: (analysis.rel(shared[0]).dx + analysis.rel(shared[1]).dx) / 2,
+      dy: (analysis.rel(shared[0]).dy + analysis.rel(shared[1]).dy) / 2,
+    }
+    const diesterCenter = members.reduce(
+      (acc, id) => ({ dx: acc.dx + analysis.rel(id).dx / 6, dy: acc.dy + analysis.rel(id).dy / 6 }),
+      { dx: 0, dy: 0 },
+    )
+    expect(
+      (diesterCenter.dx - mid.dx) * mid.dx + (diesterCenter.dy - mid.dy) * mid.dy,
+      "cAMP: diester fused externally",
+    ).toBeGreaterThan(0)
+
+    // The base stays clear of the whole diester ring (incl. P oxygens).
+    const diesterGroup = new Set(members)
+    for (const phosphate of analysis.phosphates) {
+      for (const oxygen of analysis.pipeline.snapshot.adjacency.get(phosphate) ?? []) {
+        if (
+          !sugarSet.has(oxygen) &&
+          analysis.pipeline.snapshot.atoms.get(oxygen)?.element === "O"
+        ) {
+          diesterGroup.add(oxygen)
+        }
+      }
+    }
+    expect(
+      minDistBetween(analysis.pipeline, analysis.glycosidicBase, diesterGroup),
+      "cAMP: base clear of the diester",
+    ).toBeGreaterThanOrEqual(1.0)
+  })
+
+  // The textbook pose (what ATP already draws naturally): the purine long
+  // axis points up-right at −60°, with the imidazole curl on the canonical
+  // side. Mirrored engine variants must be FLIPPED back — never free-rotated
+  // to an odd tilt. Proof: every purine's atom coordinates in its own
+  // glyco-N/axis frame are identical across all sources of adenine AND of
+  // guanine (same fused skeleton).
+  it("renders every purine nucleobase in the same canonical pose (flip, not tilt)", () => {
+    interface BasePose {
+      axisDeg: number
+      frame: { along: number; perp: number }[]
+    }
+    const poseOf = (label: string, smiles: string): BasePose => {
+      const analysis = analyzeNucleotide(smiles, label)
+      if (analysis.glycoRoot === undefined) {
+        throw new Error(`${label}: glycoRoot missing`)
+      }
+      const nPos = analysis.pipeline.positions.get(analysis.glycoRoot)
+      if (nPos === undefined) {
+        throw new Error(`${label}: glycoRoot position missing`)
+      }
+      let far = analysis.glycoRoot
+      let farDist = -1
+      for (const id of analysis.glycosidicBase) {
+        const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
+        const dist = Math.hypot(point.x - nPos.x, point.y - nPos.y)
+        if (dist > farDist) {
+          farDist = dist
+          far = id
+        }
+      }
+      const farPos = analysis.pipeline.positions.get(far) ?? { x: 0, y: 0 }
+      const axis = Math.atan2(farPos.y - nPos.y, farPos.x - nPos.x)
+      const unit = { x: Math.cos(axis), y: Math.sin(axis) }
+      const frame = [...analysis.glycosidicBase]
+        .map((id) => {
+          const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
+          const vx = point.x - nPos.x
+          const vy = point.y - nPos.y
+          return {
+            along: (vx * unit.x + vy * unit.y) / BOND,
+            perp: (unit.x * vy - unit.y * vx) / BOND,
+          }
+        })
+        .sort((a, b) => a.along - b.along || a.perp - b.perp)
+      return { axisDeg: (axis * 180) / Math.PI, frame }
+    }
+
+    const cases = [
+      ["AMP (PubChem)", PUBCHEM_AMP],
+      ["AMP (kekulé)", AMP_KEKULE],
+      ["GMP (PubChem)", PUBCHEM_GMP],
+      ["GMP (kekulé)", GMP_KEKULE],
+      ["FADH2 (adenine)", PUBCHEM_FADH2],
+      ["acetyl-CoA (adenine)", PUBCHEM_ACETYL_COA],
+      ["cAMP", PUBCHEM_CAMP],
+    ] as const
+
+    // Axis snapped to the canonical anomer-side heading (−60° for up anomers).
+    for (const [label, smiles] of cases) {
+      expect(Math.abs(poseOf(label, smiles).axisDeg - -60), `${label}: axis −60°`).toBeLessThan(3)
+    }
+
+    // Pose equality with the ATP reference: identical frame coordinates.
+    const reference = poseOf("ATP", PUBCHEM_ATP)
+    expect(reference.frame.length).toBe(9)
+    for (const [label, smiles] of cases) {
+      const pose = poseOf(label, smiles)
+      expect(pose.frame.length, `${label}: purine atom count`).toBe(9)
+      for (let index = 0; index < reference.frame.length; index += 1) {
+        expect(
+          Math.abs(pose.frame[index].along - reference.frame[index].along),
+          `${label}: atom ${index} along-axis vs ATP`,
+        ).toBeLessThan(0.05)
+        expect(
+          Math.abs(pose.frame[index].perp - reference.frame[index].perp),
+          `${label}: atom ${index} off-axis vs ATP (mirror parity)`,
+        ).toBeLessThan(0.05)
+      }
+    }
+  })
+})
