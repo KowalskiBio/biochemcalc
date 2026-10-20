@@ -1,7 +1,8 @@
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Flag } from "lucide-react"
 import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { Link, Navigate, useParams } from "react-router-dom"
 
+import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/report-question-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
@@ -16,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Slider } from "@/components/ui/slider"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
+import { biomoleculeReportsApi, snapshotOfQuestion } from "@/lib/biomolecule-reports-api"
 import { biomoleculesApi } from "@/lib/biomolecules-api"
 import {
   type CategoryQuizConfig,
@@ -491,6 +493,7 @@ interface QuestionScreenProps {
   onSelect: (key: string) => void
   onOpenSubmit: (input: string) => void
   onNext: () => void
+  onReport: () => void
 }
 
 function QuestionScreen({
@@ -506,6 +509,7 @@ function QuestionScreen({
   onSelect,
   onOpenSubmit,
   onNext,
+  onReport,
 }: QuestionScreenProps) {
   const progressText = quizStrings.questionOf
     .replace("{current}", String(index + 1))
@@ -526,7 +530,17 @@ function QuestionScreen({
       </div>
       <Progress value={progressPct} aria-label={progressText} className="h-1" />
 
-      <div className="space-y-2 py-2 text-center">
+      <div className="relative space-y-2 py-2 text-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onReport}
+          className="absolute right-0 top-0 h-8 w-8"
+          title={cs.student.report}
+          aria-label={cs.student.report}
+        >
+          <Flag className="size-4" />
+        </Button>
         <MicroLabel>{quizStrings.types[question.type]}</MicroLabel>
         <PromptView prompt={question.prompt} />
       </div>
@@ -692,6 +706,7 @@ export function BiomoleculesQuizPage() {
     config: CategoryQuizConfig
     mode: QuizMode
   } | null>(null)
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   const [session, dispatch] = useReducer(quizSessionReducer, EMPTY_QUESTIONS, createQuizSession)
 
   // Categories grouped exactly like the hub: a category pointing at a topic
@@ -778,14 +793,16 @@ export function BiomoleculesQuizPage() {
 
   const startQuiz = () => {
     if (slug === null || !entry || selectedTypes.length === 0) return
+    const seed = Date.now()
     const questions = generateQuizSession(entry.config.molecules, {
       types: selectedTypes,
       questionCount,
-      seed: Date.now(),
+      seed,
       characteristics: entry.config.characteristics,
       mode,
-    })
+    }).map((question, index) => ({ ...question, uid: `${seed}-${index}` }))
     if (questions.length === 0) return
+    setIsReportDialogOpen(false)
     dispatch({ type: "restart", questions })
     setActiveQuiz({
       slug,
@@ -852,7 +869,7 @@ export function BiomoleculesQuizPage() {
   // hard-mode input swallows its own Enter (see OpenAnswerForm), so this only
   // ever fires for the keystroke pressed after the verdict is already visible.
   useEffect(() => {
-    if (!activeQuiz || session.finished || !session.answered) return
+    if (!activeQuiz || session.finished || !session.answered || isReportDialogOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Enter") {
         event.preventDefault()
@@ -861,7 +878,7 @@ export function BiomoleculesQuizPage() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [activeQuiz, session.finished, session.answered])
+  }, [activeQuiz, session.finished, session.answered, isReportDialogOpen])
 
   // Wait for the first load before judging a slug — otherwise a direct
   // link would bounce to the hub while the dataset is still being fetched.
@@ -978,20 +995,47 @@ export function BiomoleculesQuizPage() {
     }
   }
 
+  // The dialog collects only the message; this callback freezes the snapshot
+  // of the question on screen and posts it, letting backend errors (including
+  // duplicate reports) surface through the dialog's toast.
+  const reportQuestion = async (message: string) => {
+    if (!question.uid) {
+      throw new Error(cs.student.reportError)
+    }
+    await biomoleculeReportsApi.reportQuestion({
+      questionUid: question.uid,
+      scopeSlug: activeQuiz.scope,
+      message,
+      snapshot: snapshotOfQuestion(question, {
+        scopeSlug: activeQuiz.scope,
+        molecules: activeQuiz.config.molecules,
+        answeredCorrect: session.answered ? (session.answers[session.index] ?? null) : null,
+      }),
+    })
+  }
+
   return (
-    <QuestionScreen
-      backHref={runBackHref}
-      backLabel={runBackLabel}
-      question={question}
-      molecules={activeQuiz.config.molecules}
-      index={session.index}
-      total={session.questions.length}
-      mode={activeQuiz.mode}
-      answered={session.answered}
-      selectedKey={session.selectedKey}
-      onSelect={(key) => dispatch({ type: "select", key })}
-      onOpenSubmit={submitOpenAnswer}
-      onNext={() => dispatch({ type: "next" })}
-    />
+    <>
+      <QuestionScreen
+        backHref={runBackHref}
+        backLabel={runBackLabel}
+        question={question}
+        molecules={activeQuiz.config.molecules}
+        index={session.index}
+        total={session.questions.length}
+        mode={activeQuiz.mode}
+        answered={session.answered}
+        selectedKey={session.selectedKey}
+        onSelect={(key) => dispatch({ type: "select", key })}
+        onOpenSubmit={submitOpenAnswer}
+        onNext={() => dispatch({ type: "next" })}
+        onReport={() => setIsReportDialogOpen(true)}
+      />
+      <BiomoleculeReportQuestionDialog
+        open={isReportDialogOpen}
+        onOpenChange={setIsReportDialogOpen}
+        onSubmit={reportQuestion}
+      />
+    </>
   )
 }

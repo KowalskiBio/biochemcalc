@@ -8,6 +8,7 @@ import { allowedSections } from "@/hooks/use-section"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesProjectionPage } from "@/pages/biomolecules-projection-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
+import { BiomoleculesReportsPage } from "@/pages/biomolecules-reports-page"
 import { BiomoleculesStreakPage } from "@/pages/biomolecules-streak-page"
 import { BiomoleculesTestPage } from "@/pages/biomolecules-test-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
@@ -53,6 +54,7 @@ function TeacherRoutes() {
         <Route path="/databaze" element={<DatabazePage />} />
         <Route path="/biomolekuly" element={<BiomoleculesPage />} />
         <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
+        <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
         <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
         <Route path="/biomolekuly/:categoryId/procvicovani" element={<BiomoleculesQuizPage />} />
         <Route path="/vzorce" element={<FormulasPage />} />

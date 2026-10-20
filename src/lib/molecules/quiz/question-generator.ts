@@ -110,6 +110,11 @@ export interface QuizQuestion {
   options: QuizOption[]
   /** Present only on hard-mode questions; graded via `isOpenAnswerCorrect`. */
   openAnswer?: OpenAnswer
+  /**
+   * Client-issued identity for question reporting (`${runSeed}-${n}`), tagged
+   * by the page after generation — the engine itself never sets it.
+   */
+  uid?: string
 }
 
 export interface GenerateQuizConfig {

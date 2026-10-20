@@ -23,6 +23,7 @@ import { Link, useLocation } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
+import { biomoleculeReportsApi } from "@/lib/biomolecule-reports-api"
 import { reportsApi } from "@/lib/reports-api"
 import type { Section } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -114,6 +115,11 @@ const biomoleculesNavItems: NavItem[] = [
     label: cs.navigation.projections,
   },
   {
+    path: "/biomolekuly/hlaseni",
+    icon: <Flag className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.hlaseni,
+  },
+  {
     path: "/leaderboard",
     icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.leaderboard,
@@ -125,10 +131,18 @@ const navBySection: Record<Section, { main: NavItem[]; bottom: NavItem[] }> = {
   biomolecules: { main: biomoleculesNavItems, bottom: [settingsNavItem] },
 }
 
-/** Biomolekuly owns its category pages; Projekce has its own sibling nav item. */
+/** Biomolekuly owns its category pages; Projekce and Hlášení have sibling nav items. */
+const BIOMOLECULES_SIBLING_PATHS = ["/biomolekuly/projekce", "/biomolekuly/hlaseni"]
+
 function isNavItemActive(itemPath: string, pathname: string): boolean {
   if (itemPath === "/biomolekuly") {
-    return pathname === itemPath || (pathname.startsWith(`${itemPath}/`) && !pathname.startsWith("/biomolekuly/projekce"))
+    return (
+      pathname === itemPath ||
+      (pathname.startsWith(`${itemPath}/`) &&
+        !BIOMOLECULES_SIBLING_PATHS.some(
+          (sibling) => pathname === sibling || pathname.startsWith(`${sibling}/`),
+        ))
+    )
   }
   return pathname === itemPath
 }
@@ -170,6 +184,7 @@ export function Sidebar() {
   const { main: navItems, bottom: bottomNavItems } = navBySection[section]
   const darkMode = useUiStore((state) => state.theme === "dark")
   const [reportCount, setReportCount] = useState<number>(0)
+  const [biomoleculeReportCount, setBiomoleculeReportCount] = useState<number>(0)
 
   const toggleDarkMode = () => {
     useUiStore.getState().toggleTheme()
@@ -186,7 +201,17 @@ export function Sidebar() {
       }
     }
 
+    const fetchBiomoleculeReportCount = async () => {
+      try {
+        const reports = await biomoleculeReportsApi.listQuestionReports()
+        setBiomoleculeReportCount(reports.length)
+      } catch {
+        // Silently ignore errors (403 for students)
+      }
+    }
+
     fetchReportCount()
+    fetchBiomoleculeReportCount()
   }, [location.pathname])
 
   return (
@@ -216,7 +241,12 @@ export function Sidebar() {
         <div className={cn(navSectionVariants())}>
           {navItems.map((item) => {
             const isActive = isNavItemActive(item.path, location.pathname)
-            const isReports = item.path === "/hlaseni"
+            const badgeCount =
+              item.path === "/hlaseni"
+                ? reportCount
+                : item.path === "/biomolekuly/hlaseni"
+                  ? biomoleculeReportCount
+                  : null
             return (
               <Link
                 key={item.path}
@@ -232,9 +262,9 @@ export function Sidebar() {
                   {item.icon}
                 </span>
                 <span className={cn(navLabelVariants())}>{item.label}</span>
-                {isReports && reportCount > 0 && (
+                {badgeCount !== null && badgeCount > 0 && (
                   <Badge variant="default" className="ml-auto px-2 py-0.5 text-[10px] font-mono">
-                    {reportCount}
+                    {badgeCount}
                   </Badge>
                 )}
               </Link>

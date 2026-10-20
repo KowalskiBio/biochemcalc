@@ -3,6 +3,12 @@
 //! caches the whole dataset per session); category/molecule management is
 //! teacher-only. Recording a quiz score needs Biomolekuly access.
 
+use crate::commands::biomolecule_reports::{
+    do_delete_biomolecule_question_report, do_get_biomolecule_question_report,
+    do_list_biomolecule_question_reports, do_report_biomolecule_question,
+    BiomoleculeQuestionReportDetail, BiomoleculeQuestionReportSummary,
+    BiomoleculeReportQuestionPayload,
+};
 use crate::commands::biomolecules::{
     do_create_category, do_create_molecule, do_create_topic, do_delete_category, do_delete_molecule,
     do_delete_topic, do_list_data, do_quiz_leaderboard, do_record_quiz_result,
@@ -20,7 +26,15 @@ use crate::http::middleware::CurrentUser;
 use axum::extract::{Extension, State};
 use axum::routing::post;
 use axum::{Json, Router};
+use serde::Deserialize;
 use std::sync::Arc;
+use uuid::Uuid;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportIdPayload {
+    id: Uuid,
+}
 
 async fn data(State(state): State<Arc<AppState>>) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
@@ -141,6 +155,43 @@ async fn streak_leaderboard(
     Ok(Json(do_streak_leaderboard(&conn, &payload)?))
 }
 
+async fn report_question(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<BiomoleculeReportQuestionPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_report_biomolecule_question(&conn, &user.id, &payload)?;
+    Ok(())
+}
+
+async fn list_question_reports(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<BiomoleculeQuestionReportSummary>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_list_biomolecule_question_reports(&conn)?))
+}
+
+async fn get_question_report(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ReportIdPayload>,
+) -> Result<Json<BiomoleculeQuestionReportDetail>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_get_biomolecule_question_report(
+        &conn,
+        &payload.id,
+    )?))
+}
+
+async fn delete_question_report(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ReportIdPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_delete_biomolecule_question_report(&conn, &payload.id)?;
+    Ok(())
+}
+
 /// Any authenticated user.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -154,6 +205,7 @@ pub fn quiz_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/record-quiz-result", post(record_quiz_result))
         .route("/record-streak-result", post(record_streak_result))
+        .route("/report-question", post(report_question))
 }
 
 /// Teacher only.
@@ -168,4 +220,7 @@ pub fn teacher_router() -> Router<Arc<AppState>> {
         .route("/create-molecule", post(create_molecule))
         .route("/update-molecule", post(update_molecule))
         .route("/delete-molecule", post(delete_molecule))
+        .route("/list-question-reports", post(list_question_reports))
+        .route("/get-question-report", post(get_question_report))
+        .route("/delete-question-report", post(delete_question_report))
 }

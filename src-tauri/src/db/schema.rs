@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 52;
+const CURRENT_USER_VERSION: u32 = 53;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -266,6 +266,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 52 {
         apply_migration_v52(conn)?;
         conn.pragma_update(None, "user_version", "52")?;
+    }
+
+    if user_version < 53 {
+        apply_migration_v53(conn)?;
+        conn.pragma_update(None, "user_version", "53")?;
     }
 
     Ok(())
@@ -1801,6 +1806,36 @@ fn apply_migration_v52(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// One row per Biomolekuly quiz question a student reported as broken. Unlike
+/// `question_reports`, the question is generated client-side (there is no
+/// `practice_attempts` row to point at), so the client sends a frozen snapshot
+/// that is stored verbatim.
+///
+/// The question uid is `${sessionSeed}-${questionIndex}` issued by the client;
+/// UNIQUE(user_id, question_uid) enforces one report per student per served
+/// question. There are deliberately NO foreign keys: a report must never block
+/// deleting the underlying user account, and the snapshot has to survive the
+/// molecule/category it describes being deleted.
+fn apply_migration_v53(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_question_reports (
+            id BLOB PRIMARY KEY NOT NULL,
+            question_uid TEXT NOT NULL,
+            user_id BLOB NOT NULL,
+            scope_slug TEXT NOT NULL,
+            message TEXT NOT NULL,
+            snapshot TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS biomolecule_question_reports_user_question
+            ON biomolecule_question_reports (user_id, question_uid);
+        ",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1972,6 +2007,25 @@ mod tests {
             ],
         )
         .expect("insert question_reports");
+    }
+
+    /// A Biomolekuly report: client-issued question uid plus a frozen snapshot.
+    fn insert_biomolecule_report(conn: &Connection, user_id: uuid::Uuid, question_uid: &str) {
+        conn.execute(
+            "INSERT INTO biomolecule_question_reports
+                 (id, question_uid, user_id, scope_slug, message, snapshot, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                uuid::Uuid::new_v4(),
+                question_uid,
+                user_id,
+                "sacharidy",
+                "Špatná otázka.",
+                r#"{"question_text":"Který cukr?","options":["a","b"]}"#,
+                "2026-08-07T12:00:00+00:00",
+            ],
+        )
+        .expect("insert biomolecule_question_reports");
     }
 
     fn user_version(conn: &Connection) -> u32 {
@@ -3083,6 +3137,41 @@ mod tests {
             )
             .expect("old row readable after v52");
         assert_eq!(haworth, 1, "existing molecules keep Haworth detection on");
+    }
+
+    #[test]
+    fn v53_creates_biomolecule_question_reports() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let user_id = uuid::Uuid::new_v4();
+        insert_biomolecule_report(&conn, user_id, "seed-1-0");
+
+        // One report per student per served question: the same (user_id,
+        // question_uid) pair must be rejected by the UNIQUE index.
+        let duplicate = conn.execute(
+            "INSERT INTO biomolecule_question_reports
+                 (id, question_uid, user_id, scope_slug, message, snapshot, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                uuid::Uuid::new_v4(),
+                "seed-1-0",
+                user_id,
+                "sacharidy",
+                "duplicitní hlášení",
+                r#"{"question_text":"?"}"#,
+                "2026-08-07T12:01:00+00:00",
+            ],
+        );
+        assert!(
+            duplicate.is_err(),
+            "UNIQUE(user_id, question_uid) must reject a second report"
+        );
+
+        // A different student may report the very same served question.
+        insert_biomolecule_report(&conn, uuid::Uuid::new_v4(), "seed-1-0");
     }
 
     #[test]

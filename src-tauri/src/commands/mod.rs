@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod biomolecule_reports;
 pub mod biomolecules;
 mod crud;
 mod generation;

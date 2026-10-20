@@ -1,13 +1,15 @@
-import { ArrowLeft, RotateCcw, Target, Timer, Trophy } from "lucide-react"
+import { ArrowLeft, Flag, RotateCcw, Target, Timer, Trophy } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 
+import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/report-question-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
+import { biomoleculeReportsApi, snapshotOfQuestion } from "@/lib/biomolecule-reports-api"
 import { type BiomoleculeStreakKind, biomoleculesApi } from "@/lib/biomolecules-api"
 import {
   type CategoryQuizConfig,
@@ -44,12 +46,14 @@ function formatMinutesSeconds(totalSeconds: number): string {
 
 /** One category's endless-run material: its quiz config plus the types this mode can generate. */
 interface StreakCategory {
+  slug: string
   config: CategoryQuizConfig
   types: QuizQuestionType[]
 }
 
 /** One served question, kept next to the config its labels/answers resolve against. */
 interface Round {
+  scopeSlug: string
   config: CategoryQuizConfig
   question: QuizQuestion
 }
@@ -290,7 +294,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
       )
       if (!config) continue
       const types = generatableQuizTypes(config.molecules, config.characteristics, mode)
-      if (types.length > 0) entries.push({ config, types })
+      if (types.length > 0) entries.push({ slug: category.slug, config, types })
     }
     return entries
   }, [categories, allMolecules, mode])
@@ -300,9 +304,14 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   const [questionNumber, setQuestionNumber] = useState(1)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   // Synchronous double-grade guard: two clicks (or an Enter plus a click)
   // inside one React batch would both grade against the pre-grade state.
   const gradingRef = useRef(false)
+  // Report identity: one seed per run plus a monotonic question counter, so
+  // every served question gets `${runSeed}-${counter}` as its `uid`.
+  const runSeedRef = useRef(0)
+  const questionCounterRef = useRef(0)
 
   // Serve the next question: a crypto-seeded single-question session from a
   // random eligible category, so nothing about one question leaks into the next.
@@ -317,13 +326,25 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
       characteristics: entry.config.characteristics,
       mode,
     })
-    return question ? { config: entry.config, question } : null
+    if (!question) return null
+    questionCounterRef.current += 1
+    return {
+      scopeSlug: entry.slug,
+      config: entry.config,
+      question: {
+        ...question,
+        uid: `${runSeedRef.current}-${questionCounterRef.current}`,
+      },
+    }
   }, [pool, mode])
 
   const startRun = useCallback(() => {
     gradingRef.current = false
+    runSeedRef.current = Date.now()
+    questionCounterRef.current = 0
     setSelectedKey(null)
     setQuestionNumber(1)
+    setIsReportDialogOpen(false)
     setRound(nextRound())
     const startedAt = Date.now()
     setNow(startedAt)
@@ -396,7 +417,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   // Enter opens the results once the run has failed — the mistro input that
   // could have swallowed this keystroke is disabled by then.
   useEffect(() => {
-    if (run?.phase !== "failed") return
+    if (run?.phase !== "failed" || isReportDialogOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Enter") {
         event.preventDefault()
@@ -408,7 +429,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [run?.phase])
+  }, [run?.phase, isReportDialogOpen])
 
   if (!loaded) {
     return (
@@ -513,6 +534,26 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
     return null
   }
 
+  // The dialog collects only the message; this callback freezes the snapshot
+  // of the question on screen (the streak serves one at a time) and posts it.
+  const reportQuestion = async (message: string) => {
+    if (!question.uid) {
+      throw new Error(cs.student.reportError)
+    }
+    await biomoleculeReportsApi.reportQuestion({
+      questionUid: question.uid,
+      scopeSlug: round.scopeSlug,
+      message,
+      snapshot: snapshotOfQuestion(question, {
+        scopeSlug: round.scopeSlug,
+        molecules: round.config.molecules,
+        // A correct answer advances immediately, so the question on screen is
+        // either unanswered (null) or the run-ending wrong one (false).
+        answeredCorrect: failed ? false : null,
+      }),
+    })
+  }
+
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <BackLink href="/biomolekuly/test" label={streakStrings.resultsBackToModes} />
@@ -537,7 +578,17 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
         </div>
       </div>
 
-      <div className="space-y-2 py-2 text-center">
+      <div className="relative space-y-2 py-2 text-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setIsReportDialogOpen(true)}
+          className="absolute right-0 top-0 h-8 w-8"
+          title={cs.student.report}
+          aria-label={cs.student.report}
+        >
+          <Flag className="size-4" />
+        </Button>
         <MicroLabel>{quizStrings.types[question.type]}</MicroLabel>
         <PromptView prompt={question.prompt} grayscale={master} />
       </div>
@@ -589,6 +640,12 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
           </Button>
         </div>
       )}
+
+      <BiomoleculeReportQuestionDialog
+        open={isReportDialogOpen}
+        onOpenChange={setIsReportDialogOpen}
+        onSubmit={reportQuestion}
+      />
     </div>
   )
 }
