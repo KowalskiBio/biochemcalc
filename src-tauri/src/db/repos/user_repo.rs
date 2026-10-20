@@ -16,22 +16,14 @@ pub struct UserRecord {
     pub created_at: DateTime<Utc>,
     pub protected: bool,
     pub email: Option<String>,
-    /// Stored scope; ignored for teachers (see `into_public`).
+    /// Which sections the account reaches. For a teacher this is also what
+    /// they can manage — a Biomolekuly-only teacher can't touch calculations.
     pub sections: SectionAccess,
     pub preferred_section: Option<Section>,
 }
 
 impl UserRecord {
-    /// Effective access: teachers always reach every section.
-    pub fn effective_sections(&self) -> SectionAccess {
-        match self.role {
-            Role::Teacher => SectionAccess::Both,
-            Role::Student => self.sections,
-        }
-    }
-
     pub fn into_public(self) -> User {
-        let sections = self.effective_sections();
         User {
             id: self.id,
             username: self.username,
@@ -39,7 +31,7 @@ impl UserRecord {
             created_at: self.created_at,
             protected: self.protected,
             email: self.email,
-            sections,
+            sections: self.sections,
             preferred_section: self.preferred_section,
             is_admin: self.protected,
         }
@@ -172,7 +164,7 @@ impl UserRepo {
         }
         let record = Self::get_by_id(conn, id)?;
         if let Some(preferred) = record.preferred_section {
-            if !record.effective_sections().allows(preferred) {
+            if !record.sections.allows(preferred) {
                 Self::set_preferred_section(conn, id, None)?;
             }
         }

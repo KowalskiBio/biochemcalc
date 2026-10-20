@@ -43,11 +43,13 @@ function SectionAccessSelect({
   value,
   onChange,
   disabled,
+  options = SECTION_ACCESS_OPTIONS,
 }: {
   id?: string
   value: SectionAccess
   onChange: (value: SectionAccess) => void
   disabled?: boolean
+  options?: SectionAccess[]
 }) {
   return (
     <Select value={value} onValueChange={(v) => onChange(v as SectionAccess)} disabled={disabled}>
@@ -55,7 +57,7 @@ function SectionAccessSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {SECTION_ACCESS_OPTIONS.map((option) => (
+        {options.map((option) => (
           <SelectItem key={option} value={option}>
             {cs.sections.access[option]}
           </SelectItem>
@@ -103,9 +105,12 @@ function daysUntil(value: string): number {
 
 function InviteCodeCard() {
   const { toast } = useToast()
+  // A teacher can only invite students into sections they reach themselves.
+  const ownAccess = useAuthStore((s) => s.user?.sections ?? "both")
+  const sectionOptions = ownAccess === "both" ? SECTION_ACCESS_OPTIONS : [ownAccess]
   const [codes, setCodes] = useState<InviteCode[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [sections, setSections] = useState<SectionAccess>("calculations")
+  const [sections, setSections] = useState<SectionAccess>(sectionOptions[0])
   const [isGenerating, setIsGenerating] = useState(false)
   const [revokingCode, setRevokingCode] = useState<string | null>(null)
 
@@ -176,6 +181,7 @@ function InviteCodeCard() {
               value={sections}
               onChange={setSections}
               disabled={isGenerating}
+              options={sectionOptions}
             />
           </div>
           <Button onClick={() => void handleGenerate()} disabled={isGenerating}>
@@ -286,7 +292,7 @@ function AddUserDialog({
         password: form.password,
         email: form.email.trim() || undefined,
         role: form.role,
-        sections: form.role === "teacher" ? "both" : form.sections,
+        sections: form.sections,
       })
       toast({ title: cs.settings.users.created, variant: "default" })
       setForm(EMPTY_NEW_USER)
@@ -346,19 +352,24 @@ function AddUserDialog({
               <Label>{cs.settings.users.columns.role}</Label>
               <RoleSelect
                 value={form.role}
-                onChange={(role) => setForm((prev) => ({ ...prev, role }))}
+                onChange={(role) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    role,
+                    // Teachers usually manage everything; narrowing is a deliberate choice.
+                    sections: role === "teacher" ? "both" : prev.sections,
+                  }))
+                }
               />
             </div>
-            {form.role === "student" && (
-              <div className="space-y-2">
-                <Label htmlFor="newSections">{cs.settings.users.columns.sections}</Label>
-                <SectionAccessSelect
-                  id="newSections"
-                  value={form.sections}
-                  onChange={(sections) => setForm((prev) => ({ ...prev, sections }))}
-                />
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="newSections">{cs.settings.users.columns.sections}</Label>
+              <SectionAccessSelect
+                id="newSections"
+                value={form.sections}
+                onChange={(sections) => setForm((prev) => ({ ...prev, sections }))}
+              />
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -497,24 +508,18 @@ function UsersCard() {
                     >
                       <RoleSelect
                         value={user.role}
-                        onChange={(role) =>
-                          void handleUpdate(user, role, role === "teacher" ? "both" : user.sections)
-                        }
+                        onChange={(role) => void handleUpdate(user, role, user.sections)}
                         disabled={isProtected || isBusy}
                       />
                     </TableCell>
-                    <TableCell>
-                      {user.role === "teacher" ? (
-                        <span className="text-muted-foreground">
-                          {cs.settings.users.sectionsAllForTeachers}
-                        </span>
-                      ) : (
-                        <SectionAccessSelect
-                          value={user.sections}
-                          onChange={(sections) => void handleUpdate(user, user.role, sections)}
-                          disabled={isBusy}
-                        />
-                      )}
+                    <TableCell
+                      title={isProtected ? cs.settings.users.cannotEditProtected : undefined}
+                    >
+                      <SectionAccessSelect
+                        value={user.sections}
+                        onChange={(sections) => void handleUpdate(user, user.role, sections)}
+                        disabled={isProtected || isBusy}
+                      />
                     </TableCell>
                     <TableCell>{formatDateTime(user.createdAt)}</TableCell>
                     <TableCell className="text-right">

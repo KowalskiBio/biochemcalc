@@ -6,8 +6,8 @@ import { useUiStore } from "@/stores/ui-store"
 
 /**
  * App sections. Which ones a user can reach comes from the server
- * (`user.sections` — inherited from a student's invite code, always "both"
- * for teachers); which one they're *in* comes from the URL, falling back on
+ * (`user.sections` — inherited from a student's invite code, set by the
+ * admin for a teacher); which one they're *in* comes from the URL, falling back on
  * shared pages to the section they were last in, and then to the one they
  * last chose in the switcher (`user.preferredSection`, saved server-side).
  * There is deliberately no hard-coded default: a user with both sections

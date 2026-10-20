@@ -50,7 +50,7 @@ Key facts:
 | `engine/` | `formula.rs` (evalexpr-based eval + molar masses), `generator.rs` (~5,900 lines: sampling, rounding, distractors, constraints), `variable_extractor.rs`, `answer_targets.rs`, `export_writer.rs` (IS MU `.txt`) |
 | `db/` | `schema.rs` (~2,470 lines, **47 idempotent migrations**, `CURRENT_USER_VERSION = 47`) + `repos/` (23 repos, one per entity) + `biomolecule_seed.rs` (built-in Biomolekuly dataset) |
 | `commands/` | `crud.rs` (~3,110 lines), `generation.rs`, `importer.rs`; HTTP-only: `auth.rs`, `practice.rs`, `test_session.rs`, `streak_run.rs`, `reports.rs` |
-| `http/` | axum router + SPA fallback, DB-backed session-cookie middleware with role gating (`require_teacher`, `require_admin`, `require_calculations`), `routes/{auth,cmd,student}.rs` |
+| `http/` | axum router + SPA fallback, DB-backed session-cookie middleware with role gating (`require_teacher`, `require_admin`, `require_calculations`, `require_biomolecules`), `routes/{auth,cmd,student}.rs` |
 | `bin/` | `biochemcalc-server` (web entrypoint, env-configured), `import_bulk_json`, `reparse_test1` |
 | `email.rs` | SMTP (lettre) password reset; `Disabled` mode just logs the link |
 | `lib.rs` | Tauri app: registers **70 commands**, seeds constants/atomic weights, file logger + panic hook |
@@ -276,9 +276,11 @@ the switcher shows a disabled "We are cooking…" teaser). Victor (LLM chat) was
 entirely (frontend, `commands/victor.rs`, routes, `reqwest`, the dead `settings_repo`).
 
 - **Access** (`models::SectionAccess` = calculations | biomolecules | both; migration v43):
-  a student's `users.sections` is copied from the invite code they registered with;
-  teachers always read as `both` (`UserRecord::effective_sections`). Pre-v43 accounts
-  and codes are calculations-only.
+  a student's `users.sections` is copied from the invite code they registered with.
+  A teacher's is set by the admin and scopes what they manage (v54 gave every
+  existing teacher `both`): `/api/cmd/*` adds `require_calculations`, Biomolekuly
+  editing adds `require_biomolecules`, and invite codes can't exceed the teacher's
+  own scope. Pre-v43 student accounts and codes are calculations-only.
 - **Invite codes are student-only** with a section scope; one live code per
   (role, sections) — minting replaces only the same-scope code. v43 revoked live
   teacher codes; `do_register` rejects any teacher code.

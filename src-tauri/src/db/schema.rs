@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 53;
+const CURRENT_USER_VERSION: u32 = 54;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -271,6 +271,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 53 {
         apply_migration_v53(conn)?;
         conn.pragma_update(None, "user_version", "53")?;
+    }
+
+    if user_version < 54 {
+        apply_migration_v54(conn)?;
+        conn.pragma_update(None, "user_version", "54")?;
     }
 
     Ok(())
@@ -1836,6 +1841,28 @@ fn apply_migration_v53(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Teachers' `sections` used to be ignored (they always reached every
+/// section), so the stored value is whatever the column defaulted to —
+/// usually 'calculations'. It is honoured from now on, which lets the admin
+/// scope a teacher to one section; every teacher that exists today keeps
+/// full access.
+fn apply_migration_v54(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // Hand-built partial databases (migration tests) may lack the column.
+    let has_sections: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info('users')
+                        WHERE name = 'sections')",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_sections {
+        conn.execute(
+            "UPDATE users SET sections = 'both' WHERE role = 'teacher'",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3275,5 +3302,40 @@ mod tests {
             .expect("count topics again");
         assert_eq!(topic_count, 3);
         assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+    }
+
+    #[test]
+    fn v54_gives_existing_teachers_both_sections() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        conn.pragma_update(None, "user_version", "53")
+            .expect("set version");
+        conn.execute_batch(
+            "
+            INSERT INTO users (id, username, password_hash, role, created_at, sections)
+            VALUES
+                (randomblob(16), 'old-teacher', 'h', 'teacher', '2026-01-01T00:00:00Z', 'calculations'),
+                (randomblob(16), 'old-student', 'h', 'student', '2026-01-01T00:00:00Z', 'calculations');
+            ",
+        )
+        .expect("pre-v54 users");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let sections_of = |username: &str| -> String {
+            conn.query_row(
+                "SELECT sections FROM users WHERE username = ?1",
+                [username],
+                |row| row.get(0),
+            )
+            .expect("user exists")
+        };
+        assert_eq!(sections_of("old-teacher"), "both");
+        assert_eq!(
+            sections_of("old-student"),
+            "calculations",
+            "students keep their scope"
+        );
     }
 }

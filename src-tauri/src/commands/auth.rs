@@ -55,7 +55,8 @@ pub struct LoginPayload {
 
 /// Invite codes are student-only: teachers are created by the admin
 /// directly (see [`do_admin_create_user`]), so the only choice a teacher
-/// makes when minting a code is which sections it unlocks.
+/// makes when minting a code is which sections it unlocks — never more than
+/// the teacher's own.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateInviteCodePayload {
@@ -70,7 +71,6 @@ pub struct AdminCreateUserPayload {
     #[serde(default)]
     pub email: Option<String>,
     pub role: Role,
-    /// Ignored for teachers, who always reach every section.
     pub sections: SectionAccess,
 }
 
@@ -218,6 +218,14 @@ pub fn do_create_invite_code(
     created_by: &Uuid,
     payload: CreateInviteCodePayload,
 ) -> Result<InviteCode, DbError> {
+    if !UserRepo::get_by_id(conn, created_by)?
+        .sections
+        .covers(payload.sections)
+    {
+        return Err(DbError::Validation(
+            "You can only invite students to sections you have access to".into(),
+        ));
+    }
     let code = generate_invite_code();
     InviteCodeRepo::create(
         conn,
@@ -319,7 +327,7 @@ pub fn do_set_preferred_section(
     payload: SetPreferredSectionPayload,
 ) -> Result<User, DbError> {
     let record = UserRepo::get_by_id(conn, user_id)?;
-    if !record.effective_sections().allows(payload.section) {
+    if !record.sections.allows(payload.section) {
         return Err(DbError::Validation(
             "Your account does not have access to this section".into(),
         ));
@@ -892,7 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn admin_creates_a_teacher_with_access_to_everything() {
+    fn admin_creates_a_teacher_scoped_to_one_section() {
         let conn = setup_conn();
         let teacher = do_admin_create_user(
             &conn,
@@ -901,13 +909,57 @@ mod tests {
                 password: "teacherpassword1".into(),
                 email: None,
                 role: Role::Teacher,
-                sections: SectionAccess::Calculations,
+                sections: SectionAccess::Biomolecules,
             },
         )
         .expect("create teacher");
         assert_eq!(teacher.role, Role::Teacher);
-        assert_eq!(teacher.sections, SectionAccess::Both);
+        assert_eq!(teacher.sections, SectionAccess::Biomolecules);
         assert!(!teacher.is_admin);
+
+        let session = do_login(
+            &conn,
+            LoginPayload {
+                username: "new-teacher".into(),
+                password: "teacherpassword1".into(),
+            },
+        )
+        .expect("login");
+        assert_eq!(session.user.sections, SectionAccess::Biomolecules);
+    }
+
+    #[test]
+    fn a_scoped_teacher_cannot_invite_beyond_their_sections() {
+        let conn = setup_conn();
+        let teacher = do_admin_create_user(
+            &conn,
+            AdminCreateUserPayload {
+                username: "bio-teacher".into(),
+                password: "teacherpassword1".into(),
+                email: None,
+                role: Role::Teacher,
+                sections: SectionAccess::Biomolecules,
+            },
+        )
+        .expect("create teacher");
+
+        for sections in [SectionAccess::Calculations, SectionAccess::Both] {
+            let result =
+                do_create_invite_code(&conn, &teacher.id, CreateInviteCodePayload { sections });
+            assert!(
+                matches!(result, Err(DbError::Validation(_))),
+                "{sections:?} must be refused"
+            );
+        }
+        let invite = do_create_invite_code(
+            &conn,
+            &teacher.id,
+            CreateInviteCodePayload {
+                sections: SectionAccess::Biomolecules,
+            },
+        )
+        .expect("own section is fine");
+        assert_eq!(invite.sections, SectionAccess::Biomolecules);
     }
 
     #[test]

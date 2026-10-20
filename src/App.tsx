@@ -41,31 +41,54 @@ import { TopicsPage } from "@/pages/topics-page"
 import { useAuthStore } from "@/stores/auth-store"
 import { useUiStore } from "@/stores/ui-store"
 
+/**
+ * A teacher manages the sections their account is scoped to (`user.sections`,
+ * set by the admin) — normally both. The server enforces the same split:
+ * `/api/cmd/*` needs calculations access, Biomolekuly editing needs
+ * biomolecules access.
+ */
 function TeacherRoutes() {
+  const access = useAuthStore((s) => s.user?.sections ?? "both")
+  const allowed = allowedSections(access)
+  const hasCalculations = allowed.includes("calculations")
+  const hasBiomolecules = allowed.includes("biomolecules")
+  const home = hasCalculations ? "/topics" : "/biomolekuly"
+
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<Navigate to="/topics" replace />} />
-        <Route path="/topics" element={<TopicsPage />} />
-        <Route path="/topics/:topicId" element={<TopicDetailPage />} />
-        <Route path="/sets/:setId" element={<SetDetailPage />} />
-        <Route path="/projekty" element={<ProjektyPage />} />
-        <Route path="/testy" element={<TestyPage />} />
-        <Route path="/databaze" element={<DatabazePage />} />
-        <Route path="/biomolekuly" element={<BiomoleculesPage />} />
-        <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
-        <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
-        <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
-        <Route path="/biomolekuly/:categoryId/procvicovani" element={<BiomoleculesQuizPage />} />
-        <Route path="/vzorce" element={<FormulasPage />} />
-        <Route path="/bulk-import" element={<BulkImportPage />} />
-        <Route path="/constants" element={<ConstantsPage />} />
-        <Route path="/history" element={<HistoryPage />} />
-        <Route path="/hlaseni" element={<ReportsPage />} />
+        <Route path="/" element={<Navigate to={home} replace />} />
+        {hasCalculations && (
+          <>
+            <Route path="/topics" element={<TopicsPage />} />
+            <Route path="/topics/:topicId" element={<TopicDetailPage />} />
+            <Route path="/sets/:setId" element={<SetDetailPage />} />
+            <Route path="/projekty" element={<ProjektyPage />} />
+            <Route path="/testy" element={<TestyPage />} />
+            <Route path="/databaze" element={<DatabazePage />} />
+            <Route path="/vzorce" element={<FormulasPage />} />
+            <Route path="/bulk-import" element={<BulkImportPage />} />
+            <Route path="/constants" element={<ConstantsPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/hlaseni" element={<ReportsPage />} />
+          </>
+        )}
+        {hasBiomolecules && (
+          <>
+            <Route path="/biomolekuly" element={<BiomoleculesPage />} />
+            <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
+            <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
+            <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
+            <Route
+              path="/biomolekuly/:categoryId/procvicovani"
+              element={<BiomoleculesQuizPage />}
+            />
+          </>
+        )}
         <Route path="/leaderboard" element={<StudentLeaderboardPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/help" element={<HelpPage />} />
-        <Route path="*" element={<Navigate to="/topics" replace />} />
+        <Route path="*" element={<Navigate to={home} replace />} />
       </Routes>
     </AppShell>
   )

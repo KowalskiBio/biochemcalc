@@ -29,8 +29,8 @@ impl Role {
 }
 
 /// Which app sections an account (or the invite code it registered with) can
-/// reach. Teachers always have [`SectionAccess::Both`] regardless of the
-/// stored value — scoping only applies to students.
+/// reach. For a teacher it is also the scope of what they manage: a
+/// Biomolekuly-only teacher can't edit calculations, and vice versa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SectionAccess {
@@ -64,6 +64,15 @@ impl SectionAccess {
                 | (SectionAccess::Calculations, Section::Calculations)
                 | (SectionAccess::Biomolecules, Section::Biomolecules)
         )
+    }
+
+    /// Whether every section `other` reaches is one this access reaches too.
+    pub fn covers(&self, other: SectionAccess) -> bool {
+        match other {
+            SectionAccess::Both => *self == SectionAccess::Both,
+            SectionAccess::Calculations => self.allows(Section::Calculations),
+            SectionAccess::Biomolecules => self.allows(Section::Biomolecules),
+        }
     }
 }
 
@@ -111,7 +120,7 @@ pub struct User {
     /// v37. Enables self-service password recovery; an account without one
     /// has no recovery path.
     pub email: Option<String>,
-    /// Sections this account can reach — always `Both` for teachers.
+    /// Sections this account can reach (and, for a teacher, manage).
     pub sections: SectionAccess,
     /// The section the user last chose, used as their landing section.
     /// `None` until a user with access to both picks one.

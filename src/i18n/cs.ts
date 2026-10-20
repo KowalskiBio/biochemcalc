@@ -1568,7 +1568,6 @@ export const cs = {
       },
       roleTeacher: "Učitel",
       roleStudent: "Student",
-      sectionsAllForTeachers: "Vše",
       add: "Přidat uživatele",
       addTitle: "Nový uživatel",
       addDescription: "Účet bude ihned aktivní. Předejte uživateli jméno a heslo.",

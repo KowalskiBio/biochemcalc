@@ -120,8 +120,9 @@ pub async fn require_admin(req: Request, next: Next) -> Response {
 }
 
 /// Must run *after* [`require_auth`]. Gates the practice/test/streak API to
-/// accounts whose section access includes laboratory calculations
-/// (teachers always pass — their access is always `Both`).
+/// accounts whose section access includes laboratory calculations — and,
+/// inside a teacher-only layer, the calculations question bank to teachers
+/// scoped to it.
 pub async fn require_calculations(req: Request, next: Next) -> Response {
     match req.extensions().get::<CurrentUser>() {
         Some(CurrentUser(user)) if user.sections.allows(Section::Calculations) => {

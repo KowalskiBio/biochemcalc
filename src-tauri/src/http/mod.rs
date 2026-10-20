@@ -78,7 +78,10 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
                 .layer(from_fn_with_state(state.clone(), middleware::require_auth)),
         );
 
+    // The whole `/cmd` surface is the calculations question bank, so a
+    // Biomolekuly-only teacher gets none of it — not even reads.
     let cmd_router = routes::cmd::router()
+        .layer(from_fn(middleware::require_calculations))
         .layer(from_fn(middleware::require_teacher))
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
@@ -92,7 +95,11 @@ pub async fn run_server(config: ServerConfig) -> Result<(), Box<dyn std::error::
 
     let biomolecules_router = routes::biomolecules::router()
         .merge(routes::biomolecules::quiz_router().layer(from_fn(middleware::require_biomolecules)))
-        .merge(routes::biomolecules::teacher_router().layer(from_fn(middleware::require_teacher)))
+        .merge(
+            routes::biomolecules::teacher_router()
+                .layer(from_fn(middleware::require_biomolecules))
+                .layer(from_fn(middleware::require_teacher)),
+        )
         .layer(from_fn_with_state(state.clone(), middleware::require_auth));
 
     let api_router = Router::new()
