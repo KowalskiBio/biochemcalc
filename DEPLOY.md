@@ -141,7 +141,7 @@ routine rollback step.
 ## Read-only snapshot for other developers
 
 Other developers pull a **cleaned** copy of the live database, never the live
-file, each through their own locked-down account (e.g. `david`):
+file, each through their own locked-down account (e.g. `zble`):
 
 - `deploy/dbpull-snapshot.sh` (installed as `~/biochemcalc-web/dbpull-snapshot.sh`,
   run hourly by the `biochemcalc-dbpull.timer` user unit) copies the live DB with
@@ -157,7 +157,7 @@ One-time setup per developer (root), with their account name and SSH **public** 
 
 ```bash
 ssh proxmox1 "cd ~/biochemcalc && git pull"
-ssh -t proxmox1 'sudo bash ~/biochemcalc/deploy/dbpull-setup.sh david "ssh-ed25519 AAAA… david@laptop"'
+ssh -t proxmox1 'sudo bash ~/biochemcalc/deploy/dbpull-setup.sh zble "ssh-ed25519 AAAA… zble@laptop"'
 ```
 
 It creates the account, directories and `/etc/ssh/sshd_config.d/60-dbpull-<account>.conf`,
@@ -169,7 +169,7 @@ revoke access, `sudo rm /home/<account>/.ssh/authorized_keys`.
 The developer pulls with:
 
 ```bash
-VM_HOST=david@147.251.22.180 VM_DB=/snapshot/biochemcalc.sqlite npm run db:pull
+VM_HOST=zble@147.251.22.180 VM_DB=/snapshot/biochemcalc.sqlite npm run db:pull
 ```
 
 Check the timer: `systemctl --user list-timers biochemcalc-dbpull.timer` and

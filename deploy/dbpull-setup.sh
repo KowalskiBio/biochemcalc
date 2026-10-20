@@ -6,7 +6,7 @@
 # the machine. Run it once per developer, each with their own account name.
 #
 # Usage: sudo bash deploy/dbpull-setup.sh <account> "<ssh public key>" [service-user]
-#   e.g. sudo bash deploy/dbpull-setup.sh david "ssh-ed25519 AAAA… david@laptop"
+#   e.g. sudo bash deploy/dbpull-setup.sh zble "ssh-ed25519 AAAA… zble@laptop"
 # Re-running it for the same account replaces the key (rotate or revoke).
 set -euo pipefail
 
