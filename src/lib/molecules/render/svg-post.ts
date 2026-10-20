@@ -388,47 +388,89 @@ function adjacencyOf(snapshot: MolGraphSnapshot): number[][] {
 
 /**
  * The four macrocycle nitrogens of a porphyrin/corrin-type metal site: N with
- * degree 2 whose two neighbours are carbons, sitting in a five-membered ring
- * that is not fused to another perceived (5/6-membered) ring. Returns null
- * unless exactly four nitrogens qualify, so ordinary N-heterocycles cannot
- * accidentally trigger the metal passes.
+ * degree 2 whose two neighbours are carbons, sitting in a five-membered ring.
+ *
+ * Two stages, both requiring exactly four matches so ordinary N-heterocycles
+ * cannot accidentally trigger the metal passes:
+ *
+ * 1. Strict: the five-ring is not fused to any other perceived (5/6-membered)
+ *    ring — porphyrins (heme) and corrins (B12) resolve here. The strict stage
+ *    keeps fused imidazoles (adenine, the B12 benzimidazole ligand) out.
+ * 2. Broadened: only reached when the strict stage missed, and then the
+ *    five-ring may be fused, but solely to carbocyclic partner rings. This is
+ *    chlorophyll: ring E (a cyclopentanone) annelates pyrrole ring C, so its
+ *    nitrogen never survives the strict stage and the metal pass would bail.
+ *    Purine-type fusions stay excluded because their partner rings carry
+ *    nitrogens; B12 stays on stage one and never evaluates stage two.
  */
 export function findMacrocycleNitrogens(snapshot: MolGraphSnapshot): number[] | null {
   const adjacency = adjacencyOf(snapshot)
   const elementOf = (index: number): string | undefined => snapshot.atoms[index]?.element
-  const edgeCounts = new Map<string, number>()
-  for (const ring of snapshot.rings) {
+
+  const edgeRings = new Map<string, number[]>()
+  snapshot.rings.forEach((ring, ringIndex) => {
     const members = ring.members
     for (let index = 0; index < members.length; index += 1) {
       const a = Math.min(members[index], members[(index + 1) % members.length])
       const b = Math.max(members[index], members[(index + 1) % members.length])
       const key = `${a}-${b}`
-      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1)
+      const list = edgeRings.get(key)
+      if (list === undefined) {
+        edgeRings.set(key, [ringIndex])
+      } else {
+        list.push(ringIndex)
+      }
     }
-  }
-  const isFused = (ring: { members: number[] }): boolean => {
-    const members = ring.members
+  })
+
+  const fusedPartners = (ringIndex: number): number[] => {
+    const members = snapshot.rings[ringIndex].members
+    const partners = new Set<number>()
     for (let index = 0; index < members.length; index += 1) {
       const a = Math.min(members[index], members[(index + 1) % members.length])
       const b = Math.max(members[index], members[(index + 1) % members.length])
-      if ((edgeCounts.get(`${a}-${b}`) ?? 0) > 1) {
-        return true
+      for (const other of edgeRings.get(`${a}-${b}`) ?? []) {
+        if (other !== ringIndex) {
+          partners.add(other)
+        }
       }
     }
-    return false
+    return [...partners]
   }
 
-  const fiveRings = snapshot.rings.filter((ring) => ring.members.length === 5 && !isFused(ring))
-  const nitrogens = snapshot.atoms
-    .filter((atom) => {
-      if (elementOf(atom.idx) !== "N") return false
-      const neighbours = adjacency[atom.idx]
-      if (neighbours.length !== 2) return false
-      if (!neighbours.every((neighbour) => elementOf(neighbour) === "C")) return false
-      return fiveRings.some((ring) => ring.members.includes(atom.idx))
+  const fiveRingIndexes = (atomIdx: number): number[] => {
+    const indexes: number[] = []
+    snapshot.rings.forEach((ring, ringIndex) => {
+      if (ring.members.length === 5 && ring.members.includes(atomIdx)) {
+        indexes.push(ringIndex)
+      }
     })
-    .map((atom) => atom.idx)
-  return nitrogens.length === 4 ? nitrogens : null
+    return indexes
+  }
+
+  const candidates = snapshot.atoms.filter((atom) => {
+    if (elementOf(atom.idx) !== "N") return false
+    const neighbours = adjacency[atom.idx]
+    if (neighbours.length !== 2) return false
+    if (!neighbours.every((neighbour) => elementOf(neighbour) === "C")) return false
+    return fiveRingIndexes(atom.idx).length > 0
+  })
+
+  const strict = candidates.filter((atom) =>
+    fiveRingIndexes(atom.idx).some((ringIndex) => fusedPartners(ringIndex).length === 0),
+  )
+  if (strict.length === 4) {
+    return strict.map((atom) => atom.idx)
+  }
+
+  const isCarbocycle = (ringIndex: number): boolean =>
+    snapshot.rings[ringIndex].members.every((member) => elementOf(member) === "C")
+  const broadened = candidates.filter((atom) =>
+    fiveRingIndexes(atom.idx).some((ringIndex) =>
+      fusedPartners(ringIndex).every((partner) => isCarbocycle(partner)),
+    ),
+  )
+  return broadened.length === 4 ? broadened.map((atom) => atom.idx) : null
 }
 
 /** The single isolated metal (Fe/Mg/Co) with no heavy-atom bonds, if any. */

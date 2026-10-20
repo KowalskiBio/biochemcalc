@@ -479,15 +479,40 @@ describe("isolated-metal coordination", () => {
     expect(render(B12).svg.querySelectorAll("line.porphyrin-coordination")).toHaveLength(4)
     expect(render(BILIRUBIN).svg.querySelectorAll("line.porphyrin-coordination")).toHaveLength(0)
   })
+
+  it("centres chlorophyll magnesium and draws four lines despite the annelated ring E", () => {
+    const { svg } = render(CHLOROPHYLL_PUBCHEM)
+    const lines = Array.from(svg.querySelectorAll("line.porphyrin-coordination"))
+    expect(lines).toHaveLength(4)
+
+    const snapshot = snapshotOf(CHLOROPHYLL_PUBCHEM)
+    const nitrogens = findMacrocycleNitrogens(snapshot)
+    const metal = findIsolatedMetal(snapshot)
+    expect(nitrogens).not.toBeNull()
+    expect(metal).not.toBeNull()
+    if (nitrogens === null || metal === null) return
+    const nitrogenCenters = nitrogens.map((atom) => {
+      const center = glyphCenter(svg, atom)
+      if (center === null) throw new Error(`missing N glyph ${atom}`)
+      return center
+    })
+    const expected = centroidOf(nitrogenCenters)
+    const actual = glyphCenter(svg, metal)
+    expect(actual).not.toBeNull()
+    if (actual === null) return
+    expect(distance(actual, expected)).toBeLessThanOrEqual(2)
+  })
 })
 
 describe("natural-size rendering", () => {
   it("keeps fixed-size output byte-identical to the pre-change pipeline", () => {
     // Digests recorded from the fixed-size path before natural sizing existed.
     // The opt-in flag must not disturb grids, previews or option lists.
+    // Chlorophyll's digest was re-recorded after the annelated-ring fix
+    // centred its Mg and added the four coordination lines.
     const golden: Record<string, string> = {
       cholesterol: "ba9366cd",
-      chlorophyll: "80dcbf18",
+      chlorophyll: "b9a9b367",
       glucose: "0d66270f",
     }
     expect(digest(render(CHOLESTEROL, { natural: false }).svg.outerHTML)).toBe(golden.cholesterol)
