@@ -141,7 +141,7 @@ routine rollback step.
 ## Read-only snapshot for other developers
 
 Other developers pull a **cleaned** copy of the live database, never the live
-file, through a locked-down `dbpull` account:
+file, each through their own locked-down account (e.g. `david`):
 
 - `deploy/dbpull-snapshot.sh` (installed as `~/biochemcalc-web/dbpull-snapshot.sh`,
   run hourly by the `biochemcalc-dbpull.timer` user unit) copies the live DB with
@@ -150,25 +150,26 @@ file, through a locked-down `dbpull` account:
   emails, renames students to `student-0001`…, VACUUMs, verifies, and atomically
   replaces `/srv/dbpull/snapshot/biochemcalc.sqlite`. It only ever reads the
   live DB.
-- `dbpull` is chrooted to `/srv/dbpull` with `ForceCommand internal-sftp -R`: it
-  can read that snapshot and nothing else — no shell, no forwarding, no password.
+- Each such account is chrooted to `/srv/dbpull` with `ForceCommand internal-sftp -R`:
+  it can read that snapshot and nothing else — no shell, no forwarding, no password.
 
-One-time setup (root), with the developer's SSH **public** key:
+One-time setup per developer (root), with their account name and SSH **public** key:
 
 ```bash
 ssh proxmox1 "cd ~/biochemcalc && git pull"
-ssh -t proxmox1 'sudo bash ~/biochemcalc/deploy/dbpull-setup.sh "ssh-ed25519 AAAA… name@laptop"'
+ssh -t proxmox1 'sudo bash ~/biochemcalc/deploy/dbpull-setup.sh david "ssh-ed25519 AAAA… david@laptop"'
 ```
 
-It creates the user, directories and `/etc/ssh/sshd_config.d/60-dbpull.conf`,
-runs `sshd -t` before reloading ssh, publishes the first snapshot and enables
-the timer. Re-running it with another key replaces the key; to revoke access,
-`sudo rm /home/dbpull/.ssh/authorized_keys`.
+It creates the account, directories and `/etc/ssh/sshd_config.d/60-dbpull-<account>.conf`,
+runs `sshd -t` before reloading ssh (and removes the file again if it fails),
+publishes the first snapshot and enables the timer. It refuses to touch an
+existing normal account of the same name. Re-running it replaces the key; to
+revoke access, `sudo rm /home/<account>/.ssh/authorized_keys`.
 
 The developer pulls with:
 
 ```bash
-VM_HOST=dbpull@147.251.22.180 VM_DB=/snapshot/biochemcalc.sqlite npm run db:pull
+VM_HOST=david@147.251.22.180 VM_DB=/snapshot/biochemcalc.sqlite npm run db:pull
 ```
 
 Check the timer: `systemctl --user list-timers biochemcalc-dbpull.timer` and

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publishes a CLEANED copy of the live database for read-only pulls by other
-# developers (`npm run db:pull` with VM_HOST pointing at the `dbpull` user —
+# developers (`npm run db:pull` with VM_HOST pointing at a developer's read-only account —
 # see DEPLOY.md, "Read-only snapshot for other developers"). Runs as the
 # service user from biochemcalc-dbpull.timer; never needs root.
 #
