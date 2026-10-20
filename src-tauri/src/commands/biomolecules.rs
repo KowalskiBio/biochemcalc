@@ -9,7 +9,9 @@
 //! so recorded scores are only sanity-checked — and the recorded scope must
 //! reference an existing category or topic (or the all-ungrouped sentinel).
 
-use crate::db::repos::biomolecule_repo::{BiomoleculeData, CategoryField, TopicField};
+use crate::db::repos::biomolecule_repo::{
+    BiomoleculeData, CategoryField, MoleculeRelocation, TopicField,
+};
 use crate::db::repos::{
     BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
     BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo,
@@ -394,6 +396,48 @@ pub fn do_list_data(conn: &Connection) -> Result<BiomoleculeData, DbError> {
     BiomoleculeRepo::list_data(conn)
 }
 
+/// Optimistic concurrency: a write that names the version it was based on
+/// (`expectedUpdatedAt`) only lands if the row still has that version. Each
+/// request runs under the one DB lock, so check and write are atomic.
+fn check_version(
+    what: &str,
+    current: Option<String>,
+    expected: Option<&str>,
+) -> Result<(), DbError> {
+    match (current, expected) {
+        (None, _) => Err(DbError::NotFound(format!("{what} not found"))),
+        (Some(current), Some(expected)) if current != expected => Err(DbError::Conflict(format!(
+            "{what} was changed by someone else in the meantime"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// A reorder must list exactly the current items; when it also names the
+/// order it was based on, that must still be the current one.
+fn check_order<T: Ord + Clone + PartialEq>(
+    what: &str,
+    current: &[T],
+    requested: &[T],
+    expected: Option<&[T]>,
+) -> Result<(), DbError> {
+    if expected.is_some_and(|expected| expected != current) {
+        return Err(DbError::Conflict(format!(
+            "The order of {what} was changed by someone else in the meantime"
+        )));
+    }
+    let mut have = current.to_vec();
+    let mut want = requested.to_vec();
+    have.sort();
+    want.sort();
+    if have != want {
+        return Err(DbError::Conflict(format!(
+            "The {what} changed in the meantime — reload and reorder again"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCategoryPayload {
@@ -440,6 +484,8 @@ pub struct UpdateCategoryMetaPayload {
     /// `None`/blank clears a description; a name must stay non-empty.
     #[serde(default)]
     pub value: Option<String>,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
 }
 
 pub fn do_update_category_meta(
@@ -451,6 +497,11 @@ pub fn do_update_category_meta(
     if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
         return Err(DbError::NotFound(format!("Category {category_id} not found")));
     }
+    check_version(
+        &format!("Category {category_id}"),
+        BiomoleculeRepo::category_version(conn, category_id)?,
+        payload.expected_updated_at.as_deref(),
+    )?;
     let value: Option<String> = match payload.field {
         CategoryField::Name => {
             Some(validate_category_name(payload.value.as_deref().unwrap_or(""))?.to_string())
@@ -466,6 +517,13 @@ pub fn do_update_category_meta(
 #[serde(rename_all = "camelCase")]
 pub struct DeleteCategoryPayload {
     pub category_id: String,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
+    /// The molecules (id → version) the caller expects the category to hold;
+    /// anything added, removed or edited since refuses the delete, which
+    /// would otherwise take that work down with it.
+    #[serde(default)]
+    pub expected_molecules: Option<HashMap<Uuid, String>>,
 }
 
 /// Deletes the category with its molecules and traits (FK cascade). Past
@@ -477,6 +535,18 @@ pub fn do_delete_category(
     let category_id = payload.category_id.trim();
     if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
         return Err(DbError::NotFound(format!("Category {category_id} not found")));
+    }
+    check_version(
+        &format!("Category {category_id}"),
+        BiomoleculeRepo::category_version(conn, category_id)?,
+        payload.expected_updated_at.as_deref(),
+    )?;
+    if let Some(expected) = &payload.expected_molecules {
+        if &BiomoleculeRepo::molecule_versions_in(conn, category_id)? != expected {
+            return Err(DbError::Conflict(format!(
+                "The molecules of category {category_id} were changed by someone else in the meantime"
+            )));
+        }
     }
     BiomoleculeRepo::delete_category(conn, category_id)?;
     BiomoleculeRepo::list_data(conn)
@@ -519,6 +589,8 @@ pub struct UpdateTopicMetaPayload {
     /// `None`/blank clears a description; a name must stay non-empty.
     #[serde(default)]
     pub value: Option<String>,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
 }
 
 pub fn do_update_topic_meta(
@@ -530,6 +602,11 @@ pub fn do_update_topic_meta(
     if !is_valid_slug(topic_id) || !BiomoleculeRepo::topic_exists(conn, topic_id)? {
         return Err(DbError::NotFound(format!("Topic {topic_id} not found")));
     }
+    check_version(
+        &format!("Topic {topic_id}"),
+        BiomoleculeRepo::topic_version(conn, topic_id)?,
+        payload.expected_updated_at.as_deref(),
+    )?;
     let value: Option<String> = match payload.field {
         TopicField::Name => {
             Some(validate_topic_name(payload.value.as_deref().unwrap_or(""))?.to_string())
@@ -550,6 +627,8 @@ pub fn do_update_topic_meta(
 #[serde(rename_all = "camelCase")]
 pub struct DeleteTopicPayload {
     pub topic_id: String,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
 }
 
 /// Deletes the grouping only — its categories survive and become topic-less
@@ -562,6 +641,11 @@ pub fn do_delete_topic(
     if !is_valid_slug(topic_id) || !BiomoleculeRepo::topic_exists(conn, topic_id)? {
         return Err(DbError::NotFound(format!("Topic {topic_id} not found")));
     }
+    check_version(
+        &format!("Topic {topic_id}"),
+        BiomoleculeRepo::topic_version(conn, topic_id)?,
+        payload.expected_updated_at.as_deref(),
+    )?;
     BiomoleculeRepo::delete_topic(conn, topic_id)?;
     BiomoleculeRepo::list_data(conn)
 }
@@ -668,6 +752,11 @@ pub struct UpdateMoleculePayload {
     pub haworth: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
+    /// Moves the molecule to this category (to its end); omitted keeps it.
+    #[serde(default)]
+    pub category_id: Option<String>,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
 }
 
 pub fn do_update_molecule(
@@ -675,25 +764,67 @@ pub fn do_update_molecule(
     teacher_id: &Uuid,
     payload: UpdateMoleculePayload,
 ) -> Result<BiomoleculeData, DbError> {
-    let category_slug = BiomoleculeRepo::molecule_category(conn, &payload.molecule_id)?
-        .ok_or_else(|| DbError::NotFound(format!("Molecule {} not found", payload.molecule_id)))?;
+    let id = payload.molecule_id;
+    let current_category = BiomoleculeRepo::molecule_category(conn, &id)?
+        .ok_or_else(|| DbError::NotFound(format!("Molecule {id} not found")))?;
+    check_version(
+        &format!("Molecule {id}"),
+        BiomoleculeRepo::molecule_version(conn, &id)?,
+        payload.expected_updated_at.as_deref(),
+    )?;
+    let target_category = payload
+        .category_id
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or(&current_category)
+        .to_string();
+    // Validated against the target category: names and letter codes must be
+    // unique where the molecule ends up.
     let (name, smiles, projection, traits) = validate_molecule_input(
         conn,
-        &category_slug,
+        &target_category,
         &payload.name,
         &payload.smiles,
         payload.projection.as_deref(),
         &payload.traits,
-        Some(payload.molecule_id),
+        Some(id),
     )?;
+    let relocation = if target_category != current_category {
+        let current_slug = BiomoleculeRepo::list_molecules(conn)?
+            .into_iter()
+            .find(|m| m.id == id)
+            .map(|m| m.slug)
+            .ok_or_else(|| DbError::NotFound(format!("Molecule {id} not found")))?;
+        // Keep the slug (quiz identities, pairsWith) unless the target has it.
+        let slug = if BiomoleculeRepo::molecule_slug_taken(
+            conn,
+            &target_category,
+            &current_slug,
+            Some(id),
+        )? {
+            unique_slug(&name, "molekula", |slug| {
+                BiomoleculeRepo::molecule_slug_taken(conn, &target_category, slug, Some(id))
+            })?
+        } else {
+            current_slug
+        };
+        Some(MoleculeRelocation {
+            position: BiomoleculeRepo::next_molecule_position(conn, &target_category)?,
+            category_slug: target_category,
+            slug,
+        })
+    } else {
+        None
+    };
     BiomoleculeRepo::update_molecule(
         conn,
-        &payload.molecule_id,
+        &id,
         &name,
         &smiles,
         projection.as_deref(),
         payload.haworth,
         &traits,
+        relocation.as_ref(),
         teacher_id,
     )?;
     BiomoleculeRepo::list_data(conn)
@@ -703,13 +834,100 @@ pub fn do_update_molecule(
 #[serde(rename_all = "camelCase")]
 pub struct DeleteMoleculePayload {
     pub molecule_id: Uuid,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
 }
 
 pub fn do_delete_molecule(
     conn: &Connection,
     payload: DeleteMoleculePayload,
 ) -> Result<BiomoleculeData, DbError> {
+    check_version(
+        &format!("Molecule {}", payload.molecule_id),
+        BiomoleculeRepo::molecule_version(conn, &payload.molecule_id)?,
+        payload.expected_updated_at.as_deref(),
+    )?;
     BiomoleculeRepo::delete_molecule(conn, &payload.molecule_id)?;
+    BiomoleculeRepo::list_data(conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderTopicsPayload {
+    /// Every topic slug, in the new order.
+    pub slugs: Vec<String>,
+    /// The order the caller saw; omitted skips that check.
+    #[serde(default)]
+    pub expected_order: Option<Vec<String>>,
+}
+
+pub fn do_reorder_topics(
+    conn: &Connection,
+    payload: ReorderTopicsPayload,
+) -> Result<BiomoleculeData, DbError> {
+    let current = BiomoleculeRepo::topic_order(conn)?;
+    check_order(
+        "topics",
+        &current,
+        &payload.slugs,
+        payload.expected_order.as_deref(),
+    )?;
+    BiomoleculeRepo::set_topic_order(conn, &payload.slugs)?;
+    BiomoleculeRepo::list_data(conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderCategoriesPayload {
+    /// Every category slug, in the new order.
+    pub slugs: Vec<String>,
+    #[serde(default)]
+    pub expected_order: Option<Vec<String>>,
+}
+
+pub fn do_reorder_categories(
+    conn: &Connection,
+    payload: ReorderCategoriesPayload,
+) -> Result<BiomoleculeData, DbError> {
+    let current = BiomoleculeRepo::category_order(conn)?;
+    check_order(
+        "categories",
+        &current,
+        &payload.slugs,
+        payload.expected_order.as_deref(),
+    )?;
+    BiomoleculeRepo::set_category_order(conn, &payload.slugs)?;
+    BiomoleculeRepo::list_data(conn)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderMoleculesPayload {
+    pub category_id: String,
+    /// Every molecule id of the category, in the new order.
+    pub ids: Vec<Uuid>,
+    #[serde(default)]
+    pub expected_order: Option<Vec<Uuid>>,
+}
+
+pub fn do_reorder_molecules(
+    conn: &Connection,
+    payload: ReorderMoleculesPayload,
+) -> Result<BiomoleculeData, DbError> {
+    let category_id = payload.category_id.trim();
+    if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
+        return Err(DbError::NotFound(format!(
+            "Category {category_id} not found"
+        )));
+    }
+    let current = BiomoleculeRepo::molecule_order(conn, category_id)?;
+    check_order(
+        "molecules",
+        &current,
+        &payload.ids,
+        payload.expected_order.as_deref(),
+    )?;
+    BiomoleculeRepo::set_molecule_order(conn, &payload.ids)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -1256,6 +1474,7 @@ mod tests {
                 topic_id: "vitaminy".into(),
                 field: TopicField::Name,
                 value: Some("  Vitaminy II  ".into()),
+                expected_updated_at: None,
             },
         )
         .expect("rename topic");
@@ -1271,6 +1490,7 @@ mod tests {
                 topic_id: "vitaminy".into(),
                 field: TopicField::Description,
                 value: Some("   ".into()),
+                expected_updated_at: None,
             },
         )
         .expect("clear description");
@@ -1288,6 +1508,7 @@ mod tests {
                     topic_id: "vitaminy".into(),
                     field: TopicField::Name,
                     value: Some("   ".into()),
+                    expected_updated_at: None,
                 },
             ),
             Err(DbError::Validation(_))
@@ -1308,6 +1529,7 @@ mod tests {
             &conn,
             DeleteTopicPayload {
                 topic_id: "vitaminy".into(),
+                expected_updated_at: None,
             },
         )
         .expect("delete topic");
@@ -1317,6 +1539,7 @@ mod tests {
                 &conn,
                 DeleteTopicPayload {
                     topic_id: "vitaminy".into(),
+                    expected_updated_at: None,
                 },
             ),
             Err(DbError::NotFound(_))
@@ -1363,6 +1586,7 @@ mod tests {
                 category_id: "nukleotidy".into(),
                 field: CategoryField::Topic,
                 value: Some("sacharidy".into()),
+                expected_updated_at: None,
             },
         )
         .expect("move topic");
@@ -1379,6 +1603,7 @@ mod tests {
                 category_id: "nukleotidy".into(),
                 field: CategoryField::Topic,
                 value: None,
+                expected_updated_at: None,
             },
         )
         .expect("ungroup");
@@ -1396,6 +1621,7 @@ mod tests {
                     category_id: "nukleotidy".into(),
                     field: CategoryField::Topic,
                     value: Some("neexistuje".into()),
+                    expected_updated_at: None,
                 },
             ),
             Err(DbError::NotFound(_))
@@ -1409,6 +1635,7 @@ mod tests {
             &conn,
             DeleteTopicPayload {
                 topic_id: "nukleove-kyseliny".into(),
+                expected_updated_at: None,
             },
         )
         .expect("delete topic");
@@ -1436,6 +1663,7 @@ mod tests {
                 category_id: "dusikate-baze".into(),
                 field: CategoryField::Name,
                 value: Some("  Báze  ".into()),
+                expected_updated_at: None,
             },
         )
         .expect("rename");
@@ -1450,6 +1678,7 @@ mod tests {
                     category_id: "dusikate-baze".into(),
                     field: CategoryField::Name,
                     value: Some("   ".into()),
+                    expected_updated_at: None,
                 },
             ),
             Err(DbError::Validation(_))
@@ -1462,6 +1691,7 @@ mod tests {
                 category_id: "dusikate-baze".into(),
                 field: CategoryField::Description,
                 value: Some("   ".into()),
+                expected_updated_at: None,
             },
         )
         .expect("clear description");
@@ -1482,6 +1712,7 @@ mod tests {
                     category_id: "../etc".into(),
                     field: CategoryField::Name,
                     value: Some("x".into()),
+                    expected_updated_at: None,
                 },
             ),
             Err(DbError::NotFound(_))
@@ -1492,6 +1723,8 @@ mod tests {
             &conn,
             DeleteCategoryPayload {
                 category_id: "dusikate-baze".into(),
+                expected_updated_at: None,
+                expected_molecules: None,
             },
         )
         .expect("delete");
@@ -1502,6 +1735,8 @@ mod tests {
                 &conn,
                 DeleteCategoryPayload {
                     category_id: "dusikate-baze".into(),
+                    expected_updated_at: None,
+                    expected_molecules: None,
                 },
             ),
             Err(DbError::NotFound(_))
@@ -1582,6 +1817,8 @@ mod tests {
                 projection: None,
                 haworth: false,
                 traits: new_traits,
+                category_id: None,
+                expected_updated_at: None,
             },
         )
         .expect("update");
@@ -1596,6 +1833,7 @@ mod tests {
             &conn,
             DeleteMoleculePayload {
                 molecule_id: created.id,
+                expected_updated_at: None,
             },
         )
         .expect("delete");
@@ -1638,6 +1876,8 @@ mod tests {
                 projection: None,
                 haworth: true,
                 traits: HashMap::new(),
+                category_id: None,
+                expected_updated_at: None,
             },
         )
         .expect("update");
@@ -1877,5 +2117,305 @@ mod tests {
             .expect("delete");
         crate::db::biomolecule_seed::seed_builtins_if_empty(&conn).expect("re-seed is a no-op");
         assert!(!BiomoleculeRepo::category_exists(&conn, "aminokyseliny").expect("exists"));
+    }
+
+    fn update_payload(
+        m: &crate::db::repos::biomolecule_repo::BiomoleculeInfo,
+    ) -> UpdateMoleculePayload {
+        UpdateMoleculePayload {
+            molecule_id: m.id,
+            name: m.name.clone(),
+            smiles: m.smiles.clone(),
+            projection: m.projection.clone(),
+            haworth: m.haworth,
+            traits: m.traits.clone(),
+            category_id: None,
+            expected_updated_at: None,
+        }
+    }
+
+    fn molecule<'a>(
+        data: &'a BiomoleculeData,
+        name: &str,
+    ) -> &'a crate::db::repos::biomolecule_repo::BiomoleculeInfo {
+        data.molecules
+            .iter()
+            .find(|m| m.name == name)
+            .expect("molecule")
+    }
+
+    #[test]
+    fn a_molecule_moves_to_another_category_keeping_its_id_and_slug() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let data = do_list_data(&conn).expect("list");
+        let alanine = molecule(&data, "Alanin").clone();
+
+        let data = do_update_molecule(
+            &conn,
+            &teacher,
+            UpdateMoleculePayload {
+                category_id: Some("sacharidy".into()),
+                ..update_payload(&alanine)
+            },
+        )
+        .expect("move");
+        let moved = molecule(&data, "Alanin");
+        assert_eq!(moved.id, alanine.id);
+        assert_eq!(moved.category_slug, "sacharidy");
+        assert_eq!(moved.slug, alanine.slug);
+        let last = data
+            .molecules
+            .iter()
+            .filter(|m| m.category_slug == "sacharidy")
+            .map(|m| m.position)
+            .max();
+        assert_eq!(
+            Some(moved.position),
+            last,
+            "a moved molecule goes to the end"
+        );
+
+        // The target's name rule applies: no second "Glycin" in one category.
+        let glycine = molecule(&data, "Glycin").clone();
+        do_create_molecule(
+            &conn,
+            &teacher,
+            molecule_payload("sacharidy", "Glycin", "CCO"),
+        )
+        .expect("create a namesake");
+        let result = do_update_molecule(
+            &conn,
+            &teacher,
+            UpdateMoleculePayload {
+                category_id: Some("sacharidy".into()),
+                ..update_payload(&glycine)
+            },
+        );
+        assert!(matches!(result, Err(DbError::Validation(_))));
+    }
+
+    #[test]
+    fn a_moved_molecule_gets_a_new_slug_only_when_the_target_has_its_own() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let data = do_list_data(&conn).expect("list");
+        let alanine = molecule(&data, "Alanin").clone();
+        let data = do_create_molecule(
+            &conn,
+            &teacher,
+            molecule_payload("sacharidy", &alanine.slug, "CCO"),
+        )
+        .expect("take the slug in the target");
+        assert!(data
+            .molecules
+            .iter()
+            .any(|m| m.category_slug == "sacharidy" && m.slug == alanine.slug));
+
+        let data = do_update_molecule(
+            &conn,
+            &teacher,
+            UpdateMoleculePayload {
+                category_id: Some("sacharidy".into()),
+                ..update_payload(&alanine)
+            },
+        )
+        .expect("move");
+        let moved = molecule(&data, "Alanin");
+        assert_eq!(moved.category_slug, "sacharidy");
+        assert_ne!(moved.slug, alanine.slug);
+    }
+
+    #[test]
+    fn writes_based_on_a_stale_version_are_refused() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let data = do_list_data(&conn).expect("list");
+        let alanine = molecule(&data, "Alanin").clone();
+
+        let data = do_update_molecule(
+            &conn,
+            &teacher,
+            UpdateMoleculePayload {
+                smiles: "CC(N)C(=O)O".into(),
+                expected_updated_at: Some(alanine.updated_at.clone()),
+                ..update_payload(&alanine)
+            },
+        )
+        .expect("current version is accepted");
+        assert_ne!(molecule(&data, "Alanin").updated_at, alanine.updated_at);
+
+        let stale = do_update_molecule(
+            &conn,
+            &teacher,
+            UpdateMoleculePayload {
+                name: "Ala".into(),
+                expected_updated_at: Some(alanine.updated_at.clone()),
+                ..update_payload(&alanine)
+            },
+        );
+        assert!(matches!(stale, Err(DbError::Conflict(_))));
+        let stale_delete = do_delete_molecule(
+            &conn,
+            DeleteMoleculePayload {
+                molecule_id: alanine.id,
+                expected_updated_at: Some(alanine.updated_at.clone()),
+            },
+        );
+        assert!(matches!(stale_delete, Err(DbError::Conflict(_))));
+        assert_eq!(
+            molecule(&do_list_data(&conn).expect("list"), "Alanin").smiles,
+            "CC(N)C(=O)O",
+            "refused writes change nothing"
+        );
+
+        let topic = data.topics[0].clone();
+        do_update_topic_meta(
+            &conn,
+            &teacher,
+            UpdateTopicMetaPayload {
+                topic_id: topic.slug.clone(),
+                field: TopicField::Name,
+                value: Some("Nový název".into()),
+                expected_updated_at: Some(topic.updated_at.clone()),
+            },
+        )
+        .expect("topic rename");
+        let stale_topic = do_delete_topic(
+            &conn,
+            DeleteTopicPayload {
+                topic_id: topic.slug.clone(),
+                expected_updated_at: Some(topic.updated_at.clone()),
+            },
+        );
+        assert!(matches!(stale_topic, Err(DbError::Conflict(_))));
+
+        let category = data.categories[0].clone();
+        do_update_category_meta(
+            &conn,
+            &teacher,
+            UpdateCategoryMetaPayload {
+                category_id: category.slug.clone(),
+                field: CategoryField::Description,
+                value: Some("Jinak".into()),
+                expected_updated_at: Some(category.updated_at.clone()),
+            },
+        )
+        .expect("category edit");
+        let stale_category = do_update_category_meta(
+            &conn,
+            &teacher,
+            UpdateCategoryMetaPayload {
+                category_id: category.slug.clone(),
+                field: CategoryField::Name,
+                value: Some("Jiné".into()),
+                expected_updated_at: Some(category.updated_at.clone()),
+            },
+        );
+        assert!(matches!(stale_category, Err(DbError::Conflict(_))));
+    }
+
+    #[test]
+    fn deleting_a_category_is_refused_when_its_molecules_changed() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let data = do_list_data(&conn).expect("list");
+        let seen: HashMap<Uuid, String> = data
+            .molecules
+            .iter()
+            .filter(|m| m.category_slug == "dusikate-baze")
+            .map(|m| (m.id, m.updated_at.clone()))
+            .collect();
+        do_create_molecule(
+            &conn,
+            &teacher,
+            molecule_payload("dusikate-baze", "Xanthin", "CCO"),
+        )
+        .expect("someone adds a molecule");
+
+        let delete = |expected_molecules| {
+            do_delete_category(
+                &conn,
+                DeleteCategoryPayload {
+                    category_id: "dusikate-baze".into(),
+                    expected_updated_at: None,
+                    expected_molecules: Some(expected_molecules),
+                },
+            )
+        };
+        assert!(matches!(delete(seen), Err(DbError::Conflict(_))));
+        let now = BiomoleculeRepo::molecule_versions_in(&conn, "dusikate-baze").expect("versions");
+        delete(now).expect("delete with the current contents");
+        assert!(!BiomoleculeRepo::category_exists(&conn, "dusikate-baze").expect("exists"));
+    }
+
+    #[test]
+    fn reorder_takes_every_item_and_checks_the_order_it_was_based_on() {
+        let conn = setup_conn();
+        let current = BiomoleculeRepo::topic_order(&conn).expect("order");
+        let mut reversed = current.clone();
+        reversed.reverse();
+
+        let data = do_reorder_topics(
+            &conn,
+            ReorderTopicsPayload {
+                slugs: reversed.clone(),
+                expected_order: Some(current.clone()),
+            },
+        )
+        .expect("reorder");
+        let order: Vec<String> = data.topics.iter().map(|t| t.slug.clone()).collect();
+        assert_eq!(order, reversed);
+
+        let stale = do_reorder_topics(
+            &conn,
+            ReorderTopicsPayload {
+                slugs: current.clone(),
+                expected_order: Some(current.clone()),
+            },
+        );
+        assert!(matches!(stale, Err(DbError::Conflict(_))));
+        let partial = do_reorder_topics(
+            &conn,
+            ReorderTopicsPayload {
+                slugs: current[..1].to_vec(),
+                expected_order: None,
+            },
+        );
+        assert!(matches!(partial, Err(DbError::Conflict(_))));
+
+        let ids = BiomoleculeRepo::molecule_order(&conn, "dusikate-baze").expect("ids");
+        let mut rotated = ids.clone();
+        rotated.rotate_left(1);
+        let data = do_reorder_molecules(
+            &conn,
+            ReorderMoleculesPayload {
+                category_id: "dusikate-baze".into(),
+                ids: rotated.clone(),
+                expected_order: Some(ids),
+            },
+        )
+        .expect("reorder molecules");
+        let order: Vec<Uuid> = data
+            .molecules
+            .iter()
+            .filter(|m| m.category_slug == "dusikate-baze")
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(order, rotated);
+
+        let categories = BiomoleculeRepo::category_order(&conn).expect("categories");
+        let mut swapped = categories.clone();
+        swapped.swap(0, 1);
+        let data = do_reorder_categories(
+            &conn,
+            ReorderCategoriesPayload {
+                slugs: swapped.clone(),
+                expected_order: Some(categories),
+            },
+        )
+        .expect("reorder categories");
+        let order: Vec<String> = data.categories.iter().map(|c| c.slug.clone()).collect();
+        assert_eq!(order, swapped);
     }
 }

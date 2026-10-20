@@ -1,7 +1,8 @@
-import { ArrowLeft, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ArrowLeft, ArrowUpDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
+import { ReorderDialog } from "@/components/biomolecules/reorder-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -111,6 +112,9 @@ export function BiomoleculesPage() {
   const descriptionOf = useCategoryDescriptions()
   const { nameOf: topicNameOf, descriptionOf: topicDescriptionOf } = useTopicText()
   const deleteTopic = useBiomoleculeDataStore((s) => s.deleteTopic)
+  const reorderTopics = useBiomoleculeDataStore((s) => s.reorderTopics)
+  const reorderCategories = useBiomoleculeDataStore((s) => s.reorderCategories)
+  const [reordering, setReordering] = useState<"topics" | "categories" | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [topicFormOpen, setTopicFormOpen] = useState(false)
   const [editingTopic, setEditingTopic] = useState<BiomoleculeTopicInfo | null>(null)
@@ -224,19 +228,42 @@ export function BiomoleculesPage() {
           <p className="text-sm text-muted-foreground mt-1">{cs.biomolekuly.pageDescription}</p>
         </div>
         {isTeacher && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-1 shrink-0"
-            onClick={() => {
-              setEditingTopic(null)
-              setTopicFormOpen(true)
-            }}
-          >
-            <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
-            {cs.biomolekuly.newTopic}
-          </Button>
+          <div className="mt-1 flex shrink-0 flex-wrap justify-end gap-2">
+            {topics.length > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setReordering("topics")}
+              >
+                <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
+                {manage.reorderTopics}
+              </Button>
+            )}
+            {categories.length > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setReordering("categories")}
+              >
+                <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
+                {manage.reorderCategories}
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setEditingTopic(null)
+                setTopicFormOpen(true)
+              }}
+            >
+              <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
+              {cs.biomolekuly.newTopic}
+            </Button>
+          </div>
         )}
         {!isTeacher && anyQuizTypes && (
           <Button asChild size="sm" className="mt-1 shrink-0">
@@ -281,6 +308,24 @@ export function BiomoleculesPage() {
 
       <CreateCategoryDialog open={createOpen} onOpenChange={setCreateOpen} />
       <TopicFormDialog open={topicFormOpen} onOpenChange={setTopicFormOpen} topic={editingTopic} />
+      <ReorderDialog
+        open={reordering === "topics"}
+        onOpenChange={(open) => !open && setReordering(null)}
+        title={manage.reorderTopics}
+        items={topics.map((topic) => ({ id: topic.slug, label: topicNameOf(topic.slug) }))}
+        onSave={reorderTopics}
+      />
+      <ReorderDialog
+        open={reordering === "categories"}
+        onOpenChange={(open) => !open && setReordering(null)}
+        title={manage.reorderCategories}
+        items={categories.map((category) => ({
+          id: category.slug,
+          label: nameOf(category.slug),
+          hint: category.topicSlug ? topicNameOf(category.topicSlug) : cs.biomolekuly.noTopic,
+        }))}
+        onSave={reorderCategories}
+      />
       <ConfirmDialog
         open={deletingTopic !== null}
         onOpenChange={(open) => {
@@ -1038,6 +1083,9 @@ function MoleculeFormDialog({
   const { toast } = useToast()
   const createMolecule = useBiomoleculeDataStore((s) => s.createMolecule)
   const updateMolecule = useBiomoleculeDataStore((s) => s.updateMolecule)
+  const categories = useMoleculeCategories()
+  const nameOfCategory = useCategoryNames()
+  const [targetCategory, setTargetCategory] = useState(categoryId)
   const [name, setName] = useState("")
   const [smiles, setSmiles] = useState("")
   const [smilesValid, setSmilesValid] = useState(true)
@@ -1066,6 +1114,7 @@ function MoleculeFormDialog({
 
   useEffect(() => {
     if (!open) return
+    setTargetCategory(categoryId)
     setName(molecule?.name ?? "")
     setSmiles(molecule?.smiles ?? "")
     setSmilesValid(true)
@@ -1083,7 +1132,7 @@ function MoleculeFormDialog({
     setInRna(molecule ? traitOf(molecule, TRAIT.inRna) === "true" : false)
     setHaworth(molecule?.haworth ?? true)
     setFacts(molecule ? moleculeFacts(molecule).join("\n") : "")
-  }, [open, molecule])
+  }, [open, molecule, categoryId])
 
   const canSave = name.trim().length > 0 && smiles.trim().length > 0 && smilesValid && !saving
 
@@ -1122,6 +1171,7 @@ function MoleculeFormDialog({
       if (molecule) {
         // Forward the stored projection so an ordinary name/SMILES/traits
         // edit can't silently wipe a molecule's Haworth depiction.
+        const moving = targetCategory !== categoryId
         await updateMolecule(
           molecule.id,
           name.trim(),
@@ -1129,11 +1179,17 @@ function MoleculeFormDialog({
           traits,
           molecule.projection,
           haworth,
+          moving ? targetCategory : undefined,
         )
+        toast({
+          title: moving
+            ? manage.moveSuccess.replace("{name}", nameOfCategory(targetCategory))
+            : manage.saveSuccess,
+        })
       } else {
         await createMolecule(categoryId, name.trim(), smiles.trim(), traits, haworth)
+        toast({ title: manage.saveSuccess })
       }
-      toast({ title: manage.saveSuccess })
       onOpenChange(false)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : String(err)
@@ -1186,6 +1242,27 @@ function MoleculeFormDialog({
               />
             </div>
           </div>
+
+          {molecule && categories.length > 1 && (
+            <div className="space-y-2">
+              <Label htmlFor="molecule-category">{manage.categoryLabel}</Label>
+              <Select value={targetCategory} onValueChange={setTargetCategory}>
+                <SelectTrigger id="molecule-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((category) => (
+                    <SelectItem key={category.slug} value={category.slug}>
+                      {nameOfCategory(category.slug)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {targetCategory !== categoryId && (
+                <p className="text-xs text-muted-foreground">{manage.moveHint}</p>
+              )}
+            </div>
+          )}
 
           {/* Alternative names: optional extra accepted quiz answers, kept
               visually subordinate to the primary name above (quiet ghost
@@ -1587,7 +1664,9 @@ export function BiomoleculesCategoryPage() {
   const { nameOf: topicNameOf } = useTopicText()
   const deleteCategory = useBiomoleculeDataStore((s) => s.deleteCategory)
   const updateCategoryMeta = useBiomoleculeDataStore((s) => s.updateCategoryMeta)
+  const reorderMolecules = useBiomoleculeDataStore((s) => s.reorderMolecules)
   const [addOpen, setAddOpen] = useState(false)
+  const [reorderOpen, setReorderOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [topicSaving, setTopicSaving] = useState(false)
@@ -1684,6 +1763,12 @@ export function BiomoleculesCategoryPage() {
                   <Trash2 className="size-4 mr-1.5" strokeWidth={1.75} />
                   {manage.deleteCategory}
                 </Button>
+                {molecules.length > 1 && (
+                  <Button variant="outline" size="sm" onClick={() => setReorderOpen(true)}>
+                    <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
+                    {manage.reorderMolecules}
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
                   <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
                   {manage.addMolecule}
@@ -1735,6 +1820,14 @@ export function BiomoleculesCategoryPage() {
         categoryId={category.slug}
         kind={kind}
         molecule={null}
+      />
+
+      <ReorderDialog
+        open={reorderOpen}
+        onOpenChange={setReorderOpen}
+        title={manage.reorderMolecules}
+        items={molecules.map((molecule) => ({ id: molecule.id, label: molecule.name }))}
+        onSave={(ids) => reorderMolecules(category.slug, ids)}
       />
 
       <ConfirmDialog

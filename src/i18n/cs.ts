@@ -684,6 +684,18 @@ export const cs = {
       deleteError: "Smazání se nezdařilo.",
       deleteAction: "Smazat",
       cancelAction: "Zrušit",
+      categoryLabel: "Kategorie",
+      moveHint: "Při změně kategorie se molekula přesune na konec vybrané kategorie.",
+      moveSuccess: "Molekula přesunuta do kategorie „{name}“.",
+      reorderTopics: "Pořadí témat",
+      reorderCategories: "Pořadí kategorií",
+      reorderMolecules: "Pořadí molekul",
+      reorderDescription: "Posuňte položky šipkami a pořadí uložte.",
+      moveUp: "Posunout nahoru",
+      moveDown: "Posunout dolů",
+      saveOrder: "Uložit pořadí",
+      orderSaved: "Pořadí uloženo.",
+      orderError: "Pořadí se nepodařilo uložit.",
     },
     // Teacher inbox for reported Biomolecule quiz questions
     reports: {

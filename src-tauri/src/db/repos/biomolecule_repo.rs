@@ -1,6 +1,6 @@
 use crate::db::DbError;
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -54,6 +54,9 @@ pub struct BiomoleculeTopicInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub built_in: bool,
+    /// Row version: writes may pass it back as `expectedUpdatedAt` so they
+    /// only land if nobody changed the row in the meantime.
+    pub updated_at: String,
 }
 
 /// One Biomolekuly category with its molecule count, in hub order.
@@ -70,6 +73,8 @@ pub struct BiomoleculeCategoryInfo {
     pub molecule_count: i64,
     /// Topic grouping this category belongs to, or NULL when ungrouped.
     pub topic_slug: Option<String>,
+    /// Row version, as on [`BiomoleculeTopicInfo::updated_at`].
+    pub updated_at: String,
 }
 
 /// One molecule with its traits (the optional, code-validated
@@ -90,6 +95,9 @@ pub struct BiomoleculeInfo {
     /// (true) or a plain skeletal structure (false).
     pub haworth: bool,
     pub traits: HashMap<String, String>,
+    /// Row version, as on [`BiomoleculeTopicInfo::updated_at`]. Covers the
+    /// traits too — they are only ever rewritten together with the row.
+    pub updated_at: String,
 }
 
 /// The whole Biomolekuly library in one payload; every mutation returns a
@@ -102,6 +110,14 @@ pub struct BiomoleculeData {
     pub molecules: Vec<BiomoleculeInfo>,
 }
 
+/// Where an updated molecule moves to: another category, at its end, under a
+/// slug already checked to be free there.
+pub struct MoleculeRelocation {
+    pub category_slug: String,
+    pub slug: String,
+    pub position: i64,
+}
+
 /// Biomolekuly topics, categories, molecules, and traits (migrations v47/v51).
 pub struct BiomoleculeRepo;
 
@@ -109,7 +125,7 @@ impl BiomoleculeRepo {
     /// Every topic in hub order.
     pub fn list_topics(conn: &Connection) -> Result<Vec<BiomoleculeTopicInfo>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT slug, name, description, built_in
+            "SELECT slug, name, description, built_in, updated_at
              FROM biomolecule_topics
              ORDER BY position, slug",
         )?;
@@ -119,6 +135,7 @@ impl BiomoleculeRepo {
                 name: row.get(1)?,
                 description: row.get(2)?,
                 built_in: row.get::<_, i64>(3)? != 0,
+                updated_at: row.get(4)?,
             })
         })?;
         rows.map(|r| r.map_err(DbError::Sqlite)).collect()
@@ -129,7 +146,7 @@ impl BiomoleculeRepo {
         let mut stmt = conn.prepare(
             "SELECT c.slug, c.name, c.description, c.position, c.built_in,
                     (SELECT COUNT(*) FROM biomolecules m WHERE m.category_slug = c.slug),
-                    c.topic_slug
+                    c.topic_slug, c.updated_at
              FROM biomolecule_categories c
              ORDER BY c.position, c.slug",
         )?;
@@ -141,6 +158,7 @@ impl BiomoleculeRepo {
                 built_in: row.get::<_, i64>(4)? != 0,
                 molecule_count: row.get(5)?,
                 topic_slug: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })?;
         rows.map(|r| r.map_err(DbError::Sqlite)).collect()
@@ -149,7 +167,8 @@ impl BiomoleculeRepo {
     /// Every molecule with its traits, ordered per category.
     pub fn list_molecules(conn: &Connection) -> Result<Vec<BiomoleculeInfo>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, category_slug, slug, name, smiles, position, projection, haworth
+            "SELECT id, category_slug, slug, name, smiles, position, projection, haworth,
+                    updated_at
              FROM biomolecules ORDER BY category_slug, position, slug",
         )?;
         let molecules = stmt
@@ -163,6 +182,7 @@ impl BiomoleculeRepo {
                     row.get::<_, i64>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, i64>(7)? != 0,
+                    row.get::<_, String>(8)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -188,7 +208,7 @@ impl BiomoleculeRepo {
         Ok(molecules
             .into_iter()
             .map(
-                |(id, category_slug, slug, name, smiles, position, projection, haworth)| BiomoleculeInfo {
+                |(id, category_slug, slug, name, smiles, position, projection, haworth, updated_at)| BiomoleculeInfo {
                     id,
                     category_slug,
                     slug,
@@ -199,6 +219,7 @@ impl BiomoleculeRepo {
                     haworth,
                     traits: traits_by_molecule.remove(&id).unwrap_or_default().into_iter()
                         .collect(),
+                    updated_at,
                 },
             )
             .collect())
@@ -503,9 +524,16 @@ impl BiomoleculeRepo {
         projection: Option<&str>,
         haworth: bool,
         traits: &[(String, String)],
+        relocation: Option<&MoleculeRelocation>,
         updated_by: &Uuid,
     ) -> Result<(), DbError> {
         let tx = conn.unchecked_transaction()?;
+        if let Some(to) = relocation {
+            tx.execute(
+                "UPDATE biomolecules SET category_slug = ?2, slug = ?3, position = ?4 WHERE id = ?1",
+                params![id, to.category_slug, to.slug, to.position],
+            )?;
+        }
         let changed = tx.execute(
             "UPDATE biomolecules
              SET name = ?2, smiles = ?3, projection = ?4, haworth = ?5,
@@ -535,6 +563,113 @@ impl BiomoleculeRepo {
         if changed == 0 {
             return Err(DbError::NotFound(format!("Molecule {id} not found")));
         }
+        Ok(())
+    }
+
+    /// Version (`updated_at`) of one row, `None` when it doesn't exist.
+    pub fn topic_version(conn: &Connection, slug: &str) -> Result<Option<String>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT updated_at FROM biomolecule_topics WHERE slug = ?1",
+                params![slug],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn category_version(conn: &Connection, slug: &str) -> Result<Option<String>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT updated_at FROM biomolecule_categories WHERE slug = ?1",
+                params![slug],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn molecule_version(conn: &Connection, id: &Uuid) -> Result<Option<String>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT updated_at FROM biomolecules WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Id → version of every molecule in one category.
+    pub fn molecule_versions_in(
+        conn: &Connection,
+        category_slug: &str,
+    ) -> Result<HashMap<Uuid, String>, DbError> {
+        let mut stmt =
+            conn.prepare("SELECT id, updated_at FROM biomolecules WHERE category_slug = ?1")?;
+        let rows = stmt.query_map(params![category_slug], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Topic slugs in hub order.
+    pub fn topic_order(conn: &Connection) -> Result<Vec<String>, DbError> {
+        let mut stmt =
+            conn.prepare("SELECT slug FROM biomolecule_topics ORDER BY position, slug")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Category slugs in hub order.
+    pub fn category_order(conn: &Connection) -> Result<Vec<String>, DbError> {
+        let mut stmt =
+            conn.prepare("SELECT slug FROM biomolecule_categories ORDER BY position, slug")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Molecule ids of one category in display order.
+    pub fn molecule_order(conn: &Connection, category_slug: &str) -> Result<Vec<Uuid>, DbError> {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM biomolecules WHERE category_slug = ?1 ORDER BY position, slug",
+        )?;
+        let rows = stmt.query_map(params![category_slug], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Rewrites positions to follow `slugs` (already checked to be every topic).
+    pub fn set_topic_order(conn: &Connection, slugs: &[String]) -> Result<(), DbError> {
+        let tx = conn.unchecked_transaction()?;
+        for (position, slug) in slugs.iter().enumerate() {
+            tx.execute(
+                "UPDATE biomolecule_topics SET position = ?2 WHERE slug = ?1",
+                params![slug, position as i64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Rewrites positions to follow `slugs` (already checked to be every category).
+    pub fn set_category_order(conn: &Connection, slugs: &[String]) -> Result<(), DbError> {
+        let tx = conn.unchecked_transaction()?;
+        for (position, slug) in slugs.iter().enumerate() {
+            tx.execute(
+                "UPDATE biomolecule_categories SET position = ?2 WHERE slug = ?1",
+                params![slug, position as i64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Rewrites positions to follow `ids` (already checked to be every molecule
+    /// of the category).
+    pub fn set_molecule_order(conn: &Connection, ids: &[Uuid]) -> Result<(), DbError> {
+        let tx = conn.unchecked_transaction()?;
+        for (position, id) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE biomolecules SET position = ?2 WHERE id = ?1",
+                params![id, position as i64],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 }

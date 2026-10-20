@@ -7,16 +7,22 @@ import {
   recordFailed,
   recordPlanned,
   request,
-  sameLibrary,
 } from "../lib/biomolecule-sync.js"
 
-const topic = (slug, name, extra = {}) => ({ slug, name, builtIn: false, ...extra })
+const topic = (slug, name, extra = {}) => ({
+  slug,
+  name,
+  builtIn: false,
+  updatedAt: "v1",
+  ...extra,
+})
 const category = (slug, name, topicSlug, extra = {}) => ({
   slug,
   name,
   builtIn: false,
   moleculeCount: 0,
   topicSlug,
+  updatedAt: "v1",
   ...extra,
 })
 const molecule = (id, categorySlug, name, extra = {}) => ({
@@ -28,6 +34,7 @@ const molecule = (id, categorySlug, name, extra = {}) => ({
   position: 0,
   haworth: true,
   traits: {},
+  updatedAt: "v1",
   ...extra,
 })
 
@@ -48,12 +55,11 @@ describe("planPush", () => {
   it("finds nothing to do when the library is unchanged", () => {
     const base = library()
     const local = clone(base)
-    // Order, positions and counts are server-owned and never pushed.
-    local.molecules.reverse()
+    // Positions, versions and counts are server-owned; only list order counts.
     local.molecules[0].position = 9
+    local.molecules[0].updatedAt = "v2"
     local.categories[0].moleculeCount = 99
-    expect(planPush(base, local)).toEqual({ ops: [], unsupported: [] })
-    expect(sameLibrary(base, local)).toBe(true)
+    expect(planPush(base, local)).toEqual({ ops: [] })
   })
 
   it("orders creates parent-first and deletions last", () => {
@@ -83,14 +89,30 @@ describe("planPush", () => {
     expect(planPush(base, local).ops.map((op) => op.kind)).toEqual(["deleteCategory"])
   })
 
-  it("reports a molecule moved between categories as unsupported", () => {
+  it("pushes a molecule moved to another category as an update with the new category", () => {
     const base = library()
     base.categories.push(category("jine", "Jiné", null))
     const local = clone(base)
     local.molecules[0].categorySlug = "jine"
-    const { ops, unsupported } = planPush(base, local)
-    expect(ops).toEqual([])
-    expect(unsupported).toHaveLength(1)
+    const { ops } = planPush(base, local)
+    expect(ops.map((op) => op.kind)).toEqual(["updateMolecule"])
+    const [endpoint, body] = request(ops[0], base, clone(base), createSlugMaps())
+    expect(endpoint).toBe("update-molecule")
+    expect(body).toMatchObject({ moleculeId: "m-ala", categoryId: "jine", expectedUpdatedAt: "v1" })
+  })
+
+  it("reorders only when the order really changed, not when items were just added", () => {
+    const base = library()
+    const appended = clone(base)
+    appended.molecules.push(molecule("m-new", "aminokyseliny", "Serin"))
+    expect(planPush(base, appended).ops.map((op) => op.kind)).toEqual(["createMolecule"])
+
+    const reordered = clone(base)
+    reordered.molecules.reverse()
+    const { ops } = planPush(base, reordered)
+    expect(ops).toMatchObject([
+      { kind: "reorderMolecules", slug: "aminokyseliny", order: ["m-gly", "m-ala"] },
+    ])
   })
 
   it("splits topic and category edits per field, as the API takes them", () => {
@@ -188,7 +210,7 @@ describe("slug mapping", () => {
     recordCreated(createCategory, prodBefore, prodAfter, maps)
 
     expect(decide(createMolecule, base, prodAfter, maps).action).toBe("apply")
-    const [endpoint, body] = request(createMolecule, maps)
+    const [endpoint, body] = request(createMolecule, base, prodAfter, maps)
     expect(endpoint).toBe("create-molecule")
     expect(body.categoryId).toBe("nova-2")
   })
@@ -203,7 +225,7 @@ describe("slug mapping", () => {
     const maps = createSlugMaps()
     for (const op of planPush(base, local).ops) {
       expect(decide(op, base, prod, maps).action).toBe("apply")
-      recordPlanned(op, maps)
+      recordPlanned(op, base, maps)
     }
   })
 
@@ -212,9 +234,80 @@ describe("slug mapping", () => {
     const local = clone(base)
     local.categories[0].topicSlug = null
     const [op] = planPush(base, local).ops
-    expect(request(op, createSlugMaps())).toEqual([
+    expect(request(op, base, clone(base), createSlugMaps())).toEqual([
       "update-category-meta",
-      { categoryId: "aminokyseliny", field: "topic", value: undefined },
+      { categoryId: "aminokyseliny", field: "topic", value: undefined, expectedUpdatedAt: "v1" },
+    ])
+  })
+})
+
+describe("versions and reorders", () => {
+  it("bases a second edit of the same row on the version our first edit left", () => {
+    const base = library()
+    const local = clone(base)
+    local.categories[0].name = "Nový název"
+    local.categories[0].description = "Nový popis"
+    const [rename, describeOp] = planPush(base, local).ops
+    const maps = createSlugMaps()
+    const after = clone(base)
+    after.categories[0].name = "Nový název"
+    after.categories[0].updatedAt = "v2"
+    recordCreated(rename, base, after, maps)
+    expect(request(describeOp, base, after, maps)[1].expectedUpdatedAt).toBe("v2")
+  })
+
+  it("deletes a category after moving a molecule out of it without a false conflict", () => {
+    const base = library()
+    base.categories.push(category("jine", "Jiné", null))
+    const local = clone(base)
+    local.molecules[0].categorySlug = "jine"
+    local.categories = local.categories.filter((c) => c.slug !== "aminokyseliny")
+    local.molecules = local.molecules.filter((m) => m.id !== "m-gly")
+    const { ops } = planPush(base, local)
+    expect(ops.map((op) => op.kind)).toEqual(["updateMolecule", "deleteCategory"])
+
+    const maps = createSlugMaps()
+    const afterMove = clone(base)
+    afterMove.molecules[0].categorySlug = "jine"
+    afterMove.molecules[0].updatedAt = "v2"
+    recordCreated(ops[0], base, afterMove, maps)
+    expect(decide(ops[1], base, afterMove, maps).action).toBe("apply")
+    expect(request(ops[1], base, afterMove, maps)[1].expectedMolecules).toEqual({ "m-gly": "v1" })
+  })
+
+  it("refuses a reorder when the site was reordered since the pull", () => {
+    const base = library()
+    base.molecules.push(molecule("m-ser", "aminokyseliny", "Serin"))
+    const byId = (data, ids) => ids.map((id) => data.molecules.find((m) => m.id === id))
+    const local = clone(base)
+    local.molecules = byId(base, ["m-ser", "m-ala", "m-gly"])
+    const [op] = planPush(base, local).ops
+
+    // Already in our order on the site, with a site-added molecule in between.
+    const done = clone(local)
+    done.molecules.splice(1, 0, molecule("m-x", "aminokyseliny", "Xanthin"))
+    expect(decide(op, base, done, createSlugMaps()).action).toBe("skip")
+
+    const reorderedOnSite = clone(base)
+    reorderedOnSite.molecules = byId(base, ["m-gly", "m-ala", "m-ser"])
+    expect(decide(op, base, reorderedOnSite, createSlugMaps()).action).toBe("conflict")
+  })
+
+  it("sends the full new order, keeps site-added items at the end and names the order it saw", () => {
+    const base = library()
+    const local = clone(base)
+    local.molecules.reverse()
+    const [op] = planPush(base, local).ops
+    const prod = clone(base)
+    prod.molecules.push(molecule("m-ser", "aminokyseliny", "Serin"))
+    expect(decide(op, base, prod, createSlugMaps()).action).toBe("apply")
+    expect(request(op, base, prod, createSlugMaps())).toEqual([
+      "reorder-molecules",
+      {
+        categoryId: "aminokyseliny",
+        ids: ["m-gly", "m-ala", "m-ser"],
+        expectedOrder: ["m-ala", "m-gly", "m-ser"],
+      },
     ])
   })
 })

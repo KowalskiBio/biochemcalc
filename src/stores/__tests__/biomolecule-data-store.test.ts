@@ -145,15 +145,31 @@ describe("useBiomoleculeDataStore molecules", () => {
     )
   })
 
-  it("updateMolecule() forwards the projection and the haworth flag", async () => {
+  it("updateMolecule() forwards the projection, the haworth flag and a move", async () => {
     api.updateMolecule.mockResolvedValue(dataset())
     const store = useBiomoleculeDataStore.getState()
 
     await store.updateMolecule("mol-1", "Kofein", SMILES, {}, "{}", true)
-    expect(api.updateMolecule).toHaveBeenLastCalledWith("mol-1", "Kofein", SMILES, {}, "{}", true)
+    expect(api.updateMolecule).toHaveBeenLastCalledWith(
+      "mol-1",
+      "Kofein",
+      SMILES,
+      {},
+      "{}",
+      true,
+      undefined,
+    )
 
-    await store.updateMolecule("mol-1", "Kofein", SMILES, {}, null, false)
-    expect(api.updateMolecule).toHaveBeenLastCalledWith("mol-1", "Kofein", SMILES, {}, null, false)
+    await store.updateMolecule("mol-1", "Kofein", SMILES, {}, null, false, "sacharidy")
+    expect(api.updateMolecule).toHaveBeenLastCalledWith(
+      "mol-1",
+      "Kofein",
+      SMILES,
+      {},
+      null,
+      false,
+      "sacharidy",
+    )
   })
 })
 

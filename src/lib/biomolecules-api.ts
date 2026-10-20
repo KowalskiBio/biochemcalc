@@ -13,6 +13,8 @@ export interface BiomoleculeTopicInfo {
   name: string
   description?: string
   builtIn: boolean
+  /** Row version; writes may echo it back so they only land on an unchanged row. */
+  updatedAt?: string
 }
 
 /** One Biomolekuly category, as listed on the hub. */
@@ -24,6 +26,7 @@ export interface BiomoleculeCategoryInfo {
   moleculeCount: number
   /** The topic this category is grouped under, if any. */
   topicSlug?: string | null
+  updatedAt?: string
 }
 
 /** One molecule. `name` and `smiles` are mandatory, traits optional. */
@@ -43,6 +46,7 @@ export interface Biomolecule {
   haworth?: boolean
   position: number
   traits: BiomoleculeTraits
+  updatedAt?: string
 }
 
 /** The whole Biomolekuly library; every mutation returns a fresh copy. */
@@ -150,7 +154,10 @@ export const biomoleculesApi = {
       ...(haworth === undefined ? {} : { haworth }),
     }),
 
-  /** Teacher: update a molecule's name, SMILES, trait set (wholesale), and projection. */
+  /**
+   * Teacher: update a molecule's name, SMILES, trait set (wholesale), and
+   * projection; a `categoryId` other than its own moves it there.
+   */
   updateMolecule: (
     moleculeId: string,
     name: string,
@@ -158,6 +165,7 @@ export const biomoleculesApi = {
     traits: BiomoleculeTraits,
     projection?: string | null,
     haworth?: boolean,
+    categoryId?: string,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/update-molecule", {
       moleculeId,
@@ -166,6 +174,31 @@ export const biomoleculesApi = {
       projection: projection ?? null,
       traits,
       ...(haworth === undefined ? {} : { haworth }),
+      ...(categoryId === undefined ? {} : { categoryId }),
+    }),
+
+  /**
+   * Teacher: reorder. Each takes every item in the new order plus the order
+   * it was based on, so a concurrent change is refused instead of lost.
+   */
+  reorderTopics: (slugs: string[], expectedOrder: string[]): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/reorder-topics", { slugs, expectedOrder }),
+
+  reorderCategories: (slugs: string[], expectedOrder: string[]): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/reorder-categories", {
+      slugs,
+      expectedOrder,
+    }),
+
+  reorderMolecules: (
+    categoryId: string,
+    ids: string[],
+    expectedOrder: string[],
+  ): Promise<BiomoleculeData> =>
+    httpRequest<BiomoleculeData>("/api/biomolecules/reorder-molecules", {
+      categoryId,
+      ids,
+      expectedOrder,
     }),
 
   /** Teacher: delete one molecule. */

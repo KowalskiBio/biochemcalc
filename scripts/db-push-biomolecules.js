@@ -7,7 +7,8 @@
 //
 // Before every write the live row is compared with the pulled snapshot: if
 // someone edited it on the site since your pull, that change is reported and
-// left alone instead of being overwritten.
+// left alone instead of being overwritten. Each write also carries the row
+// version it was based on, so the server refuses one that loses a race.
 //
 // Usage: npm run db:push-biomolecules              (preview only)
 //        npm run db:push-biomolecules -- --apply   (send it)
@@ -90,7 +91,9 @@ class Site {
       } catch {
         // not JSON — keep the raw body
       }
-      throw new Error(`${response.status} ${message}`.trim())
+      const error = new Error(`${response.status} ${message}`.trim())
+      error.status = response.status
+      throw error
     }
     return response
   }
@@ -145,11 +148,10 @@ async function main() {
   const localJson = exportLibrary(LOCAL_DB)
   const local = JSON.parse(localJson)
 
-  const { ops, unsupported } = planPush(base, local)
-  for (const note of unsupported) log(`NOT PUSHABLE: ${note}`)
+  const { ops } = planPush(base, local)
   if (ops.length === 0) {
     log("No Biomolekuly changes to push.")
-    process.exit(unsupported.length > 0 ? 1 : 0)
+    process.exit(0)
   }
 
   log(`Site: ${SITE}`)
@@ -190,12 +192,12 @@ async function main() {
         continue
       }
       if (!APPLY) {
-        recordPlanned(op, maps)
+        recordPlanned(op, base, maps)
         counts.applied += 1
         log(`  ready     ${line}`)
         continue
       }
-      const [endpoint, body] = request(op, maps)
+      const [endpoint, body] = request(op, base, prod, maps)
       try {
         const after = await site.write(endpoint, body)
         recordCreated(op, prod, after, maps)
@@ -204,8 +206,15 @@ async function main() {
         log(`  done      ${line}`)
       } catch (error) {
         recordFailed(op, maps)
-        counts.failed += 1
-        log(`  FAILED    ${line} — ${error.message}`)
+        // 409: the row changed between our check and the write — the server's call.
+        if (error.status === 409) {
+          counts.conflict += 1
+          log(`  CONFLICT  ${line} — ${error.message.replace(/^409 /, "")}`)
+        } else {
+          counts.failed += 1
+          log(`  FAILED    ${line} — ${error.message}`)
+        }
+        prod = await site.data()
       }
     }
 
@@ -220,7 +229,7 @@ async function main() {
       )
     }
     if (!APPLY && counts.applied > 0) log("Nothing was sent. Run again with --apply to push.")
-    const complete = counts.conflict + counts.failed === 0 && unsupported.length === 0
+    const complete = counts.conflict + counts.failed === 0
     if (APPLY && complete) {
       const fingerprint = createHash("sha256").update(localJson.trimEnd()).digest("hex")
       writeFileSync(PUSHED_MARK, `${fingerprint}\n`)

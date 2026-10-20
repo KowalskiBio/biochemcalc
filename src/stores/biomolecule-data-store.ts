@@ -53,8 +53,12 @@ interface BiomoleculeDataState {
     traits: BiomoleculeTraits,
     projection?: string | null,
     haworth?: boolean,
+    categoryId?: string,
   ) => Promise<void>
   deleteMolecule: (moleculeId: string) => Promise<void>
+  reorderTopics: (slugs: string[]) => Promise<void>
+  reorderCategories: (slugs: string[]) => Promise<void>
+  reorderMolecules: (categoryId: string, ids: string[]) => Promise<void>
 }
 
 export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) => ({
@@ -129,7 +133,7 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
-  updateMolecule: async (moleculeId, name, smiles, traits, projection, haworth) => {
+  updateMolecule: async (moleculeId, name, smiles, traits, projection, haworth, categoryId) => {
     const data = await biomoleculesApi.updateMolecule(
       moleculeId,
       name,
@@ -137,12 +141,34 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
       traits,
       projection,
       haworth,
+      categoryId,
     )
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
   deleteMolecule: async (moleculeId) => {
     const data = await biomoleculesApi.deleteMolecule(moleculeId)
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
+  },
+
+  // The order this client shows is what the reorder was based on.
+  reorderTopics: async (slugs) => {
+    const expected = get().topics.map((t) => t.slug)
+    const data = await biomoleculesApi.reorderTopics(slugs, expected)
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
+  },
+
+  reorderCategories: async (slugs) => {
+    const expected = get().categories.map((c) => c.slug)
+    const data = await biomoleculesApi.reorderCategories(slugs, expected)
+    set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
+  },
+
+  reorderMolecules: async (categoryId, ids) => {
+    const expected = get()
+      .molecules.filter((m) => m.categorySlug === categoryId)
+      .map((m) => m.id)
+    const data = await biomoleculesApi.reorderMolecules(categoryId, ids, expected)
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 }))

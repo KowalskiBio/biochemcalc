@@ -118,10 +118,14 @@ cargo test --manifest-path src-tauri/Cargo.toml
 `scripts/lib/biomolecule-sync.js`): `db:pull` keeps the downloaded snapshot as
 `.local-dev/biochemcalc.base.sqlite`; the push diffs local vs base (both read by the
 `export_biomolecules` bin — read-only, via a migrated `VACUUM INTO` copy) and sends
-each change through `/api/biomolecules/*` as the logged-in teacher. Before every write
-it compares the live row with base: changed on the site since the pull → reported as a
-conflict, never overwritten. Positions and moving a molecule between categories have no
-API and aren't pushed. A fully successful push writes `.local-dev/biochemcalc.pushed`
+each change through `/api/biomolecules/*` as the logged-in teacher — including molecule
+moves (`update-molecule` with `categoryId`) and reorders (`reorder-topics`,
+`reorder-categories`, `reorder-molecules`). Before every write it compares the live row
+with base: changed on the site since the pull → reported as a conflict, never
+overwritten. The server enforces the same atomically: updates/deletes accept
+`expectedUpdatedAt` (every row's `updatedAt` is in `/data`), `delete-category` also
+`expectedMolecules`, reorders `expectedOrder`; a mismatch is a 409. A fully successful
+push writes `.local-dev/biochemcalc.pushed`
 (fingerprint of the local library); `db:pull` refuses to replace a library that differs
 from base unless it matches that fingerprint or `--force` is given.
 
