@@ -36,6 +36,11 @@ export interface Biomolecule {
   smiles: string
   /** Raw JSON Haworth projection spec, when the molecule has one. */
   projection?: string | null
+  /**
+   * Whether to recognize saccharides and draw them as a Haworth projection.
+   * `undefined`/absent means `true` (the default behavior).
+   */
+  haworth?: boolean
   position: number
   traits: BiomoleculeTraits
 }
@@ -134,6 +139,7 @@ export const biomoleculesApi = {
     smiles: string,
     traits: BiomoleculeTraits,
     projection?: string | null,
+    haworth?: boolean,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/create-molecule", {
       categoryId,
@@ -141,6 +147,7 @@ export const biomoleculesApi = {
       smiles,
       projection: projection ?? null,
       traits,
+      ...(haworth === undefined ? {} : { haworth }),
     }),
 
   /** Teacher: update a molecule's name, SMILES, trait set (wholesale), and projection. */
@@ -150,6 +157,7 @@ export const biomoleculesApi = {
     smiles: string,
     traits: BiomoleculeTraits,
     projection?: string | null,
+    haworth?: boolean,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/update-molecule", {
       moleculeId,
@@ -157,6 +165,7 @@ export const biomoleculesApi = {
       smiles,
       projection: projection ?? null,
       traits,
+      ...(haworth === undefined ? {} : { haworth }),
     }),
 
   /** Teacher: delete one molecule. */

@@ -117,6 +117,46 @@ describe("useBiomoleculeDataStore topics", () => {
   })
 })
 
+describe("useBiomoleculeDataStore molecules", () => {
+  const SMILES = "CN1C=NC2=C1C(=O)N(C)C(=O)N2C"
+
+  it("createMolecule() forwards the haworth flag (true and false)", async () => {
+    api.createMolecule.mockResolvedValue(dataset())
+    const store = useBiomoleculeDataStore.getState()
+
+    await store.createMolecule("vitamin-c", "Kofein", SMILES, {}, true)
+    expect(api.createMolecule).toHaveBeenLastCalledWith(
+      "vitamin-c",
+      "Kofein",
+      SMILES,
+      {},
+      undefined,
+      true,
+    )
+
+    await store.createMolecule("vitamin-c", "Kofein", SMILES, {}, false)
+    expect(api.createMolecule).toHaveBeenLastCalledWith(
+      "vitamin-c",
+      "Kofein",
+      SMILES,
+      {},
+      undefined,
+      false,
+    )
+  })
+
+  it("updateMolecule() forwards the projection and the haworth flag", async () => {
+    api.updateMolecule.mockResolvedValue(dataset())
+    const store = useBiomoleculeDataStore.getState()
+
+    await store.updateMolecule("mol-1", "Kofein", SMILES, {}, "{}", true)
+    expect(api.updateMolecule).toHaveBeenLastCalledWith("mol-1", "Kofein", SMILES, {}, "{}", true)
+
+    await store.updateMolecule("mol-1", "Kofein", SMILES, {}, null, false)
+    expect(api.updateMolecule).toHaveBeenLastCalledWith("mol-1", "Kofein", SMILES, {}, null, false)
+  })
+})
+
 let captured:
   | {
       topics: BiomoleculeTopicInfo[]

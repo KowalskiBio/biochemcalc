@@ -663,6 +663,10 @@ export const cs = {
       sulfurLabel: "Obsahuje síru",
       dnaLabel: "DNA",
       rnaLabel: "RNA",
+      haworthLabel: "Haworthova projekce",
+      haworthHint: "Detekovat sacharidy a kreslit je Haworthovou projekcí.",
+      haworthDisabledProjectionHint:
+        "Haworthova projekce je pro tuto molekulu vypnutá; uložená projekce zůstává zachována.",
       unsetOption: "Neuvedeno",
       requiredHint: "Název a struktura jsou povinné, vše ostatní je nepovinné.",
       saveMolecule: "Uložit molekulu",

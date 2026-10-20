@@ -51,6 +51,8 @@ export interface QuizMolecule {
    * When present it takes rendering precedence over `smiles` everywhere.
    */
   projection?: ProjectionSpec
+  /** False forces skeletal rendering, ignoring Haworth projections. Default true. */
+  haworth?: boolean
 }
 
 /** A named predicate plus its molecule test, supplied by the category adapter. */
@@ -71,6 +73,8 @@ export interface QuizOption {
   orientationDeg?: number
   /** Present when the option's molecule carries a teaching projection. */
   projection?: ProjectionSpec
+  /** False forces skeletal rendering, ignoring Haworth projections. Default true. */
+  haworth?: boolean
 }
 
 export interface QuizPrompt {
@@ -85,6 +89,8 @@ export interface QuizPrompt {
   predicate?: CharacteristicPredicate
   /** Present when the prompt's molecule carries a teaching projection. */
   projection?: ProjectionSpec
+  /** False forces skeletal rendering, ignoring Haworth projections. Default true. */
+  haworth?: boolean
 }
 
 /**
@@ -266,6 +272,7 @@ function makeOption(
       smiles: molecule.smiles,
       orientationDeg: orientationForStructure(molecule, rng),
       projection: molecule.projection,
+      haworth: molecule.haworth,
     }
   }
   return { key: molecule.id, display, moleculeId: molecule.id, correct }
@@ -320,6 +327,7 @@ function buildPrompt(target: QuizMolecule, type: QuizQuestionType, rng: () => nu
         smiles: target.smiles,
         orientationDeg: orientationForStructure(target, rng),
         projection: target.projection,
+        haworth: target.haworth,
       }
     case "characteristic":
       // Built by buildCharacteristicQuestion, which knows the predicate.

@@ -52,6 +52,11 @@ export interface RenderStructureOptions {
    * `width` × `height`; grids and option lists keep the fixed box.
    */
   natural?: boolean
+  /**
+   * False disables saccharide auto-recognition, forcing a plain skeletal
+   * depiction (and suppressing the Haworth overlay). Default true.
+   */
+  haworth?: boolean
 }
 
 export interface RenderedStructure {
@@ -73,6 +78,7 @@ export function renderStructure(
     height: options.height,
     bondLength: options.bondLength,
     natural,
+    haworth: options.haworth,
   })
   if (prepared === null) {
     return null

@@ -437,6 +437,12 @@ describe("OH label hints (atom-indexed overlay)", () => {
     expect(prepared?.recognized).toBe(false)
     expect(prepared?.overlay).toBeUndefined()
   })
+
+  it("skips recognition entirely when haworth is false", () => {
+    const prepared = prepareStructureRender(TRUE_BETA_GLUCOSE, { haworth: false })
+    expect(prepared?.recognized).toBe(false)
+    expect(prepared?.overlay).toBeUndefined()
+  })
 })
 
 describe("front ring bond pairs (atom-indexed overlay)", () => {

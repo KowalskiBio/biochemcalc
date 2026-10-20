@@ -865,43 +865,48 @@ function MoleculeBrowser({
   }, [molecules])
 
   const facts = selected ? moleculeFacts(selected) : []
+  const selectedHaworthOk = selected?.haworth ?? true
 
   return (
     <>
       {/* Molecule grid */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5">
-        {molecules.map((molecule) => (
-          <button
-            key={molecule.id}
-            type="button"
-            onClick={() => openDetail(molecule)}
-            className={cn(
-              "flex h-full cursor-pointer flex-col items-center gap-3 rounded-[4px] border bg-card p-4 text-center",
-              "transition-colors duration-150 hover:border-primary/50",
-              FOCUS_RING_CLASS,
-            )}
-          >
-            <div aria-hidden="true" className="flex items-center justify-center">
-              <StructureView
-                smiles={molecule.smiles}
-                projection={projections.get(molecule.id)}
-                size={140}
-                title={molecule.name}
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <div className="text-sm font-semibold tracking-tight">{molecule.name}</div>
-              <div className="font-mono tabular text-xs text-muted-foreground">
-                {bits.cardCodeLine(molecule)}
+        {molecules.map((molecule) => {
+          const haworthOk = molecule.haworth ?? true
+          return (
+            <button
+              key={molecule.id}
+              type="button"
+              onClick={() => openDetail(molecule)}
+              className={cn(
+                "flex h-full cursor-pointer flex-col items-center gap-3 rounded-[4px] border bg-card p-4 text-center",
+                "transition-colors duration-150 hover:border-primary/50",
+                FOCUS_RING_CLASS,
+              )}
+            >
+              <div aria-hidden="true" className="flex items-center justify-center">
+                <StructureView
+                  smiles={molecule.smiles}
+                  projection={haworthOk ? projections.get(molecule.id) : undefined}
+                  haworth={haworthOk}
+                  size={140}
+                  title={molecule.name}
+                />
               </div>
-            </div>
-            {bits.cardBadges && (
-              <div className="mt-auto flex flex-wrap items-center justify-center gap-1.5">
-                {bits.cardBadges(molecule)}
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-semibold tracking-tight">{molecule.name}</div>
+                <div className="font-mono tabular text-xs text-muted-foreground">
+                  {bits.cardCodeLine(molecule)}
+                </div>
               </div>
-            )}
-          </button>
-        ))}
+              {bits.cardBadges && (
+                <div className="mt-auto flex flex-wrap items-center justify-center gap-1.5">
+                  {bits.cardBadges(molecule)}
+                </div>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* Detail dialog */}
@@ -920,7 +925,8 @@ function MoleculeBrowser({
                     own width is the width cap, so the depiction can't burst it. */}
                 <StructureView
                   smiles={selected.smiles}
-                  projection={projections.get(selected.id)}
+                  projection={selectedHaworthOk ? projections.get(selected.id) : undefined}
+                  haworth={selectedHaworthOk}
                   size={260}
                   grow
                   title={selected.name}
@@ -1047,6 +1053,7 @@ function MoleculeFormDialog({
   const [sulfur, setSulfur] = useState(false)
   const [inDna, setInDna] = useState(false)
   const [inRna, setInRna] = useState(false)
+  const [haworth, setHaworth] = useState(true)
   const [facts, setFacts] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -1074,6 +1081,7 @@ function MoleculeFormDialog({
     setSulfur(molecule ? traitOf(molecule, TRAIT.sulfur) === "true" : false)
     setInDna(molecule ? traitOf(molecule, TRAIT.inDna) === "true" : false)
     setInRna(molecule ? traitOf(molecule, TRAIT.inRna) === "true" : false)
+    setHaworth(molecule?.haworth ?? true)
     setFacts(molecule ? moleculeFacts(molecule).join("\n") : "")
   }, [open, molecule])
 
@@ -1114,9 +1122,16 @@ function MoleculeFormDialog({
       if (molecule) {
         // Forward the stored projection so an ordinary name/SMILES/traits
         // edit can't silently wipe a molecule's Haworth depiction.
-        await updateMolecule(molecule.id, name.trim(), smiles.trim(), traits, molecule.projection)
+        await updateMolecule(
+          molecule.id,
+          name.trim(),
+          smiles.trim(),
+          traits,
+          molecule.projection,
+          haworth,
+        )
       } else {
-        await createMolecule(categoryId, name.trim(), smiles.trim(), traits)
+        await createMolecule(categoryId, name.trim(), smiles.trim(), traits, haworth)
       }
       toast({ title: manage.saveSuccess })
       onOpenChange(false)
@@ -1229,7 +1244,7 @@ function MoleculeFormDialog({
             />
             {/* A saved projection outranks the typed SMILES in the preview —
                 the spec itself is read-only here, so a hint says so. */}
-            {savedProjection ? (
+            {savedProjection && haworth ? (
               <div className="flex justify-center rounded-[4px] border p-3">
                 <ProjectionView spec={savedProjection} ariaLabel={name.trim() || smiles.trim()} />
               </div>
@@ -1239,6 +1254,7 @@ function MoleculeFormDialog({
               <div className="flex justify-center rounded-[4px] border p-3">
                 <StructureView
                   smiles={smiles.trim()}
+                  haworth={haworth}
                   size={180}
                   title={smiles.trim()}
                   onValidityChange={setSmilesValid}
@@ -1252,19 +1268,39 @@ function MoleculeFormDialog({
               <div className="hidden" aria-hidden="true">
                 <StructureView
                   smiles={smiles.trim()}
+                  haworth={haworth}
                   size={180}
                   title={smiles.trim()}
                   onValidityChange={setSmilesValid}
                 />
               </div>
             )}
-            {savedProjection && (
+            {savedProjection && haworth && (
               <p className="text-xs text-muted-foreground">{manage.projectionReadonlyHint}</p>
+            )}
+            {savedProjection && !haworth && (
+              <p className="text-xs text-muted-foreground">
+                {manage.haworthDisabledProjectionHint}
+              </p>
             )}
             {smiles.trim() && !smilesValid && (
               <p className="text-sm text-destructive">{manage.smilesInvalid}</p>
             )}
             {smiles.trim() === "" && <span className="hidden" />}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-pressed={haworth}
+                onClick={() => setHaworth((v) => !v)}
+                className={flagButtonClass(haworth)}
+              >
+                {manage.haworthLabel}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">{manage.haworthHint}</p>
           </div>
 
           {kind === "aminoAcids" && (

@@ -18,6 +18,11 @@ export interface StructureViewProps {
    * strings are parsed upstream with `parseProjection`.
    */
   projection?: ProjectionSpec
+  /**
+   * Gate saccharide auto-recognition and Haworth projection. Set false to
+   * force skeletal rendering and ignore Haworth projections; default true.
+   */
+  haworth?: boolean
   /** Square canvas side length in px. */
   size?: number
   /**
@@ -146,7 +151,7 @@ function ProjectionStructureView({
 export function StructureView(props: StructureViewProps) {
   // No hooks here: the two branches are distinct components, so a
   // projection↔SMILES flip reconciles as a plain remount.
-  if (props.projection) {
+  if (props.projection && props.haworth !== false) {
     return <ProjectionStructureView {...props} projection={props.projection} />
   }
   return <SmilesStructureView {...props} />
@@ -163,6 +168,7 @@ function SmilesStructureView({
   onValidityChange,
   grow = false,
   maxWidth,
+  haworth = true,
 }: StructureViewProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -218,6 +224,7 @@ function SmilesStructureView({
       theme: resolvedTheme,
       bondLength: 24,
       natural: grow,
+      haworth,
     })
     if (rendered === null) {
       setHasError(true)
@@ -236,7 +243,7 @@ function SmilesStructureView({
     }
     // onValidityChange is intentionally not a dependency: its identity can
     // change per parent render, and only real inputs should trigger a redraw.
-  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth])
+  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth, haworth])
 
   return (
     <div

@@ -86,6 +86,8 @@ export interface HaworthLayoutOptions {
    * to fit `width` × `height`. Default false keeps the fixed-box preview.
    */
   natural?: boolean
+  /** False skips saccharide recognition entirely; default true. */
+  haworth?: boolean
 }
 
 interface ResolvedOptions {
@@ -93,6 +95,7 @@ interface ResolvedOptions {
   height: number
   bondLength: number
   natural: boolean
+  haworth: boolean
 }
 
 /** Recognition + post-layout geometry, useful for tests and diagnostics. */
@@ -302,7 +305,7 @@ function openSession(smiles: string, opts: ResolvedOptions): LayoutSession | nul
     const coordinateScale = opts.bondLength / medianBondLength(snapshot)
     const preprocessor = buildPreprocessor(snapshot, metadata, opts.bondLength, coordinateScale)
     const recognizerSnapshot = snapshotFromPreprocessor(preprocessor)
-    const plans = recognizeSugarRings(recognizerSnapshot)
+    const plans = opts.haworth ? recognizeSugarRings(recognizerSnapshot) : []
     const recognized = plans.length > 0 ? applyHaworthLayout(preprocessor) : false
     return {
       mol,
@@ -572,5 +575,6 @@ function resolveOptions(options: HaworthLayoutOptions): ResolvedOptions {
     height: options.height ?? DEFAULT_HEIGHT,
     bondLength: options.bondLength ?? DEFAULT_BOND_LENGTH,
     natural: options.natural === true,
+    haworth: options.haworth !== false,
   }
 }

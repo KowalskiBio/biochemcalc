@@ -75,7 +75,10 @@ function baseQuizMolecule(
 ): QuizMolecule {
   // A declarative projection carries stereochemistry by definition, so the
   // molecule is chiral even when its (skeletal fallback) SMILES has no `@`.
-  const projection = parseProjection(molecule.projection)
+  // When `haworth` is explicitly false the projection is ignored entirely, so
+  // there is nothing to parse and achirality falls back to the SMILES.
+  const haworth = molecule.haworth !== false
+  const projection = haworth ? parseProjection(molecule.projection) : null
   return {
     id: molecule.slug,
     name: molecule.name,
@@ -85,6 +88,7 @@ function baseQuizMolecule(
     classKey,
     achiral: projection !== null ? false : isAchiral(molecule),
     projection: projection ?? undefined,
+    haworth,
   }
 }
 

@@ -392,6 +392,16 @@ describe("Haworth HO labels", () => {
 })
 
 describe("Haworth bold front edges", () => {
+  it("skips recognition and front edges when haworth is false", () => {
+    const defaultRender = render(TRUE_BETA_GLUCOSE)
+    expect(defaultRender.recognized).toBe("haworth")
+    expect(defaultRender.svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(3)
+
+    const skeletal = render(TRUE_BETA_GLUCOSE, { haworth: false })
+    expect(skeletal.recognized).toBe(false)
+    expect(skeletal.svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(0)
+  })
+
   it("draws three graduated edges on beta-D-glucose", () => {
     const quads = quadsOf(render(TRUE_BETA_GLUCOSE).svg)
     expect(quads).toHaveLength(3)

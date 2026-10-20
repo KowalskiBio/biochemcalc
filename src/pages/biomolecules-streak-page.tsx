@@ -116,6 +116,7 @@ function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: bool
       <StructureView
         smiles={prompt.smiles}
         projection={prompt.projection}
+        haworth={prompt.haworth ?? true}
         orientationDeg={prompt.orientationDeg}
         size={220}
         grow
@@ -186,6 +187,7 @@ function OptionButton({
           <StructureView
             smiles={option.smiles ?? ""}
             projection={option.projection}
+            haworth={option.haworth ?? true}
             orientationDeg={option.orientationDeg}
             size={150}
             className={cn(grayscale && "[&_svg]:grayscale")}

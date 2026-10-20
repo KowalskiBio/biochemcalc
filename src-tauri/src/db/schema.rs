@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 51;
+const CURRENT_USER_VERSION: u32 = 52;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -261,6 +261,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 51 {
         apply_migration_v51(conn)?;
         conn.pragma_update(None, "user_version", "51")?;
+    }
+
+    if user_version < 52 {
+        apply_migration_v52(conn)?;
+        conn.pragma_update(None, "user_version", "52")?;
     }
 
     Ok(())
@@ -1544,6 +1549,9 @@ fn apply_migration_v47(conn: &Connection) -> Result<(), rusqlite::Error> {
             -- Optional raw JSON Haworth projection spec (v50; also created
             -- here so a fresh database seeds its saccharides in one pass).
             projection TEXT,
+            -- Whether the client should recognize saccharides and draw a
+            -- Haworth projection instead of a plain skeletal structure (v52).
+            haworth INTEGER NOT NULL DEFAULT 1,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
@@ -1756,6 +1764,37 @@ fn apply_migration_v51(conn: &Connection) -> Result<(), rusqlite::Error> {
                 WHERE slug = 'dusikate-baze';
             UPDATE biomolecule_categories SET topic_slug = 'sacharidy'
                 WHERE slug = 'sacharidy';
+            ",
+        )?;
+    }
+    Ok(())
+}
+
+/// Per-molecule switch between the plain skeletal depiction and the
+/// saccharide-aware Haworth projection. Existing rows default to 1 (true) so
+/// an upgrade keeps the current detection behavior.
+fn apply_migration_v52(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // Fresh databases already get the column from v47's CREATE TABLE; older
+    // ones need the additive ALTER here. A synthetic pre-v47 database (some
+    // migration tests) has no biomolecules table at all — then there is
+    // nothing to alter.
+    let has_molecules: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'biomolecules')",
+        [],
+        |row| row.get(0),
+    )?;
+    let has_haworth: bool = has_molecules
+        && conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('biomolecules')
+                            WHERE name = 'haworth')",
+            [],
+            |row| row.get(0),
+        )?;
+    if has_molecules && !has_haworth {
+        conn.execute_batch(
+            "
+            ALTER TABLE biomolecules ADD COLUMN haworth INTEGER NOT NULL DEFAULT 1;
             ",
         )?;
     }
@@ -2991,6 +3030,62 @@ mod tests {
     }
 
     #[test]
+    fn v52_adds_a_non_null_haworth_flag_defaulting_to_true() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // A database that already ran v50/v51: projection exists, haworth
+        // does not.
+        conn.execute_batch(
+            "
+            CREATE TABLE biomolecules (
+                id BLOB PRIMARY KEY NOT NULL,
+                category_slug TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                name TEXT NOT NULL,
+                smiles TEXT NOT NULL,
+                projection TEXT,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                created_by BLOB,
+                updated_at TEXT NOT NULL,
+                updated_by BLOB,
+                UNIQUE (category_slug, slug)
+            );
+            INSERT INTO biomolecules
+                (id, category_slug, slug, name, smiles, created_at, updated_at)
+            VALUES
+                (randomblob(16), 'sacharidy', 'glukoza-a', 'α-D-glukóza',
+                 'OCC1OC(O)C(O)C(O)C1O', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .expect("pre-v52 library");
+        conn.pragma_update(None, "user_version", "51")
+            .expect("set version");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (notnull, dflt): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT \"notnull\", dflt_value FROM pragma_table_info('biomolecules')
+                 WHERE name = 'haworth'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("haworth must exist after v52");
+        assert_eq!(notnull, 1, "haworth must be NOT NULL");
+        assert_eq!(dflt.as_deref(), Some("1"), "haworth must default to 1");
+
+        let haworth: i64 = conn
+            .query_row(
+                "SELECT haworth FROM biomolecules WHERE slug = 'glukoza-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("old row readable after v52");
+        assert_eq!(haworth, 1, "existing molecules keep Haworth detection on");
+    }
+
+    #[test]
     fn v47_seeds_the_builtin_biomolecule_library() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
@@ -3040,7 +3135,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("fk on");
         run_migrations(&conn).expect("migrations");
-        assert_eq!(user_version(&conn), 51);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
 
         let topics: Vec<(String, String, i64)> = {
             let mut stmt = conn
@@ -3090,6 +3185,6 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM biomolecule_topics", [], |row| row.get(0))
             .expect("count topics again");
         assert_eq!(topic_count, 3);
-        assert_eq!(user_version(&conn), 51);
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
     }
 }

@@ -566,6 +566,11 @@ pub fn do_delete_topic(
     BiomoleculeRepo::list_data(conn)
 }
 
+/// Older clients omit `haworth`; saccharide detection stays on for them.
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMoleculePayload {
@@ -575,6 +580,9 @@ pub struct CreateMoleculePayload {
     /// Optional raw JSON Haworth spec (see `validate_projection`).
     #[serde(default)]
     pub projection: Option<String>,
+    /// Draw a Haworth projection (true) or a plain skeletal one (false).
+    #[serde(default = "default_true")]
+    pub haworth: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
 }
@@ -638,6 +646,7 @@ pub fn do_create_molecule(
         &name,
         &smiles,
         projection.as_deref(),
+        payload.haworth,
         position,
         &traits,
         teacher_id,
@@ -654,6 +663,9 @@ pub struct UpdateMoleculePayload {
     /// Optional raw JSON Haworth spec; `None` clears it.
     #[serde(default)]
     pub projection: Option<String>,
+    /// Draw a Haworth projection (true) or a plain skeletal one (false).
+    #[serde(default = "default_true")]
+    pub haworth: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
 }
@@ -680,6 +692,7 @@ pub fn do_update_molecule(
         &name,
         &smiles,
         projection.as_deref(),
+        payload.haworth,
         &traits,
         teacher_id,
     )?;
@@ -929,6 +942,7 @@ mod tests {
             name: name.into(),
             smiles: smiles.into(),
             projection: None,
+            haworth: true,
             traits: HashMap::new(),
         }
     }
@@ -977,6 +991,11 @@ mod tests {
             assert!(
                 molecule.smiles.contains('@'),
                 "{} must carry an isomeric SMILES so the recognizer can derive Haworth sides",
+                molecule.slug
+            );
+            assert!(
+                molecule.haworth,
+                "{} must keep Haworth detection on by default",
                 molecule.slug
             );
         }
@@ -1506,6 +1525,7 @@ mod tests {
                 name: "Watsonin".into(),
                 smiles: "C[C@@H](C(=O)O)N".into(),
                 projection: None,
+                haworth: true,
                 traits,
             },
         )
@@ -1516,6 +1536,7 @@ mod tests {
             .find(|m| m.slug == "watsonin")
             .expect("created");
         assert_eq!(created.category_slug, "aminokyseliny");
+        assert!(created.haworth, "an omitted haworth field defaults to true");
         assert_eq!(
             created.traits.get("abbreviation").map(String::as_str),
             Some("Wat")
@@ -1541,6 +1562,7 @@ mod tests {
                     name: "Testin".into(),
                     smiles: "CCO".into(),
                     projection: None,
+                    haworth: true,
                     traits: letter,
                 },
             ),
@@ -1558,6 +1580,7 @@ mod tests {
                 name: "Watsonin II".into(),
                 smiles: "CCO".into(),
                 projection: None,
+                haworth: false,
                 traits: new_traits,
             },
         )
@@ -1565,6 +1588,7 @@ mod tests {
         let updated = data.molecules.iter().find(|m| m.id == created.id).unwrap();
         assert_eq!(updated.name, "Watsonin II");
         assert_eq!(updated.slug, "watsonin", "slug stays stable across renames");
+        assert!(!updated.haworth, "an explicit false round-trips through update");
         assert_eq!(updated.traits.len(), 1);
         assert_eq!(updated.traits.get("polarity").map(String::as_str), Some("hydrophobic"));
 
@@ -1576,6 +1600,49 @@ mod tests {
         )
         .expect("delete");
         assert!(!data.molecules.iter().any(|m| m.id == created.id));
+    }
+
+    #[test]
+    fn molecule_haworth_flag_round_trips() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        // Explicit false disables saccharide recognition for this molecule.
+        let data = do_create_molecule(
+            &conn,
+            &teacher,
+            CreateMoleculePayload {
+                category_id: "sacharidy".into(),
+                name: "Testoza".into(),
+                smiles: "OCC1OC(O)C(O)C(O)C1O".into(),
+                projection: None,
+                haworth: false,
+                traits: HashMap::new(),
+            },
+        )
+        .expect("create");
+        let created = data
+            .molecules
+            .iter()
+            .find(|m| m.name == "Testoza")
+            .expect("created");
+        assert!(!created.haworth, "explicit false survives create");
+
+        let data = do_update_molecule(
+            &conn,
+            &teacher,
+            UpdateMoleculePayload {
+                molecule_id: created.id,
+                name: "Testoza".into(),
+                smiles: "OCC1OC(O)C(O)C(O)C1O".into(),
+                projection: None,
+                haworth: true,
+                traits: HashMap::new(),
+            },
+        )
+        .expect("update");
+        let updated = data.molecules.iter().find(|m| m.id == created.id).unwrap();
+        assert!(updated.haworth, "explicit true survives update");
     }
 
     #[test]
@@ -1593,6 +1660,7 @@ mod tests {
                     name: "Testin".into(),
                     smiles: "CCO".into(),
                     projection: None,
+                    haworth: true,
                     traits,
                 },
             )
