@@ -348,7 +348,7 @@ function applyPlan(
             }
             const farthestPosition = positionOf(preprocessor, farthest)
             if (farthestPosition !== undefined) {
-              const targetHeading = group.direction * (Math.PI / 3)
+              const targetHeading = group.direction * (Math.PI / 6)
               const headingNow = Math.atan2(
                 farthestPosition.y - glycoNPosition.y,
                 farthestPosition.x - glycoNPosition.x,

@@ -933,12 +933,11 @@ describe("nucleotide placement", () => {
     ).toBeGreaterThanOrEqual(1.0)
   })
 
-  // The textbook pose (what ATP already draws naturally): the purine long
-  // axis points up-right at −60°, with the imidazole curl on the canonical
-  // side. Mirrored engine variants must be FLIPPED back — never free-rotated
-  // to an odd tilt. Proof: every purine's atom coordinates in its own
-  // glyco-N/axis frame are identical across all sources of adenine AND of
-  // guanine (same fused skeleton).
+  // The textbook pose: the purine long axis is tilted to −30°, so its fused
+  // ring system reads essentially horizontal. Mirrored engine variants must
+  // be FLIPPED back — never free-rotated to an odd tilt. Proof: every
+  // purine's atom coordinates in its own glyco-N/axis frame are identical
+  // across all sources of adenine AND of guanine (same fused skeleton).
   it("renders every purine nucleobase in the same canonical pose (flip, not tilt)", () => {
     interface BasePose {
       axisDeg: number
@@ -990,9 +989,41 @@ describe("nucleotide placement", () => {
       ["cAMP", PUBCHEM_CAMP],
     ] as const
 
-    // Axis snapped to the canonical anomer-side heading (−60° for up anomers).
+    // Axis snapped to the anomer-side heading that reads horizontal (−30°).
     for (const [label, smiles] of cases) {
-      expect(Math.abs(poseOf(label, smiles).axisDeg - -60), `${label}: axis −60°`).toBeLessThan(3)
+      expect(Math.abs(poseOf(label, smiles).axisDeg - -30), `${label}: axis −30°`).toBeLessThan(3)
+    }
+
+    // The purine's fused-ring axis (ring5 center → ring6 center) sits
+    // essentially horizontal — the visible "tilt slightly so they are
+    // horizontal" reading of the −30° snap.
+    for (const [label, smiles] of cases) {
+      const analysis = analyzeNucleotide(smiles, label)
+      const baseRings = analysis.pipeline.preprocessor.rings.filter(
+        (ring) =>
+          ring.members.length <= 6 && ring.members.every((id) => analysis.glycosidicBase.has(id)),
+      )
+      const five = baseRings.find((ring) => ring.members.length === 5)
+      const six = baseRings.find((ring) => ring.members.length === 6)
+      expect(five, `${label}: imidazole ring`).toBeDefined()
+      expect(six, `${label}: pyrimidine ring`).toBeDefined()
+      if (five === undefined || six === undefined) {
+        continue
+      }
+      const centerOf = (members: number[]) => ({
+        x:
+          members.reduce((sum, id) => sum + (analysis.pipeline.positions.get(id)?.x ?? 0), 0) /
+          members.length,
+        y:
+          members.reduce((sum, id) => sum + (analysis.pipeline.positions.get(id)?.y ?? 0), 0) /
+          members.length,
+      })
+      const fiveCenter = centerOf(five.members)
+      const sixCenter = centerOf(six.members)
+      const fusedDeg =
+        (Math.atan2(sixCenter.y - fiveCenter.y, sixCenter.x - fiveCenter.x) * 180) / Math.PI
+      const deviation = Math.min(Math.abs(fusedDeg), Math.abs(Math.abs(fusedDeg) - 180))
+      expect(deviation, `${label}: fused rings horizontal`).toBeLessThan(8)
     }
 
     // Pose equality with the ATP reference: identical frame coordinates.
