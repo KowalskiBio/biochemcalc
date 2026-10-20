@@ -931,6 +931,43 @@ describe("nucleotide placement", () => {
       minDistBetween(analysis.pipeline, analysis.glycosidicBase, diesterGroup),
       "cAMP: base clear of the diester",
     ).toBeGreaterThanOrEqual(1.0)
+
+    // P's exocyclic oxygens (P=O / P–O) sit in the free hexagon-vertex slots
+    // (outward ±60°), never along/over a P–O ring bond — the "one bond
+    // overlapping another" regression.
+    const phosphorus = analysis.phosphates[0]
+    const ringEster = (analysis.pipeline.snapshot.adjacency.get(phosphorus) ?? []).filter((id) =>
+      memberSet.has(id),
+    )
+    expect(ringEster, "cAMP: two ring ester oxygens").toHaveLength(2)
+    const exoOxygens = (analysis.pipeline.snapshot.adjacency.get(phosphorus) ?? []).filter(
+      (id) => !memberSet.has(id) && analysis.pipeline.snapshot.atoms.get(id)?.element === "O",
+    )
+    expect(exoOxygens, "cAMP: two exocyclic oxygens").toHaveLength(2)
+    const pPos = analysis.pipeline.positions.get(phosphorus) ?? { x: 0, y: 0 }
+    const unitFromP = (id: number) => {
+      const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
+      const dx = point.x - pPos.x
+      const dy = point.y - pPos.y
+      const length = Math.hypot(dx, dy)
+      return { x: dx / length, y: dy / length }
+    }
+    const ringDirs = ringEster.map((id) => Math.atan2(unitFromP(id).y, unitFromP(id).x))
+    const bisector = ringEster.reduce(
+      (acc, id) => ({ x: acc.x + unitFromP(id).x, y: acc.y + unitFromP(id).y }),
+      { x: 0, y: 0 },
+    )
+    const outwardDeg = (Math.atan2(-bisector.y, -bisector.x) * 180) / Math.PI
+    const angleDiff = (a: number, b: number) => Math.abs(((((a - b) % 360) + 540) % 360) - 180)
+    for (const oxygen of exoOxygens) {
+      const dirDeg = (Math.atan2(unitFromP(oxygen).y, unitFromP(oxygen).x) * 180) / Math.PI
+      for (const ringDir of ringDirs) {
+        const diff = angleDiff(dirDeg, (ringDir * 180) / Math.PI)
+        expect(diff, `cAMP: P-exo O#${oxygen} clear of a ring bond`).toBeGreaterThan(40)
+      }
+      const slotDiff = Math.abs(angleDiff(dirDeg, outwardDeg) - 60)
+      expect(slotDiff, `cAMP: P-exo O#${oxygen} in an outward ±60° slot`).toBeLessThan(10)
+    }
   })
 
   // The textbook pose: the purine long axis is tilted to −30°, so its fused

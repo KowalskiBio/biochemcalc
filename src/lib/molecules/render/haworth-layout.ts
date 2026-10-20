@@ -599,6 +599,81 @@ function rebuildCyclicDiesters(
       }
       place(preprocessor, id, target)
     }
+
+    // Re-aim the phosphorus's two exocyclic oxygens (P=O / P–O): the rigid
+    // drag above keeps whatever heading they inherited, which can draw the
+    // P=O almost exactly along a P–O ring bond. The free slots at a fused
+    // hexagon vertex are the two directions outward ±60°, each 120° clear of
+    // both ring bonds; the double bond takes the leading one.
+    const phosphorusId = phosphorusIds[0]
+    const phosphorusIndex = ordered.indexOf(phosphorusId)
+    const phosphorusPosition = positionOf(preprocessor, phosphorusId)
+    if (phosphorusIndex > 0 && phosphorusPosition !== undefined) {
+      const previousRing = positionOf(
+        preprocessor,
+        ordered[(phosphorusIndex + ordered.length - 1) % ordered.length],
+      )
+      const nextRing = positionOf(preprocessor, ordered[(phosphorusIndex + 1) % ordered.length])
+      if (previousRing !== undefined && nextRing !== undefined) {
+        const unitToward = (target: Point): Point => {
+          const dx = target.x - phosphorusPosition.x
+          const dy = target.y - phosphorusPosition.y
+          const length = Math.hypot(dx, dy)
+          return length < 1e-9 ? { x: 0, y: 0 } : { x: dx / length, y: dy / length }
+        }
+        const towardPrevious = unitToward(previousRing)
+        const towardNext = unitToward(nextRing)
+        const bisectorLength = Math.hypot(
+          towardPrevious.x + towardNext.x,
+          towardPrevious.y + towardNext.y,
+        )
+        if (bisectorLength > 1e-6) {
+          const outwardHeading = Math.atan2(
+            -((towardPrevious.y + towardNext.y) / bisectorLength),
+            -((towardPrevious.x + towardNext.x) / bisectorLength),
+          )
+          const phosphorusBondLength = preprocessor.opts?.bondLength ?? 24
+          const edges = preprocessor.graph.edges ?? []
+          const exoOxygens = (
+            preprocessor.graph.vertices.find((candidate) => candidate.id === phosphorusId)
+              ?.neighbours ?? []
+          )
+            .filter((neighbour) => !memberSet.has(neighbour) && elementOf(neighbour) === "O")
+            .sort((left, right) => {
+              const orderOf = (oxygen: number): number =>
+                edges.find(
+                  (edge) =>
+                    (edge.sourceId === phosphorusId && edge.targetId === oxygen) ||
+                    (edge.sourceId === oxygen && edge.targetId === phosphorusId),
+                )?.weight ?? 1
+              return orderOf(right) - orderOf(left)
+            })
+          exoOxygens.forEach((oxygen, slot) => {
+            const angle = outwardHeading + (slot === 0 ? 1 : -1) * (Math.PI / 3)
+            const target = {
+              x: phosphorusPosition.x + Math.cos(angle) * phosphorusBondLength,
+              y: phosphorusPosition.y + Math.sin(angle) * phosphorusBondLength,
+            }
+            const currentPosition = positionOf(preprocessor, oxygen)
+            if (currentPosition !== undefined) {
+              const shift = { x: target.x - currentPosition.x, y: target.y - currentPosition.y }
+              const dragged = collectSubtree(
+                preprocessor,
+                oxygen,
+                new Set([...memberSet, phosphorusId]),
+              )
+              for (const draggedId of dragged) {
+                const vertex = preprocessor.graph.vertices.find((c) => c.id === draggedId)
+                if (vertex !== undefined) {
+                  vertex.position.x += shift.x
+                  vertex.position.y += shift.y
+                }
+              }
+            }
+          })
+        }
+      }
+    }
     recomputeRingCenter(preprocessor, ring.id, ring.members)
   }
 }
