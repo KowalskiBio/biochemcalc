@@ -106,12 +106,24 @@ All three are in `.ragignore`. Don't delete without updating `importer.rs` tests
 npm install
 npm run dev:local   # backend :8080 (local DB copy) + Vite :1420 — normal web dev
 npm run db:pull     # pull live DB snapshot into .local-dev/ (read-only vs VM)
+npm run db:push-biomolecules [-- --apply]  # replay local Biomolekuly edits on the site via its API
 npm run tauri dev   # desktop app
 npm test            # Vitest (13 test files, all colocated in __tests__/)
 npm run check       # Biome lint + format (CI gate)
 npm run build       # tsc --noEmit + vite build
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
+**Biomolekuly push** (`scripts/db-push-biomolecules.js`, planning in
+`scripts/lib/biomolecule-sync.js`): `db:pull` keeps the downloaded snapshot as
+`.local-dev/biochemcalc.base.sqlite`; the push diffs local vs base (both read by the
+`export_biomolecules` bin — read-only, via a migrated `VACUUM INTO` copy) and sends
+each change through `/api/biomolecules/*` as the logged-in teacher. Before every write
+it compares the live row with base: changed on the site since the pull → reported as a
+conflict, never overwritten. Positions and moving a molecule between categories have no
+API and aren't pushed. A fully successful push writes `.local-dev/biochemcalc.pushed`
+(fingerprint of the local library); `db:pull` refuses to replace a library that differs
+from base unless it matches that fingerprint or `--force` is given.
 
 - Vitest: `environment: "node"`, `globals: true`, alias `@` → `./src`. Well covered: math-utils,
   formula parsers, bulk import, databaze-store, decimal-input/formatted-result components.

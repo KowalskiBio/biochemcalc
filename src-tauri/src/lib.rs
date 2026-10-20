@@ -24,6 +24,39 @@ pub fn import_bulk_templates_from_json(
     do_import_bulk_templates(&conn, payload)
 }
 
+/// The Biomolekuly library of the database at `db_path` as the same JSON
+/// `/api/biomolecules/data` serves. The file itself is only read: a
+/// consistent copy (`VACUUM INTO`, which also picks up a live WAL) is
+/// migrated to the current schema and read instead, so snapshots pulled
+/// before a migration still compare. Used by `npm run db:push-biomolecules`.
+pub fn export_biomolecule_data_json(db_path: &Path) -> Result<String, db::DbError> {
+    let io = |e: rusqlite::Error| db::DbError::Io(e.to_string());
+    let copy = std::env::temp_dir().join(format!(
+        "biochemcalc-export-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| {
+        let source = rusqlite::Connection::open_with_flags(
+            db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(io)?;
+        source
+            .execute("VACUUM INTO ?1", [copy.to_string_lossy()])
+            .map_err(io)?;
+        drop(source);
+        let conn = rusqlite::Connection::open(&copy).map_err(io)?;
+        run_migrations(&conn).map_err(io)?;
+        let data = db::repos::biomolecule_repo::BiomoleculeRepo::list_data(&conn)?;
+        // Via `Value` so object keys come out sorted: traits are a HashMap,
+        // and callers compare two exports as plain strings.
+        let canonical = serde_json::to_value(&data).map_err(db::DbError::Serde)?;
+        serde_json::to_string(&canonical).map_err(db::DbError::Serde)
+    })();
+    let _ = std::fs::remove_file(&copy);
+    result
+}
+
 use db::{initialize_db, AppState};
 use tauri::Manager;
 

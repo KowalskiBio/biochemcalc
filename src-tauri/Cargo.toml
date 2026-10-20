@@ -25,6 +25,10 @@ name = "import_bulk_json"
 path = "src/bin/import_bulk_json.rs"
 
 [[bin]]
+name = "export_biomolecules"
+path = "src/bin/export_biomolecules.rs"
+
+[[bin]]
 name = "biochemcalc-server"
 path = "src/bin/server.rs"
 

@@ -206,6 +206,13 @@ npm run tauri dev    # desktop app with hot reload
 npm run dev:local    # web server on :8080 + Vite on :1420, on a local copy of the question data (npm run db:pull)
 ```
 
+Biomolekuly edits made locally (topics, categories, molecules) can be sent to the live site with your teacher account — nothing else is touched, and anything changed on the site since your pull is reported instead of overwritten:
+
+```bash
+npm run db:push-biomolecules              # preview against the live site
+npm run db:push-biomolecules -- --apply   # push, then: npm run db:pull
+```
+
 ```bash
 npm test             # Vitest
 npm run check        # Biome lint + format check
