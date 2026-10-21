@@ -2147,6 +2147,7 @@ mod tests {
             smiles: m.smiles.clone(),
             projection: m.projection.clone(),
             haworth: m.haworth,
+            fischer: m.fischer,
             traits: m.traits.clone(),
             category_id: None,
             expected_updated_at: None,

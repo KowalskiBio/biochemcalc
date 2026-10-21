@@ -136,7 +136,16 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
-  updateMolecule: async (moleculeId, name, smiles, traits, projection, haworth, categoryId, fischer) => {
+  updateMolecule: async (
+    moleculeId,
+    name,
+    smiles,
+    traits,
+    projection,
+    haworth,
+    categoryId,
+    fischer,
+  ) => {
     const data = await biomoleculesApi.updateMolecule(
       moleculeId,
       name,

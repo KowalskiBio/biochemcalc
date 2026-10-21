@@ -74,42 +74,134 @@ describe("recognizeOpenChainSugar", () => {
 })
 
 describe("drawFischer", () => {
-  it("renders the classic vertical spine with crossings and terminal labels", () => {
+  const OXYGEN_RED = "#FF0000"
+  const NEUTRAL_INK = "#000000"
+
+  interface Glyph {
+    text: string
+    x: number
+    y: number
+    anchor?: string
+    fill?: string
+    fontSize?: number
+  }
+
+  function glyphsOf(drawing: ReturnType<typeof drawFischer>): Glyph[] {
+    return drawing.elements
+      .filter((element) => element.kind === "text")
+      .map((element) => element as unknown as Glyph & { kind: "text" })
+  }
+
+  it("renders terminal labels as carbon-centered runs with red oxygens and a true subscript", () => {
     const recognition = recognize(OPEN_GLUCOSE)
     if (recognition === null) {
       throw new Error("glucose not recognized")
     }
     const drawing = drawFischer(recognition)
-    const labels = drawing.elements.filter((element) => element.kind === "text")
-    const texts = labels.map((element) => ("text" in element ? element.text : ""))
+    const glyphs = glyphsOf(drawing)
+    const texts = glyphs.map((glyph) => glyph.text)
 
-    // Terminals: CHO firmly above every crossing, CH2OH below every crossing.
-    const cho = labels.find((element) => "text" in element && element.text === "CHO")
-    const ch2oh = labels.find((element) => "text" in element && element.text === "CH2OH")
-    const crossings = labels.filter(
-      (element) => "text" in element && (element.text === "OH" || element.text === "HO"),
+    // Nothing is spelled with "=" and no whole-word carbon labels anywhere.
+    expect(texts.some((text) => text.includes("="))).toBe(false)
+    expect(texts).not.toContain("CHO")
+    expect(texts).not.toContain("CH2OH")
+
+    // Every oxygen letter takes the atom palette; carbons/hydrogens stay ink.
+    for (const glyph of glyphs) {
+      const expected = glyph.text === "O" ? OXYGEN_RED : NEUTRAL_INK
+      expect(glyph.fill, `glyph ${glyph.text} fill`).toBe(expected)
+    }
+
+    // The two terminal carbons (CHO top and CH2OH bottom) share exactly one x,
+    // centered on the vertical spine bond (half a letter left of it).
+    const spineXs = new Set(
+      drawing.elements
+        .filter(
+          (element): element is Extract<typeof element, { kind: "line" }> =>
+            element.kind === "line" && element.x1 === element.x2,
+        )
+        .map((line) => line.x1),
     )
-    expect(crossings.length).toBe(4)
-    expect(cho).toBeDefined()
-    expect(ch2oh).toBeDefined()
-    for (const crossing of crossings) {
-      if (!("y" in crossing) || cho === undefined || ch2oh === undefined) continue
-      expect(crossing.y).toBeGreaterThan(cho.y)
-      expect(crossing.y).toBeLessThan(ch2oh.y)
+    expect(spineXs.size).toBe(1)
+    const spineX = [...spineXs][0]
+    const terminalCs = glyphs.filter((glyph) => glyph.text === "C")
+    expect(terminalCs).toHaveLength(2)
+    for (const glyph of terminalCs) {
+      expect(Math.abs(glyph.x - (spineX - 3.5))).toBeLessThan(0.01)
     }
 
-    // Left-side OH renders as "HO" (the classic left-flip idiom), right as "OH".
-    expect(texts.filter((text) => text === "OH")).toHaveLength(3)
-    expect(texts.filter((text) => text === "HO")).toHaveLength(1)
-    // An "H" opposite every OH; no bare carbon letters anywhere.
-    expect(texts.filter((text) => text === "H")).toHaveLength(4)
-    expect(texts).not.toContain("C")
+    // The "2" is a real subscript: smaller font and dropped below its siblings.
+    const twos = glyphs.filter((glyph) => glyph.text === "2")
+    expect(twos).toHaveLength(1)
+    expect(twos[0].fontSize).toBeLessThan(11)
+    const siblingRowGlyphs = glyphs.filter((glyph) => glyph.y === twos[0].y - 4)
+    expect(siblingRowGlyphs.length, "CH2OH row carries its siblings").toBeGreaterThanOrEqual(4)
 
-    // The spine is a constant x for every OH/HO crossing label's row anchor.
-    const ohXs = crossings.map((element) => ("x" in element ? element.x : 0))
-    for (const x of ohXs) {
-      expect(Math.abs(x - ohXs[0])).toBeLessThan(80)
+    // Terminal labels hug the chain: top row above every crossing, bottom row below.
+    const crossingYs = drawing.elements
+      .filter(
+        (element): element is Extract<typeof element, { kind: "line" }> =>
+          element.kind === "line" && element.y1 === element.y2 && element.x1 < element.x2,
+      )
+      .map((line) => line.y1)
+    expect(crossingYs.length).toBeGreaterThan(0)
+    const [topY, bottomY] = [
+      Math.min(...terminalCs.map((glyph) => glyph.y)),
+      Math.max(...terminalCs.map((glyph) => glyph.y)),
+    ]
+    for (const y of crossingYs) {
+      expect(y).toBeGreaterThan(topY)
+      expect(y).toBeLessThan(bottomY)
     }
+  })
+
+  it("renders a ketose with a real double-bonded oxygen on the right, never '='", () => {
+    const recognition = recognize(OPEN_FRUCTOSE)
+    if (recognition === null) {
+      throw new Error("fructose not recognized")
+    }
+    const drawing = drawFischer(recognition)
+    const glyphs = glyphsOf(drawing)
+    const texts = glyphs.map((glyph) => glyph.text)
+
+    expect(texts.some((text) => text.includes("="))).toBe(false)
+    expect(texts).not.toContain("C=O")
+    // Both CH2OH terminals decompose: two subscript "2" runs.
+    expect(
+      glyphs.filter((glyph) => glyph.text === "2" && glyph.fontSize !== undefined),
+    ).toHaveLength(2)
+
+    // Exactly one red O strictly to the right of the glycosidic OH side, joined
+    // by two short parallel horizontal strokes of equal y-offset.
+    const spineXs = new Set(
+      drawing.elements
+        .filter(
+          (element): element is Extract<typeof element, { kind: "line" }> =>
+            element.kind === "line" && element.x1 === element.x2,
+        )
+        .map((line) => line.x1),
+    )
+    const spineX = [...spineXs][0]
+    const carbonylOxygen = glyphs.filter((glyph) => glyph.text === "O" && glyph.x > spineX + 20)
+    expect(carbonylOxygen.length).toBeGreaterThan(0)
+    for (const glyph of carbonylOxygen) {
+      expect(glyph.fill).toBe(OXYGEN_RED)
+    }
+    // Two short parallel strokes leave the spine, one exactly 2px above and
+    // one exactly 2px below the carbonyl oxygen's baseline — a double bond,
+    // never an equals sign.
+    const ARM_APPROX = 26 * 0.8
+    const strokes = drawing.elements.filter(
+      (element): element is Extract<typeof element, { kind: "line" }> =>
+        element.kind === "line" &&
+        element.y1 === element.y2 &&
+        Math.abs(element.x1 - spineX) < 0.01 &&
+        Math.abs(element.x2 - element.x1 - ARM_APPROX) < 2.5 &&
+        Math.abs(Math.abs(element.y1 - carbonylOxygen[0].y) - 2) < 0.01,
+    )
+    expect(strokes.map((line) => line.y1 - carbonylOxygen[0].y).sort((a, b) => a - b)).toEqual([
+      -2, 2,
+    ])
   })
 
   it("sizes up with chain length (glucose taller than ribose)", () => {

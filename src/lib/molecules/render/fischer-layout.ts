@@ -23,7 +23,8 @@ export interface FischerChainCenter {
 }
 
 export type FischerSpineSlot =
-  | { kind: "label"; text: "CHO" | "CH2OH" | "C=O" }
+  | { kind: "label"; text: "CHO" | "CH2OH" }
+  | { kind: "carbonyl" }
   | { kind: "center"; center: FischerChainCenter }
 
 export interface FischerRecognition {
@@ -301,7 +302,9 @@ export function recognizeOpenChainSugar(
     const carbonylIndex = chainOrder.indexOf(carbonyl.carbonyl)
     for (let index = 1; index < chainOrder.length - 1; index += 1) {
       if (index === carbonylIndex) {
-        slots.push({ kind: "label", text: "C=O" })
+        // The ketone position renders as an unlabeled carbonyl vertex with a
+        // real double bond to its oxygen (see drawFischer), never a "C=O".
+        slots.push({ kind: "carbonyl" })
         continue
       }
       const center = centers.find((candidate) => candidate.atomIdx === chainOrder[index])
@@ -332,13 +335,30 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
         `<line x1='${element.x1}' y1='${element.y1}' x2='${element.x2}' y2='${element.y2}' stroke='#000000' stroke-width='${width}' stroke-linecap='round'/>`,
       )
     } else {
+      const fill = element.fill ?? "#000000"
+      const fontSize = element.fontSize ?? 11
       const text = element.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       parts.push(
-        `<text x='${element.x}' y='${element.y}' font-size='11' dominant-baseline='central' text-anchor='${element.anchor ?? "middle"}' fill='#000000'>${text}</text>`,
+        `<text x='${element.x}' y='${element.y}' font-size='${fontSize}' dominant-baseline='central' text-anchor='${element.anchor ?? "middle"}' fill='${fill}'>${text}</text>`,
       )
     }
   }
   return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${drawing.width} ${drawing.height}' width='${drawing.width}' height='${drawing.height}'>${parts.join("")}</svg>`
+}
+
+/** Atom palette — the exact values the app's RDKit depictions use. */
+const ATOM_COLOR_OXYGEN = "#FF0000"
+const ATOM_COLOR_NEUTRAL = "#000000"
+/** Subscript digits sit this many px below the label baseline. */
+const SUBSCRIPT_DROP = 4
+const SUBSCRIPT_SIZE = 8
+
+interface TextRun {
+  text: string
+  x: number
+  y: number
+  fill: string
+  fontSize?: number
 }
 
 /** Vertical spacing between two spine slots. */
@@ -346,43 +366,129 @@ const SPINE_STEP = BOND * 1.5
 /** Horizontal arm length from the spine to a side label zone. */
 const ARM = BOND * 0.8
 
-function textWidth(text: string): number {
-  return text.length * TEXT_WIDTH_PER_CHAR
+function textWidth(text: string, fontSize?: number): number {
+  return text.length * ((fontSize ?? TEXT_HEIGHT) * (TEXT_WIDTH_PER_CHAR / TEXT_HEIGHT))
 }
 
 /**
- * Draw the classic Fischer projection as shared drawing elements
- * (line/text), natural size with padding — same output model as
- * `drawProjection`, so it can be rendered by the same consumers.
+ * Terminal labels ("CHO" / "CH2OH") as per-letter runs: the carbon letter
+ * sits exactly on the bond, the "2" renders as a real subscript (smaller and
+ * dropped below the baseline), oxygens take the app's atom palette.
+ */
+function terminalLabelRuns(text: "CHO" | "CH2OH", centerX: number, y: number): TextRun[] {
+  const charW = TEXT_WIDTH_PER_CHAR
+  const runs: TextRun[] = []
+  let x = centerX - charW / 2
+  runs.push({ text: "C", x, y, fill: ATOM_COLOR_NEUTRAL })
+  x += charW
+  runs.push({ text: "H", x, y, fill: ATOM_COLOR_NEUTRAL })
+  x += charW
+  if (text === "CH2OH") {
+    runs.push({
+      text: "2",
+      x,
+      y: y + SUBSCRIPT_DROP,
+      fill: ATOM_COLOR_NEUTRAL,
+      fontSize: SUBSCRIPT_SIZE,
+    })
+    x += SUBSCRIPT_SIZE / 2
+  }
+  runs.push({ text: "O", x, y, fill: ATOM_COLOR_OXYGEN })
+  x += charW
+  if (text === "CH2OH") {
+    runs.push({ text: "H", x, y, fill: ATOM_COLOR_NEUTRAL })
+  }
+  return runs
+}
+
+/**
+ * The classic Fischer projection as shared drawing elements, atom-colored
+ * (red oxygens) and typed like the rest of the app — natural size, padded.
  */
 export function drawFischer(recognition: FischerRecognition): ProjectionDrawing {
   const elements: DrawingElement[] = []
   const spineX = 0
   const bodyOf = (slot: FischerSpineSlot): number =>
-    slot.kind === "label" ? TEXT_HEIGHT / 2 + 2 : 0
+    slot.kind === "center" ? 0 : TEXT_HEIGHT / 2 + 2
 
   recognition.slots.forEach((slot, index) => {
     const y = index * SPINE_STEP
     if (slot.kind === "label") {
-      elements.push({ kind: "text", x: spineX, y, text: slot.text, anchor: "middle" })
+      for (const run of terminalLabelRuns(slot.text, spineX, y)) {
+        elements.push({
+          kind: "text",
+          x: run.x,
+          y: run.y,
+          text: run.text,
+          anchor: "start",
+          fill: run.fill,
+          ...(run.fontSize !== undefined ? { fontSize: run.fontSize } : {}),
+        })
+      }
       return
     }
-    // Crossing: horizontal arm plus OH/HO and H labels on opposite sides.
+    if (slot.kind === "carbonyl") {
+      // Ketone vertex: unlabeled carbon on the spine, oxygen to the RIGHT as
+      // a proper double bond — two short parallel strokes ending at a red O.
+      elements.push({ kind: "line", x1: spineX, y1: y - 2, x2: spineX + ARM, y2: y - 2 })
+      elements.push({ kind: "line", x1: spineX, y1: y + 2, x2: spineX + ARM, y2: y + 2 })
+      elements.push({
+        kind: "text",
+        x: spineX + ARM + HYDROGEN_PAD,
+        y,
+        text: "O",
+        anchor: "start",
+        fill: ATOM_COLOR_OXYGEN,
+      })
+      return
+    }
+    // Crossing: horizontal arm; OH/HO side carries split O(red)+H runs and a
+    // lone H on the opposite side, matching the Haworth flip idiom.
     elements.push({ kind: "line", x1: spineX - ARM, y1: y, x2: spineX + ARM, y2: y })
     const ohLeft = slot.center.ohSide === "left"
-    elements.push({
-      kind: "text",
-      x: ohLeft ? spineX - ARM - HYDROGEN_PAD : spineX + ARM + HYDROGEN_PAD,
-      y,
-      text: ohLeft ? "HO" : "OH",
-      anchor: ohLeft ? "end" : "start",
-    })
+    const sideX = ohLeft ? spineX - ARM - HYDROGEN_PAD : spineX + ARM + HYDROGEN_PAD
+    if (ohLeft) {
+      elements.push({
+        kind: "text",
+        x: sideX - 2 * TEXT_WIDTH_PER_CHAR,
+        y,
+        text: "O",
+        anchor: "start",
+        fill: ATOM_COLOR_OXYGEN,
+      })
+      elements.push({
+        kind: "text",
+        x: sideX - TEXT_WIDTH_PER_CHAR,
+        y,
+        text: "H",
+        anchor: "start",
+        fill: ATOM_COLOR_NEUTRAL,
+      })
+    } else {
+      elements.push({
+        kind: "text",
+        x: sideX,
+        y,
+        text: "O",
+        anchor: ohLeft ? "end" : "start",
+        fill: ATOM_COLOR_OXYGEN,
+      })
+      elements.push({
+        kind: "text",
+        x: sideX + TEXT_WIDTH_PER_CHAR,
+        y,
+        text: "H",
+        anchor: ohLeft ? "end" : "start",
+        fill: ATOM_COLOR_NEUTRAL,
+      })
+    }
     elements.push({
       kind: "text",
       x: ohLeft ? spineX + ARM + HYDROGEN_PAD : spineX - ARM - HYDROGEN_PAD,
       y,
       text: "H",
       anchor: ohLeft ? "start" : "end",
+      fill: ATOM_COLOR_NEUTRAL,
     })
   })
 
@@ -407,13 +513,14 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
       minY = Math.min(minY, element.y1, element.y2)
       maxY = Math.max(maxY, element.y1, element.y2)
     } else {
-      const width = textWidth(element.text)
+      const fontSize = element.fontSize ?? 11
+      const width = textWidth(element.text, fontSize)
       const half = element.anchor === "middle" ? width / 2 : element.anchor === "start" ? 0 : width
       const left = element.x - half
       minX = Math.min(minX, left)
       maxX = Math.max(maxX, left + width)
-      minY = Math.min(minY, element.y - TEXT_HEIGHT / 2)
-      maxY = Math.max(maxY, element.y + TEXT_HEIGHT / 2)
+      minY = Math.min(minY, element.y - (fontSize * TEXT_HEIGHT) / 11 / 2)
+      maxY = Math.max(maxY, element.y + (fontSize * TEXT_HEIGHT) / 11 / 2)
     }
   }
   if (!Number.isFinite(minX)) {

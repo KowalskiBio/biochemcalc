@@ -339,11 +339,18 @@ describe("Fischer projections", () => {
     const { svg, recognized } = render(OPEN_GLUCOSE)
     expect(recognized).toBe("fischer")
     const texts = textsOf(svg)
-    expect(texts).toContain("CHO")
-    expect(texts).toContain("CH2OH")
-    expect(texts.filter((text) => text === "OH")).toHaveLength(3)
-    expect(texts.filter((text) => text === "HO")).toHaveLength(1)
-    expect(texts.filter((text) => text === "H")).toHaveLength(4)
+    // Terminal labels are decomposed into per-letter runs; never a whole word.
+    for (const whole of ["CHO", "CH2OH", "C=O", "="]) {
+      expect(texts.some((text) => text.includes(whole))).toBe(false)
+    }
+    expect(texts.filter((text) => text === "C")).toHaveLength(2)
+    expect(texts.filter((text) => text === "2")).toHaveLength(1)
+    expect(texts.filter((text) => text === "O").length).toBeGreaterThan(0)
+    // At least one oxygen takes the app's atom-red palette color.
+    const oxygens = Array.from(svg.querySelectorAll("text")).filter(
+      (node) => node.textContent === "O",
+    )
+    expect(oxygens.some((node) => node.getAttribute("fill") === "#FF0000")).toBe(true)
   })
 
   it("suppresses the Fischer projection when fischer is false", () => {
@@ -352,13 +359,25 @@ describe("Fischer projections", () => {
     expect(textsOf(svg)).not.toContain("CHO")
   })
 
-  it("renders an open-chain ketose with the carbonyl slot in the spine", () => {
+  it("renders an open-chain ketose with a real double bond, never '='", () => {
     const { svg, recognized } = render(OPEN_FRUCTOSE)
     expect(recognized).toBe("fischer")
     const texts = textsOf(svg)
-    expect(texts).toContain("CH2OH")
-    expect(texts).toContain("C=O")
     expect(texts).not.toContain("CHO")
+    expect(texts.some((text) => text.includes("="))).toBe(false)
+    expect(texts.filter((text) => text === "2")).toHaveLength(2)
+    const oxygens = Array.from(svg.querySelectorAll("text")).filter(
+      (node) => node.textContent === "O",
+    )
+    // The ketone's oxygen is red and sits right of the spine.
+    const verticalXValues = Array.from(svg.querySelectorAll("line"))
+      .filter((line) => Number(line.getAttribute("x1")) === Number(line.getAttribute("x2")))
+      .map((line) => Number(line.getAttribute("x1")))
+    const spineXs = new Set(verticalXValues)
+    expect(spineXs.size).toBe(1)
+    const spineX = verticalXValues[0]
+    const rightOxygen = oxygens.find((node) => Number(node.getAttribute("x")) > spineX + 20)
+    expect(rightOxygen?.getAttribute("fill")).toBe("#FF0000")
   })
 
   it("keeps cyclic sugars on the Haworth path (mutual exclusion)", () => {
