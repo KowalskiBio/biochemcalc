@@ -57,11 +57,17 @@ export interface RenderStructureOptions {
    * depiction (and suppressing the Haworth overlay). Default true.
    */
   haworth?: boolean
+  /**
+   * False disables open-chain Fischer auto-recognition (runs only when no
+   * sugar ring is recognized — the two projections stay mutually exclusive).
+   * Default true.
+   */
+  fischer?: boolean
 }
 
 export interface RenderedStructure {
   svg: SVGSVGElement
-  recognized: "haworth" | false
+  recognized: "haworth" | "fischer" | false
 }
 
 /**
@@ -79,6 +85,7 @@ export function renderStructure(
     bondLength: options.bondLength,
     natural,
     haworth: options.haworth,
+    fischer: options.fischer,
   })
   if (prepared === null) {
     return null
@@ -108,7 +115,7 @@ export function renderStructure(
           natural,
         }) ?? prepared.svg
     }
-  } else if (orientationDeg !== 0 || mirror) {
+  } else if (recognized === false && (orientationDeg !== 0 || mirror)) {
     const transformed = transformedMolblock(molblock, orientationDeg, mirror)
     if (transformed !== null) {
       molblock = transformed.molblock

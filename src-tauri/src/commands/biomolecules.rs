@@ -667,6 +667,10 @@ pub struct CreateMoleculePayload {
     /// Draw a Haworth projection (true) or a plain skeletal one (false).
     #[serde(default = "default_true")]
     pub haworth: bool,
+    /// Draw a Fischer projection for open-chain sugars (true) or a plain
+    /// skeletal one (false). Older clients omit it; detection stays on.
+    #[serde(default = "default_true")]
+    pub fischer: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
 }
@@ -731,6 +735,7 @@ pub fn do_create_molecule(
         &smiles,
         projection.as_deref(),
         payload.haworth,
+        payload.fischer,
         position,
         &traits,
         teacher_id,
@@ -750,6 +755,10 @@ pub struct UpdateMoleculePayload {
     /// Draw a Haworth projection (true) or a plain skeletal one (false).
     #[serde(default = "default_true")]
     pub haworth: bool,
+    /// Draw a Fischer projection for open-chain sugars (true) or a plain
+    /// skeletal one (false). Older clients omit it; detection stays on.
+    #[serde(default = "default_true")]
+    pub fischer: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
     /// Moves the molecule to this category (to its end); omitted keeps it.
@@ -823,6 +832,7 @@ pub fn do_update_molecule(
         &smiles,
         projection.as_deref(),
         payload.haworth,
+        payload.fischer,
         &traits,
         relocation.as_ref(),
         teacher_id,
@@ -1161,6 +1171,7 @@ mod tests {
             smiles: smiles.into(),
             projection: None,
             haworth: true,
+            fischer: true,
             traits: HashMap::new(),
         }
     }
@@ -1761,6 +1772,7 @@ mod tests {
                 smiles: "C[C@@H](C(=O)O)N".into(),
                 projection: None,
                 haworth: true,
+                fischer: true,
                 traits,
             },
         )
@@ -1798,6 +1810,7 @@ mod tests {
                     smiles: "CCO".into(),
                     projection: None,
                     haworth: true,
+                    fischer: true,
                     traits: letter,
                 },
             ),
@@ -1816,6 +1829,7 @@ mod tests {
                 smiles: "CCO".into(),
                 projection: None,
                 haworth: false,
+                fischer: true,
                 traits: new_traits,
                 category_id: None,
                 expected_updated_at: None,
@@ -1841,11 +1855,11 @@ mod tests {
     }
 
     #[test]
-    fn molecule_haworth_flag_round_trips() {
+    fn molecule_projection_flags_round_trip() {
         let conn = setup_conn();
         let teacher = teacher_id(&conn);
 
-        // Explicit false disables saccharide recognition for this molecule.
+        // Explicit false disables each projection detection for this molecule.
         let data = do_create_molecule(
             &conn,
             &teacher,
@@ -1855,6 +1869,7 @@ mod tests {
                 smiles: "OCC1OC(O)C(O)C(O)C1O".into(),
                 projection: None,
                 haworth: false,
+                fischer: false,
                 traits: HashMap::new(),
             },
         )
@@ -1865,6 +1880,7 @@ mod tests {
             .find(|m| m.name == "Testoza")
             .expect("created");
         assert!(!created.haworth, "explicit false survives create");
+        assert!(!created.fischer, "explicit false survives create");
 
         let data = do_update_molecule(
             &conn,
@@ -1875,6 +1891,7 @@ mod tests {
                 smiles: "OCC1OC(O)C(O)C(O)C1O".into(),
                 projection: None,
                 haworth: true,
+                fischer: true,
                 traits: HashMap::new(),
                 category_id: None,
                 expected_updated_at: None,
@@ -1883,6 +1900,7 @@ mod tests {
         .expect("update");
         let updated = data.molecules.iter().find(|m| m.id == created.id).unwrap();
         assert!(updated.haworth, "explicit true survives update");
+        assert!(updated.fischer, "explicit true survives update");
     }
 
     #[test]
@@ -1901,6 +1919,7 @@ mod tests {
                     smiles: "CCO".into(),
                     projection: None,
                     haworth: true,
+                    fischer: true,
                     traits,
                 },
             )
@@ -2128,6 +2147,7 @@ mod tests {
             smiles: m.smiles.clone(),
             projection: m.projection.clone(),
             haworth: m.haworth,
+            fischer: m.fischer,
             traits: m.traits.clone(),
             category_id: None,
             expected_updated_at: None,

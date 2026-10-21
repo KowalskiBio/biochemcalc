@@ -48,10 +48,7 @@ export function traitPredicate(trait: string, value: string): string {
  * any alias equal to the molecule name is ignored, and an empty result is
  * `undefined` (the engine's "no aliases" shape).
  */
-function quizAliases(
-  molecule: Biomolecule,
-  abbreviationAlias?: string,
-): string[] | undefined {
+function quizAliases(molecule: Biomolecule, abbreviationAlias?: string): string[] | undefined {
   const name = molecule.name.trim().toLowerCase()
   const seen = new Set<string>()
   const aliases: string[] = []
@@ -89,6 +86,7 @@ function baseQuizMolecule(
     achiral: projection !== null ? false : isAchiral(molecule),
     projection: projection ?? undefined,
     haworth,
+    fischer: molecule.fischer !== false,
   }
 }
 
@@ -163,12 +161,7 @@ function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
  */
 function saccharidesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   const quizMolecules = molecules.map((molecule) =>
-    baseQuizMolecule(
-      molecule,
-      undefined,
-      traitOf(molecule, TRAIT.ringForm),
-      quizAliases(molecule),
-    ),
+    baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringForm), quizAliases(molecule)),
   )
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
   const traitIs =

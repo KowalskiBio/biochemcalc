@@ -121,6 +121,7 @@ export function normalizeSnapshot(raw: unknown): BiomoleculeQuestionReportSnapsh
         name: readString(option.name, readString(option.key)),
         ...(smiles !== undefined ? { smiles } : {}),
         ...(typeof option.haworth === "boolean" ? { haworth: option.haworth } : {}),
+        ...(typeof option.fischer === "boolean" ? { fischer: option.fischer } : {}),
         projection: option.projection ?? null,
         correct: option.correct === true,
       }
@@ -150,6 +151,7 @@ export function normalizeSnapshot(raw: unknown): BiomoleculeQuestionReportSnapsh
       text: readString(prompt.text),
       ...(promptSmiles !== undefined ? { smiles: promptSmiles } : {}),
       ...(typeof prompt.haworth === "boolean" ? { haworth: prompt.haworth } : {}),
+      ...(typeof prompt.fischer === "boolean" ? { fischer: prompt.fischer } : {}),
       projection: prompt.projection ?? null,
     },
     options,
@@ -185,6 +187,7 @@ function SnapshotOption({
           smiles={option.smiles}
           projection={projection ?? undefined}
           haworth={option.haworth ?? true}
+          fischer={option.fischer ?? true}
           size={140}
           title={option.name || option.key}
         />
@@ -244,6 +247,7 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
               smiles={snapshot.prompt.smiles}
               projection={promptProjection ?? undefined}
               haworth={snapshot.prompt.haworth ?? true}
+              fischer={snapshot.prompt.fischer ?? true}
               size={180}
               title={cs.biomolekuly.quiz.promptStructureLabel}
               className="mx-auto"

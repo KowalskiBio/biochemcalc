@@ -132,6 +132,7 @@ describe("useBiomoleculeDataStore molecules", () => {
       {},
       undefined,
       true,
+      undefined,
     )
 
     await store.createMolecule("vitamin-c", "Kofein", SMILES, {}, false)
@@ -141,6 +142,34 @@ describe("useBiomoleculeDataStore molecules", () => {
       SMILES,
       {},
       undefined,
+      false,
+      undefined,
+    )
+  })
+
+  it("createMolecule() forwards the fischer flag (true and false)", async () => {
+    api.createMolecule.mockResolvedValue(dataset())
+    const store = useBiomoleculeDataStore.getState()
+
+    await store.createMolecule("vitamin-c", "Kofein", SMILES, {}, true, true)
+    expect(api.createMolecule).toHaveBeenLastCalledWith(
+      "vitamin-c",
+      "Kofein",
+      SMILES,
+      {},
+      undefined,
+      true,
+      true,
+    )
+
+    await store.createMolecule("vitamin-c", "Kofein", SMILES, {}, true, false)
+    expect(api.createMolecule).toHaveBeenLastCalledWith(
+      "vitamin-c",
+      "Kofein",
+      SMILES,
+      {},
+      undefined,
+      true,
       false,
     )
   })
@@ -158,6 +187,7 @@ describe("useBiomoleculeDataStore molecules", () => {
       "{}",
       true,
       undefined,
+      undefined,
     )
 
     await store.updateMolecule("mol-1", "Kofein", SMILES, {}, null, false, "sacharidy")
@@ -169,6 +199,36 @@ describe("useBiomoleculeDataStore molecules", () => {
       null,
       false,
       "sacharidy",
+      undefined,
+    )
+  })
+
+  it("updateMolecule() forwards the fischer flag", async () => {
+    api.updateMolecule.mockResolvedValue(dataset())
+    const store = useBiomoleculeDataStore.getState()
+
+    await store.updateMolecule("mol-1", "Kofein", SMILES, {}, "{}", true, undefined, true)
+    expect(api.updateMolecule).toHaveBeenLastCalledWith(
+      "mol-1",
+      "Kofein",
+      SMILES,
+      {},
+      "{}",
+      true,
+      undefined,
+      true,
+    )
+
+    await store.updateMolecule("mol-1", "Kofein", SMILES, {}, null, true, undefined, false)
+    expect(api.updateMolecule).toHaveBeenLastCalledWith(
+      "mol-1",
+      "Kofein",
+      SMILES,
+      {},
+      null,
+      true,
+      undefined,
+      false,
     )
   })
 })

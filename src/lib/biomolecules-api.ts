@@ -44,6 +44,11 @@ export interface Biomolecule {
    * `undefined`/absent means `true` (the default behavior).
    */
   haworth?: boolean
+  /**
+   * Whether to recognize open-chain sugars and draw them as a Fischer
+   * projection. `undefined`/absent means `true` (the default behavior).
+   */
+  fischer?: boolean
   position: number
   traits: BiomoleculeTraits
   updatedAt?: string
@@ -144,6 +149,7 @@ export const biomoleculesApi = {
     traits: BiomoleculeTraits,
     projection?: string | null,
     haworth?: boolean,
+    fischer?: boolean,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/create-molecule", {
       categoryId,
@@ -152,6 +158,7 @@ export const biomoleculesApi = {
       projection: projection ?? null,
       traits,
       ...(haworth === undefined ? {} : { haworth }),
+      ...(fischer === undefined ? {} : { fischer }),
     }),
 
   /**
@@ -166,6 +173,7 @@ export const biomoleculesApi = {
     projection?: string | null,
     haworth?: boolean,
     categoryId?: string,
+    fischer?: boolean,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/update-molecule", {
       moleculeId,
@@ -175,6 +183,7 @@ export const biomoleculesApi = {
       traits,
       ...(haworth === undefined ? {} : { haworth }),
       ...(categoryId === undefined ? {} : { categoryId }),
+      ...(fischer === undefined ? {} : { fischer }),
     }),
 
   /**

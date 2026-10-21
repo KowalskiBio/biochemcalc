@@ -137,6 +137,7 @@ function PromptView({ prompt }: { prompt: QuizPrompt }) {
         smiles={prompt.smiles}
         projection={prompt.projection}
         haworth={prompt.haworth ?? true}
+        fischer={prompt.fischer ?? true}
         orientationDeg={prompt.orientationDeg}
         size={220}
         grow
@@ -208,6 +209,7 @@ function OptionButton({
             smiles={option.smiles ?? ""}
             projection={option.projection}
             haworth={option.haworth ?? true}
+            fischer={option.fischer ?? true}
             orientationDeg={option.orientationDeg}
             size={150}
           />
@@ -956,9 +958,7 @@ export function BiomoleculesQuizPage() {
   // picker URL, so the hub is used instead — navigating to the current route
   // would look like a dead link.
   const runBackHref =
-    activeQuiz.slug === ALL_CATEGORIES_VALUE
-      ? "/biomolekuly"
-      : `/biomolekuly/${activeQuiz.slug}`
+    activeQuiz.slug === ALL_CATEGORIES_VALUE ? "/biomolekuly" : `/biomolekuly/${activeQuiz.slug}`
   const runBackLabel =
     activeQuiz.slug === ALL_CATEGORIES_VALUE
       ? cs.biomolekuly.backToCategories

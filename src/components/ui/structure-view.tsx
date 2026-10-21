@@ -23,6 +23,12 @@ export interface StructureViewProps {
    * force skeletal rendering and ignore Haworth projections; default true.
    */
   haworth?: boolean
+  /**
+   * Gate open-chain sugar auto-recognition into a Fischer projection (runs
+   * only when no sugar ring is recognized — mutually exclusive by structure).
+   * Default true.
+   */
+  fischer?: boolean
   /** Square canvas side length in px. */
   size?: number
   /**
@@ -169,6 +175,7 @@ function SmilesStructureView({
   grow = false,
   maxWidth,
   haworth = true,
+  fischer = true,
 }: StructureViewProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -225,6 +232,7 @@ function SmilesStructureView({
       bondLength: 24,
       natural: grow,
       haworth,
+      fischer,
     })
     if (rendered === null) {
       setHasError(true)
@@ -243,7 +251,7 @@ function SmilesStructureView({
     }
     // onValidityChange is intentionally not a dependency: its identity can
     // change per parent render, and only real inputs should trigger a redraw.
-  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth, haworth])
+  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth, haworth, fischer])
 
   return (
     <div

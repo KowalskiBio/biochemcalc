@@ -911,6 +911,7 @@ function MoleculeBrowser({
 
   const facts = selected ? moleculeFacts(selected) : []
   const selectedHaworthOk = selected?.haworth ?? true
+  const selectedFischerOk = selected?.fischer ?? true
 
   return (
     <>
@@ -934,6 +935,7 @@ function MoleculeBrowser({
                   smiles={molecule.smiles}
                   projection={haworthOk ? projections.get(molecule.id) : undefined}
                   haworth={haworthOk}
+                  fischer={molecule.fischer ?? true}
                   size={140}
                   title={molecule.name}
                 />
@@ -972,6 +974,7 @@ function MoleculeBrowser({
                   smiles={selected.smiles}
                   projection={selectedHaworthOk ? projections.get(selected.id) : undefined}
                   haworth={selectedHaworthOk}
+                  fischer={selectedFischerOk}
                   size={260}
                   grow
                   title={selected.name}
@@ -1102,6 +1105,7 @@ function MoleculeFormDialog({
   const [inDna, setInDna] = useState(false)
   const [inRna, setInRna] = useState(false)
   const [haworth, setHaworth] = useState(true)
+  const [fischer, setFischer] = useState(true)
   const [facts, setFacts] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -1131,6 +1135,7 @@ function MoleculeFormDialog({
     setInDna(molecule ? traitOf(molecule, TRAIT.inDna) === "true" : false)
     setInRna(molecule ? traitOf(molecule, TRAIT.inRna) === "true" : false)
     setHaworth(molecule?.haworth ?? true)
+    setFischer(molecule?.fischer ?? true)
     setFacts(molecule ? moleculeFacts(molecule).join("\n") : "")
   }, [open, molecule, categoryId])
 
@@ -1180,6 +1185,7 @@ function MoleculeFormDialog({
           molecule.projection,
           haworth,
           moving ? targetCategory : undefined,
+          fischer,
         )
         toast({
           title: moving
@@ -1187,7 +1193,7 @@ function MoleculeFormDialog({
             : manage.saveSuccess,
         })
       } else {
-        await createMolecule(categoryId, name.trim(), smiles.trim(), traits, haworth)
+        await createMolecule(categoryId, name.trim(), smiles.trim(), traits, haworth, fischer)
         toast({ title: manage.saveSuccess })
       }
       onOpenChange(false)
@@ -1332,6 +1338,7 @@ function MoleculeFormDialog({
                 <StructureView
                   smiles={smiles.trim()}
                   haworth={haworth}
+                  fischer={fischer}
                   size={180}
                   title={smiles.trim()}
                   onValidityChange={setSmilesValid}
@@ -1376,8 +1383,17 @@ function MoleculeFormDialog({
               >
                 {manage.haworthLabel}
               </button>
+              <button
+                type="button"
+                aria-pressed={fischer}
+                onClick={() => setFischer((v) => !v)}
+                className={flagButtonClass(fischer)}
+              >
+                {manage.fischerLabel}
+              </button>
             </div>
             <p className="text-xs text-muted-foreground">{manage.haworthHint}</p>
+            <p className="text-xs text-muted-foreground">{manage.fischerHint}</p>
           </div>
 
           {kind === "aminoAcids" && (
