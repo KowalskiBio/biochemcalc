@@ -484,6 +484,19 @@ mod tests {
         assert!(!verify_password("wrong password", &hash));
     }
 
+    /// The developer snapshot (deploy/dbpull-snapshot.sh) sets every password
+    /// to one hard-coded hash; DEPLOY.md promises it is `devpassword1`.
+    #[test]
+    fn snapshot_dev_hash_is_devpassword1() {
+        let script = include_str!("../../../deploy/dbpull-snapshot.sh");
+        let hash = script
+            .lines()
+            .find_map(|line| line.strip_prefix("DEV_HASH='"))
+            .and_then(|rest| rest.strip_suffix('\''))
+            .expect("DEV_HASH='…' line in dbpull-snapshot.sh");
+        assert!(verify_password("devpassword1", hash));
+    }
+
     #[test]
     fn register_consumes_invite_code_and_creates_session() {
         let conn = setup_conn();

@@ -4,13 +4,25 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { extractErrorMessage } from "@/lib/api"
+import { ApiError } from "@/lib/api"
 import { useAuthStore } from "@/stores/auth-store"
 
+// The server words its errors in English; map the ones a student can hit here
+// (the browser already enforces username, password length and email format).
+function registerErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "conflict") {
+      return error.message.includes("email") ? cs.auth.emailTaken : cs.auth.usernameTaken
+    }
+    if (error.code === "validation" && error.message.includes("Invite code")) {
+      return cs.auth.inviteCodeInvalid
+    }
+  }
+  return cs.auth.registerError
+}
+
 export function RegisterPage() {
-  const { toast } = useToast()
   const navigate = useNavigate()
   const register = useAuthStore((s) => s.register)
 
@@ -19,18 +31,18 @@ export function RegisterPage() {
   const [inviteCode, setInviteCode] = useState("")
   const [email, setEmail] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Inline, not a toast: no <Toaster /> is mounted outside the app shells.
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
+    setError(null)
     try {
       await register(username.trim(), password, inviteCode.trim(), email.trim() || undefined)
       navigate("/", { replace: true })
-    } catch (error) {
-      toast({
-        title: extractErrorMessage(error, cs.auth.registerError),
-        variant: "destructive",
-      })
+    } catch (err) {
+      setError(registerErrorMessage(err))
     } finally {
       setIsSubmitting(false)
     }
@@ -93,6 +105,11 @@ export function RegisterPage() {
                 minLength={8}
               />
             </div>
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
             <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? cs.auth.registerButtonLoading : cs.auth.registerButton}
             </Button>
