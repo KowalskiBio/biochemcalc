@@ -36,6 +36,14 @@ const RECOGNIZED_EXAMPLES: ProjectionExample[] = [
   { name: "α-D-glukóza", smiles: "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O)O)O)O)O" },
   { name: "β-D-fruktóza", smiles: "OC[C@]1(O)[C@@H](O)[C@@H](O)[C@@H](CO)O1" },
   {
+    name: "D-glukóza (otevřený řetězec)",
+    smiles: "C([C@H]([C@H]([C@@H]([C@H](C=O)O)O)O)O)O",
+  },
+  {
+    name: "D-fruktóza (otevřený řetězec)",
+    smiles: "O=C(CO)[C@@H](O)[C@H](O)[C@H](O)CO",
+  },
+  {
     name: "adenosin (nukleotid, ribofuranóza)",
     smiles: "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O",
   },
@@ -132,7 +140,9 @@ export function BiomoleculesProjectionPage() {
           .map((form) =>
             form === "pyranose"
               ? cs.biomolekuly.projection.ringPyranose
-              : cs.biomolekuly.projection.ringFuranose,
+              : form === "furanose"
+                ? cs.biomolekuly.projection.ringFuranose
+                : cs.biomolekuly.projection.chainOpen,
           )
           .join(", ")
       : null

@@ -667,6 +667,8 @@ export const cs = {
       haworthHint: "Detekovat sacharidy a kreslit je Haworthovou projekcí.",
       haworthDisabledProjectionHint:
         "Haworthova projekce je pro tuto molekulu vypnutá; uložená projekce zůstává zachována.",
+      fischerLabel: "Fischerova projekce",
+      fischerHint: "Detekovat otevřené řetězce sacharidů a kreslit je Fischerovou projekcí.",
       unsetOption: "Neuvedeno",
       requiredHint: "Název a struktura jsou povinné, vše ostatní je nepovinné.",
       saveMolecule: "Uložit molekulu",
@@ -744,17 +746,18 @@ export const cs = {
     },
     projection: {
       title: "Haworthovy projekce",
-      description: "Ověřte, jak aplikace nakládá s vašimi SMILES řetězci u cyklických sacharidů.",
+      description: "Ověřte, jak aplikace nakládá s vašimi SMILES řetězci u sacharidů.",
       cardTitle: "Náhled SMILES",
       cardDescription:
-        "Vložte SMILES molekuly. Rozpoznáme-li v ní sacharidový prstenec, přepneme její zobrazení do Haworthovy projekce.",
+        "Vložte SMILES molekuly. Sacharidový prstenec vykreslíme Haworthovou projekcí, otevřený řetězec Fischerovou.",
       smilesLabel: "SMILES molekuly",
       smilesPlaceholder: "např. OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O",
       verdictRecognized: "Rozpoznáno jako sacharid:",
-      verdictNone: "Sacharidový prstenec nerozpoznán — zobrazí se pouze skelet.",
+      verdictNone: "Sacharid nerozpoznán — zobrazí se pouze skelet.",
       verdictInvalid: "SMILES se nepodařilo přečíst.",
       ringPyranose: "pyranózový prstenec",
       ringFuranose: "furanózový prstenec",
+      chainOpen: "otevřený řetězec (Fischer)",
       howItWorksTitle: "Jak rozpoznání funguje",
       howItWorksP1:
         "Cyklus o 5–6 atomech s jedním kyslíkem v kruhu (pyranóza / furanóza) se sestrojí jako Haworthova projekce, když všechny jeho substituované atomy mají v záznamu stereochemické značky (@ / @@), ze kterých lze odvodit strany vazeb.",
@@ -762,9 +765,11 @@ export const cs = {
         "Chybí-li stereochemie (nebo cyklus není cukr), zůstává běžné skeletové zobrazení — nástroj nikdy neodhadne strany vazeb, raději nic nesestrojí.",
       howItWorksP3:
         "U disacharidů se přes glykosidický kyslík navzájem polohují obě cukrové jednotky; nerozpoznaný cyklus zůstává skeletový.",
+      howItWorksP4:
+        "Otevřený řetězec sacharidu (aldehyd nebo keton na konci, řada −CH(OH)− center, konec −CH2OH) se vykreslí Fischerovou projekcí: hlavní řetězec svisle s karbonylem co nejvýše a hydroxyl skupiny vlevo/vpravo podle stereochemie.",
       examplesTitle: "Příklady",
       examplesDescription: "Kliknutím na příklad vložíte jeho SMILES do vstupu výše.",
-      examplesRecognizedTitle: "Rozpoznáno (Haworth)",
+      examplesRecognizedTitle: "Rozpoznáno (Haworth / Fischer)",
       examplesSkeletalTitle: "Nerozpoznáno (skeletové)",
     },
   },

@@ -45,6 +45,7 @@ interface BiomoleculeDataState {
     smiles: string,
     traits: BiomoleculeTraits,
     haworth?: boolean,
+    fischer?: boolean,
   ) => Promise<void>
   updateMolecule: (
     moleculeId: string,
@@ -54,6 +55,7 @@ interface BiomoleculeDataState {
     projection?: string | null,
     haworth?: boolean,
     categoryId?: string,
+    fischer?: boolean,
   ) => Promise<void>
   deleteMolecule: (moleculeId: string) => Promise<void>
   reorderTopics: (slugs: string[]) => Promise<void>
@@ -121,7 +123,7 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
-  createMolecule: async (categoryId, name, smiles, traits, haworth) => {
+  createMolecule: async (categoryId, name, smiles, traits, haworth, fischer) => {
     const data = await biomoleculesApi.createMolecule(
       categoryId,
       name,
@@ -129,11 +131,12 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
       traits,
       undefined,
       haworth,
+      fischer,
     )
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },
 
-  updateMolecule: async (moleculeId, name, smiles, traits, projection, haworth, categoryId) => {
+  updateMolecule: async (moleculeId, name, smiles, traits, projection, haworth, categoryId, fischer) => {
     const data = await biomoleculesApi.updateMolecule(
       moleculeId,
       name,
@@ -142,6 +145,7 @@ export const useBiomoleculeDataStore = create<BiomoleculeDataState>((set, get) =
       projection,
       haworth,
       categoryId,
+      fischer,
     )
     set({ topics: data.topics, categories: data.categories, molecules: data.molecules })
   },

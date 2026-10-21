@@ -17,6 +17,11 @@
 
 import type { Point } from "@/lib/molecules/orientation"
 import {
+  drawFischer,
+  drawingToSvg,
+  recognizeOpenChainSugar,
+} from "@/lib/molecules/render/fischer-layout"
+import {
   applyHaworthLayout,
   type HaworthPreprocessor,
   type HOHint,
@@ -65,8 +70,8 @@ export interface HaworthOverlay {
 
 /** Result of the one entry point Phase 3 consumes. */
 export interface PreparedStructure {
-  recognized: "haworth" | false
-  /** Final depiction markup (RDKit SVG). */
+  recognized: "haworth" | "fischer" | false
+  /** Final depiction markup (RDKit SVG for classic paths, projection SVG for Fischer). */
   svg: string
   /** Present only when `recognized === "haworth"`. */
   overlay?: HaworthOverlay
@@ -88,6 +93,8 @@ export interface HaworthLayoutOptions {
   natural?: boolean
   /** False skips saccharide recognition entirely; default true. */
   haworth?: boolean
+  /** False skips open-chain (Fischer) recognition; default true. Runs only when no sugar ring is recognized. */
+  fischer?: boolean
 }
 
 interface ResolvedOptions {
@@ -96,6 +103,7 @@ interface ResolvedOptions {
   bondLength: number
   natural: boolean
   haworth: boolean
+  fischer: boolean
 }
 
 /** Recognition + post-layout geometry, useful for tests and diagnostics. */
@@ -239,6 +247,18 @@ export function prepareStructureRender(
   const { mol } = session
   try {
     if (!session.recognized) {
+      // Open-chain sugars never become a Haworth ring; draw them as a Fischer
+      // projection instead when enabled (mutually exclusive by structure).
+      if (opts.fischer) {
+        const fischer = recognizeOpenChainSugar(session.graphSnapshot, session.chirality)
+        if (fischer !== null) {
+          return {
+            recognized: "fischer",
+            svg: drawingToSvg(drawFischer(fischer)),
+            molblock: getMolBlock(mol),
+          }
+        }
+      }
       return {
         recognized: false,
         svg: opts.natural
@@ -576,5 +596,6 @@ function resolveOptions(options: HaworthLayoutOptions): ResolvedOptions {
     bondLength: options.bondLength ?? DEFAULT_BOND_LENGTH,
     natural: options.natural === true,
     haworth: options.haworth !== false,
+    fischer: options.fischer !== false,
   }
 }

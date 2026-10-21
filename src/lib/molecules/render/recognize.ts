@@ -56,7 +56,17 @@ export interface SugarRingRecognition {
 }
 
 const ATOMIC_NUMBER: Record<string, number> = {
-  H: 1, B: 5, C: 6, N: 7, O: 8, F: 9, P: 15, S: 16, Cl: 17, Br: 35, I: 53,
+  H: 1,
+  B: 5,
+  C: 6,
+  N: 7,
+  O: 8,
+  F: 9,
+  P: 15,
+  S: 16,
+  Cl: 17,
+  Br: 35,
+  I: 53,
 }
 
 const MAX_DEPTH = 8
@@ -75,8 +85,11 @@ function atomicZ(snapshot: GraphSnapshot, vertexId: number): number {
  * level-by-level over sorted sphere digests; returns 1 when left outranks
  * right, −1 the opposite, 0 when undecided — the strict caller then refuses
  * to recognize the ring.
+ *
+ * Exported for the Fischer recognizer: it needs the same "which drawn chain
+ * neighbour outranks" answer to place each stereocenter's OH left/right.
  */
-function comparePriorities(
+export function comparePriorities(
   snapshot: GraphSnapshot,
   root: number,
   left: number,
@@ -319,7 +332,9 @@ function cycleOrder(ring: SnapshotRing, snapshot: GraphSnapshot): number[] | nul
   const remaining = new Set(ring.members.slice(1))
   while (remaining.size > 0) {
     const last = order[order.length - 1]
-    const next = (snapshot.adjacency.get(last) ?? []).find((n) => remaining.has(n) && members.has(n))
+    const next = (snapshot.adjacency.get(last) ?? []).find(
+      (n) => remaining.has(n) && members.has(n),
+    )
     if (next === undefined) {
       return null
     }
@@ -367,7 +382,10 @@ export function recognizeSugarRings(snapshot: GraphSnapshot): SugarRingRecogniti
   return plans
 }
 
-function recognizeSingleRing(snapshot: GraphSnapshot, ring: SnapshotRing): SugarRingRecognition | null {
+function recognizeSingleRing(
+  snapshot: GraphSnapshot,
+  ring: SnapshotRing,
+): SugarRingRecognition | null {
   if (ring.members.length !== 5 && ring.members.length !== 6) {
     return null
   }

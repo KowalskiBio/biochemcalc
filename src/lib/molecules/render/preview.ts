@@ -7,7 +7,7 @@ import { ensureRdkit } from "@/lib/molecules/render/rdkit-engine"
 export type RecognitionVerdict =
   | { status: "invalid" }
   | { status: "none" }
-  | { status: "recognized"; forms: ("pyranose" | "furanose")[] }
+  | { status: "recognized"; forms: ("pyranose" | "furanose" | "fischer")[] }
 
 /**
  * Prepare the depiction and decide whether any sugar-like ring is recognized.
@@ -23,6 +23,9 @@ export async function previewRecognition(smiles: string): Promise<RecognitionVer
   const prepared = prepareStructureRender(smiles, { width: 320, height: 240 })
   if (prepared === null) {
     return { status: "invalid" }
+  }
+  if (prepared.recognized === "fischer") {
+    return { status: "recognized", forms: ["fischer"] }
   }
   if (prepared.recognized !== "haworth") {
     return { status: "none" }

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 54;
+const CURRENT_USER_VERSION: u32 = 55;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -276,6 +276,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 54 {
         apply_migration_v54(conn)?;
         conn.pragma_update(None, "user_version", "54")?;
+    }
+
+    if user_version < 55 {
+        apply_migration_v55(conn)?;
+        conn.pragma_update(None, "user_version", "55")?;
     }
 
     Ok(())
@@ -1562,6 +1567,9 @@ fn apply_migration_v47(conn: &Connection) -> Result<(), rusqlite::Error> {
             -- Whether the client should recognize saccharides and draw a
             -- Haworth projection instead of a plain skeletal structure (v52).
             haworth INTEGER NOT NULL DEFAULT 1,
+            -- Whether the client should recognize open-chain sugars and draw a
+            -- Fischer projection instead of a plain skeletal structure (v54).
+            fischer INTEGER NOT NULL DEFAULT 1,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
@@ -1858,6 +1866,37 @@ fn apply_migration_v54(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute(
             "UPDATE users SET sections = 'both' WHERE role = 'teacher'",
             [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Per-molecule switch between the plain skeletal depiction and the Fischer
+/// projection for open-chain sugars. Existing rows default to 1 (true) so an
+/// upgrade keeps the current detection behavior.
+fn apply_migration_v55(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // Fresh databases already get the column from v47's CREATE TABLE; older
+    // ones need the additive ALTER here. A synthetic pre-v47 database (some
+    // migration tests) has no biomolecules table at all — then there is
+    // nothing to alter.
+    let has_molecules: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'biomolecules')",
+        [],
+        |row| row.get(0),
+    )?;
+    let has_fischer: bool = has_molecules
+        && conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('biomolecules')
+                            WHERE name = 'fischer')",
+            [],
+            |row| row.get(0),
+        )?;
+    if has_molecules && !has_fischer {
+        conn.execute_batch(
+            "
+            ALTER TABLE biomolecules ADD COLUMN fischer INTEGER NOT NULL DEFAULT 1;
+            ",
         )?;
     }
     Ok(())
@@ -3164,6 +3203,64 @@ mod tests {
             )
             .expect("old row readable after v52");
         assert_eq!(haworth, 1, "existing molecules keep Haworth detection on");
+    }
+
+    #[test]
+    fn v55_adds_a_non_null_fischer_flag_defaulting_to_true() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // A database that already ran v54: projection AND haworth exist, but
+        // fischer does not.
+        conn.execute_batch(
+            "
+            CREATE TABLE biomolecules (
+                id BLOB PRIMARY KEY NOT NULL,
+                category_slug TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                name TEXT NOT NULL,
+                smiles TEXT NOT NULL,
+                projection TEXT,
+                haworth INTEGER NOT NULL DEFAULT 1,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                created_by BLOB,
+                updated_at TEXT NOT NULL,
+                updated_by BLOB,
+                UNIQUE (category_slug, slug)
+            );
+            INSERT INTO biomolecules
+                (id, category_slug, slug, name, smiles, projection, haworth, created_at, updated_at)
+            VALUES
+                (randomblob(16), 'sacharidy', 'glukoza-otevrena', 'D-glukóza (otevřená)',
+                 'O=CC(O)C(O)C(O)C(O)CO', NULL, 1,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .expect("pre-v55 library");
+        conn.pragma_update(None, "user_version", "54")
+            .expect("set version");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (notnull, dflt): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT \"notnull\", dflt_value FROM pragma_table_info('biomolecules')
+                 WHERE name = 'fischer'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("fischer must exist after v54");
+        assert_eq!(notnull, 1, "fischer must be NOT NULL");
+        assert_eq!(dflt.as_deref(), Some("1"), "fischer must default to 1");
+
+        let fischer: i64 = conn
+            .query_row(
+                "SELECT fischer FROM biomolecules WHERE slug = 'glukoza-otevrena'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("old row readable after v54");
+        assert_eq!(fischer, 1, "existing molecules keep Fischer detection on");
     }
 
     #[test]

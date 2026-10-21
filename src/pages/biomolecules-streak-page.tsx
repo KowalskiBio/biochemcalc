@@ -121,6 +121,7 @@ function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: bool
         smiles={prompt.smiles}
         projection={prompt.projection}
         haworth={prompt.haworth ?? true}
+        fischer={prompt.fischer ?? true}
         orientationDeg={prompt.orientationDeg}
         size={220}
         grow
@@ -192,6 +193,7 @@ function OptionButton({
             smiles={option.smiles ?? ""}
             projection={option.projection}
             haworth={option.haworth ?? true}
+            fischer={option.fischer ?? true}
             orientationDeg={option.orientationDeg}
             size={150}
             className={cn(grayscale && "[&_svg]:grayscale")}
@@ -400,9 +402,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   }
 
   const showResults = () => {
-    setRun((current) =>
-      current?.phase === "failed" ? { ...current, phase: "results" } : current,
-    )
+    setRun((current) => (current?.phase === "failed" ? { ...current, phase: "results" } : current))
   }
 
   // The live timer: ticks once a second while the run is active, freezes the
