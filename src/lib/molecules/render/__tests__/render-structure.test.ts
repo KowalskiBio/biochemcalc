@@ -7,6 +7,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import {
   ATOM_COLOR_NEUTRAL,
+  ATOM_COLOR_NEUTRAL_DARK,
   ATOM_COLOR_NITROGEN,
   ATOM_COLOR_OXYGEN,
   ATOM_COLOR_PHOSPHORUS,
@@ -596,11 +597,12 @@ describe("natural-size rendering", () => {
     // The opt-in flag must not disturb grids, previews or option lists.
     // Chlorophyll's digest was re-recorded after the annelated-ring fix
     // centred its Mg and added the four coordination lines; all three were
-    // re-recorded when the atom-palette remap recoloured the heteroatoms.
+    // re-recorded when the atom-palette remap recoloured the heteroatoms, and
+    // again when the neutral ink moved to the theme's paper tones.
     const golden: Record<string, string> = {
-      cholesterol: "39110e3b",
-      chlorophyll: "e2c28894",
-      glucose: "aaa96ac3",
+      cholesterol: "1b49f2e5",
+      chlorophyll: "b8b6c80a",
+      glucose: "c12a457b",
     }
     expect(digest(render(CHOLESTEROL, { natural: false }).svg.outerHTML)).toBe(golden.cholesterol)
     expect(digest(render(CHLOROPHYLL_PUBCHEM, { natural: false }).svg.outerHTML)).toBe(
@@ -648,7 +650,7 @@ describe("natural-size rendering", () => {
 })
 
 describe("theme", () => {
-  it("uses no black ink in dark mode", () => {
+  it("swaps the neutral ink for the dark one in dark mode", () => {
     const { svg } = render(TRUE_BETA_GLUCOSE, { theme: "dark" })
     for (const element of Array.from(svg.querySelectorAll("*"))) {
       for (const attribute of ["fill", "stroke", "style"]) {
@@ -658,6 +660,7 @@ describe("theme", () => {
         }
       }
     }
+    expect(svg.outerHTML.toLowerCase()).toContain(ATOM_COLOR_NEUTRAL_DARK.toLowerCase())
   })
 
   it("recolours heteroatoms to the app palette in both themes, with no RDKit hex left", () => {
@@ -680,6 +683,32 @@ describe("theme", () => {
             hex.toLowerCase(),
           )
         }
+      }
+    }
+  })
+})
+
+describe("monochrome", () => {
+  it("draws the whole structure — bonds and labels — in the single theme ink", () => {
+    // Mistr's quiz prompt hides the atom colour coding, so alanine's
+    // nitrogen and oxygen crush to the neutral ink along with the bonds,
+    // and nothing of the palette (or the other theme's ink) survives.
+    const cases: [theme: "light" | "dark", ink: string][] = [
+      ["light", ATOM_COLOR_NEUTRAL],
+      ["dark", ATOM_COLOR_NEUTRAL_DARK],
+    ]
+    const hidden = Object.values(RDKIT_DEFAULT_ATOM_COLORS).concat(
+      ATOM_COLOR_NEUTRAL,
+      ATOM_COLOR_NEUTRAL_DARK,
+    )
+    for (const [theme, ink] of cases) {
+      const markup = render(ALANINE, { theme, monochrome: true }).svg.outerHTML.toLowerCase()
+      expect(markup, `alanine monochrome (${theme}) uses the ink`).toContain(ink.toLowerCase())
+      for (const colour of hidden) {
+        if (colour === ink) continue
+        expect(markup, `alanine monochrome (${theme}) hides ${colour}`).not.toContain(
+          colour.toLowerCase(),
+        )
       }
     }
   })

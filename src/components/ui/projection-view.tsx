@@ -18,6 +18,13 @@ export interface ProjectionViewProps {
    */
   mirror?: boolean
   className?: string
+  /**
+   * Draw in the single Mistr ink — the theme's neutral atom ink (#16281F
+   * light, #FCFCF8 dark) — instead of the surrounding text colour. The
+   * projection has no atom palette to hide, but Mistr insists on one flat
+   * ink across the whole depiction, projections included. Default false.
+   */
+  monochrome?: boolean
   /** Accessible name for the wrapper's `role="img"`. */
   ariaLabel: string
 }
@@ -36,13 +43,15 @@ const BOLD_STROKE_WIDTH = STROKE_WIDTH * 2.2
  *
  * Everything strokes/fills with `currentColor` against a transparent
  * background — the drawing follows the surrounding text color instead of a
- * baked-in light/dark theme, and the streak page's `[&_svg]:grayscale` Mistr
- * filter keeps working, since the projection is a plain `<svg>`.
+ * baked-in light/dark theme. Mistr sets `monochrome` to pin that colour to
+ * the app atom ink, matching what `applyTheme` does to the SMILES
+ * depictions.
  */
 export function ProjectionView({
   spec,
   orientationDeg,
   mirror,
+  monochrome = false,
   className,
   ariaLabel,
 }: ProjectionViewProps) {
@@ -66,7 +75,7 @@ export function ProjectionView({
         width={drawing.width}
         height={drawing.height}
         aria-hidden="true"
-        className="text-foreground"
+        className={cn("text-foreground", monochrome && "text-[#16281F] dark:text-[#FCFCF8]")}
       >
         {drawing.elements.map((element, index) =>
           element.kind === "line" ? (

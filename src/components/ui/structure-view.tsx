@@ -63,6 +63,13 @@ export interface StructureViewProps {
   mirror?: boolean
   /** Drawing theme. Defaults to the app theme from `useUiStore`. */
   theme?: "light" | "dark"
+  /**
+   * Draw the whole structure — bonds and atom labels alike — in the theme's
+   * single neutral ink, hiding the colour coding. Mistr quiz prompts use
+   * this so the palette can't give away part of the answer. On the
+   * projection branch it swaps the label ink instead. Default false.
+   */
+  monochrome?: boolean
   className?: string
   /** Accessible name; falls back to the SMILES string when omitted. */
   title?: string
@@ -127,6 +134,7 @@ function ProjectionStructureView({
   className,
   title,
   smiles,
+  monochrome,
   onValidityChange,
 }: StructureViewProps & { projection: ProjectionSpec }) {
   useEffect(() => {
@@ -139,6 +147,7 @@ function ProjectionStructureView({
       spec={projection}
       orientationDeg={orientationDeg}
       mirror={mirror}
+      monochrome={monochrome}
       className={className}
       ariaLabel={title ?? smiles}
     />
@@ -169,6 +178,7 @@ function SmilesStructureView({
   orientationDeg = 0,
   mirror = false,
   theme,
+  monochrome = false,
   className,
   title,
   onValidityChange,
@@ -229,6 +239,7 @@ function SmilesStructureView({
       orientationDeg,
       mirror,
       theme: resolvedTheme,
+      monochrome,
       bondLength: 24,
       natural: grow,
       haworth,
@@ -251,7 +262,7 @@ function SmilesStructureView({
     }
     // onValidityChange is intentionally not a dependency: its identity can
     // change per parent render, and only real inputs should trigger a redraw.
-  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth, haworth, fischer])
+  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, monochrome, grow, maxWidth, haworth, fischer])
 
   return (
     <div

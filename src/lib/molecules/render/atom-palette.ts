@@ -9,8 +9,9 @@
 // a glucose ring oxygen and a calculation variable speak one accent language.
 // Like the variable accents, the same hexes serve both themes — the atom
 // letter itself carries identity, so the -600 shades need no per-theme
-// variant. The neutral carbon ink keeps the classic black/white swap
-// (applyTheme in svg-post.ts).
+// variant. The neutral carbon ink sits just off pure black/white
+// (applyTheme in svg-post.ts swaps one for the other, and Mistr's single-ink
+// monochrome mode draws the whole structure in it).
 //
 // Scope is deliberately the four heteroatoms this app's biomolecules actually
 // contain: oxygen everywhere, nitrogen in amino acids / bases / nucleotides /
@@ -38,10 +39,19 @@ export const ATOM_COLOR_SULFUR = "#CCCC00"
  */
 export const ATOM_COLOR_PHOSPHORUS = "#EA580C"
 
-/** Neutral ink — carbon chains and hydrogens — in the light theme. */
-export const ATOM_COLOR_NEUTRAL = "#000000"
-/** Neutral ink in the dark theme (applyTheme swaps the light ink for it). */
-export const ATOM_COLOR_NEUTRAL_DARK = "#FFFFFF"
+/**
+ * Neutral ink — carbon chains and hydrogens — in the light theme. Not pure
+ * black: the theme's darkest surface tone (--color-sidebar #16281F in
+ * tokens.css), which softens the depiction against the paper background
+ * without losing the skeletal contrast.
+ */
+export const ATOM_COLOR_NEUTRAL = "#16281F"
+/**
+ * Neutral ink in the dark theme (applyTheme swaps the light ink for it).
+ * Not pure white: near-white with a warm/paper bias (#FCFCF8) so dark-mode
+ * structures stop flaring against the muted palette.
+ */
+export const ATOM_COLOR_NEUTRAL_DARK = "#FCFCF8"
 
 /**
  * RDKit's default heteroatom hexes → the app palette, keys uppercase. The
