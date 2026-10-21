@@ -15,6 +15,10 @@
 // tokenizes the class attribute and tests exact membership.
 
 import type { Point } from "@/lib/molecules/orientation"
+import {
+  ATOM_COLOR_NEUTRAL_DARK,
+  RDKIT_DEFAULT_ATOM_COLORS,
+} from "@/lib/molecules/render/atom-palette"
 import type { MolGraphSnapshot } from "@/lib/molecules/render/rdkit-engine"
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -347,12 +351,47 @@ function isWhite(fill: string): boolean {
 }
 
 /**
- * Theme the depiction. The RDKit background rect is always removed (the app's
- * wrapper is transparent). Light leaves the black ink alone; dark recolours
- * neutral black strokes/fills to white and leaves the heteroatom palette
- * (red oxygen, blue nitrogen, …) untouched.
+ * Recolour RDKit's legacy heteroatom hexes to the app atom palette
+ * (atom-palette.ts). RDKit carries each glyph's hue twice — a fill/stroke
+ * attribute plus an inline `style="fill:#…"` fragment — and the remap table
+ * is keyed uppercase, so both the attribute pass and the style regex match
+ * case-insensitively. Runs before the light/dark ink switch: the heteroatom
+ * palette is theme-independent, like the calculations variable accents it
+ * derives from, and none of its hexes is the neutral ink the dark pass
+ * touches.
+ */
+function remapAtomPalette(svg: Element): void {
+  for (const element of Array.from(svg.querySelectorAll("*"))) {
+    for (const attribute of ["fill", "stroke"]) {
+      const value = element.getAttribute(attribute)
+      const replacement =
+        value === null ? undefined : RDKIT_DEFAULT_ATOM_COLORS[value.trim().toUpperCase()]
+      if (replacement !== undefined) {
+        element.setAttribute(attribute, replacement)
+      }
+    }
+    const style = element.getAttribute("style")
+    if (style?.includes("#")) {
+      element.setAttribute(
+        "style",
+        style.replace(
+          /#[0-9a-f]{6}/gi,
+          (match) => RDKIT_DEFAULT_ATOM_COLORS[match.toUpperCase()] ?? match,
+        ),
+      )
+    }
+  }
+}
+
+/**
+ * Theme the depiction. RDKit's heteroatom hexes are first recoloured to the
+ * app atom palette (same hexes in both themes — see atom-palette.ts), and the
+ * RDKit background rect is always removed (the app's wrapper is transparent).
+ * Light then leaves the black ink alone; dark recolours neutral black
+ * strokes/fills to white and leaves the heteroatom palette untouched.
  */
 export function applyTheme(svg: Element, theme: "light" | "dark"): void {
+  remapAtomPalette(svg)
   for (const rect of Array.from(svg.querySelectorAll("rect"))) {
     const style = rect.getAttribute("style") ?? ""
     const fill = rect.getAttribute("fill") ?? ""
@@ -367,12 +406,12 @@ export function applyTheme(svg: Element, theme: "light" | "dark"): void {
     for (const attribute of ["fill", "stroke"]) {
       const value = element.getAttribute(attribute)
       if (value !== null && /^#000000$/i.test(value.trim())) {
-        element.setAttribute(attribute, "#FFFFFF")
+        element.setAttribute(attribute, ATOM_COLOR_NEUTRAL_DARK)
       }
     }
     const style = element.getAttribute("style")
     if (style !== null) {
-      element.setAttribute("style", style.replace(/#000000/gi, "#FFFFFF"))
+      element.setAttribute("style", style.replace(/#000000/gi, ATOM_COLOR_NEUTRAL_DARK))
     }
   }
 }

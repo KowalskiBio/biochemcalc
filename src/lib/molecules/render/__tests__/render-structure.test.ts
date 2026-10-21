@@ -5,6 +5,14 @@
 // (jsdom has no getBBox), the same way the production helpers do.
 
 import { beforeAll, describe, expect, it } from "vitest"
+import {
+  ATOM_COLOR_NEUTRAL,
+  ATOM_COLOR_NITROGEN,
+  ATOM_COLOR_OXYGEN,
+  ATOM_COLOR_PHOSPHORUS,
+  ATOM_COLOR_SULFUR,
+  RDKIT_DEFAULT_ATOM_COLORS,
+} from "@/lib/molecules/render/atom-palette"
 import { ensureRdkit, parseMol, snapshotFromMol } from "@/lib/molecules/render/rdkit-engine"
 import {
   type RenderedStructure,
@@ -24,6 +32,8 @@ beforeAll(async () => {
 const TRUE_BETA_GLUCOSE = "C([C@@H]1[C@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O"
 const CANDIDATE_BETA_GALACTOSE = "C([C@@H]1[C@@H]([C@@H]([C@H]([C@@H](O1)O)O)O)O)O"
 const ALANINE = "N[C@@H](C)C(=O)O"
+const CYSTEINE = "C([C@@H](C(=O)O)N)S"
+const AMP = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
 const SUCROSE =
   "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O[C@]2([C@H]([C@@H]([C@H](O2)CO)O)O)CO)O)O)O)O"
 const ADENOSINE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
@@ -346,11 +356,11 @@ describe("Fischer projections", () => {
     expect(texts.filter((text) => text === "C")).toHaveLength(2)
     expect(texts.filter((text) => text === "2")).toHaveLength(1)
     expect(texts.filter((text) => text === "O").length).toBeGreaterThan(0)
-    // At least one oxygen takes the app's atom-red palette color.
+    // At least one oxygen takes the app atom palette's oxygen red.
     const oxygens = Array.from(svg.querySelectorAll("text")).filter(
       (node) => node.textContent === "O",
     )
-    expect(oxygens.some((node) => node.getAttribute("fill") === "#FF0000")).toBe(true)
+    expect(oxygens.some((node) => node.getAttribute("fill") === ATOM_COLOR_OXYGEN)).toBe(true)
   })
 
   it("suppresses the Fischer projection when fischer is false", () => {
@@ -377,7 +387,7 @@ describe("Fischer projections", () => {
     expect(spineXs.size).toBe(1)
     const spineX = verticalXValues[0]
     const rightOxygen = oxygens.find((node) => Number(node.getAttribute("x")) > spineX + 20)
-    expect(rightOxygen?.getAttribute("fill")).toBe("#FF0000")
+    expect(rightOxygen?.getAttribute("fill")).toBe(ATOM_COLOR_OXYGEN)
   })
 
   it("keeps cyclic sugars on the Haworth path (mutual exclusion)", () => {
@@ -585,11 +595,12 @@ describe("natural-size rendering", () => {
     // Digests recorded from the fixed-size path before natural sizing existed.
     // The opt-in flag must not disturb grids, previews or option lists.
     // Chlorophyll's digest was re-recorded after the annelated-ring fix
-    // centred its Mg and added the four coordination lines.
+    // centred its Mg and added the four coordination lines; all three were
+    // re-recorded when the atom-palette remap recoloured the heteroatoms.
     const golden: Record<string, string> = {
-      cholesterol: "ba9366cd",
-      chlorophyll: "b9a9b367",
-      glucose: "0d66270f",
+      cholesterol: "39110e3b",
+      chlorophyll: "e2c28894",
+      glucose: "aaa96ac3",
     }
     expect(digest(render(CHOLESTEROL, { natural: false }).svg.outerHTML)).toBe(golden.cholesterol)
     expect(digest(render(CHLOROPHYLL_PUBCHEM, { natural: false }).svg.outerHTML)).toBe(
@@ -637,19 +648,39 @@ describe("natural-size rendering", () => {
 })
 
 describe("theme", () => {
-  it("uses no black ink in dark mode and keeps the heteroatom palette", () => {
+  it("uses no black ink in dark mode", () => {
     const { svg } = render(TRUE_BETA_GLUCOSE, { theme: "dark" })
     for (const element of Array.from(svg.querySelectorAll("*"))) {
       for (const attribute of ["fill", "stroke", "style"]) {
         const value = element.getAttribute(attribute)
         if (value !== null) {
-          expect(value.toLowerCase()).not.toContain("#000000")
+          expect(value.toLowerCase()).not.toContain(ATOM_COLOR_NEUTRAL.toLowerCase())
         }
       }
     }
-    const styles = Array.from(svg.querySelectorAll("path")).map(
-      (path) => path.getAttribute("style") ?? "",
-    )
-    expect(styles.some((style) => style.includes("#FF0000"))).toBe(true)
+  })
+
+  it("recolours heteroatoms to the app palette in both themes, with no RDKit hex left", () => {
+    // Glucose covers oxygen, alanine adds nitrogen, cysteine adds sulfur,
+    // AMP adds phosphorus. The theme never re-tints the palette — like the
+    // calculations variable accents, the same hexes serve light and dark.
+    const cases: [name: string, smiles: string, accent: string][] = [
+      ["glucose", TRUE_BETA_GLUCOSE, ATOM_COLOR_OXYGEN],
+      ["alanine", ALANINE, ATOM_COLOR_NITROGEN],
+      ["cysteine", CYSTEINE, ATOM_COLOR_SULFUR],
+      ["amp", AMP, ATOM_COLOR_PHOSPHORUS],
+    ]
+    const legacy = Object.keys(RDKIT_DEFAULT_ATOM_COLORS)
+    for (const [name, smiles, accent] of cases) {
+      for (const theme of ["light", "dark"] as const) {
+        const markup = render(smiles, { theme }).svg.outerHTML.toLowerCase()
+        expect(markup, `${name} (${theme}) carries its accent`).toContain(accent.toLowerCase())
+        for (const hex of legacy) {
+          expect(markup, `${name} (${theme}) drops RDKit's ${hex}`).not.toContain(
+            hex.toLowerCase(),
+          )
+        }
+      }
+    }
   })
 })

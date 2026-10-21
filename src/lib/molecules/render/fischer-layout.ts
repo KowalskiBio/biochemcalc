@@ -13,6 +13,7 @@
 // stereocenters as plain crossings (no carbon letter), OH / HO labels
 // following the left-flip idiom.
 
+import { ATOM_COLOR_NEUTRAL, ATOM_COLOR_OXYGEN } from "@/lib/molecules/render/atom-palette"
 import type { DrawingElement, ProjectionDrawing } from "@/lib/molecules/render/projection"
 import { comparePriorities, type GraphSnapshot } from "@/lib/molecules/render/recognize"
 
@@ -325,6 +326,10 @@ export function recognizeOpenChainSugar(
 const STROKE_WIDTH = 1.5
 const BOLD_STROKE_WIDTH = STROKE_WIDTH * 2.2
 
+// Atom colours (ATOM_COLOR_OXYGEN / ATOM_COLOR_NEUTRAL) come from the shared
+// app palette — see atom-palette.ts — so a Fischer projection matches the
+// RDKit depictions exactly; the dark-theme ink swap in applyTheme takes care
+// of the neutral parts.
 /** Plain SVG markup for shared drawing elements, styled like a projection. */
 export function drawingToSvg(drawing: ProjectionDrawing): string {
   const parts: string[] = []
@@ -332,10 +337,10 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
     if (element.kind === "line") {
       const width = element.bold === true ? BOLD_STROKE_WIDTH : STROKE_WIDTH
       parts.push(
-        `<line x1='${element.x1}' y1='${element.y1}' x2='${element.x2}' y2='${element.y2}' stroke='#000000' stroke-width='${width}' stroke-linecap='round'/>`,
+        `<line x1='${element.x1}' y1='${element.y1}' x2='${element.x2}' y2='${element.y2}' stroke='${ATOM_COLOR_NEUTRAL}' stroke-width='${width}' stroke-linecap='round'/>`,
       )
     } else {
-      const fill = element.fill ?? "#000000"
+      const fill = element.fill ?? ATOM_COLOR_NEUTRAL
       const fontSize = element.fontSize ?? 11
       const text = element.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       parts.push(
@@ -346,9 +351,6 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
   return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${drawing.width} ${drawing.height}' width='${drawing.width}' height='${drawing.height}'>${parts.join("")}</svg>`
 }
 
-/** Atom palette — the exact values the app's RDKit depictions use. */
-const ATOM_COLOR_OXYGEN = "#FF0000"
-const ATOM_COLOR_NEUTRAL = "#000000"
 /** Subscript digits sit this many px below the label baseline. */
 const SUBSCRIPT_DROP = 4
 const SUBSCRIPT_SIZE = 8

@@ -3,6 +3,10 @@
 // aldoses/ketoses. Golden sides come from the textbook Fischer patterns.
 import { beforeAll, describe, expect, it } from "vitest"
 
+import {
+  ATOM_COLOR_NEUTRAL,
+  ATOM_COLOR_OXYGEN,
+} from "@/lib/molecules/render/atom-palette"
 import { drawFischer, recognizeOpenChainSugar } from "@/lib/molecules/render/fischer-layout"
 import { haworthLayoutOf } from "@/lib/molecules/render/haworth-rdkit"
 import { ensureRdkit } from "@/lib/molecules/render/rdkit-engine"
@@ -74,8 +78,10 @@ describe("recognizeOpenChainSugar", () => {
 })
 
 describe("drawFischer", () => {
-  const OXYGEN_RED = "#FF0000"
-  const NEUTRAL_INK = "#000000"
+  // Aliases to the shared app palette (atom-palette.ts) — never re-hardcode
+  // the hexes here, the projection must track the palette by reference.
+  const OXYGEN_RED = ATOM_COLOR_OXYGEN
+  const NEUTRAL_INK = ATOM_COLOR_NEUTRAL
 
   interface Glyph {
     text: string
