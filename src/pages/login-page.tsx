@@ -4,13 +4,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { extractErrorMessage } from "@/lib/api"
+import { ApiError, extractErrorMessage } from "@/lib/api"
 import { useAuthStore } from "@/stores/auth-store"
 
 export function LoginPage() {
-  const { toast } = useToast()
   const navigate = useNavigate()
   const location = useLocation()
   const login = useAuthStore((s) => s.login)
@@ -18,19 +16,27 @@ export function LoginPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Shown inline: the login page sits outside the shells that mount <Toaster />,
+  // so a toast here would only appear after the next successful login.
+  const [error, setError] = useState<string | null>(null)
+  // Success message handed over by another page, e.g. after a password reset.
+  const notice = (location.state as { notice?: string } | null)?.notice
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
+    setError(null)
     try {
       await login(username.trim(), password)
       const from = (location.state as { from?: Location })?.from
       navigate(from?.pathname ?? "/", { replace: true })
-    } catch (error) {
-      toast({
-        title: extractErrorMessage(error, cs.auth.loginError),
-        variant: "destructive",
-      })
+    } catch (err) {
+      // The server's own wording is English; wrong credentials get the Czech text.
+      setError(
+        err instanceof ApiError && err.code === "unauthorized"
+          ? cs.auth.loginError
+          : extractErrorMessage(err, cs.auth.loginError),
+      )
     } finally {
       setIsSubmitting(false)
     }
@@ -45,6 +51,11 @@ export function LoginPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
+            {notice && !error && (
+              <p role="status" className="text-sm text-muted-foreground">
+                {notice}
+              </p>
+            )}
             <div className="space-y-2">
               <Label htmlFor="username">{cs.auth.usernameLabel}</Label>
               <Input
@@ -69,6 +80,11 @@ export function LoginPage() {
                 required
               />
             </div>
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
             <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? cs.auth.loginButtonLoading : cs.auth.loginButton}
             </Button>

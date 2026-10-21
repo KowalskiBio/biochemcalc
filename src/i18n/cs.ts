@@ -27,6 +27,9 @@ export const cs = {
     forgotPasswordLink: "Zapomenuté heslo?",
     loginError: "Nesprávné uživatelské jméno nebo heslo",
     registerError: "Registrace se nezdařila",
+    inviteCodeInvalid: "Zvací kód je neplatný nebo vypršel",
+    usernameTaken: "Toto uživatelské jméno je již obsazené",
+    emailTaken: "Tento e-mail je již zaregistrován",
     logout: "Odhlásit se",
     forgotPassword: {
       title: "Zapomenuté heslo",
@@ -51,6 +54,7 @@ export const cs = {
       successMessage: "Heslo bylo úspěšně nastaveno. Nyní se můžete přihlásit.",
       mismatchError: "Hesla se neshodují",
       invalidTokenError: "Odkaz pro obnovení hesla je neplatný nebo vypršel",
+      error: "Nastavení hesla se nezdařilo",
       requestNewLink: "Vyžádat nový odkaz",
     },
     account: {

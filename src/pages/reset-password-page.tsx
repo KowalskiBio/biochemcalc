@@ -4,13 +4,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { ApiError, extractErrorMessage } from "@/lib/api"
+import { ApiError } from "@/lib/api"
 import { authApi } from "@/lib/auth-api"
 
 export function ResetPasswordPage() {
-  const { toast } = useToast()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const token = searchParams.get("token") ?? ""
@@ -19,26 +17,30 @@ export function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [tokenInvalid, setTokenInvalid] = useState(false)
+  // Inline, not a toast: no <Toaster /> is mounted outside the app shells.
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError(null)
     if (newPassword !== confirmPassword) {
-      toast({ title: cs.auth.resetPassword.mismatchError, variant: "destructive" })
+      setError(cs.auth.resetPassword.mismatchError)
       return
     }
     setIsSubmitting(true)
     try {
       await authApi.resetPassword({ token, newPassword })
-      toast({ title: cs.auth.resetPassword.successMessage, variant: "default" })
-      navigate("/login", { replace: true })
-    } catch (error) {
-      if (error instanceof ApiError && error.code === "validation") {
-        setTokenInvalid(true)
-      }
-      toast({
-        title: extractErrorMessage(error, cs.auth.resetPassword.invalidTokenError),
-        variant: "destructive",
+      navigate("/login", {
+        replace: true,
+        state: { notice: cs.auth.resetPassword.successMessage },
       })
+    } catch (err) {
+      // A bad or expired link swaps the form for its own Czech message.
+      if (err instanceof ApiError && err.code === "validation") {
+        setTokenInvalid(true)
+      } else {
+        setError(cs.auth.resetPassword.error)
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -91,6 +93,11 @@ export function ResetPasswordPage() {
                   minLength={8}
                 />
               </div>
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
               <Button type="submit" className="w-full" disabled={isSubmitting || !token}>
                 {isSubmitting
                   ? cs.auth.resetPassword.submitButtonLoading
