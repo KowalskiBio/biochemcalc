@@ -364,6 +364,26 @@ describe("Fischer projections", () => {
     expect(oxygens.some((node) => node.getAttribute("fill") === ATOM_COLOR_OXYGEN)).toBe(true)
   })
 
+  it("raises letters onto their bond's vertical midline (optical offset used by everything else)", () => {
+    const { svg } = render(OPEN_GLUCOSE)
+    // dy = −0.1 · font-size per letter class: cap letters get −1.60 at the
+    // 16 px base size, the subscript "2" gets −1.20 at its 12 px size — the
+    // ink's optical midpoint then lines up with the horizontal bond instead of
+    // hanging slightly below it as plain `dominant-baseline: central` leaves it.
+    const capLetters = Array.from(svg.querySelectorAll("text")).filter(
+      (node) => node.textContent === "O" || node.textContent === "H" || node.textContent === "C",
+    )
+    expect(capLetters.length).toBeGreaterThan(0)
+    for (const node of capLetters) {
+      const dy = Number(node.getAttribute("dy"))
+      expect(Math.abs(dy + 1.6), "dy ≈ −0.1 × 16").toBeLessThan(0.001)
+    }
+    const subscript = Array.from(svg.querySelectorAll("text")).find(
+      (node) => node.textContent === "2",
+    )
+    expect(Math.abs(Number(subscript?.getAttribute("dy")) + 1.2)).toBeLessThan(0.001)
+  })
+
   it("suppresses the Fischer projection when fischer is false", () => {
     const { svg, recognized } = render(OPEN_GLUCOSE, { fischer: false })
     expect(recognized).toBe(false)
@@ -679,9 +699,7 @@ describe("theme", () => {
         const markup = render(smiles, { theme }).svg.outerHTML.toLowerCase()
         expect(markup, `${name} (${theme}) carries its accent`).toContain(accent.toLowerCase())
         for (const hex of legacy) {
-          expect(markup, `${name} (${theme}) drops RDKit's ${hex}`).not.toContain(
-            hex.toLowerCase(),
-          )
+          expect(markup, `${name} (${theme}) drops RDKit's ${hex}`).not.toContain(hex.toLowerCase())
         }
       }
     }

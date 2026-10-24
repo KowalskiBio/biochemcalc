@@ -40,9 +40,18 @@ export interface FischerRecognition {
 /** Mirrors the constants of the declarative projection renderer. */
 const BOND = 26
 const PADDING = 14
-const HYDROGEN_PAD = 7
-const TEXT_WIDTH_PER_CHAR = 7
-const TEXT_HEIGHT = 13
+const TEXT_HEIGHT = 20
+/** Visible letter size — sized to the 1.5-bond spine step so letters read at
+ * the same ink-to-bond ratio as the RDKit skeletal depictions. */
+const FONT_SIZE = 16
+/**
+ * Per-letter slot and ink width at FONT_SIZE, so the runs of one label keep
+ * the same breathing room the RDKit depictions give adjacent letters.
+ */
+const LETTER_STEP = 10
+const LETTER_INK = 8
+/** The carbonyl-of-subscript "2" gets a slightly narrower advance. */
+const SUBSCRIPT_ADVANCE = 7
 
 /** Max chain carbons we accept as an open-chain sugar (aldoses to octoses). */
 const MAX_CHAIN_CARBONS = 10
@@ -341,10 +350,14 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
       )
     } else {
       const fill = element.fill ?? ATOM_COLOR_NEUTRAL
-      const fontSize = element.fontSize ?? 11
+      const fontSize = element.fontSize ?? FONT_SIZE
       const text = element.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      // Raise the SVG text's optical midpoint to the model y instead of the
+      // em-box middle — RDKit centers atom ink on the atom point, so letters
+      // read vertically centered against the bond (dy = −0.1 · font-size).
+      const dy = -(fontSize * 0.1).toFixed(2)
       parts.push(
-        `<text x='${element.x}' y='${element.y}' font-size='${fontSize}' dominant-baseline='central' text-anchor='${element.anchor ?? "middle"}' fill='${fill}'>${text}</text>`,
+        `<text x='${element.x}' y='${element.y}' dy='${dy}' font-size='${fontSize}' dominant-baseline='central' text-anchor='${element.anchor ?? "middle"}' fill='${fill}'>${text}</text>`,
       )
     }
   }
@@ -352,8 +365,16 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
 }
 
 /** Subscript digits sit this many px below the label baseline. */
-const SUBSCRIPT_DROP = 4
-const SUBSCRIPT_SIZE = 8
+const SUBSCRIPT_DROP = 5
+const SUBSCRIPT_SIZE = 12
+
+/** Ink-to-bond-end adjacency for right-side (OH) labels — they nearly touch
+ * their bond, matching the RDKit depictions. */
+const BOND_LABEL_GAP = 2
+/** Left-side (HO) labels sit a little further out — they read better with
+ * extra room on the bond side and there is no handed-count of the bond ending
+ * against the outer H that would argue for the same tightness. */
+const LEFT_BOND_LABEL_GAP = 6
 
 interface TextRun {
   text: string
@@ -369,22 +390,22 @@ const SPINE_STEP = BOND * 1.5
 const ARM = BOND * 0.8
 
 function textWidth(text: string, fontSize?: number): number {
-  return text.length * ((fontSize ?? TEXT_HEIGHT) * (TEXT_WIDTH_PER_CHAR / TEXT_HEIGHT))
+  return text.length * ((fontSize ?? FONT_SIZE) * 0.5)
 }
 
 /**
  * Terminal labels ("CHO" / "CH2OH") as per-letter runs: the carbon letter
  * sits exactly on the bond, the "2" renders as a real subscript (smaller and
- * dropped below the baseline), oxygens take the app's atom palette.
+ * dropped below the baseline), oxygens take the app's atom palette. Every
+ * letter occupies a LETTER_STEP-wide slot so adjacent letters never crowd.
  */
 function terminalLabelRuns(text: "CHO" | "CH2OH", centerX: number, y: number): TextRun[] {
-  const charW = TEXT_WIDTH_PER_CHAR
   const runs: TextRun[] = []
-  let x = centerX - charW / 2
+  let x = centerX - LETTER_INK / 2
   runs.push({ text: "C", x, y, fill: ATOM_COLOR_NEUTRAL })
-  x += charW
+  x += LETTER_STEP
   runs.push({ text: "H", x, y, fill: ATOM_COLOR_NEUTRAL })
-  x += charW
+  x += LETTER_STEP
   if (text === "CH2OH") {
     runs.push({
       text: "2",
@@ -393,10 +414,10 @@ function terminalLabelRuns(text: "CHO" | "CH2OH", centerX: number, y: number): T
       fill: ATOM_COLOR_NEUTRAL,
       fontSize: SUBSCRIPT_SIZE,
     })
-    x += SUBSCRIPT_SIZE / 2
+    x += SUBSCRIPT_ADVANCE
   }
   runs.push({ text: "O", x, y, fill: ATOM_COLOR_OXYGEN })
-  x += charW
+  x += LETTER_STEP
   if (text === "CH2OH") {
     runs.push({ text: "H", x, y, fill: ATOM_COLOR_NEUTRAL })
   }
@@ -411,7 +432,7 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
   const elements: DrawingElement[] = []
   const spineX = 0
   const bodyOf = (slot: FischerSpineSlot): number =>
-    slot.kind === "center" ? 0 : TEXT_HEIGHT / 2 + 2
+    slot.kind === "label" ? TEXT_HEIGHT / 2 + 2 : 0
 
   recognition.slots.forEach((slot, index) => {
     const y = index * SPINE_STEP
@@ -436,7 +457,7 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
       elements.push({ kind: "line", x1: spineX, y1: y + 2, x2: spineX + ARM, y2: y + 2 })
       elements.push({
         kind: "text",
-        x: spineX + ARM + HYDROGEN_PAD,
+        x: spineX + ARM + BOND_LABEL_GAP,
         y,
         text: "O",
         anchor: "start",
@@ -444,52 +465,58 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
       })
       return
     }
-    // Crossing: horizontal arm; OH/HO side carries split O(red)+H runs and a
-    // lone H on the opposite side, matching the Haworth flip idiom.
+    // Crossing: horizontal arm; the hydroxyl reads "HO" on the LEFT of the
+    // ring and "OH" on the RIGHT of the ring (the O is always adjacent to its
+    // bond — the same flip idiom the Haworth pass uses). Each letter occupies
+    // its own LETTER_STEP slot so adjacent letters keep the app's breathing
+    // room instead of crowding like they did at raw character steps, and the
+    // outermost letter's ink touches the bond end like everywhere else.
     elements.push({ kind: "line", x1: spineX - ARM, y1: y, x2: spineX + ARM, y2: y })
     const ohLeft = slot.center.ohSide === "left"
-    const sideX = ohLeft ? spineX - ARM - HYDROGEN_PAD : spineX + ARM + HYDROGEN_PAD
     if (ohLeft) {
+      const bondEndX = spineX - ARM - LEFT_BOND_LABEL_GAP
+      const ox = bondEndX - LETTER_INK
       elements.push({
         kind: "text",
-        x: sideX - 2 * TEXT_WIDTH_PER_CHAR,
-        y,
-        text: "O",
-        anchor: "start",
-        fill: ATOM_COLOR_OXYGEN,
-      })
-      elements.push({
-        kind: "text",
-        x: sideX - TEXT_WIDTH_PER_CHAR,
+        x: ox - LETTER_STEP,
         y,
         text: "H",
         anchor: "start",
         fill: ATOM_COLOR_NEUTRAL,
       })
-    } else {
       elements.push({
         kind: "text",
-        x: sideX,
+        x: ox,
         y,
         text: "O",
-        anchor: ohLeft ? "end" : "start",
+        anchor: "start",
+        fill: ATOM_COLOR_OXYGEN,
+      })
+    } else {
+      const ox = spineX + ARM + BOND_LABEL_GAP
+      elements.push({
+        kind: "text",
+        x: ox,
+        y,
+        text: "O",
+        anchor: "start",
         fill: ATOM_COLOR_OXYGEN,
       })
       elements.push({
         kind: "text",
-        x: sideX + TEXT_WIDTH_PER_CHAR,
+        x: ox + LETTER_STEP,
         y,
         text: "H",
-        anchor: ohLeft ? "end" : "start",
+        anchor: "start",
         fill: ATOM_COLOR_NEUTRAL,
       })
     }
     elements.push({
       kind: "text",
-      x: ohLeft ? spineX + ARM + HYDROGEN_PAD : spineX - ARM - HYDROGEN_PAD,
+      x: ohLeft ? spineX + ARM + BOND_LABEL_GAP : spineX - ARM - LEFT_BOND_LABEL_GAP - LETTER_INK,
       y,
       text: "H",
-      anchor: ohLeft ? "start" : "end",
+      anchor: "start",
       fill: ATOM_COLOR_NEUTRAL,
     })
   })
@@ -515,7 +542,7 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
       minY = Math.min(minY, element.y1, element.y2)
       maxY = Math.max(maxY, element.y1, element.y2)
     } else {
-      const fontSize = element.fontSize ?? 11
+      const fontSize = element.fontSize ?? FONT_SIZE
       const width = textWidth(element.text, fontSize)
       const half = element.anchor === "middle" ? width / 2 : element.anchor === "start" ? 0 : width
       const left = element.x - half
