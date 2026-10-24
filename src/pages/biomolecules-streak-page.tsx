@@ -108,15 +108,16 @@ function MicroLabel({ children }: { children: string }) {
   )
 }
 
-function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: boolean }) {
+function PromptView({ prompt, monochrome }: { prompt: QuizPrompt; monochrome: boolean }) {
   if (prompt.kind === "structure" && prompt.smiles) {
     return (
-      // Mistr draws structures colorlessly — atom color coding would give
-      // away part of what the open answer is supposed to test. The arbitrary
-      // variant grays only the svg, never the error fallback; a projection,
-      // when the molecule carries one, is a plain svg and grays the same.
-      // Like the quiz prompt, this is a single-molecule context, so `grow`
-      // keeps large molecules at 1:1 bonds instead of an unreadable square.
+      // Mistr draws structures in a single flat ink — atom colour coding
+      // would give away part of what the open answer is supposed to test.
+      // The palette crush happens in applyTheme on the SMILES path and as a
+      // label colour swap on the projection branch: one neutral ink per
+      // theme, never the error fallback. Like the quiz prompt, this is a
+      // single-molecule context, so `grow` keeps large molecules at 1:1
+      // bonds instead of an unreadable square.
       <StructureView
         smiles={prompt.smiles}
         projection={prompt.projection}
@@ -125,8 +126,9 @@ function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: bool
         orientationDeg={prompt.orientationDeg}
         size={220}
         grow
+        monochrome={monochrome}
         title={quizStrings.promptStructureLabel}
-        className={cn("mx-auto", grayscale && "[&_svg]:grayscale")}
+        className="mx-auto"
       />
     )
   }
@@ -149,7 +151,7 @@ interface OptionButtonProps {
   index: number
   answered: boolean
   isSelected: boolean
-  grayscale: boolean
+  monochrome: boolean
   onSelect: () => void
 }
 
@@ -159,7 +161,7 @@ function OptionButton({
   index,
   answered,
   isSelected,
-  grayscale,
+  monochrome,
   onSelect,
 }: OptionButtonProps) {
   const stateClass = answered
@@ -196,7 +198,7 @@ function OptionButton({
             fischer={option.fischer ?? true}
             orientationDeg={option.orientationDeg}
             size={150}
-            className={cn(grayscale && "[&_svg]:grayscale")}
+            monochrome={monochrome}
           />
         </div>
       ) : (
@@ -590,7 +592,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
           <Flag className="size-4" />
         </Button>
         <MicroLabel>{quizStrings.types[question.type]}</MicroLabel>
-        <PromptView prompt={question.prompt} grayscale={master} />
+        <PromptView prompt={question.prompt} monochrome={master} />
       </div>
 
       {master ? (
@@ -610,7 +612,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
               index={i}
               answered={failed}
               isSelected={option.key === selectedKey}
-              grayscale={false}
+              monochrome={false}
               onSelect={() => selectOption(option.key)}
             />
           ))}

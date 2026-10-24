@@ -15,6 +15,11 @@
 // tokenizes the class attribute and tests exact membership.
 
 import type { Point } from "@/lib/molecules/orientation"
+import {
+  ATOM_COLOR_NEUTRAL,
+  ATOM_COLOR_NEUTRAL_DARK,
+  RDKIT_DEFAULT_ATOM_COLORS,
+} from "@/lib/molecules/render/atom-palette"
 import type { MolGraphSnapshot } from "@/lib/molecules/render/rdkit-engine"
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -347,12 +352,94 @@ function isWhite(fill: string): boolean {
 }
 
 /**
- * Theme the depiction. The RDKit background rect is always removed (the app's
- * wrapper is transparent). Light leaves the black ink alone; dark recolours
- * neutral black strokes/fills to white and leaves the heteroatom palette
- * (red oxygen, blue nitrogen, …) untouched.
+ * Recolour RDKit's legacy heteroatom hexes to the app atom palette
+ * (atom-palette.ts). RDKit carries each glyph's hue twice — a fill/stroke
+ * attribute plus an inline `style="fill:#…"` fragment — and the remap table
+ * is keyed uppercase, so both the attribute pass and the style regex match
+ * case-insensitively. Runs before the light/dark ink switch: the heteroatom
+ * palette is theme-independent, like the calculations variable accents it
+ * derives from, and none of its hexes is the neutral ink the dark pass
+ * touches.
  */
-export function applyTheme(svg: Element, theme: "light" | "dark"): void {
+function remapAtomPalette(svg: Element): void {
+  for (const element of Array.from(svg.querySelectorAll("*"))) {
+    for (const attribute of ["fill", "stroke"]) {
+      const value = element.getAttribute(attribute)
+      const replacement =
+        value === null ? undefined : RDKIT_DEFAULT_ATOM_COLORS[value.trim().toUpperCase()]
+      if (replacement !== undefined) {
+        element.setAttribute(attribute, replacement)
+      }
+    }
+    const style = element.getAttribute("style")
+    if (style?.includes("#")) {
+      element.setAttribute(
+        "style",
+        style.replace(
+          /#[0-9a-f]{6}/gi,
+          (match) => RDKIT_DEFAULT_ATOM_COLORS[match.toUpperCase()] ?? match,
+        ),
+      )
+    }
+  }
+}
+
+/**
+ * Rewrite every neutral-ink source to the theme's ink: RDKit's own carbon
+ * black #000000 (bonds and C/H labels) plus the light app ink itself (which
+ * the hand-drawn Fischer labels stamp directly), so the dark theme swaps
+ * both for the near-white ink. Case-insensitive on attributes and inline
+ * style fragments, like the heteroatom remap.
+ */
+function applyNeutralInk(svg: Element, ink: string): void {
+  const source = new RegExp(`#000000|${ATOM_COLOR_NEUTRAL}`, "gi")
+  const sourceExact = new RegExp(`^(?:#000000|${ATOM_COLOR_NEUTRAL})$`, "i")
+  for (const element of Array.from(svg.querySelectorAll("*"))) {
+    for (const attribute of ["fill", "stroke"]) {
+      const value = element.getAttribute(attribute)
+      if (value !== null && sourceExact.test(value.trim())) {
+        element.setAttribute(attribute, ink)
+      }
+    }
+    const style = element.getAttribute("style")
+    if (style?.includes("#")) {
+      element.setAttribute("style", style.replace(source, ink))
+    }
+  }
+}
+
+/**
+ * Crush every colour in the depiction to the single neutral ink. Used by
+ * Mistr's quiz prompt, where atom colour coding would give away part of the
+ * answer: bonds and heteroatom labels alike end up one flat ink, the light
+ * or dark neutral depending on the theme. Only hex colours are rewritten —
+ * `fill="none"` markers survive.
+ */
+function applyMonochromeInk(svg: Element, ink: string): void {
+  for (const element of Array.from(svg.querySelectorAll("*"))) {
+    for (const attribute of ["fill", "stroke"]) {
+      const value = element.getAttribute(attribute)
+      if (value !== null && /^#[0-9a-f]{6}$/i.test(value.trim())) {
+        element.setAttribute(attribute, ink)
+      }
+    }
+    const style = element.getAttribute("style")
+    if (style?.includes("#")) {
+      element.setAttribute("style", style.replace(/#[0-9a-f]{6}/gi, ink))
+    }
+  }
+}
+
+/**
+ * Theme the depiction. The RDKit background rect is always removed (the app's
+ * wrapper is transparent). In monochrome mode the whole structure then takes
+ * the theme's neutral ink and returns (Mistr prompts hide the atom colours);
+ * otherwise RDKit's carbon black settles to the theme's neutral ink (the
+ * light paper ink or, in dark mode, the near-white one) and its heteroatom
+ * hexes are recoloured to the app atom palette (same hexes in both themes —
+ * see atom-palette.ts).
+ */
+export function applyTheme(svg: Element, theme: "light" | "dark", monochrome = false): void {
   for (const rect of Array.from(svg.querySelectorAll("rect"))) {
     const style = rect.getAttribute("style") ?? ""
     const fill = rect.getAttribute("fill") ?? ""
@@ -360,21 +447,13 @@ export function applyTheme(svg: Element, theme: "light" | "dark"): void {
       rect.remove()
     }
   }
-  if (theme !== "dark") {
+  const ink = theme === "dark" ? ATOM_COLOR_NEUTRAL_DARK : ATOM_COLOR_NEUTRAL
+  if (monochrome) {
+    applyMonochromeInk(svg, ink)
     return
   }
-  for (const element of Array.from(svg.querySelectorAll("*"))) {
-    for (const attribute of ["fill", "stroke"]) {
-      const value = element.getAttribute(attribute)
-      if (value !== null && /^#000000$/i.test(value.trim())) {
-        element.setAttribute(attribute, "#FFFFFF")
-      }
-    }
-    const style = element.getAttribute("style")
-    if (style !== null) {
-      element.setAttribute("style", style.replace(/#000000/gi, "#FFFFFF"))
-    }
-  }
+  applyNeutralInk(svg, ink)
+  remapAtomPalette(svg)
 }
 
 function adjacencyOf(snapshot: MolGraphSnapshot): number[][] {

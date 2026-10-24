@@ -44,6 +44,12 @@ export interface RenderStructureOptions {
   /** Mirror across the vertical axis (also ignored for recognised skeletons' orientation). */
   mirror?: boolean
   theme: "light" | "dark"
+  /**
+   * Erase the atom palette entirely: every bond and label draws in the
+   * theme's single neutral ink. Used by Mistr quiz prompts, where colour
+   * coding would give away part of the answer. Default false.
+   */
+  monochrome?: boolean
   /** Bond length used by the Haworth layout and coordination insets. */
   bondLength?: number
   /**
@@ -135,7 +141,7 @@ export function renderStructure(
     return null
   }
 
-  applyTheme(host, options.theme)
+  applyTheme(host, options.theme, options.monochrome === true)
 
   if (recognized === "haworth" && prepared.overlay !== undefined) {
     // A mirrored sugar flips left/right, so the HO hints flip with it.

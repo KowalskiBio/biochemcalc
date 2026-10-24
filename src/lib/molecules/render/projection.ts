@@ -47,7 +47,7 @@ export type DrawingElement =
       y: number
       text: string
       anchor?: "start" | "middle" | "end"
-      /** Atom-palette fill (oxygen red, nitrogen blue, neutral ink otherwise). */
+      /** Atom-palette fill (see atom-palette.ts); absent means neutral ink. */
       fill?: string
       /** Baseline font size in px (smaller values render as subscripts). */
       fontSize?: number
