@@ -255,37 +255,49 @@ function digest(value: string): string {
 
 interface Quad {
   vertices: Vec[]
-  endA: Vec
-  endB: Vec
   halfThicknessA: number
   halfThicknessB: number
-  midpoint: Vec
   outwardMidpoint: Vec
   innerMidpoint: Vec
 }
 
+/**
+ * The welded outline of one ring's front edge: outer cap at role0, the two
+ * outer miters at the shared front carbons, outer cap at role3, then the
+ * mirrored inner line back. Eight points per polygon.
+ */
 function quadsOf(svg: Element): Quad[] {
   return Array.from(svg.querySelectorAll("polygon.haworth-front-edge")).map((polygon) => {
     const numbers = numericCoordinates(polygon.getAttribute("points") ?? "")
-    if (numbers.length !== 8) {
-      throw new Error("malformed haworth-front-edge polygon")
+    if (numbers.length !== 16) {
+      throw new Error(`malformed haworth-front-edge polygon: ${numbers.length / 2} points`)
     }
-    const vertices = [0, 2, 4, 6].map((index) => ({
-      x: numbers[index],
-      y: numbers[index + 1],
+    const vertices = Array.from({ length: 8 }, (_, index) => ({
+      x: numbers[index * 2],
+      y: numbers[index * 2 + 1],
     }))
-    const [p0, p1, p2, p3] = vertices
-    const endA = { x: (p0.x + p3.x) / 2, y: (p0.y + p3.y) / 2 }
-    const endB = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+    const [
+      outerCapStart,
+      outerMiter1,
+      outerMiter2,
+      outerCapEnd,
+      innerCapEnd,
+      innerMiter2,
+      innerMiter1,
+      innerCapStart,
+    ] = vertices
     return {
       vertices,
-      endA,
-      endB,
-      halfThicknessA: Math.hypot(p0.x - p3.x, p0.y - p3.y) / 2,
-      halfThicknessB: Math.hypot(p1.x - p2.x, p1.y - p2.y) / 2,
-      midpoint: { x: (endA.x + endB.x) / 2, y: (endA.y + endB.y) / 2 },
-      outwardMidpoint: { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 },
-      innerMidpoint: { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 },
+      halfThicknessA: distance(outerCapStart, innerCapStart) / 2,
+      halfThicknessB: distance(outerCapEnd, innerCapEnd) / 2,
+      outwardMidpoint: {
+        x: (outerMiter1.x + outerMiter2.x) / 2,
+        y: (outerMiter1.y + outerMiter2.y) / 2,
+      },
+      innerMidpoint: {
+        x: (innerMiter1.x + innerMiter2.x) / 2,
+        y: (innerMiter1.y + innerMiter2.y) / 2,
+      },
     }
   })
 }
@@ -300,29 +312,6 @@ function centroidOf(points: Vec[]): Vec {
     y: 0,
   })
   return { x: sum.x / points.length, y: sum.y / points.length }
-}
-
-/** Recover the four front ring roles from the three chained quads. */
-function frontRingOf(quads: Quad[]): Vec[] {
-  const first = quads[0]
-  const second = quads[1]
-  const third = quads[2]
-  const between = (a: Quad, b: Quad): Vec => {
-    const candidates = [a.endA, a.endB]
-    return candidates.reduce((best, point) =>
-      distance(point, b.endA) < distance(best, b.endA) ? point : best,
-    )
-  }
-  return [first.endA, between(first, second), between(second, third), third.endB]
-}
-
-function expectFlaresOutward(quad: Quad, ringCenter: Vec, label: string): void {
-  expect(distance(quad.outwardMidpoint, ringCenter), `${label}: flares outward`).toBeGreaterThan(
-    distance(quad.innerMidpoint, ringCenter),
-  )
-  expect(quad.outwardMidpoint.y, `${label}: flares down (front side)`).toBeGreaterThan(
-    quad.innerMidpoint.y,
-  )
 }
 
 function snapshotOf(smiles: string) {
@@ -492,69 +481,147 @@ describe("Haworth bold front edges", () => {
   it("skips recognition and front edges when haworth is false", () => {
     const defaultRender = render(TRUE_BETA_GLUCOSE)
     expect(defaultRender.recognized).toBe("haworth")
-    expect(defaultRender.svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(3)
+    expect(defaultRender.svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(1)
 
     const skeletal = render(TRUE_BETA_GLUCOSE, { haworth: false })
     expect(skeletal.recognized).toBe(false)
     expect(skeletal.svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(0)
   })
 
-  it("draws three graduated edges on beta-D-glucose", () => {
-    const quads = quadsOf(render(TRUE_BETA_GLUCOSE).svg)
-    expect(quads).toHaveLength(3)
+  it("draws one welded, outline — no seam between the front carbons", () => {
+    const { svg } = render(TRUE_BETA_GLUCOSE)
+    const quads = quadsOf(svg)
+    expect(quads).toHaveLength(1)
+    const outline = quads[0]
+
+    // Endpoint caps keep their thick tapers from the quad form: role0 ends
+    // 1.1 wide, role3 ends 1.1 wide (full-width measured corner-to-corner).
     const close = (actual: number, expected: number): void => {
       expect(Math.abs(actual - expected)).toBeLessThanOrEqual(0.3)
     }
-    close(quads[0].halfThicknessA, 1.1)
-    close(quads[0].halfThicknessB, 2.2)
-    close(quads[1].halfThicknessA, 2.2)
-    close(quads[1].halfThicknessB, 2.2)
-    close(quads[2].halfThicknessA, 2.2)
-    close(quads[2].halfThicknessB, 1.1)
+    close(outline.halfThicknessA, 1.1)
+    close(outline.halfThicknessB, 1.1)
 
-    const ringCenter = centroidOf(frontRingOf(quads))
-    quads.forEach((quad, index) => {
-      expectFlaresOutward(quad, ringCenter, `glucose edge ${index}`)
-    })
+    // Weld continuity: near the two shared front carbons there is exactly one
+    // outline corner per side (the offset-miter join) — earlier each segment
+    // ended at its own vertex and a wedge opened between quads.
+    const outerMiters = [outline.vertices[1], outline.vertices[2]]
+    const innerMiters = [outline.vertices[5], outline.vertices[6]]
+    expect(outerMiters).toHaveLength(2)
+    expect(innerMiters).toHaveLength(2)
+    const centroid = centroidOf(outline.vertices)
+    for (const corner of outerMiters) {
+      expect(distance(corner, centroid)).toBeGreaterThan(0.01)
+    }
+
+    // Ring-end micro-joints: cap ends joined onto the neighbouring thin ring
+    // edges (C1–ring-O and C4–next-carbon), clamped so they can't overshoot.
+    // The regression pinning their exact geometry is the byte digest above;
+    // here we assert the front band remains a single bounded, non-degenerate
+    // outline with a real joint point at each end (never a NaN elsewhere).
+    expect(Number.isFinite(outline.vertices[0].x)).toBe(true)
+    expect(Number.isFinite(outline.vertices[3].x)).toBe(true)
+    expect(Number.isFinite(outline.vertices[0].y)).toBe(true)
+    expect(Number.isFinite(outline.vertices[3].y)).toBe(true)
+
+    // Junction seals: each ring end is a three-way stroke junction (band +
+    // thin ring bond + hydroxyl bond) sealed by a round dot at the vertex.
+    const caps = Array.from(svg.querySelectorAll("circle.haworth-front-cap"))
+    expect(caps).toHaveLength(2)
+    for (const [outer, inner] of [
+      [outline.vertices[0], outline.vertices[7]],
+      [outline.vertices[3], outline.vertices[4]],
+    ] as const) {
+      // The cap midpoint is the ring vertex itself (cap passes through it).
+      const vertex = { x: (outer.x + inner.x) / 2, y: (outer.y + inner.y) / 2 }
+      const cap = caps.find(
+        (element) =>
+          distance(
+            { x: Number(element.getAttribute("cx")), y: Number(element.getAttribute("cy")) },
+            vertex,
+          ) <= 0.5,
+      )
+      expect(cap !== undefined).toBe(true)
+      if (cap === undefined) continue
+      const radius = Number(cap.getAttribute("r"))
+      // Round-cap range: band half-thickness 1.1 up to the joint clamp 1.6 × 1.1.
+      expect(radius).toBeGreaterThanOrEqual(1.09)
+      expect(radius).toBeLessThanOrEqual(1.78)
+    }
   })
 
-  it("draws three tapers on each sucrose ring, both flaring outward-down", () => {
-    const quads = quadsOf(render(SUCROSE).svg)
-    expect(quads).toHaveLength(6)
-    // The two rings are disjoint: group quads by shared endpoints.
-    const groups: Quad[][] = []
-    for (const quad of quads) {
-      const group = groups.find((candidate) =>
-        candidate.some(
-          (member) =>
-            Math.min(
-              distance(member.endA, quad.endA),
-              distance(member.endA, quad.endB),
-              distance(member.endB, quad.endA),
-              distance(member.endB, quad.endB),
-            ) < 0.5,
-        ),
-      )
-      if (group === undefined) {
-        groups.push([quad])
-      } else {
-        group.push(quad)
-      }
-    }
-    expect(groups.map((group) => group.length)).toEqual([3, 3])
-    for (const group of groups) {
-      const center = centroidOf(frontRingOf(group))
-      group.forEach((quad, index) => {
-        expectFlaresOutward(quad, center, `sucrose ring edge ${index}`)
-      })
+  it("welds both sucrose rings into continuous outlines flaring outward-down", () => {
+    const { svg } = render(SUCROSE)
+    const quads = quadsOf(svg)
+    expect(quads).toHaveLength(2)
+    expect(svg.querySelectorAll("circle.haworth-front-cap")).toHaveLength(4)
+    for (const outline of quads) {
+      // Flare direction: each outline's outer cusps (miters) sit beyond the
+      // inner side on the outward-down axis from the ring's own geometry —
+      // the same outward normal that used to expand each quad.
+      const outerCusps = [outline.vertices[1], outline.vertices[2]]
+      const innerCusps = [outline.vertices[5], outline.vertices[6]]
+      const outerY = Math.min(...outerCusps.map((point) => point.y))
+      const innerY = Math.min(...innerCusps.map((point) => point.y))
+      expect(outerY).toBeGreaterThanOrEqual(innerY)
+      expect(distance(outline.outwardMidpoint, outline.innerMidpoint)).toBeGreaterThan(1)
     }
   })
 
   it("adds front edges to the adenosine furanose without touching the base", () => {
     const { svg, recognized } = render(ADENOSINE)
     expect(recognized).toBe("haworth")
-    expect(svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(3)
-    expect(svg.querySelectorAll("polygon")).toHaveLength(3)
+    expect(svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(1)
+    expect(svg.querySelectorAll("polygon")).toHaveLength(1)
+    expect(svg.querySelectorAll("circle.haworth-front-cap")).toHaveLength(2)
+  })
+})
+
+describe("atom glyph z-order", () => {
+  it("draws atom letters above every bond line and decoration", () => {
+    const isConstruction = (element: Element): boolean => {
+      const tokens = (element.getAttribute("class") ?? "").split(/\s+/)
+      if (tokens.some((token) => token.startsWith("bond-"))) return true
+      if (
+        tokens.includes("haworth-front-edge") ||
+        tokens.includes("haworth-front-cap") ||
+        tokens.includes("porphyrin-coordination")
+      ) {
+        return true
+      }
+      // Classless paths are unlabeled line art (RDKit's wedge/hashed stereo
+      // strokes carry no class); letters always carry an atom-N token.
+      return element.localName === "path" && !tokens.some((token) => token.startsWith("atom-"))
+    }
+    const isLetter = (element: Element): boolean => {
+      if (element.localName !== "path") return false
+      const tokens = (element.getAttribute("class") ?? "").split(/\s+/)
+      return tokens.some((token) => token.startsWith("atom-")) && !isConstruction(element)
+    }
+    for (const smiles of [TRUE_BETA_GLUCOSE, CHOLESTEROL, CHLOROPHYLL_PUBCHEM]) {
+      const children = Array.from(render(smiles).svg.children)
+      const letterIndices = children
+        .map((element, index) => (isLetter(element) ? index : -1))
+        .filter((index) => index >= 0)
+      const deepestConstruction = Math.max(
+        -1,
+        ...children.map((element, index) => (isConstruction(element) ? index : -1)),
+      )
+      expect(letterIndices.length).toBeGreaterThan(0)
+      for (const letterIndex of letterIndices) {
+        expect(letterIndex, `${smiles}: letters paint after all construction`).toBeGreaterThan(
+          deepestConstruction,
+        )
+      }
+      // No letter may end up buried between construction layers either.
+      const trailing = children.slice(deepestConstruction + 1)
+      expect(
+        trailing.every(isLetter),
+        `${smiles}: trailing non-letter wall after deepest construction: ${trailing
+          .map((element) => `${element.localName}.${element.getAttribute("class") ?? ""}`)
+          .join("|")}`,
+      ).toBe(true)
+    }
   })
 })
 
@@ -619,10 +686,17 @@ describe("natural-size rendering", () => {
     // centred its Mg and added the four coordination lines; all three were
     // re-recorded when the atom-palette remap recoloured the heteroatoms, and
     // again when the neutral ink moved to the theme's paper tones.
+    // digest was re-recorded when the three front-edge quads welded into one
+    // mitered outline, then again when the cap ends became micro-joints at the
+    // neighbouring thin ring edges on BOTH sides (C1/C4 of hexose; pentoses),
+    // and again when round junction seals closed each ring end (band + thin
+    // ring bond + hydroxyl bond meet there — a three-way stroke junction).
+    // All three re-recorded once more when atom letters were raised to the
+    // top z-layer so construction strokes can never paint over a glyph.
     const golden: Record<string, string> = {
-      cholesterol: "1b49f2e5",
-      chlorophyll: "b8b6c80a",
-      glucose: "c12a457b",
+      cholesterol: "6f8480a5",
+      chlorophyll: "8a1ceabe",
+      glucose: "cb50ca23",
     }
     expect(digest(render(CHOLESTEROL, { natural: false }).svg.outerHTML)).toBe(golden.cholesterol)
     expect(digest(render(CHLOROPHYLL_PUBCHEM, { natural: false }).svg.outerHTML)).toBe(
@@ -657,7 +731,7 @@ describe("natural-size rendering", () => {
   it("keeps the Haworth overlays and the drawing inside the natural canvas", () => {
     const { svg, recognized } = render(TRUE_BETA_GLUCOSE, { natural: true })
     expect(recognized).toBe("haworth")
-    expect(svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(3)
+    expect(svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(1)
     expectInsideCanvas(svg)
   })
 

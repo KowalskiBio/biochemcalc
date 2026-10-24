@@ -30,6 +30,7 @@ import {
   centerIsolatedMetal,
   type FrontRingBond,
   type OhLabelHint,
+  raiseAtomLetters,
 } from "@/lib/molecules/render/svg-post"
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -150,7 +151,7 @@ export function renderStructure(
     )
     applyOhLabelHints(host, hints)
     const frontBonds: FrontRingBond[] = prepared.overlay.frontRingBonds
-    applyBoldFrontEdges(host, frontBonds)
+    applyBoldFrontEdges(host, frontBonds, prepared.overlay.cyclePositions)
   }
 
   if (ISOLATED_METAL_PATTERN.test(smiles)) {
@@ -164,6 +165,11 @@ export function renderStructure(
       }
     }
   }
+
+  // Letters are the read layer: after every decoration pass so nothing —
+  // front-edge bands, seals, coordination lines, or a crossing bond — can
+  // paint over a heteroatom glyph.
+  raiseAtomLetters(host)
 
   return { svg: host, recognized }
 }

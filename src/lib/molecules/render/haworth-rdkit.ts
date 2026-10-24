@@ -66,6 +66,11 @@ export interface FrontRingBond {
 export interface HaworthOverlay {
   ohHints: OhLabelHint[]
   frontRingBonds: FrontRingBond[]
+  /** Full canonical cycle positions per recognized ring (anomeric first, ring
+   * oxygen last), one entry per group of three `frontRingBonds` in plan
+   * order. Lets the front-edge weld meet the adjacent ring edges at both caps
+   * (hexose C1→ring-O end and the C4/next-carbon end; pentoses alike). */
+  cyclePositions?: { id: number; position: Point }[][]
 }
 
 /** Result of the one entry point Phase 3 consumes. */
@@ -546,7 +551,14 @@ function overlayOf(session: LayoutSession, opts: ResolvedOptions): HaworthOverla
 
   const ohHints: OhLabelHint[] = []
   const frontRingBonds: FrontRingBond[] = []
+  const cyclePositions: { id: number; position: Point }[][] = []
   for (const plan of plans) {
+    const cycle = plan.cycle
+      .map((id) => ({ id, position: positionOf(id) }))
+      .filter((entry): entry is { id: number; position: Point } => entry.position !== undefined)
+    if (cycle.length >= 4) {
+      cyclePositions.push(cycle)
+    }
     const ringPositions = plan.cycle
       .map((id) => positionOf(id))
       .filter((position): position is Point => position !== undefined)
@@ -586,7 +598,9 @@ function overlayOf(session: LayoutSession, opts: ResolvedOptions): HaworthOverla
       }
     }
   }
-  return { ohHints, frontRingBonds }
+  return cyclePositions.length > 0
+    ? { ohHints, frontRingBonds, cyclePositions }
+    : { ohHints, frontRingBonds }
 }
 
 function resolveOptions(options: HaworthLayoutOptions): ResolvedOptions {

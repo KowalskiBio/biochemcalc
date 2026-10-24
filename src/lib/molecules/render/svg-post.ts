@@ -261,7 +261,13 @@ function centroidOf(points: Point[]): Point {
  * the `{a,b}` pair, so the taper follows the canonical ring traversal even
  * when RDKit wrote the underlying path in the opposite order.
  */
-export function applyBoldFrontEdges(svg: Element, bonds: FrontRingBond[]): void {
+const MITER_MAX_FACTOR = 1.6
+
+export function applyBoldFrontEdges(
+  svg: Element,
+  bonds: FrontRingBond[],
+  cyclePositions?: { id: number; position: Point }[][],
+): void {
   const fallbackFill = sampleBondStroke(svg)
   for (let base = 0; base + 2 < bonds.length; base += 3) {
     const group = bonds.slice(base, base + 3)
@@ -296,13 +302,89 @@ export function applyBoldFrontEdges(svg: Element, bonds: FrontRingBond[]): void 
     const ring = rolePositions as Point[]
     const ringCenter = centroidOf(ring)
 
+    // The cap ends are joints onto the neighbouring thin ring edges, computed
+    // ENTIRELY in the drawn SVG's coordinate frame: joint candidates would be
+    // meaningless if the neighbour vertices came from the layouter's own
+    // world (≈20–240 px apart, which is what made earlier attempts invisible).
+    // Neighbour directions come from the neighbouring bond paths' own drawn
+    // segments, never from layout-world positions.
+    interface OffsetEdge {
+      from: Point
+      to: Point
+      dx: number
+      dy: number
+      length: number
+      nx: number
+      ny: number
+      ta: number
+      tb: number
+    }
+
+    const segmentToOffsetEdge = (segment: { from: Point; to: Point }): OffsetEdge | null => {
+      const dx = segment.to.x - segment.from.x
+      const dy = segment.to.y - segment.from.y
+      const length = Math.hypot(dx, dy)
+      if (length < 1e-9) {
+        return null
+      }
+      return {
+        from: segment.from,
+        to: segment.to,
+        dx,
+        dy,
+        length,
+        nx: -dy / length,
+        ny: dx / length,
+        ta: 0,
+        tb: 0,
+      }
+    }
+
+    const groupCycle = cyclePositions?.[base / 3]
+    const neighbourInfo = (atomA: number, atomB: number): { from: Point; to: Point } | null => {
+      const path = bondPathFor(svg, atomA, atomB)
+      if (path === null) {
+        return null
+      }
+      return parseSegment(path)
+    }
+
+    const cycleIndexForVertex = (
+      vertexRole: 0 | 3,
+    ): { prevSegment: OffsetEdge | null; nextSegment: OffsetEdge | null } => {
+      if (groupCycle === undefined || groupCycle.length < 4) {
+        return { prevSegment: null, nextSegment: null }
+      }
+      const mainRoleEntry = groupCycle[vertexRole]
+      const prevRoleEntry =
+        vertexRole === 0 ? groupCycle[groupCycle.length - 1] : groupCycle[vertexRole - 1]
+      const nextRoleEntry = vertexRole === 3 ? groupCycle[4] : groupCycle[vertexRole + 1]
+      if (
+        mainRoleEntry === undefined ||
+        prevRoleEntry === undefined ||
+        nextRoleEntry === undefined
+      ) {
+        return { prevSegment: null, nextSegment: null }
+      }
+      const prevSegment = neighbourInfo(prevRoleEntry.id, mainRoleEntry.id)
+      const nextSegment = neighbourInfo(mainRoleEntry.id, nextRoleEntry.id)
+      return {
+        prevSegment: prevSegment === null ? null : segmentToOffsetEdge(prevSegment),
+        nextSegment: nextSegment === null ? null : segmentToOffsetEdge(nextSegment),
+      }
+    }
+    const edges: OffsetEdge[] = []
+    let skip = false
     for (let index = 0; index < 3; index += 1) {
       const from = ring[index]
       const to = ring[index + 1]
       const dx = to.x - from.x
       const dy = to.y - from.y
       const length = Math.hypot(dx, dy)
-      if (length === 0) continue
+      if (length < 1e-9) {
+        skip = true
+        break
+      }
       let nx = -dy / length
       let ny = dx / length
       const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
@@ -311,19 +393,260 @@ export function applyBoldFrontEdges(svg: Element, bonds: FrontRingBond[]): void 
         ny = -ny
       }
       const taper = FRONT_EDGE_SEGMENTS[index]
-      const corners = [
-        { x: from.x + nx * taper.ta, y: from.y + ny * taper.ta },
-        { x: to.x + nx * taper.tb, y: to.y + ny * taper.tb },
-        { x: to.x - nx * taper.tb, y: to.y - ny * taper.tb },
-        { x: from.x - nx * taper.ta, y: from.y - ny * taper.ta },
-      ]
-      const polygon = svg.ownerDocument.createElementNS(SVG_NAMESPACE, "polygon")
-      polygon.setAttribute("points", corners.map((corner) => `${corner.x},${corner.y}`).join(" "))
-      polygon.setAttribute("fill", strokeOf(paths[index]) ?? fallbackFill)
-      polygon.setAttribute("stroke", "none")
-      polygon.setAttribute("class", "haworth-front-edge")
-      svg.appendChild(polygon)
+      edges.push({ from, to, dx, dy, length, nx, ny, ta: taper.ta, tb: taper.tb })
     }
+    if (skip) {
+      continue
+    }
+
+    // Offset-miter join: the outer (or inner) tips of two adjacent edges at a
+    // shared vertex are the intersection of the two offset lines. When the
+    // lines are nearly parallel the tips average into a captured corner.
+    const miter = (
+      startPoint: Point,
+      directionA: { x: number; y: number },
+      endPoint: Point,
+      directionB: { x: number; y: number },
+    ): Point => {
+      // startPoint + s·directionA == endPoint + t·directionB
+      const cross = directionA.x * directionB.y - directionA.y * directionB.x
+      if (Math.abs(cross) < 1e-9) {
+        return {
+          x: (startPoint.x + endPoint.x) / 2,
+          y: (startPoint.y + endPoint.y) / 2,
+        }
+      }
+      const rx = endPoint.x - startPoint.x
+      const ry = endPoint.y - startPoint.y
+      const s = (rx * directionB.y - ry * directionB.x) / cross
+      return { x: startPoint.x + s * directionA.x, y: startPoint.y + s * directionA.y }
+    }
+
+    const corners: Point[] = []
+    // Given the full cycle, the caps become micro-joints at the adjacent thin ring
+    // edges instead — closing the barely-visible wedge at hexose/pentose C1/C4.
+    const cappedEnd = (vertex: Point, edge: OffsetEdge, sign: 1 | -1): Point => ({
+      x: vertex.x + sign * edge.nx * edge.tb,
+      y: vertex.y + sign * edge.ny * edge.tb,
+    })
+    const cappedStart = (vertex: Point, edge: OffsetEdge, sign: 1 | -1): Point => ({
+      x: vertex.x + sign * edge.nx * edge.ta,
+      y: vertex.y + sign * edge.ny * edge.ta,
+    })
+
+    const joint = (
+      vertex: Point,
+      offsetLineStart: (sign: 1 | -1) => Point,
+      offsetDirection: { x: number; y: number },
+      neighborDirection: { x: number; y: number },
+      oppositeFallback: Point,
+      width: number,
+    ): Point => {
+      const candidate = miter(offsetLineStart(1), offsetDirection, vertex, neighborDirection)
+      const distanceToVertex = Math.hypot(candidate.x - vertex.x, candidate.y - vertex.y)
+      if (
+        !Number.isFinite(candidate.x) ||
+        !Number.isFinite(candidate.y) ||
+        distanceToVertex > MITER_MAX_FACTOR * width
+      ) {
+        return oppositeFallback
+      }
+      return candidate
+    }
+
+    const startOuter =
+      groupCycle !== undefined &&
+      groupCycle.length >= 4 &&
+      groupCycle[groupCycle.length - 1] !== undefined
+        ? (() => {
+            const { prevSegment } = cycleIndexForVertex(0)
+            if (prevSegment === null) {
+              return cappedStart(ring[0], edges[0], 1)
+            }
+            const neighbourDirection = {
+              x: prevSegment.dx / prevSegment.length,
+              y: prevSegment.dy / prevSegment.length,
+            }
+            return joint(
+              ring[0],
+              (sign) => ({
+                x: ring[0].x + sign * edges[0].nx * edges[0].ta,
+                y: ring[0].y + sign * edges[0].ny * edges[0].ta,
+              }),
+              { x: edges[0].dx / edges[0].length, y: edges[0].dy / edges[0].length },
+              neighbourDirection,
+              cappedStart(ring[0], edges[0], 1),
+              edges[0].ta,
+            )
+          })()
+        : cappedStart(ring[0], edges[0], 1)
+    const endOuter =
+      groupCycle !== undefined && groupCycle.length >= 5 && groupCycle[4] !== undefined
+        ? (() => {
+            const { nextSegment } = cycleIndexForVertex(3)
+            if (nextSegment === null) {
+              return cappedEnd(ring[3], edges[2], 1)
+            }
+            const neighbourDirection = {
+              x: nextSegment.dx / nextSegment.length,
+              y: nextSegment.dy / nextSegment.length,
+            }
+            return joint(
+              ring[3],
+              (sign) => ({
+                x: ring[3].x + sign * edges[2].nx * edges[2].tb,
+                y: ring[3].y + sign * edges[2].ny * edges[2].tb,
+              }),
+              { x: edges[2].dx / edges[2].length, y: edges[2].dy / edges[2].length },
+              neighbourDirection,
+              cappedEnd(ring[3], edges[2], 1),
+              edges[2].tb,
+            )
+          })()
+        : cappedEnd(ring[3], edges[2], 1)
+    const miterOuter1 = miter(
+      { x: ring[1].x + edges[0].nx * edges[0].tb, y: ring[1].y + edges[0].ny * edges[0].tb },
+      { x: edges[0].dx, y: edges[0].dy },
+      { x: ring[1].x + edges[1].nx * edges[1].ta, y: ring[1].y + edges[1].ny * edges[1].ta },
+      { x: edges[1].dx, y: edges[1].dy },
+    )
+    const miterOuter2 = miter(
+      { x: ring[2].x + edges[1].nx * edges[1].tb, y: ring[2].y + edges[1].ny * edges[1].tb },
+      { x: edges[1].dx, y: edges[1].dy },
+      { x: ring[2].x + edges[2].nx * edges[2].ta, y: ring[2].y + edges[2].ny * edges[2].ta },
+      { x: edges[2].dx, y: edges[2].dy },
+    )
+    const startInner =
+      groupCycle !== undefined &&
+      groupCycle.length >= 4 &&
+      groupCycle[groupCycle.length - 1] !== undefined
+        ? (() => {
+            const { prevSegment } = cycleIndexForVertex(0)
+            if (prevSegment === null) {
+              return cappedStart(ring[0], edges[0], -1)
+            }
+            const neighbourDirection = {
+              x: prevSegment.dx / prevSegment.length,
+              y: prevSegment.dy / prevSegment.length,
+            }
+            return joint(
+              ring[0],
+              (sign) => ({
+                x: ring[0].x - sign * edges[0].nx * edges[0].ta,
+                y: ring[0].y - sign * edges[0].ny * edges[0].ta,
+              }),
+              { x: edges[0].dx / edges[0].length, y: edges[0].dy / edges[0].length },
+              neighbourDirection,
+              cappedStart(ring[0], edges[0], -1),
+              edges[0].ta,
+            )
+          })()
+        : cappedStart(ring[0], edges[0], -1)
+    const endInner =
+      groupCycle !== undefined && groupCycle.length >= 5 && groupCycle[4] !== undefined
+        ? (() => {
+            const { nextSegment } = cycleIndexForVertex(3)
+            if (nextSegment === null) {
+              return cappedEnd(ring[3], edges[2], -1)
+            }
+            const neighbourDirection = {
+              x: nextSegment.dx / nextSegment.length,
+              y: nextSegment.dy / nextSegment.length,
+            }
+            return joint(
+              ring[3],
+              (sign) => ({
+                x: ring[3].x - sign * edges[2].nx * edges[2].tb,
+                y: ring[3].y - sign * edges[2].ny * edges[2].tb,
+              }),
+              { x: edges[2].dx / edges[2].length, y: edges[2].dy / edges[2].length },
+              neighbourDirection,
+              cappedEnd(ring[3], edges[2], -1),
+              edges[2].tb,
+            )
+          })()
+        : cappedEnd(ring[3], edges[2], -1)
+    const miterInner1 = miter(
+      { x: ring[1].x - edges[0].nx * edges[0].tb, y: ring[1].y - edges[0].ny * edges[0].tb },
+      { x: edges[0].dx, y: edges[0].dy },
+      { x: ring[1].x - edges[1].nx * edges[1].ta, y: ring[1].y - edges[1].ny * edges[1].ta },
+      { x: edges[1].dx, y: edges[1].dy },
+    )
+    const miterInner2 = miter(
+      { x: ring[2].x - edges[1].nx * edges[1].tb, y: ring[2].y - edges[1].ny * edges[1].tb },
+      { x: edges[1].dx, y: edges[1].dy },
+      { x: ring[2].x - edges[2].nx * edges[2].ta, y: ring[2].y - edges[2].ny * edges[2].ta },
+      { x: edges[2].dx, y: edges[2].dy },
+    )
+
+    // Outline: outer caps at both ends with mitered joins at the two shared
+    // front carbons, mirrored inner line running back from role 3 to role 0.
+    // One polygon per ring.
+    corners.push(
+      startOuter,
+      miterOuter1,
+      miterOuter2,
+      endOuter,
+      endInner,
+      miterInner2,
+      miterInner1,
+      startInner,
+    )
+    if (corners.some((corner) => !Number.isFinite(corner.x) || !Number.isFinite(corner.y))) {
+      continue
+    }
+    const polygonFill = strokeOf(paths[0]) ?? fallbackFill
+    const polygon = svg.ownerDocument.createElementNS(SVG_NAMESPACE, "polygon")
+    polygon.setAttribute("points", corners.map((corner) => `${corner.x},${corner.y}`).join(" "))
+    polygon.setAttribute("fill", polygonFill)
+    polygon.setAttribute("stroke", "none")
+    polygon.setAttribute("class", "haworth-front-edge")
+    svg.appendChild(polygon)
+
+    // Junction seal at each ring end: here the band, the neighbouring thin
+    // ring bond AND the hydroxyl bond meet — a three-way stroke junction.
+    // The interior miters seal two same-width strokes, but no pair of cap
+    // corners can close three incident strokes of two widths; a round union
+    // dot of the band's local half-thickness does, exactly like a round
+    // linecap, and it swallows the OH bond's root into the same ink.
+    const sealAt = (vertex: Point, halfThickness: number, ...capCorners: Point[]): void => {
+      const reach = Math.max(
+        halfThickness,
+        ...capCorners.map((corner) => Math.hypot(corner.x - vertex.x, corner.y - vertex.y)),
+      )
+      const seal = svg.ownerDocument.createElementNS(SVG_NAMESPACE, "circle")
+      seal.setAttribute("cx", String(vertex.x))
+      seal.setAttribute("cy", String(vertex.y))
+      seal.setAttribute("r", String(reach))
+      seal.setAttribute("fill", polygonFill)
+      seal.setAttribute("stroke", "none")
+      seal.setAttribute("class", "haworth-front-cap")
+      svg.appendChild(seal)
+    }
+    sealAt(ring[0], edges[0].ta, startOuter, startInner)
+    sealAt(ring[3], edges[2].tb, endOuter, endInner)
+  }
+}
+
+/**
+ * Atom letters are the read layer: raise every atom glyph above all
+ * construction strokes (bonds, front-edge bands/seals, coordination lines).
+ * RDKit-JS draws letters as `<path class="atom-N">` with no `bond-*` token,
+ * so z-order is a stable child reorder — glyphs move to the end in their
+ * original order, everything else is untouched. Runs last so overlap from
+ * any decoration pass can never swallow a heteroatom letter.
+ */
+export function raiseAtomLetters(svg: Element): void {
+  const glyphs: Element[] = []
+  for (const child of Array.from(svg.children)) {
+    if (child.localName !== "path") continue
+    const tokens = classTokens(child)
+    if (tokens.some((token) => token.startsWith("atom-")) && !isBondPath(child)) {
+      glyphs.push(child)
+    }
+  }
+  for (const glyph of glyphs) {
+    svg.appendChild(glyph)
   }
 }
 
