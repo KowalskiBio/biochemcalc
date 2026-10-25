@@ -958,7 +958,7 @@ function MoleculeBrowser({
 
       {/* Detail dialog */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-full max-w-md max-h-[85vh] overflow-y-auto sm:w-auto sm:max-w-[min(48rem,100vw_-_2rem)]">
           {selected && (
             <>
               <DialogHeader>
@@ -966,10 +966,15 @@ function MoleculeBrowser({
                 <DialogDescription>{bits.dialogDescription(selected)}</DialogDescription>
               </DialogHeader>
 
-              <div className="flex justify-center">
-                {/* The dialog is a single-molecule context: `grow` keeps big
-                    molecules (acetyl-CoA, peptides) at 1:1 bonds. The dialog's
-                    own width is the width cap, so the depiction can't burst it. */}
+              <div className="flex min-w-0 justify-center">
+                {/* Single-molecule context: `grow` keeps big molecules
+                    (acetyl-CoA, peptides) at 1:1 bonds. The dialog shrink-fits
+                    its content on sm+ screens, so its own width would feed
+                    back on the grown depiction — maxWidth caps it at the
+                    dialog's inner width at its widest (768 px − 2×24 px
+                    padding = 720 px). On screens narrower than the grown
+                    draw, the svg scales down with its wrapper instead of
+                    bursting the dialog. */}
                 <StructureView
                   smiles={selected.smiles}
                   projection={selectedHaworthOk ? projections.get(selected.id) : undefined}
@@ -977,55 +982,62 @@ function MoleculeBrowser({
                   fischer={selectedFischerOk}
                   size={260}
                   grow
+                  maxWidth={720}
                   title={selected.name}
+                  className="max-w-full !h-auto [&>svg]:h-auto [&>svg]:max-w-full"
                 />
               </div>
 
-              {/* Meta rows */}
-              <dl className="divide-y divide-border rounded-[4px] border">
-                {bits.detailRows(selected, molecules).map((row) => (
-                  <div key={row.label} className="flex items-center justify-between px-3 py-2">
-                    <dt className="text-sm text-muted-foreground">{row.label}</dt>
-                    <dd className={cn("text-sm font-medium", row.valueClassName)}>{row.value}</dd>
+              {/* Keep the text blocks at their reading width (max-w-md,
+                  centred) even when the depiction above opens the dialog wide
+                  for a long molecule. */}
+              <div className="mx-auto w-full max-w-md space-y-4">
+                {/* Meta rows */}
+                <dl className="divide-y divide-border rounded-[4px] border">
+                  {bits.detailRows(selected, molecules).map((row) => (
+                    <div key={row.label} className="flex items-center justify-between px-3 py-2">
+                      <dt className="text-sm text-muted-foreground">{row.label}</dt>
+                      <dd className={cn("text-sm font-medium", row.valueClassName)}>{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+
+                {/* Facts */}
+                {facts.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold">{labels.detail.factsLabel}</h3>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                      {facts.map((fact) => (
+                        <li key={fact}>{fact}</li>
+                      ))}
+                    </ul>
                   </div>
-                ))}
-              </dl>
+                )}
 
-              {/* Facts */}
-              {facts.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold">{labels.detail.factsLabel}</h3>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                    {facts.map((fact) => (
-                      <li key={fact}>{fact}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {isTeacher && (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setDeleteOpen(true)
-                    }}
-                  >
-                    <Trash2 className="size-4 mr-1.5" strokeWidth={1.75} />
-                    {manage.deleteMolecule}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setFormOpen(true)
-                    }}
-                  >
-                    <Pencil className="size-4 mr-1.5" strokeWidth={1.75} />
-                    {manage.editMolecule}
-                  </Button>
-                </div>
-              )}
+                {isTeacher && (
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setDeleteOpen(true)
+                      }}
+                    >
+                      <Trash2 className="size-4 mr-1.5" strokeWidth={1.75} />
+                      {manage.deleteMolecule}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setFormOpen(true)
+                      }}
+                    >
+                      <Pencil className="size-4 mr-1.5" strokeWidth={1.75} />
+                      {manage.editMolecule}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </DialogContent>
