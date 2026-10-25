@@ -1,5 +1,6 @@
 import { createSeededRandom, pick, randomInt, shuffle } from "@/lib/molecules/quiz/random"
 import type { ProjectionSpec } from "@/lib/molecules/render/projection"
+import { stripRichMarkup } from "@/lib/rich-text"
 
 export type QuizQuestionType =
   | "nameToLetter"
@@ -417,11 +418,19 @@ function buildQuestion(
 
 /**
  * Normalize a free-text quiz answer for tolerant comparison: Unicode-decompose,
- * strip combining diacritics, lowercase, trim, and collapse inner whitespace.
- * So "Kyselina asparagová" and "  kyselina   asparagova " compare equal.
+ * strip combining diacritics, lowercase, trim, collapse inner whitespace, and
+ * strip rich-text script markup (`_{...}`/`^{...}`) — teacher-stored names may
+ * carry display braces, but students always type the plain form.
+ * So "Kyselina asparagová" and "  kyselina   asparagova " compare equal,
+ * and "FADH_{2}" accepts "FADH2".
  */
 export function normalizeQuizAnswer(input: string): string {
-  return input.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ")
+  return stripRichMarkup(input)
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
 }
 
 /**

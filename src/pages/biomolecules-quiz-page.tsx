@@ -6,6 +6,7 @@ import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/repor
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { RichText } from "@/components/ui/rich-text"
 import {
   Select,
   SelectContent,
@@ -36,6 +37,7 @@ import {
   type QuizQuestionType,
   quizSessionReducer,
 } from "@/lib/molecules/quiz"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 import {
   useBiomoleculeDataLoaded,
@@ -156,7 +158,11 @@ function PromptView({ prompt }: { prompt: QuizPrompt }) {
       </p>
     )
   }
-  return <p className="text-2xl font-semibold tracking-tight">{prompt.text}</p>
+  return (
+    <p className="text-2xl font-semibold tracking-tight">
+      <RichText text={prompt.text} />
+    </p>
+  )
 }
 
 interface OptionButtonProps {
@@ -220,7 +226,7 @@ function OptionButton({
             option.display === "letter" ? "font-mono tabular text-lg" : "text-sm font-medium",
           )}
         >
-          {optionLabel(molecules, option)}
+          <RichText text={optionLabel(molecules, option)} />
         </span>
       )}
     </button>
@@ -367,7 +373,7 @@ function SetupScreen({
           <SelectContent>
             {categoryOptions.map((option) => (
               <SelectItem key={option.slug} value={option.slug}>
-                {option.name}
+                <RichText text={option.name} />
               </SelectItem>
             ))}
           </SelectContent>
@@ -582,7 +588,7 @@ function QuestionScreen({
               <p className="text-sm text-muted-foreground">
                 {quizStrings.correctAnswerWas.replace(
                   "{answer}",
-                  correctAnswerText(question, molecules),
+                  stripRichMarkup(correctAnswerText(question, molecules)),
                 )}
               </p>
             )}

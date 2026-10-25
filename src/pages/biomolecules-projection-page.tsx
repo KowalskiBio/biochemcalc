@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RichText } from "@/components/ui/rich-text"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
 import { previewRecognition, type RecognitionVerdict } from "@/lib/molecules/render/preview"
@@ -91,7 +92,9 @@ function ProjectionExampleRow({
         FOCUS_RING_CLASS,
       )}
     >
-      <span className="shrink-0 text-sm font-medium text-foreground">{example.name}</span>
+      <span className="shrink-0 text-sm font-medium text-foreground">
+        <RichText text={example.name} />
+      </span>
       {example.reason !== undefined && (
         <span className="shrink-0 text-xs text-muted-foreground">{example.reason}</span>
       )}

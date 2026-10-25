@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { RichText } from "@/components/ui/rich-text"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import {
@@ -24,6 +25,7 @@ import {
   biomoleculeReportsApi,
 } from "@/lib/biomolecule-reports-api"
 import { type ProjectionSpec, parseProjection } from "@/lib/molecules/render/projection"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 
 const strings = cs.biomolekuly.reports
@@ -189,7 +191,7 @@ function SnapshotOption({
           haworth={option.haworth ?? true}
           fischer={option.fischer ?? true}
           size={140}
-          title={option.name || option.key}
+          title={stripRichMarkup(option.name || option.key)}
         />
       ) : (
         <span
@@ -197,7 +199,7 @@ function SnapshotOption({
             option.display === "letter" ? "font-mono tabular text-lg font-semibold" : "font-medium",
           )}
         >
-          {option.display === "letter" ? option.key : option.name}
+          {option.display === "letter" ? option.key : <RichText text={option.name} />}
         </span>
       )}
       {option.correct && (
@@ -222,7 +224,10 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
       <CardHeader>
         <CardTitle className="text-lg">
           {strings.reportedQuestion}
-          <span className="text-muted-foreground"> — {targetName}</span>
+          <span className="text-muted-foreground">
+            {" — "}
+            <RichText text={targetName} />
+          </span>
         </CardTitle>
         <CardDescription>
           {questionTypeLabel(snapshot.questionType) || strings.selectPrompt}
@@ -239,7 +244,7 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
                 snapshot.prompt.kind === "letter" && "font-mono tabular",
               )}
             >
-              {snapshot.prompt.text}
+              <RichText text={snapshot.prompt.text} />
             </p>
           )}
           {snapshot.prompt.kind === "structure" && snapshot.prompt.smiles && (
@@ -272,7 +277,7 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
               <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">
                 {snapshot.openAnswer.acceptedAnswers.map((answer) => (
                   <li key={answer} className="font-mono">
-                    {answer}
+                    <RichText text={answer} />
                   </li>
                 ))}
               </ul>

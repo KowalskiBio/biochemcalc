@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowUpDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { ReorderDialog } from "@/components/biomolecules/reorder-dialog"
@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProjectionView } from "@/components/ui/projection-view"
+import { RichText } from "@/components/ui/rich-text"
 import {
   Select,
   SelectContent,
@@ -43,6 +44,7 @@ import {
   type QuizQuestionType,
 } from "@/lib/molecules/quiz"
 import { type ProjectionSpec, parseProjection } from "@/lib/molecules/render/projection"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
 import {
@@ -662,8 +664,19 @@ function monoRow(label: string, value: string): DetailRow {
   return { label, value: <span className="font-mono tabular">{value}</span> }
 }
 
-function labelRow(label: string, value: string): DetailRow {
+function labelRow(label: string, value: ReactNode): DetailRow {
   return { label, value }
+}
+
+/** Comma-separated teacher names, each rendered through <RichText/>. */
+function richNamesValue(names: string[]): ReactNode {
+  return names.map((name, index) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: names are positional display fragments
+    <Fragment key={index}>
+      {index > 0 ? ", " : null}
+      <RichText text={name} />
+    </Fragment>
+  ))
 }
 
 function essentialRow(molecule: Biomolecule): DetailRow {
@@ -708,7 +721,9 @@ const aminoAcidBits: CategoryBits = {
   ),
   dialogDescription: (molecule) => (
     <>
-      <span className="font-mono tabular">{codeLine(molecule, true)}</span>
+      <span className="font-mono tabular">
+        <RichText text={codeLine(molecule, true)} />
+      </span>
       {traitOf(molecule, TRAIT.sideChain) && (
         <>
           {" — "}
@@ -748,8 +763,7 @@ const nitrogenBaseBits: CategoryBits = {
       const names = pairsWith
         .split(",")
         .map((slug) => molecules?.find((m) => m.slug === slug)?.name ?? slug)
-        .join(", ")
-      rows.push(labelRow(labels.detail.pairingLabel, names))
+      rows.push(labelRow(labels.detail.pairingLabel, richNamesValue(names)))
     }
     const inDna = traitOf(molecule, TRAIT.inDna) === "true"
     const inRna = traitOf(molecule, TRAIT.inRna) === "true"
@@ -838,8 +852,7 @@ const customBits: CategoryBits = {
       const names = pairsWith
         .split(",")
         .map((slug) => molecules?.find((m) => m.slug === slug)?.name ?? slug)
-        .join(", ")
-      rows.push(labelRow(labels.detail.pairingLabel, names))
+      rows.push(labelRow(labels.detail.pairingLabel, richNamesValue(names)))
     }
     return rows
   },
@@ -937,13 +950,15 @@ function MoleculeBrowser({
                   haworth={haworthOk}
                   fischer={molecule.fischer ?? true}
                   size={140}
-                  title={molecule.name}
+                  title={stripRichMarkup(molecule.name)}
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <div className="text-sm font-semibold tracking-tight">{molecule.name}</div>
+                <div className="text-sm font-semibold tracking-tight">
+                  <RichText text={molecule.name} />
+                </div>
                 <div className="font-mono tabular text-xs text-muted-foreground">
-                  {bits.cardCodeLine(molecule)}
+                  <RichText text={bits.cardCodeLine(molecule)} />
                 </div>
               </div>
               {bits.cardBadges && (
@@ -962,7 +977,9 @@ function MoleculeBrowser({
           {selected && (
             <>
               <DialogHeader>
-                <DialogTitle>{selected.name}</DialogTitle>
+                <DialogTitle>
+                  <RichText text={selected.name} />
+                </DialogTitle>
                 <DialogDescription>{bits.dialogDescription(selected)}</DialogDescription>
               </DialogHeader>
 
@@ -983,7 +1000,7 @@ function MoleculeBrowser({
                   size={260}
                   grow
                   maxWidth={720}
-                  title={selected.name}
+                  title={stripRichMarkup(selected.name)}
                   className="max-w-full !h-auto [&>svg]:h-auto [&>svg]:max-w-full"
                 />
               </div>
@@ -1008,7 +1025,9 @@ function MoleculeBrowser({
                     <h3 className="text-sm font-semibold">{labels.detail.factsLabel}</h3>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                       {facts.map((fact) => (
-                        <li key={fact}>{fact}</li>
+                        <li key={fact}>
+                          <RichText text={fact} />
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -1057,7 +1076,10 @@ function MoleculeBrowser({
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={manage.deleteMoleculeTitle}
-        description={manage.deleteMoleculeDescription.replace("{name}", selected?.name ?? "")}
+        description={manage.deleteMoleculeDescription.replace(
+          "{name}",
+          stripRichMarkup(selected?.name ?? ""),
+        )}
         confirmLabel={manage.deleteAction}
         cancelLabel={manage.cancelAction}
         onConfirm={() => void handleDelete()}
@@ -1341,7 +1363,10 @@ function MoleculeFormDialog({
                 the spec itself is read-only here, so a hint says so. */}
             {savedProjection && haworth ? (
               <div className="flex justify-center rounded-[4px] border p-3">
-                <ProjectionView spec={savedProjection} ariaLabel={name.trim() || smiles.trim()} />
+                <ProjectionView
+                  spec={savedProjection}
+                  ariaLabel={stripRichMarkup(name.trim()) || smiles.trim()}
+                />
               </div>
             ) : smiles.trim() ? (
               // Keep the preview mounted for ANY non-empty SMILES — only a
@@ -1559,6 +1584,7 @@ function MoleculeFormDialog({
               rows={3}
               maxLength={1000}
             />
+            <p className="text-xs text-muted-foreground">{manage.scriptHint}</p>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -1854,7 +1880,10 @@ export function BiomoleculesCategoryPage() {
         open={reorderOpen}
         onOpenChange={setReorderOpen}
         title={manage.reorderMolecules}
-        items={molecules.map((molecule) => ({ id: molecule.id, label: molecule.name }))}
+        items={molecules.map((molecule) => ({
+          id: molecule.id,
+          label: stripRichMarkup(molecule.name),
+        }))}
         onSave={(ids) => reorderMolecules(category.slug, ids)}
       />
 

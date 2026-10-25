@@ -663,6 +663,8 @@ export const cs = {
       occurrenceLabel: "Výskyt",
       factsLabel: "Zajímavosti",
       factsPlaceholder: "Jedna zajímavost na řádek (nepovinné)",
+      scriptHint:
+        "Dolní/horní indexy: _{…} resp. ^{…} (FADH_{2}, SO_{4}^{2-}). Bez složených závorek zůstane text obyčejný — např. Vitamin B12.",
       essentialLabel: "Esenciální",
       sulfurLabel: "Obsahuje síru",
       dnaLabel: "DNA",

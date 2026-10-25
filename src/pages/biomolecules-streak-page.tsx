@@ -6,6 +6,7 @@ import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/repor
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { RichText } from "@/components/ui/rich-text"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
@@ -25,6 +26,7 @@ import {
   type QuizQuestion,
   type QuizQuestionType,
 } from "@/lib/molecules/quiz"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn, formatDecimalComma } from "@/lib/utils"
 import {
   useBiomoleculeDataLoaded,
@@ -142,7 +144,11 @@ function PromptView({ prompt, monochrome }: { prompt: QuizPrompt; monochrome: bo
       </p>
     )
   }
-  return <p className="text-2xl font-semibold tracking-tight">{prompt.text}</p>
+  return (
+    <p className="text-2xl font-semibold tracking-tight">
+      <RichText text={prompt.text} />
+    </p>
+  )
 }
 
 interface OptionButtonProps {
@@ -207,7 +213,7 @@ function OptionButton({
             option.display === "letter" ? "font-mono tabular text-lg" : "text-sm font-medium",
           )}
         >
-          {optionLabel(molecules, option)}
+          <RichText text={optionLabel(molecules, option)} />
         </span>
       )}
     </button>
@@ -631,7 +637,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
               <p className="text-sm text-muted-foreground">
                 {quizStrings.correctAnswerWas.replace(
                   "{answer}",
-                  correctAnswerText(question, round.config.molecules),
+                  stripRichMarkup(correctAnswerText(question, round.config.molecules)),
                 )}
               </p>
             )}
