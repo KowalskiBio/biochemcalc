@@ -699,6 +699,7 @@ export const cs = {
       reorderCategories: "Pořadí kategorií",
       reorderMolecules: "Pořadí molekul",
       reorderDescription: "Posuňte položky šipkami a pořadí uložte.",
+      sortAlphabetically: "Seřadit A–Z",
       moveUp: "Posunout nahoru",
       moveDown: "Posunout dolů",
       saveOrder: "Uložit pořadí",

@@ -169,6 +169,23 @@ export function BiomoleculesPage() {
     (section) => section.categories.length > 0 || (isTeacher && section.topic !== null),
   )
 
+  // Sections for the category reorder dialog: the hub grouping minus empty
+  // topics. Moves stay inside a topic; the dialog concatenates on save, so
+  // ungrouped categories ("Ostatní") end up last, matching the hub.
+  const categoryReorderSections = useMemo(
+    () =>
+      sections
+        .filter((section) => section.categories.length > 0)
+        .map((section) => ({
+          title: section.topic ? topicNameOf(section.topic.slug) : cs.biomolekuly.noTopic,
+          items: section.categories.map((category) => ({
+            id: category.slug,
+            label: nameOf(category.slug),
+          })),
+        })),
+    [sections, topicNameOf, nameOf],
+  )
+
   const handleDeleteTopic = async () => {
     if (!deletingTopic || topicDeleting) return
     try {
@@ -321,11 +338,7 @@ export function BiomoleculesPage() {
         open={reordering === "categories"}
         onOpenChange={(open) => !open && setReordering(null)}
         title={manage.reorderCategories}
-        items={categories.map((category) => ({
-          id: category.slug,
-          label: nameOf(category.slug),
-          hint: category.topicSlug ? topicNameOf(category.topicSlug) : cs.biomolekuly.noTopic,
-        }))}
+        sections={categoryReorderSections}
         onSave={reorderCategories}
       />
       <ConfirmDialog
@@ -1884,6 +1897,7 @@ export function BiomoleculesCategoryPage() {
           id: molecule.id,
           label: stripRichMarkup(molecule.name),
         }))}
+        sortAlphabeticalLabel={manage.sortAlphabetically}
         onSave={(ids) => reorderMolecules(category.slug, ids)}
       />
 
