@@ -312,6 +312,8 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   const [run, setRun] = useState<Run | null>(null)
   const [round, setRound] = useState<Round | null>(null)
   const [questionNumber, setQuestionNumber] = useState(1)
+  // Run identity for the answer form's remount key (see OpenAnswerForm below).
+  const [runId, setRunId] = useState(0)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
@@ -352,6 +354,9 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
     gradingRef.current = false
     runSeedRef.current = Date.now()
     questionCounterRef.current = 0
+    // Bumped as run identity for the answer form's key — without it the key
+    // is 1→1 on a round-1 restart and React keeps the stale draft mounted.
+    setRunId((id) => id + 1)
     setSelectedKey(null)
     setQuestionNumber(1)
     setIsReportDialogOpen(false)
@@ -603,7 +608,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
 
       {master ? (
         <OpenAnswerForm
-          key={questionNumber}
+          key={`${runId}-${questionNumber}`}
           answered={failed}
           verdict={failed ? "incorrect" : null}
           onSubmit={submitOpenAnswer}
