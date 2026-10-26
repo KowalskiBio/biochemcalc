@@ -82,6 +82,25 @@ export interface BiomoleculeLeaderboardEntry {
 /** The two Biomolekuly streak variants: Učeň and Mistr. */
 export type BiomoleculeStreakKind = "apprentice" | "master"
 
+/** The two Peptidovka modes: Učeň and Mistr. */
+export type PeptidovkaMode = "ucen" | "mistr"
+
+/** One mode's teacher-editable Peptidovka settings. */
+export interface PeptidovkaSettings {
+  mode: PeptidovkaMode
+  minLen: number
+  maxLen: number
+  secondsPerAa: number
+  slugs: string[]
+}
+
+/** The aggregate of one finished Peptidovka run, as recorded for the leaderboard. */
+export interface PeptidovkaRunResult {
+  mode: PeptidovkaMode
+  correctCount: number
+  totalSeconds: number
+}
+
 /** One user's best finished Biomolekuly streak of a given kind. */
 export interface BiomoleculeStreakLeaderboardEntry {
   userId: string
@@ -239,4 +258,19 @@ export const biomoleculesApi = {
     httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/streak-leaderboard", {
       kind,
     }),
+
+  /** Any logged-in user: both Peptidovka modes' settings, Učeň first. */
+  peptidovkaSettings: (): Promise<PeptidovkaSettings[]> =>
+    httpRequest<PeptidovkaSettings[]>("/api/biomolecules/peptidovka-settings"),
+
+  /** Teacher: replace one mode's settings (bounds validated server-side). */
+  updatePeptidovkaSettings: (
+    mode: PeptidovkaMode,
+    settings: Omit<PeptidovkaSettings, "mode">,
+  ): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/update-peptidovka-settings", { mode, ...settings }),
+
+  /** Store the aggregate of one finished Peptidovka run. */
+  recordPeptidovkaRun: (run: PeptidovkaRunResult): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/record-peptidovka-run", run),
 }

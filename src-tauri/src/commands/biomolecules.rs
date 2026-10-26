@@ -14,7 +14,8 @@ use crate::db::repos::biomolecule_repo::{
 };
 use crate::db::repos::{
     BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
-    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo,
+    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaRepo,
+    PeptidovkaSettingsRecord,
 };
 use crate::db::DbError;
 use rusqlite::Connection;
@@ -48,6 +49,17 @@ const MAX_STREAK_SECONDS: f64 = 86_400.0;
 /// kept as text here since the Biomolekuly streak lives entirely in the
 /// frontend and is only validated on record.
 const STREAK_KINDS: [&str; 2] = ["apprentice", "master"];
+
+/// The two Peptidovka modes. Text-only server-side (the game is graded in the
+/// frontend), validated on every settings write and run record.
+const PEPTIDOVKA_MODES: [&str; 2] = ["ucen", "mistr"];
+
+/// Settings bounds mirroring the teacher-facing form: a run picks at least
+/// two and at most all 20 amino acids, at 3-120 seconds per answer.
+const PEPTIDOVKA_MIN_LEN_FLOOR: i64 = 2;
+const PEPTIDOVKA_MAX_LEN_CEILING: i64 = 20;
+const PEPTIDOVKA_SECONDS_PER_AA_MIN: i64 = 3;
+const PEPTIDOVKA_SECONDS_PER_AA_MAX: i64 = 120;
 
 /// The validated trait vocabulary (values stored as text in
 /// `biomolecule_traits`; adding a kind needs no schema change).
@@ -1121,6 +1133,152 @@ fn validate_streak_kind(kind: &str) -> Result<&str, DbError> {
     } else {
         Err(DbError::Validation(format!("Invalid streak kind: {kind}")))
     }
+}
+
+/// One mode's Peptidovka settings as the API returns them.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaSettings {
+    pub mode: String,
+    pub min_len: i64,
+    pub max_len: i64,
+    pub seconds_per_aa: i64,
+    pub slugs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePeptidovkaSettingsPayload {
+    /// `"ucen"` or `"mistr"`.
+    pub mode: String,
+    pub min_len: i64,
+    pub max_len: i64,
+    pub seconds_per_aa: i64,
+    pub slugs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordPeptidovkaRunPayload {
+    /// `"ucen"` or `"mistr"`.
+    pub mode: String,
+    pub correct_count: i64,
+    pub total_seconds: f64,
+}
+
+fn validate_peptidovka_mode(mode: &str) -> Result<&str, DbError> {
+    let mode = mode.trim();
+    if PEPTIDOVKA_MODES.contains(&mode) {
+        Ok(mode)
+    } else {
+        Err(DbError::Validation(format!(
+            "Invalid peptidovka mode: {mode}"
+        )))
+    }
+}
+
+/// Both modes' settings, Učeň first.
+pub fn do_list_peptidovka_settings(conn: &Connection) -> Result<Vec<PeptidovkaSettings>, DbError> {
+    PeptidovkaRepo::list_settings(conn)?
+        .into_iter()
+        .map(|row: PeptidovkaSettingsRecord| {
+            Ok(PeptidovkaSettings {
+                mode: row.mode,
+                min_len: row.min_len,
+                max_len: row.max_len,
+                seconds_per_aa: row.seconds_per_aa,
+                slugs: serde_json::from_str(&row.slugs_json)?,
+            })
+        })
+        .collect()
+}
+
+/// Replace one mode's settings. The teacher form owns the whole row, so this
+/// is a wholesale upsert; all bounds are checked here rather than in the
+/// schema so the error messages reach the client.
+pub fn do_update_peptidovka_settings(
+    conn: &Connection,
+    payload: UpdatePeptidovkaSettingsPayload,
+) -> Result<(), DbError> {
+    let mode = validate_peptidovka_mode(&payload.mode)?;
+    if payload.min_len < PEPTIDOVKA_MIN_LEN_FLOOR {
+        return Err(DbError::Validation(format!(
+            "Minimum length must be at least {PEPTIDOVKA_MIN_LEN_FLOOR}"
+        )));
+    }
+    if payload.max_len < payload.min_len {
+        return Err(DbError::Validation(
+            "Maximum length must not be shorter than the minimum".into(),
+        ));
+    }
+    if payload.max_len > PEPTIDOVKA_MAX_LEN_CEILING {
+        return Err(DbError::Validation(format!(
+            "Maximum length must be at most {PEPTIDOVKA_MAX_LEN_CEILING}"
+        )));
+    }
+    if !(PEPTIDOVKA_SECONDS_PER_AA_MIN..=PEPTIDOVKA_SECONDS_PER_AA_MAX)
+        .contains(&payload.seconds_per_aa)
+    {
+        return Err(DbError::Validation(format!(
+            "Seconds per amino acid must be {PEPTIDOVKA_SECONDS_PER_AA_MIN}-{PEPTIDOVKA_SECONDS_PER_AA_MAX}"
+        )));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let slugs: Vec<String> = payload
+        .slugs
+        .iter()
+        .map(|slug| slug.trim().to_string())
+        .filter(|slug| !slug.is_empty())
+        .filter(|slug| seen.insert(slug.clone()))
+        .collect();
+    if slugs.is_empty() || slugs.iter().any(|slug| !is_valid_slug(slug)) {
+        return Err(DbError::Validation(
+            "Slugs must be a non-empty list of amino-acid slugs".into(),
+        ));
+    }
+    // Format alone lets a typo'd slug silently break the game pool later;
+    // demand every slug names a real molecule (any category — a teacher's
+    // custom amino-acid entry is just as valid as a seeded one).
+    for slug in &slugs {
+        if !BiomoleculeRepo::molecule_slug_exists(conn, slug)? {
+            return Err(DbError::Validation(format!(
+                "Unknown molecule slug: {slug}"
+            )));
+        }
+    }
+    let slugs_json = serde_json::to_string(&slugs)?;
+    PeptidovkaRepo::upsert_settings(
+        conn,
+        mode,
+        payload.min_len,
+        payload.max_len,
+        payload.seconds_per_aa,
+        &slugs_json,
+    )
+}
+
+/// Store the aggregate of one finished Peptidovka run for the acting user.
+/// Graded client-side, so this only sanity-checks the numbers, exactly like
+/// `do_record_streak_result`.
+pub fn do_record_peptidovka_run(
+    conn: &Connection,
+    user_id: &Uuid,
+    payload: RecordPeptidovkaRunPayload,
+) -> Result<(), DbError> {
+    let mode = validate_peptidovka_mode(&payload.mode)?;
+    if !(0..=MAX_STREAK_CORRECT).contains(&payload.correct_count) {
+        return Err(DbError::Validation("Invalid peptidovka run score".into()));
+    }
+    if !(payload.total_seconds > 0.0 && payload.total_seconds <= MAX_STREAK_SECONDS) {
+        return Err(DbError::Validation("Invalid peptidovka run time".into()));
+    }
+    PeptidovkaRepo::insert_run(
+        conn,
+        user_id,
+        mode,
+        payload.correct_count,
+        payload.total_seconds,
+    )
 }
 
 #[cfg(test)]
@@ -2437,5 +2595,290 @@ mod tests {
         .expect("reorder categories");
         let order: Vec<String> = data.categories.iter().map(|c| c.slug.clone()).collect();
         assert_eq!(order, swapped);
+    }
+
+    #[test]
+    fn peptidovka_defaults_are_seeded_for_both_modes() {
+        let conn = setup_conn();
+        let settings = do_list_peptidovka_settings(&conn).expect("settings");
+
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[0].mode, "ucen");
+        assert_eq!(
+            (
+                settings[0].min_len,
+                settings[0].max_len,
+                settings[0].seconds_per_aa
+            ),
+            (3, 6, 15)
+        );
+        assert_eq!(settings[1].mode, "mistr");
+        assert_eq!(
+            (
+                settings[1].min_len,
+                settings[1].max_len,
+                settings[1].seconds_per_aa
+            ),
+            (3, 10, 15)
+        );
+
+        // Both modes default to the canonical 20 amino-acid slugs.
+        assert_eq!(settings[0].slugs.len(), 20);
+        assert!(settings[0].slugs.iter().any(|slug| slug == "ala"));
+        assert_eq!(settings[0].slugs, settings[1].slugs);
+    }
+
+    #[test]
+    fn peptidovka_settings_update_round_trips_each_mode() {
+        let conn = setup_conn();
+        for (mode, max_len) in [("ucen", 5_i64), ("mistr", 9_i64)] {
+            do_update_peptidovka_settings(
+                &conn,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: mode.into(),
+                    min_len: 4,
+                    max_len,
+                    seconds_per_aa: 30,
+                    slugs: vec!["ala".into(), "gly".into()],
+                },
+            )
+            .expect("update");
+        }
+
+        let settings = do_list_peptidovka_settings(&conn).expect("settings");
+        let ucen = settings
+            .iter()
+            .find(|s| s.mode == "ucen")
+            .expect("ucen settings");
+        assert_eq!((ucen.min_len, ucen.max_len), (4, 5));
+        assert_eq!(ucen.seconds_per_aa, 30);
+        assert_eq!(ucen.slugs, vec!["ala".to_string(), "gly".to_string()]);
+
+        let mistr = settings
+            .iter()
+            .find(|s| s.mode == "mistr")
+            .expect("mistr settings");
+        assert_eq!((mistr.min_len, mistr.max_len), (4, 9));
+        assert_eq!(mistr.seconds_per_aa, 30);
+        assert_eq!(mistr.slugs, vec!["ala".to_string(), "gly".to_string()]);
+    }
+
+    #[test]
+    fn peptidovka_settings_validation_rejects_bad_input() {
+        let conn = setup_conn();
+        let update =
+            |mode: &str, min_len: i64, max_len: i64, seconds_per_aa: i64, slugs: Vec<String>| {
+                do_update_peptidovka_settings(
+                    &conn,
+                    UpdatePeptidovkaSettingsPayload {
+                        mode: mode.into(),
+                        min_len,
+                        max_len,
+                        seconds_per_aa,
+                        slugs,
+                    },
+                )
+            };
+        let aa = || vec!["ala".to_string()];
+
+        assert!(matches!(
+            update("beginner", 3, 6, 15, aa()),
+            Err(DbError::Validation(_))
+        ));
+        assert!(
+            matches!(update("ucen", 1, 6, 15, aa()), Err(DbError::Validation(_))),
+            "minimum length below 2 must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 8, 4, 15, aa()), Err(DbError::Validation(_))),
+            "inverted lengths must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 3, 21, 15, aa()), Err(DbError::Validation(_))),
+            "maximum length above 20 must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 3, 6, 2, aa()), Err(DbError::Validation(_))),
+            "seconds per amino acid below 3 must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 3, 6, 121, aa()), Err(DbError::Validation(_))),
+            "seconds per amino acid above 120 must be rejected"
+        );
+        assert!(
+            matches!(
+                update("ucen", 3, 6, 15, vec![]),
+                Err(DbError::Validation(_))
+            ),
+            "an empty slug set must be rejected"
+        );
+    }
+
+    #[test]
+    fn peptidovka_run_is_recorded() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "peptak");
+
+        do_record_peptidovka_run(
+            &conn,
+            &student,
+            RecordPeptidovkaRunPayload {
+                mode: "ucen".into(),
+                correct_count: 7,
+                total_seconds: 12.5,
+            },
+        )
+        .expect("record run");
+
+        let (mode, correct_count, total_seconds): (String, i64, f64) = conn
+            .query_row(
+                "SELECT mode, correct_count, total_seconds FROM peptidovka_runs",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("stored run");
+        assert_eq!(mode, "ucen");
+        assert_eq!(correct_count, 7);
+        assert_eq!(total_seconds, 12.5);
+    }
+
+    #[test]
+    fn peptidovka_rejects_stale_mode_strings() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "peptak");
+
+        for stale in ["apprentice", "master", ""] {
+            assert!(
+                matches!(
+                    do_record_peptidovka_run(
+                        &conn,
+                        &student,
+                        RecordPeptidovkaRunPayload {
+                            mode: stale.into(),
+                            correct_count: 3,
+                            total_seconds: 10.0,
+                        },
+                    ),
+                    Err(DbError::Validation(_))
+                ),
+                "run mode {stale:?} must be rejected"
+            );
+            assert!(
+                matches!(
+                    do_update_peptidovka_settings(
+                        &conn,
+                        UpdatePeptidovkaSettingsPayload {
+                            mode: stale.into(),
+                            min_len: 3,
+                            max_len: 6,
+                            seconds_per_aa: 15,
+                            slugs: vec!["ala".into()],
+                        },
+                    ),
+                    Err(DbError::Validation(_))
+                ),
+                "settings mode {stale:?} must be rejected"
+            );
+        }
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM peptidovka_runs", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count"),
+            0,
+            "rejected runs write nothing"
+        );
+    }
+
+    #[test]
+    fn peptidovka_record_run_validates_bounds() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "peptak");
+        let record = |mode: &str, correct: i64, seconds: f64| {
+            do_record_peptidovka_run(
+                &conn,
+                &student,
+                RecordPeptidovkaRunPayload {
+                    mode: mode.into(),
+                    correct_count: correct,
+                    total_seconds: seconds,
+                },
+            )
+        };
+
+        assert!(matches!(
+            record("ucen", -1, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("ucen", MAX_STREAK_CORRECT + 1, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(record("ucen", 5, 0.0), Err(DbError::Validation(_))));
+        assert!(matches!(
+            record("ucen", 5, -4.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("ucen", 5, MAX_STREAK_SECONDS + 1.0),
+            Err(DbError::Validation(_))
+        ));
+        record("mistr", 5, 30.0).expect("valid mistr run");
+        record("ucen", 0, 4.0).expect("zero-answer run is valid");
+    }
+
+    #[test]
+    fn peptidovka_update_rejects_unknown_slugs_and_dedupes() {
+        let conn = setup_conn();
+
+        // Well-formed but nonexistent slug — format checks alone used to let
+        // this through, silently breaking the game's pool. Distinct numerics,
+        // so the "stored untouched" assertion below actually discriminates
+        // (seed defaults are 3/6/15).
+        assert!(matches!(
+            do_update_peptidovka_settings(
+                &conn,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: "ucen".into(),
+                    min_len: 4,
+                    max_len: 8,
+                    seconds_per_aa: 20,
+                    slugs: vec!["ala".into(), "gly".into(), "nesmysl-123".into()],
+                },
+            ),
+            Err(DbError::Validation(_))
+        ));
+        let stored_seconds: i64 = conn
+            .query_row(
+                "SELECT seconds_per_aa FROM peptidovka_settings WHERE mode = 'ucen'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("untouched settings");
+        assert_eq!(stored_seconds, 15, "a rejected update writes nothing");
+
+        // Duplicates collapse once, in first-seen order.
+        do_update_peptidovka_settings(
+            &conn,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 3,
+                max_len: 6,
+                seconds_per_aa: 15,
+                slugs: vec!["ala".into(), "ala".into(), "gly".into()],
+            },
+        )
+        .expect("deduped update");
+        let slugs_json: String = conn
+            .query_row(
+                "SELECT slugs FROM peptidovka_settings WHERE mode = 'ucen'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("slugs");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&slugs_json).expect("slugs json"),
+            vec!["ala".to_string(), "gly".to_string()]
+        );
     }
 }

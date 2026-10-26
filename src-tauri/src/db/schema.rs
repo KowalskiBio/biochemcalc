@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 55;
+const CURRENT_USER_VERSION: u32 = 56;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -281,6 +281,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 55 {
         apply_migration_v55(conn)?;
         conn.pragma_update(None, "user_version", "55")?;
+    }
+
+    if user_version < 56 {
+        apply_migration_v56(conn)?;
+        conn.pragma_update(None, "user_version", "56")?;
     }
 
     Ok(())
@@ -1902,6 +1907,65 @@ fn apply_migration_v55(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Peptidovka game state: per-mode teacher-editable settings (length range,
+/// seconds per amino acid, and the slug set to draw from) plus finished-run
+/// aggregates for a future leaderboard.
+///
+/// The settings defaults are seeded only when the table is empty, so a
+/// re-run/upgrade never overwrites a teacher's edits. Both defaults use the
+/// canonical 20 amino-acid slugs; runs mirror `biomolecule_streak_runs` with
+/// `kind` renamed to `mode`.
+fn apply_migration_v56(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS peptidovka_settings (
+            mode TEXT PRIMARY KEY NOT NULL CHECK (mode IN ('ucen','mistr')),
+            min_len INTEGER NOT NULL,
+            max_len INTEGER NOT NULL,
+            seconds_per_aa INTEGER NOT NULL,
+            slugs TEXT NOT NULL DEFAULT '[]'
+        );
+
+        CREATE TABLE IF NOT EXISTS peptidovka_runs (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            mode TEXT NOT NULL,
+            correct_count INTEGER NOT NULL CHECK (correct_count >= 0),
+            total_seconds REAL NOT NULL CHECK (total_seconds > 0),
+            finished_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_peptidovka_runs_mode_user
+        ON peptidovka_runs(mode, user_id);
+        ",
+    )?;
+
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM peptidovka_settings", [], |row| {
+        row.get(0)
+    })?;
+    if count == 0 {
+        let slugs_json = peptidovka_default_slugs_json()?;
+        for (mode, min_len, max_len, seconds_per_aa) in [
+            ("ucen", 3_i64, 6_i64, 15_i64),
+            ("mistr", 3_i64, 10_i64, 15_i64),
+        ] {
+            conn.execute(
+                "INSERT INTO peptidovka_settings
+                     (mode, min_len, max_len, seconds_per_aa, slugs)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![mode, min_len, max_len, seconds_per_aa, slugs_json],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// JSON array of the canonical amino-acid slugs, built from the seed module so
+/// the settings defaults cannot drift from the library.
+fn peptidovka_default_slugs_json() -> Result<String, rusqlite::Error> {
+    serde_json::to_string(crate::db::biomolecule_seed::AMINO_ACID_SLUGS)
+        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2253,6 +2317,42 @@ mod tests {
             !columns.iter().any(|(name, _, _)| name == "difficulty"),
             "a fresh database must have no difficulty column on templates"
         );
+    }
+
+    /// The v56 defaults seed only when the settings table is empty, so an
+    /// upgrade re-run must never clobber a teacher's saved Peptidovka config.
+    #[test]
+    fn v56_seeding_preserves_teacher_edits_on_remigration() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        conn.execute(
+            "UPDATE peptidovka_settings
+             SET min_len = 4, max_len = 8, seconds_per_aa = 20, slugs = ?1
+             WHERE mode = 'ucen'",
+            rusqlite::params!["[\"ala\",\"gly\"]"],
+        )
+        .expect("teacher edit");
+
+        // Replaying after the edit must hands-off the row — reset the version
+        // so v56 really re-runs (the house idiom: same pragma trick as the
+        // earlier upgrade tests) and its `count == 0` guard is the load
+        // being pinned, not the version gate.
+        conn.pragma_update(None, "user_version", "55")
+            .expect("reset version");
+        run_migrations(&conn).expect("re-migration");
+
+        let (min_len, max_len, seconds_per_aa, slugs): (i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT min_len, max_len, seconds_per_aa, slugs
+                 FROM peptidovka_settings WHERE mode = 'ucen'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read settings");
+        assert_eq!((min_len, max_len), (4, 8));
+        assert_eq!(seconds_per_aa, 20);
+        assert_eq!(slugs, "[\"ala\",\"gly\"]");
     }
 
     /// A database that last saw v32 (the deployed state before this feature)

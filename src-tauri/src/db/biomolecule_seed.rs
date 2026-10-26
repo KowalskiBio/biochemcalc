@@ -81,6 +81,13 @@ const SACCHARIDES_CATEGORY: SeedCategory = SeedCategory {
     topic_slug: SACCHARIDES_TOPIC_SLUG,
 };
 
+/// Canonical slugs of the 20 proteinogenic amino acids, in seed order. Used
+/// as the default Peptidovka slug set (migration v56).
+pub const AMINO_ACID_SLUGS: &[&str] = &[
+    "ala", "arg", "asn", "asp", "cys", "gln", "glu", "gly", "his", "ile", "leu", "lys", "met",
+    "phe", "pro", "ser", "thr", "trp", "tyr", "val",
+];
+
 /// The 20 proteinogenic L-amino acids. SMILES are the PubChem canonical
 /// isomeric forms in the neutral (non-zwitterionic) state; glycine is the
 /// only achiral one (no `@`). Traits: `oneLetter` (quiz letter),

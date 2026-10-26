@@ -7,6 +7,7 @@ pub mod constant_repo;
 pub mod invite_code_repo;
 pub mod output_file_repo;
 pub mod password_reset_repo;
+pub mod peptidovka_repo;
 pub mod practice_repo;
 pub mod projekt_repo;
 pub mod question_report_repo;
@@ -35,6 +36,8 @@ pub use constant_repo::ConstantRepo;
 pub use invite_code_repo::InviteCodeRepo;
 pub use output_file_repo::OutputFileRepo;
 pub use password_reset_repo::PasswordResetTokenRepo;
+#[allow(unused_imports)]
+pub use peptidovka_repo::{PeptidovkaLeaderboardRow, PeptidovkaRepo, PeptidovkaSettingsRecord};
 #[allow(unused_imports)]
 pub use practice_repo::{
     AnyPracticeTemplateRow, LeaderboardRow, PracticeAttemptRecord, PracticeRepo,
