@@ -344,6 +344,14 @@ impl BiomoleculeRepo {
         )?)
     }
 
+    pub fn molecule_slug_exists(conn: &Connection, slug: &str) -> Result<bool, DbError> {
+        Ok(conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM biomolecules WHERE slug = ?1)",
+            params![slug],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Next free position within the hub / within one category.
     pub fn next_category_position(conn: &Connection) -> Result<i64, DbError> {
         Ok(conn.query_row(
