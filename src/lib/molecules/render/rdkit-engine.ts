@@ -18,6 +18,7 @@ export interface Mol {
   get_svg_with_highlights(details: string): string
   get_json(): string
   get_molblock(): string
+  get_smiles(): string
   get_num_atoms(): number
   get_num_bonds(): number
   delete(): void
@@ -48,6 +49,10 @@ export interface MolRingSnapshot {
 }
 
 export interface MolGraphSnapshot {
+  /**
+   * Atom (and bond) ordering mirrors the source SMILES/molblock parse order,
+   * so index-based anchors computed while assembling the input stay valid.
+   */
   atoms: MolAtomSnapshot[]
   bonds: MolBondSnapshot[]
   rings: MolRingSnapshot[]
