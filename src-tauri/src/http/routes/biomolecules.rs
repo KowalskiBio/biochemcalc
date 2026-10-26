@@ -12,16 +12,17 @@ use crate::commands::biomolecule_reports::{
 use crate::commands::biomolecules::{
     do_create_category, do_create_molecule, do_create_topic, do_delete_category,
     do_delete_molecule, do_delete_topic, do_list_data, do_list_peptidovka_settings,
-    do_quiz_leaderboard, do_record_peptidovka_run, do_record_quiz_result, do_record_streak_result,
-    do_reorder_categories, do_reorder_molecules, do_reorder_topics, do_streak_leaderboard,
+    do_peptidovka_leaderboard, do_quiz_leaderboard, do_record_peptidovka_run,
+    do_record_quiz_result, do_record_streak_result, do_reorder_categories,
+    do_reorder_molecules, do_reorder_topics, do_streak_leaderboard,
     do_update_category_meta, do_update_molecule, do_update_peptidovka_settings,
     do_update_topic_meta, BiomoleculeLeaderboardEntry, BiomoleculeStreakLeaderboardEntry,
     CreateCategoryPayload, CreateMoleculePayload, CreateTopicPayload, DeleteCategoryPayload,
-    DeleteMoleculePayload, DeleteTopicPayload, PeptidovkaSettings, QuizLeaderboardPayload,
-    RecordPeptidovkaRunPayload, RecordQuizResultPayload, RecordStreakResultPayload,
-    ReorderCategoriesPayload, ReorderMoleculesPayload, ReorderTopicsPayload,
-    StreakLeaderboardPayload, UpdateCategoryMetaPayload, UpdateMoleculePayload,
-    UpdatePeptidovkaSettingsPayload, UpdateTopicMetaPayload,
+    DeleteMoleculePayload, DeleteTopicPayload, PeptidovkaLeaderboardPayload, PeptidovkaSettings,
+    QuizLeaderboardPayload, RecordPeptidovkaRunPayload, RecordQuizResultPayload,
+    RecordStreakResultPayload, ReorderCategoriesPayload, ReorderMoleculesPayload,
+    ReorderTopicsPayload, StreakLeaderboardPayload, UpdateCategoryMetaPayload,
+    UpdateMoleculePayload, UpdatePeptidovkaSettingsPayload, UpdateTopicMetaPayload,
 };
 use crate::db::repos::biomolecule_repo::BiomoleculeData;
 use crate::db::AppState;
@@ -183,6 +184,14 @@ async fn streak_leaderboard(
     Ok(Json(do_streak_leaderboard(&conn, &payload)?))
 }
 
+async fn peptidovka_leaderboard(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<PeptidovkaLeaderboardPayload>,
+) -> Result<Json<Vec<BiomoleculeStreakLeaderboardEntry>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_peptidovka_leaderboard(&conn, &payload)?))
+}
+
 async fn peptidovka_settings(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<PeptidovkaSettings>>, HttpError> {
@@ -252,6 +261,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/data", post(data))
         .route("/leaderboard", post(leaderboard))
         .route("/streak-leaderboard", post(streak_leaderboard))
+        .route("/peptidovka-leaderboard", post(peptidovka_leaderboard))
         .route("/peptidovka-settings", post(peptidovka_settings))
         .route("/record-peptidovka-run", post(record_peptidovka_run))
 }

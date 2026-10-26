@@ -273,4 +273,10 @@ export const biomoleculesApi = {
   /** Store the aggregate of one finished Peptidovka run. */
   recordPeptidovkaRun: (run: PeptidovkaRunResult): Promise<void> =>
     httpRequest<void>("/api/biomolecules/record-peptidovka-run", run),
+
+  /** Any logged-in user: each user's single best finished Peptidovka run of the mode. */
+  peptidovkaLeaderboard: (mode: PeptidovkaMode): Promise<BiomoleculeStreakLeaderboardEntry[]> =>
+    httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/peptidovka-leaderboard", {
+      mode,
+    }),
 }

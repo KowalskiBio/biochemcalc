@@ -184,6 +184,9 @@ export const cs = {
 
     leaderboardApprenticeTitle: "Nejlepší série – Učeň",
     leaderboardMasterTitle: "Nejlepší série – Mistr",
+    leaderboardPeptidovkaUcenTitle: "Peptidovka – Učeň",
+    leaderboardPeptidovkaMistrTitle: "Peptidovka – Mistr",
+    leaderboardPeptidovkaDescription: "Nejdelší série správně určených peptidů v řadě.",
     leaderboardStreakDescription: "Nejdelší série správných odpovědí v řadě, bez chyby.",
     leaderboardStreakCount: "Nejlepší série",
     leaderboardStreakTime: "Celkový čas",

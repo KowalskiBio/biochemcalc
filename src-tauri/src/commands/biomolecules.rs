@@ -14,8 +14,8 @@ use crate::db::repos::biomolecule_repo::{
 };
 use crate::db::repos::{
     BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
-    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaRepo,
-    PeptidovkaSettingsRecord,
+    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaLeaderboardRow,
+    PeptidovkaRepo, PeptidovkaSettingsRecord,
 };
 use crate::db::DbError;
 use rusqlite::Connection;
@@ -1119,6 +1119,36 @@ pub fn do_streak_leaderboard(
                 total_seconds: row.total_seconds,
                 // The failed answer counts as answered, mirroring the
                 // calculations streak summary.
+                seconds_per_answer: row.total_seconds / (row.best_correct_count + 1) as f64,
+            },
+        )
+        .collect())
+}
+
+/// Leaderboard payload for one Peptidovka mode (`"ucen"` / `"mistr"`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaLeaderboardPayload {
+    pub mode: String,
+}
+
+/// Each user's single best finished Peptidovka run of the mode — same table
+/// shape as the streak board, so the page reuses it verbatim.
+pub fn do_peptidovka_leaderboard(
+    conn: &Connection,
+    payload: &PeptidovkaLeaderboardPayload,
+) -> Result<Vec<BiomoleculeStreakLeaderboardEntry>, DbError> {
+    let mode = validate_peptidovka_mode(&payload.mode)?;
+    Ok(PeptidovkaRepo::best_per_user(conn, mode)?
+        .into_iter()
+        .map(
+            |row: PeptidovkaLeaderboardRow| BiomoleculeStreakLeaderboardEntry {
+                user_id: row.user_id.to_string(),
+                username: row.username,
+                best_correct_count: row.best_correct_count,
+                total_seconds: row.total_seconds,
+                // The run always ends on one failed/expired round: that round
+                // counts as answered, exactly like the streak's +1.
                 seconds_per_answer: row.total_seconds / (row.best_correct_count + 1) as f64,
             },
         )
@@ -2825,6 +2855,81 @@ mod tests {
         ));
         record("mistr", 5, 30.0).expect("valid mistr run");
         record("ucen", 0, 4.0).expect("zero-answer run is valid");
+    }
+
+    #[test]
+    fn peptidovka_leaderboard_reports_each_users_best_run_per_mode() {
+        let conn = setup_conn();
+        let petri = insert_student(&conn, "petri");
+        let other = insert_student(&conn, "jinek");
+
+        for (count, seconds) in [(2_i64, 30.0_f64), (5, 40.0), (3, 10.0)] {
+            do_record_peptidovka_run(
+                &conn,
+                &petri,
+                RecordPeptidovkaRunPayload {
+                    mode: "ucen".into(),
+                    correct_count: count,
+                    total_seconds: seconds,
+                },
+            )
+            .expect("petri run");
+        }
+        do_record_peptidovka_run(
+            &conn,
+            &other,
+            RecordPeptidovkaRunPayload {
+                mode: "ucen".into(),
+                correct_count: 4,
+                total_seconds: 20.0,
+            },
+        )
+        .expect("other run");
+        do_record_peptidovka_run(
+            &conn,
+            &petri,
+            RecordPeptidovkaRunPayload {
+                mode: "mistr".into(),
+                correct_count: 1,
+                total_seconds: 8.0,
+            },
+        )
+        .expect("mistr run separate");
+
+        let board = do_peptidovka_leaderboard(
+            &conn,
+            &PeptidovkaLeaderboardPayload {
+                mode: "ucen".into(),
+            },
+        )
+        .expect("leaderboard");
+        assert_eq!(board.len(), 2);
+        // Petri's best is 5 correct from the second run; the slower 3-correct
+        // run and the worse 2-correct run are folded away, and the other
+        // student sits behind despite more correct than petri's worst runs.
+        assert_eq!(board[0].best_correct_count, 5);
+        assert_eq!(board[0].username, "petri");
+        assert_eq!(board[0].seconds_per_answer, 40.0 / 6.0);
+        assert_eq!(board[1].best_correct_count, 4);
+
+        let mistr = do_peptidovka_leaderboard(
+            &conn,
+            &PeptidovkaLeaderboardPayload {
+                mode: "mistr".into(),
+            },
+        )
+        .expect("mistr leaderboard");
+        assert_eq!(mistr.len(), 1, "modes stay isolated on the board");
+
+        assert!(matches!(
+            do_peptidovka_leaderboard(
+                &conn,
+                &PeptidovkaLeaderboardPayload {
+                    mode: "apprentice".into(),
+                },
+            ),
+            Err(DbError::Validation(_))
+        ));
     }
 
     #[test]
