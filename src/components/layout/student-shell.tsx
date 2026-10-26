@@ -2,6 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cva } from "class-variance-authority"
 import {
   Atom,
+  Dna,
   FlaskConical,
   LogOut,
   Menu,
@@ -80,6 +81,11 @@ const navBySection: Record<Section, NavItem[]> = {
       path: "/biomolekuly/test",
       icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
       label: cs.navigation.test,
+    },
+    {
+      path: "/biomolekuly/peptidovka",
+      icon: <Dna className="size-[18px]" strokeWidth={1.75} />,
+      label: cs.navigation.peptidovka,
     },
     {
       path: "/biomolekuly",

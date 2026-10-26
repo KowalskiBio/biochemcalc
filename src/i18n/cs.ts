@@ -81,6 +81,7 @@ export const cs = {
     testy: "Testy",
     databaze: "Databáze",
     biomolekuly: "Biomolekuly",
+    peptidovka: "Peptidovka",
     projections: "Projekce",
     formulas: "Vzorce",
     bulkImport: "Hromadný import",
@@ -310,6 +311,72 @@ export const cs = {
     resultsTryAgain: "Zkusit znovu",
     resultsBackToModes: "Zpět na výběr režimu",
     noResults: "Žádné výsledky k zobrazení.",
+  },
+
+  // Peptidovka: the peptide-reading game. One generated peptide structure
+  // per round, answered as one-letter codes from the N-terminus; the run
+  // ends on the first mistake or when the round timer runs out. Mode titles
+  // are the shared `cs.test` ones, same convention as the streaks above.
+  peptidovka: {
+    title: "Peptidovka",
+    modePickDescription:
+      "Poznávejte složení peptidů z jejich strukturních vzorců. Vyberte režim hry.",
+    modeUcenDescription:
+      "Peptid má barevné atomy a vždy čte zleva od N-konce. Série končí první chybou nebo vypršením času.",
+    modeMistrDescription:
+      "Peptid je jednobarevný a natočený náhodným směrem. Série končí první chybou nebo vypršením času.",
+    backToModes: "Zpět na výběr režimu",
+    runTitle: {
+      ucen: "Peptidovka – Učeň",
+      mistr: "Peptidovka – Mistr",
+    },
+    pointsSoFar: "Body zatím: {points}",
+    roundLabel: "Peptid {index} · {count}",
+    aminoAcidCount: {
+      one: "{count} aminokyselina",
+      few: "{count} aminokyseliny",
+      many: "{count} aminokyselin",
+    },
+    structureLabel: "Struktura peptidu k rozpoznání",
+    answerLabel: "Složení peptidu",
+    answerPlaceholder: "např. MKY",
+    answerHint: "Pište jednopísmenné kódy v pořadí od N-konce k C-konci.",
+    checkAnswer: "Zkontrolovat",
+    failedWrong: "Špatně. Série skončila.",
+    failedTimeout: "Čas vypršel. Série skončila.",
+    failedInterrupted: "Série byla přerušena — další peptid se nepodařilo nalosovat.",
+    correctAnswerLabel: "Správné složení",
+    resultsPoints: "Získané body",
+    resultsPeptides: "Dokončené peptidy",
+    resultsTime: "Celkový čas",
+    playAgain: "Hrát znovu",
+    emptyTitle: "Peptidovku teď nelze spustit",
+    emptyDescription:
+      "Ve hře musí být alespoň dvě aminokyseliny s jednopísmenným kódem. Počkejte, až je vyučující vybere v nastavení.",
+    loadError: "Hru se nepodařilo načíst. Zkuste to prosím znovu.",
+
+    // Teacher settings (`/biomolekuly/peptidovka` under the teacher shell) —
+    // one save per mode, bounds mirrored from the server, which stays the
+    // authority.
+    settingsDescription:
+      "Délka peptidů, časový limit a aminokyseliny ve hře — pro každý režim zvlášť.",
+    minLenLabel: "Minimální délka",
+    maxLenLabel: "Maximální délka",
+    secondsPerAaLabel: "Sekund na aminokyselinu",
+    poolLabel: "Aminokyseliny ve hře",
+    poolSelected: "Vybráno {selected} z {total}",
+    saveSettings: "Uložit nastavení",
+    savingSettings: "Ukládám...",
+    settingsSaved: "Nastavení bylo uloženo.",
+    settingsSaveError: "Nastavení se nepodařilo uložit",
+    settingsLoadError: "Nastavení se nepodařilo načíst",
+    invalidLength: "Délka musí být 2–20 a maximum nesmí být menší než minimum.",
+    invalidSeconds: "Čas na aminokyselinu musí být 3–120 sekund.",
+    invalidPool: "Vyberte alespoň dvě aminokyseliny.",
+    poolEmptyTitle: "Žádné hratelné aminokyseliny",
+    poolEmptyDescription:
+      "V kategorii Aminokyseliny zatím nejsou alespoň dvě molekuly s jednopísmenným kódem. Doplňte je tam.",
+    poolEmptyAction: "Otevřít aminokyseliny",
   },
 
   // Question reports (teacher inbox)
