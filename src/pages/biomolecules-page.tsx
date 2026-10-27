@@ -86,7 +86,11 @@ const NO_TOPIC_VALUE = "none"
 type CategoryKind = "aminoAcids" | "nitrogenBases" | "custom"
 
 function categoryKind(categoryId: string): CategoryKind {
-  if (categoryId === "aminokyseliny") return "aminoAcids"
+  // The special (Sec, Pyl) category shares its kind with amino acids: same
+  // traits vocabulary, same one-letter code-line, same polarity-hidden UI.
+  if (categoryId === "aminokyseliny" || categoryId === "specialni-aminokyseliny") {
+    return "aminoAcids"
+  }
   if (categoryId === "dusikate-baze") return "nitrogenBases"
   return "custom"
 }
