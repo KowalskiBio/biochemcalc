@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 59;
+const CURRENT_USER_VERSION: u32 = 60;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -302,6 +302,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 59 {
         apply_migration_v59(conn)?;
         conn.pragma_update(None, "user_version", "59")?;
+    }
+
+    if user_version < 60 {
+        apply_migration_v60(conn)?;
+        conn.pragma_update(None, "user_version", "60")?;
     }
 
     Ok(())
@@ -1982,6 +1987,48 @@ fn peptidovka_default_slugs_json() -> Result<String, rusqlite::Error> {
         .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
 }
 
+/// Match the blob-typed Uuid storage every other biomolecule write uses —
+/// immediately lowering any TEXT-shaped id written by a pre-v60 upgrade
+/// through `unhex(replace(...))`. BLOB rows are untouched, so the statement
+/// is a no-op on healthy data.
+fn apply_migration_v60(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        -- Repair for a real deployment bug: one v59 insert path wrote Uuids
+        -- as dashed TEXT while every other molecule id is a BLOB, which made
+        -- the whole dataset unreadable (list_data errors on InvalidColumnType
+        -- for the id column). Rewrite the TEXT ids (and their trait FKs) to
+        -- BLOB form; idempotent on untouched/on-heading data.
+        CREATE TABLE IF NOT EXISTS biomolecules (
+            id BLOB PRIMARY KEY NOT NULL,
+            category_slug TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            smiles TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS biomolecule_traits (
+            molecule_id BLOB NOT NULL,
+            trait TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (molecule_id, trait)
+        );
+
+        PRAGMA foreign_keys = OFF;
+
+        UPDATE biomolecules SET id = unhex(replace(id, '-', '')) WHERE typeof(id) = 'text';
+        UPDATE biomolecule_traits
+        SET molecule_id = unhex(replace(molecule_id, '-', ''))
+        WHERE typeof(molecule_id) = 'text';
+
+        PRAGMA foreign_keys = ON;
+        ",
+    )
+}
+
 /// Adds the `polarity` trait (hydrophobic/hydrophilic) to the twenty
 /// canonical amino acids so the quiz can ask polarity on its own axis,
 /// independent of the side-chain family label (see aminoAcidsQuizConfig).
@@ -2104,8 +2151,10 @@ fn apply_migration_v59(conn: &Connection) -> Result<(), rusqlite::Error> {
     ];
     for (slug, name, smiles, position) in MOLECULES {
         // Fresh Uuid per attempt, but the row appears only once: NOT EXISTS is
-        // the idempotency contract of this migration.
-        let molecule_id = Uuid::new_v4().to_string();
+        // the idempotency contract of this migration. Bound as Uuid (BLOB),
+        // never as dashed TEXT — that mismatch already shipped a hotfix
+        // (v60) once, do not reintroduce it.
+        let molecule_id = Uuid::new_v4();
         conn.execute(
             "INSERT INTO biomolecules
                  (id, category_slug, slug, name, smiles, projection, position, created_at, updated_at)
@@ -3814,6 +3863,35 @@ mod tests {
         assert_eq!(topic_count, 3);
         assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
     }
+    /// Legacy upgrade simulation: a v58-era library status qua replayed via
+    /// the full chain, then trimmed back and v59 re-applied, must leave the
+    /// new special category correctly grouped and listed.
+    #[test]
+    fn upgrade_from_v58_keeps_special_amino_acids_grouped() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        conn.execute(
+            "DELETE FROM biomolecule_categories WHERE slug = 'specialni-aminokyseliny'",
+            [],
+        )
+        .expect("back to v58 shape");
+        conn.pragma_update(None, "user_version", "58").expect("58");
+        run_migrations(&conn).expect("v59 reapplied");
+
+        let topic: String = conn
+            .query_row(
+                "SELECT topic_slug FROM biomolecule_categories WHERE slug = 'specialni-aminokyseliny'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("category restored");
+        assert_eq!(topic, "aminokyseliny");
+
+        let data = crate::db::repos::BiomoleculeRepo::list_data(&conn).expect("list data");
+        assert_eq!(data.categories.len(), 4);
+        assert!(data.molecules.iter().any(|m| m.slug == "sec"));
+        assert!(data.molecules.iter().any(|m| m.slug == "pyl"));
+    }
 
     #[test]
     fn v54_gives_existing_teachers_both_sections() {
@@ -3821,6 +3899,7 @@ mod tests {
         run_migrations(&conn).expect("migrations");
         conn.pragma_update(None, "user_version", "53")
             .expect("set version");
+
         conn.execute_batch(
             "
             INSERT INTO users (id, username, password_hash, role, created_at, sections)
@@ -3848,5 +3927,53 @@ mod tests {
             "calculations",
             "students keep their scope"
         );
+    }
+
+    /// The v59-era TEXT/BLOB id mistake poisoned live databases with rows
+    /// whose molecule ids are TEXT-shaped — unreadable to every list consumer.
+    /// The v60 repair must retype exactly those rows and nothing else, and it
+    /// pinpoints the repaired path via a fresh re-exercise of list_data.
+    #[test]
+    fn v60_repairs_text_typed_molecule_ids() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        // Simulate the exact corruption a pre-v60 rollout produced: TEXT id
+        // in the molecule row AND TEXT fks in its trait rows.
+        let text_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO biomolecules
+                 (id, category_slug, slug, name, smiles, position, created_at, updated_at)
+             VALUES (?1, 'specialni-aminokyseliny', 'his-acid', 'Histidyldetyl', 'NCC(=O)O', 99, ?2, ?2)",
+            rusqlite::params![text_id, "2026-01-01T00:00:00Z"],
+        )
+        .expect("poison molecule");
+        conn.execute(
+            "INSERT INTO biomolecule_traits (molecule_id, trait, value) VALUES (?1, 'oneLetter', 'X')",
+            rusqlite::params![text_id],
+        )
+        .expect("poison trait");
+
+        conn.pragma_update(None, "user_version", "59").expect("backlevel");
+        run_migrations(&conn).expect("v60");
+
+        let text_ids: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecules WHERE typeof(id) = 'text'", [], |row| {
+                row.get(0)
+            })
+            .expect("text ids");
+        assert_eq!(text_ids, 0, "every molecule id is BLOB again");
+        let text_trait_fks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM biomolecule_traits WHERE typeof(molecule_id) = 'text'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("text trait fks");
+        assert_eq!(text_trait_fks, 0, "every trait foreign key is BLOB again");
+        // The deployment symptom — list_data dying on a TEXT id — is what
+        // this test exists to prevent from ever coming back.
+        let data = crate::db::repos::BiomoleculeRepo::list_data(&conn).expect("list data");
+        assert!(data.molecules.iter().any(|m| m.slug == "his-acid"));
     }
 }
