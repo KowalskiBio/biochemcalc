@@ -14,6 +14,13 @@ export const AMINO_ACIDS_SLUG = "aminokyseliny"
 export const NITROGEN_BASES_SLUG = "dusikate-baze"
 /** Route slug of the seeded saccharides category (Haworth projections). */
 export const SACCHARIDES_SLUG = "sacharidy"
+/** Route slug of the seeded special (Sec, Pyl) amino-acid category. */
+export const SPECIAL_AMINO_ACIDS_SLUG = "specialni-aminokyseliny"
+/** The amino-acid family eligible for the Peptidovka pool. */
+export const PEPTIDE_FAMILY_SLUGS: readonly string[] = [
+  AMINO_ACIDS_SLUG,
+  SPECIAL_AMINO_ACIDS_SLUG,
+] as const
 
 /** The trait keys validated server-side (mirrors `commands::biomolecules::traits`). */
 export const TRAIT = {

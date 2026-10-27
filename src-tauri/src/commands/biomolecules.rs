@@ -1510,7 +1510,7 @@ mod tests {
     fn seeded_categories_are_listed() {
         let conn = setup_conn();
         let data = do_list_data(&conn).expect("list");
-        assert_eq!(data.categories.len(), 3);
+        assert_eq!(data.categories.len(), 4);
         assert_eq!(data.categories[0].slug, "aminokyseliny");
         assert!(data.categories[0].built_in);
         assert_eq!(data.categories[0].molecule_count, 20);
@@ -1519,6 +1519,9 @@ mod tests {
         assert_eq!(data.categories[2].slug, "sacharidy");
         assert!(data.categories[2].built_in);
         assert_eq!(data.categories[2].molecule_count, 9);
+        assert_eq!(data.categories[3].slug, "specialni-aminokyseliny");
+        assert!(data.categories[3].built_in);
+        assert_eq!(data.categories[3].molecule_count, 2);
         let ala = data
             .molecules
             .iter()

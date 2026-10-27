@@ -16,7 +16,7 @@ import {
   type PeptidovkaSettings,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
-import { AMINO_ACIDS_SLUG, TRAIT, traitOf } from "@/lib/molecules"
+import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const peptidovkaStrings = cs.peptidovka
@@ -270,7 +270,7 @@ export function PeptidovkaSettingsPage() {
     () =>
       allMolecules.filter(
         (molecule) =>
-          molecule.categorySlug === AMINO_ACIDS_SLUG &&
+          PEPTIDE_FAMILY_SLUGS.includes(molecule.categorySlug) &&
           traitOf(molecule, TRAIT.oneLetter) !== undefined,
       ),
     [allMolecules],
@@ -326,9 +326,7 @@ export function PeptidovkaSettingsPage() {
               </p>
             </div>
             <Button variant="outline" asChild>
-              <Link to={`/biomolekuly/${AMINO_ACIDS_SLUG}`}>
-                {peptidovkaStrings.poolEmptyAction}
-              </Link>
+              <Link to="/biomolekuly">{peptidovkaStrings.poolEmptyAction}</Link>
             </Button>
           </CardContent>
         </Card>

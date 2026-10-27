@@ -33,7 +33,7 @@ const SEED: { slug: string; smiles: string }[] = Array.from(
   SEED_SOURCE.matchAll(/slug: "([a-z0-9-]+)", name: "[^"]*", smiles: "([^"]+)"/g),
   (match: RegExpMatchArray) => ({ slug: match[1], smiles: match[2] }),
 ).filter(({ slug }) => RESIDUES[slug] !== undefined || slug === "pro")
-expect(SEED.length, "all 20 canonical amino acids are pinned by the roundtrip").toBe(20)
+expect(SEED.length, "all canonical and special amino acids are pinned by the roundtrip").toBe(22)
 
 beforeAll(async () => {
   await ensureRdkit()
@@ -58,6 +58,16 @@ describe("peptideSmiles", () => {
     expect(fromTemplate).not.toBeNull()
     if (fromTemplate === null) return
     expect(canonical(fromTemplate)).toBe(canonical(fromSeedOrder))
+  })
+
+  it("anchors the pyrrolysine authoring's topology to PubChem connectivity", () => {
+    // Chirality brackets are the only brackets in either molecule: rewriting
+    // them down to a plain C makes topology read identically when the
+    // canonical walks of the same graph coincide.
+    const deStereotyped = (smiles: string) => smiles.replace(/\[C@+H?\]/g, "C")
+    const authored = deStereotyped(canonical("N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O"))
+    const pubchem = deStereotyped(canonical("CC1CC=NC1C(=O)NCCCCC(C(=O)O)N"))
+    expect(authored, "same connectivity graph as PubChem pyrrolysine").toBe(pubchem)
   })
 
   it("pins a coiled mid-chain trio: standard+cyclic+achiral neighbors", () => {

@@ -42,6 +42,10 @@ export const RESIDUES: Readonly<Record<string, ResidueFragment>> = {
   trp: { unit: "N[C@@H](Cc1c[nH]c2ccccc12)C(=O)" },
   tyr: { unit: "N[C@@H](Cc1ccc(O)cc1)C(=O)" },
   val: { unit: "N[C@@H](C(C)C)C(=O)" },
+  // Special proteinogenic residues (opt-in pool members from the
+  // "specialni-aminokyseliny" category), same alpha template as the twenty.
+  sec: { unit: "N[C@@H](C[SeH])C(=O)" },
+  pyl: { unit: "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)" },
 } as const
 
 /** Seed slugs the template cannot express (ring-fused secondary amine). */

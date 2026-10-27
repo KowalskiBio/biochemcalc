@@ -18,6 +18,7 @@ import {
   moleculeAliases,
   NITROGEN_BASES_SLUG,
   SACCHARIDES_SLUG,
+  SPECIAL_AMINO_ACIDS_SLUG,
   TRAIT,
   type TraitKey,
   traitOf,
@@ -324,7 +325,9 @@ export function getCategoryQuizConfig(
   if (molecules.length === 0) {
     return undefined
   }
-  if (categoryId === AMINO_ACIDS_SLUG) {
+  if (categoryId === AMINO_ACIDS_SLUG || categoryId === SPECIAL_AMINO_ACIDS_SLUG) {
+    // Both amino-acid categories quiz the same way: letters from `oneLetter`,
+    // polarity on the hydrophobic/hydrophilic axis, family classes, flags.
     return aminoAcidsQuizConfig(molecules)
   }
   if (categoryId === NITROGEN_BASES_SLUG) {

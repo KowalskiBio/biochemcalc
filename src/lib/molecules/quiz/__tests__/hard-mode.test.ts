@@ -203,6 +203,68 @@ describe("polarity axis vs side-chain family", () => {
   })
 })
 
+describe("special amino acids (specialni-aminokyseliny)", () => {
+  function specialRow(
+    slug: string,
+    name: string,
+    smiles: string,
+    traits: Record<string, string>,
+  ): import("@/lib/biomolecules-api").Biomolecule {
+    return {
+      id: `specialni-aminokyseliny-${slug}`,
+      categorySlug: "specialni-aminokyseliny",
+      slug,
+      name,
+      smiles,
+      traits,
+      position: 0,
+    }
+  }
+
+  const SPECIAL = [
+    specialRow("sec", "Selenocystein", "N[C@@H](C[SeH])C(=O)O", {
+      oneLetter: "U",
+      abbreviation: "Sec",
+      sideChain: "polar",
+      polarity: "hydrophobic",
+      charge: "neutral",
+    }),
+    specialRow("pyl", "Pyrrolysin", "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O", {
+      oneLetter: "O",
+      abbreviation: "Pyl",
+      sideChain: "basic",
+      polarity: "hydrophilic",
+      charge: "neutral",
+    }),
+  ]
+
+  it("quizzes with letters and one form: sec is U, pyl is O", () => {
+    const config = getCategoryQuizConfig("specialni-aminokyseliny", SPECIAL)
+    expect(config).toBeDefined()
+    if (config === undefined) return
+    expect(config.molecules.find((m) => m.id === "sec")?.oneLetter).toBe("U")
+    expect(config.molecules.find((m) => m.id === "pyl")?.oneLetter).toBe("O")
+  })
+
+  it("matches the polarity axis like the canonical acids (sec nonpolar, pyl polar)", () => {
+    const config = getCategoryQuizConfig("specialni-aminokyseliny", SPECIAL)
+    expect(config).toBeDefined()
+    if (config === undefined) return
+    const characteristics = requireCharacteristics(config)
+    const sec = config.molecules.find((m) => m.id === "sec")
+    const pyl = config.molecules.find((m) => m.id === "pyl")
+    if (sec === undefined || pyl === undefined) return
+    expect(
+      characteristics.find((def) => def.predicate === "nonpolar")?.matches(sec),
+      "selenocysteine mirrors cysteine on the polarity axis",
+    ).toBe(true)
+    expect(
+      characteristics.find((def) => def.predicate === "nonpolar")?.matches(pyl),
+      "pyrrolysine is hydrophilic like lysine",
+    ).toBe(false)
+  })
+})
+
 describe("aliases propagation", () => {
   /** Alanine carries a two-line `aliases` trait on top of its code. */
   function aliasedAminoAcids() {

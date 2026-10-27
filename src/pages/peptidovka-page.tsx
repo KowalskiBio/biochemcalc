@@ -15,7 +15,7 @@ import {
   type PeptidovkaMode,
   type PeptidovkaSettings,
 } from "@/lib/biomolecules-api"
-import { AMINO_ACIDS_SLUG, TRAIT, traitOf } from "@/lib/molecules"
+import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
 import { ensureRdkit } from "@/lib/molecules/render/rdkit-engine"
 import {
   expectedChainLetters,
@@ -277,7 +277,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   const playableBySlug = useMemo(() => {
     const map = new Map<string, string>()
     for (const molecule of allMolecules) {
-      if (molecule.categorySlug !== AMINO_ACIDS_SLUG) continue
+      if (!PEPTIDE_FAMILY_SLUGS.includes(molecule.categorySlug)) continue
       const oneLetter = traitOf(molecule, TRAIT.oneLetter)
       if (oneLetter !== undefined) map.set(molecule.slug, oneLetter)
     }
@@ -495,7 +495,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   // instead of a run that can never serve a round.
   if (
     roundImpossible ||
-    !categories.some((category) => category.slug === AMINO_ACIDS_SLUG) ||
+    !categories.some((category) => PEPTIDE_FAMILY_SLUGS.includes(category.slug)) ||
     playableBySlug.size === 0 ||
     pool.length < 2
   ) {

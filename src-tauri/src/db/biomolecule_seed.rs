@@ -13,6 +13,9 @@ use uuid::Uuid;
 pub const AMINO_ACIDS_SLUG: &str = "aminokyseliny";
 pub const NITROGEN_BASES_SLUG: &str = "dusikate-baze";
 pub const SACCHARIDES_SLUG: &str = "sacharidy";
+/// Special proteinogenic amino acids beyond the canonical 20 (Sec, Pyl).
+/// Opted into games individually — the Peptidovka defaults leave them out.
+pub const SPECIAL_AMINO_ACIDS_SLUG: &str = "specialni-aminokyseliny";
 
 pub const AMINO_ACIDS_TOPIC_SLUG: &str = "aminokyseliny";
 pub const NUCLEIC_ACIDS_TOPIC_SLUG: &str = "nukleove-kyseliny";
@@ -80,6 +83,34 @@ const SACCHARIDES_CATEGORY: SeedCategory = SeedCategory {
     description: "Vybrané monosacharidy a nukleotidy — Haworthovy projekce a strukturní vzorce.",
     topic_slug: SACCHARIDES_TOPIC_SLUG,
 };
+
+const SPECIAL_AMINO_ACIDS_CATEGORY: SeedCategory = SeedCategory {
+    slug: SPECIAL_AMINO_ACIDS_SLUG,
+    name: "Speciální aminokyseliny",
+    description: "21. a 22. proteinogenní aminokyselina — selenocystein a pyrrolysin.",
+    topic_slug: AMINO_ACIDS_TOPIC_SLUG,
+};
+
+/// Selenocysteine and pyrrolysine with the same trait vocabulary as the
+/// canonical twenty: single letters (U / O), codes, family, charge, polarity
+/// axis, and facts. SMILES are the neutral isomeric L forms (PubChem).
+#[rustfmt::skip]
+const SPECIAL_AMINO_ACIDS: &[SeedMolecule] = &[
+    SeedMolecule {
+        slug: "sec", name: "Selenocystein", smiles: "N[C@@H](C[SeH])C(=O)O",
+        projection: None,
+        traits: &[("oneLetter", "U"), ("abbreviation", "Sec"), ("sideChain", "polar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"),
+                  ("facts", "21. aminokyselina; vkládá se recodingem UGA kodonu pomocí sekundární SECIS struktury.\nSelen stojí v active centrech (glutathion peroxidáza, thioredoxin reduktáza).")],
+    },
+    SeedMolecule {
+        slug: "pyl", name: "Pyrrolysin", smiles: "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O",
+        projection: None,
+        traits: &[("oneLetter", "O"), ("abbreviation", "Pyl"), ("sideChain", "basic"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
+                  ("facts", "22. aminokyselina; vkládá se recodingem UAG kodonu u metanogenů.\nPostranní řetězec nese metylpyrrolinkarbonylamid na ε-dusíku lysinu.")],
+    },
+];
 
 /// Canonical slugs of the 20 proteinogenic amino acids, in seed order. Used
 /// as the default Peptidovka slug set (migration v56).
@@ -380,6 +411,7 @@ pub fn seed_builtins_if_empty(conn: &Connection) -> Result<(), rusqlite::Error> 
         (&AMINO_ACIDS_CATEGORY, AMINO_ACIDS),
         (&NITROGEN_BASES_CATEGORY, NITROGEN_BASES),
         (&SACCHARIDES_CATEGORY, SACCHARIDES),
+        (&SPECIAL_AMINO_ACIDS_CATEGORY, SPECIAL_AMINO_ACIDS),
     ]
     .into_iter()
     .enumerate()
