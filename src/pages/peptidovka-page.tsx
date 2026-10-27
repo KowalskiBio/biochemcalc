@@ -382,9 +382,10 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
       const endedAt = Date.now()
       const totalSeconds = Math.max(0, Math.round((endedAt - current.startedAt) / 1000))
       // Best effort: a lost score only costs a leaderboard entry, not the
-      // end screen the student is looking at.
+      // end screen the student is looking at. The board's "best run" means
+      // the number of SOLVED peptides — points stay decorative in-game.
       biomoleculesApi
-        .recordPeptidovkaRun({ mode, correctCount: current.points, totalSeconds })
+        .recordPeptidovkaRun({ mode, correctCount: current.solvedCount, totalSeconds })
         .catch(() => {})
       setRun({
         ...current,
@@ -441,12 +442,13 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
       // custom amino acid). Never strand an active run: the session ends
       // HERE inside the results card — not in the launch-failure empty
       // state, which would hide the results and read "wait for the teacher"
-      // mid-game. Earned points still count toward the recorded result.
+      // mid-game. Earned points still show; the recorded run's solved count
+      // is what just reached history.
       endingRef.current = true
       const endedAt = Date.now()
       const totalSeconds = Math.max(0, Math.round((endedAt - current.startedAt) / 1000))
       biomoleculesApi
-        .recordPeptidovkaRun({ mode, correctCount: points, totalSeconds })
+        .recordPeptidovkaRun({ mode, correctCount: solvedCount, totalSeconds })
         .catch(() => {})
       setRun({
         ...current,

@@ -97,6 +97,11 @@ export interface PeptidovkaSettings {
 /** The aggregate of one finished Peptidovka run, as recorded for the leaderboard. */
 export interface PeptidovkaRunResult {
   mode: PeptidovkaMode
+  /**
+   * Number of peptides GUESSED CORRECTLY in the run — the leaderboard's
+   * "Nejlepší série" metric. Points (their in-game summary) are computed
+   * but NOT recorded: time/answer needs a per-peptide unit to avg over.
+   */
   correctCount: number
   totalSeconds: number
 }

@@ -1316,6 +1316,8 @@ pub struct UpdatePeptidovkaSettingsPayload {
 pub struct RecordPeptidovkaRunPayload {
     /// `"ucen"` or `"mistr"`.
     pub mode: String,
+    /// Peptides solved correctly in the run — the leaderboard's best-series
+    /// metric (in-game points are decoration only and are never recorded).
     pub correct_count: i64,
     pub total_seconds: f64,
 }
