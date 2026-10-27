@@ -149,7 +149,58 @@ describe("hard-mode openAnswer content", () => {
       }
     }
   })
+})
 
+describe("polarity axis vs side-chain family", () => {
+  function characteristicOf(predicate: string): CharacteristicDef {
+    const def = AA_CHARACTERISTICS.find((d) => d.predicate === predicate)
+    if (def === undefined) {
+      throw new Error(`missing characteristic ${predicate}`)
+    }
+    return def
+  }
+
+  function quizMoleculeOf(slug: string) {
+    const molecule = AMINO_ACIDS.molecules.find((candidate) => candidate.id === slug)
+    if (molecule === undefined) {
+      throw new Error(`unknown quiz molecule: ${slug}`)
+    }
+    return molecule
+  }
+
+  it("treats phenylalanine as nonpolar AND aromatic (the reported bug)", () => {
+    const phe = quizMoleculeOf("phe")
+    expect(characteristicOf("nonpolar").matches(phe), "Phe is hydrophobic").toBe(true)
+    expect(characteristicOf("aromatic").matches(phe), "Phe is also aromatic").toBe(true)
+  })
+
+  it("keeps tyrosine out of nonpolar — the phenol –OH is hydrophilic", () => {
+    const tyr = quizMoleculeOf("tyr")
+    expect(characteristicOf("nonpolar").matches(tyr)).toBe(false)
+    expect(characteristicOf("polar").matches(tyr)).toBe(true)
+    expect(characteristicOf("aromatic").matches(tyr)).toBe(true)
+  })
+
+  it("counts tryptophan among nonpolar aromatics", () => {
+    const trp = quizMoleculeOf("trp")
+    expect(characteristicOf("nonpolar").matches(trp)).toBe(true)
+    expect(characteristicOf("aromatic").matches(trp)).toBe(true)
+  })
+
+  it("does not let histidine masquerade as nonpolar", () => {
+    const his = quizMoleculeOf("his")
+    expect(characteristicOf("nonpolar").matches(his)).toBe(false)
+    expect(characteristicOf("basic").matches(his)).toBe(true)
+  })
+
+  it("keeps classic nonpolar rows nonpolar and charged rows out", () => {
+    for (const slug of ["gly", "ala", "val", "leu", "ile", "met", "pro", "cys"]) {
+      expect(characteristicOf("nonpolar").matches(quizMoleculeOf(slug)), slug).toBe(true)
+    }
+    for (const slug of ["asp", "glu", "lys", "arg"]) {
+      expect(characteristicOf("nonpolar").matches(quizMoleculeOf(slug)), slug).toBe(false)
+    }
+  })
 })
 
 describe("aliases propagation", () => {

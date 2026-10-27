@@ -111,11 +111,20 @@ function aminoAcidsQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
       const molecule = byId.get(quiz.id)
       return molecule !== undefined && traitOf(molecule, TRAIT.sideChain) === classKey
     }
+  // Polarity questions ask the hydrophobic/hydrophilic axis on purpose, not
+  // the display family: phenylalanine is aromatic BY FAMILY yet hydrophobic
+  // BY BEHAVIOUR, and students deserve both answers, one per axis.
+  const polarityIs =
+    (value: string) =>
+    (quiz: QuizMolecule): boolean => {
+      const molecule = byId.get(quiz.id)
+      return molecule !== undefined && traitOf(molecule, TRAIT.polarity) === value
+    }
 
   // Order mirrors `CHARACTERISTIC_PREDICATES` so predicate selection stays stable.
   const characteristics: CharacteristicDef[] = [
-    { predicate: "nonpolar", matches: classIs("nonpolar") },
-    { predicate: "polar", matches: classIs("polar") },
+    { predicate: "nonpolar", matches: polarityIs("hydrophobic") },
+    { predicate: "polar", matches: polarityIs("hydrophilic") },
     { predicate: "aromatic", matches: classIs("aromatic") },
     { predicate: "acidic", matches: classIs("acidic") },
     { predicate: "basic", matches: classIs("basic") },

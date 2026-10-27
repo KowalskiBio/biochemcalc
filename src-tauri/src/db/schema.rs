@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 57;
+const CURRENT_USER_VERSION: u32 = 58;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -291,6 +291,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 57 {
         apply_migration_v57(conn)?;
         conn.pragma_update(None, "user_version", "57")?;
+    }
+
+    if user_version < 58 {
+        apply_migration_v58(conn)?;
+        conn.pragma_update(None, "user_version", "58")?;
     }
 
     Ok(())
@@ -1971,6 +1976,36 @@ fn peptidovka_default_slugs_json() -> Result<String, rusqlite::Error> {
         .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
 }
 
+/// Adds the `polarity` trait (hydrophobic/hydrophilic) to the twenty
+/// canonical amino acids so the quiz can ask polarity on its own axis,
+/// independent of the side-chain family label (see aminoAcidsQuizConfig).
+/// INSERT OR IGNORE so a polarity the teacher already set by hand wins —
+/// the migration only fills gaps, exactly like v56's empty-table seeding.
+fn apply_migration_v58(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        -- Self-sufficient on synthetic partial replays (the house tests build
+        -- the pre-v47 schema ladder by hand and would otherwise find no
+        -- traits table); IF NOT EXISTS makes the CREATE a no-op in production.
+        CREATE TABLE IF NOT EXISTS biomolecule_traits (
+            molecule_id BLOB NOT NULL REFERENCES biomolecules(id) ON DELETE CASCADE,
+            trait TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (molecule_id, trait)
+        );
+
+        INSERT OR IGNORE INTO biomolecule_traits (molecule_id, trait, value)
+        SELECT m.id, 'polarity',
+               CASE WHEN m.slug IN ('ala','gly','val','leu','ile','met','pro','cys','phe','trp')
+                    THEN 'hydrophobic' ELSE 'hydrophilic' END
+        FROM biomolecules m
+        WHERE m.category_slug = 'aminokyseliny'
+          AND m.slug IN ('ala','arg','asn','asp','cys','gln','glu','gly','his','ile',
+                         'leu','lys','met','phe','pro','ser','thr','trp','tyr','val');
+        ",
+    )
+}
+
 /// Teacher-action log for the biomolecules module, mirroring the
 /// calculations history pattern: every mutation records who did what, so
 /// the "Historie" page can show a reviewable trail. `kind` scopes the entry
@@ -2382,6 +2417,63 @@ mod tests {
         assert_eq!((min_len, max_len), (4, 8));
         assert_eq!(seconds_per_aa, 20);
         assert_eq!(slugs, "[\"ala\",\"gly\"]");
+    }
+
+    /// v58 fills the amino acids' polarity trait but never second-guesses a
+    /// polarity the teacher already assigned (INSERT OR IGNORE semantics).
+    #[test]
+    fn v58_fills_polarity_without_overwriting_teacher_edits() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        let (hydrophobic, hydrophilic): (i64, i64) = conn
+            .query_row(
+                "SELECT
+                     SUM(CASE WHEN t.value = 'hydrophobic' THEN 1 ELSE 0 END),
+                     SUM(CASE WHEN t.value = 'hydrophilic' THEN 1 ELSE 0 END)
+                 FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.category_slug = 'aminokyseliny' AND t.trait = 'polarity'",
+                [],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .map(|(a, b)| (a.unwrap_or(0), b.unwrap_or(0)))
+            .expect("polarity counts");
+        assert_eq!((hydrophobic, hydrophilic), (10, 10));
+        let phe: String = conn
+            .query_row(
+                "SELECT t.value FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.slug = 'phe' AND t.trait = 'polarity'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("phe polarity");
+        assert_eq!(phe, "hydrophobic");
+
+        // A teacher edit loses out: pretend phe's polarity was changed by hand
+        // and replay the migration; the hand-set value must survive.
+        conn.execute(
+            "UPDATE biomolecule_traits
+             SET value = 'hydrophilic'
+             WHERE trait = 'polarity'
+               AND molecule_id = (SELECT id FROM biomolecules WHERE slug = 'phe')",
+            [],
+        )
+        .expect("teacher edit");
+        conn.pragma_update(None, "user_version", "57")
+            .expect("backlevel version");
+        run_migrations(&conn).expect("re-migration");
+        let kept: String = conn
+            .query_row(
+                "SELECT t.value FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.slug = 'phe' AND t.trait = 'polarity'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("kept polarity");
+        assert_eq!(kept, "hydrophilic", "teacher-set polarity is authoritative");
     }
 
     /// A database that last saw v32 (the deployed state before this feature)
