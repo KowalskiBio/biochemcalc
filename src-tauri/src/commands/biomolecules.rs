@@ -13,7 +13,7 @@ use crate::db::repos::biomolecule_repo::{
     BiomoleculeData, CategoryField, MoleculeRelocation, TopicField,
 };
 use crate::db::repos::{
-    BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
+    BiomoleculeHistoryRepo, BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
     BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaLeaderboardRow,
     PeptidovkaRepo, PeptidovkaSettingsRecord,
 };
@@ -485,6 +485,7 @@ pub fn do_create_category(
         position,
         teacher_id,
     )?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "category", "create", name, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -521,7 +522,38 @@ pub fn do_update_category_meta(
         CategoryField::Description => validate_description(payload.value.as_deref())?,
         CategoryField::Topic => validate_optional_topic(conn, payload.value.as_deref())?,
     };
+    // Diff capture before the write: the history entry shows what changed,
+    // in "field: old → new" form, one logical row per save.
+    let old_name = BiomoleculeRepo::category_name(conn, category_id)?;
+    let old_topic_slug = if payload.field == CategoryField::Topic {
+        BiomoleculeRepo::category_topic_slug(conn, category_id)?.flatten()
+    } else {
+        None
+    };
     BiomoleculeRepo::update_category_field(conn, category_id, payload.field, value.as_deref(), teacher_id)?;
+    let new_name = BiomoleculeRepo::category_name(conn, category_id)?
+        .unwrap_or_else(|| category_id.to_string());
+    let detail = match payload.field {
+        CategoryField::Name => format!(
+            "name: {} → {}",
+            old_name.as_deref().unwrap_or("—"),
+            new_name.as_str()
+        ),
+        CategoryField::Description => "description changed".to_string(),
+        CategoryField::Topic => format!(
+            "topic: {} → {}",
+            old_topic_slug.as_deref().unwrap_or("—"),
+            value.as_deref().unwrap_or("—")
+        ),
+    };
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "category",
+        "update",
+        new_name.as_str(),
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -542,6 +574,7 @@ pub struct DeleteCategoryPayload {
 /// quiz results keep their slug — the leaderboard rows survive the deletion.
 pub fn do_delete_category(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: DeleteCategoryPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim();
@@ -560,7 +593,10 @@ pub fn do_delete_category(
             )));
         }
     }
+    let label = BiomoleculeRepo::category_name(conn, category_id)?
+        .unwrap_or_else(|| category_id.to_string());
     BiomoleculeRepo::delete_category(conn, category_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "category", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -590,6 +626,7 @@ pub fn do_create_topic(
         position,
         teacher_id,
     )?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "topic", "create", name, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -625,12 +662,31 @@ pub fn do_update_topic_meta(
         }
         TopicField::Description => validate_description(payload.value.as_deref())?,
     };
+    let old_name = BiomoleculeRepo::topic_name(conn, topic_id)?;
     BiomoleculeRepo::update_topic_field(
         conn,
         topic_id,
         payload.field,
         value.as_deref(),
         teacher_id,
+    )?;
+    let new_name = BiomoleculeRepo::topic_name(conn, topic_id)?
+        .unwrap_or_else(|| topic_id.to_string());
+    let detail = match payload.field {
+        TopicField::Name => format!(
+            "name: {} → {}",
+            old_name.as_deref().unwrap_or("—"),
+            new_name.as_str()
+        ),
+        TopicField::Description => "description changed".to_string(),
+    };
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "topic",
+        "update",
+        new_name.as_str(),
+        Some(detail.as_str()),
     )?;
     BiomoleculeRepo::list_data(conn)
 }
@@ -647,6 +703,7 @@ pub struct DeleteTopicPayload {
 /// (`ON DELETE SET NULL`).
 pub fn do_delete_topic(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: DeleteTopicPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let topic_id = payload.topic_id.trim();
@@ -658,7 +715,9 @@ pub fn do_delete_topic(
         BiomoleculeRepo::topic_version(conn, topic_id)?,
         payload.expected_updated_at.as_deref(),
     )?;
+    let label = BiomoleculeRepo::topic_name(conn, topic_id)?.unwrap_or_else(|| topic_id.to_string());
     BiomoleculeRepo::delete_topic(conn, topic_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "topic", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -752,6 +811,7 @@ pub fn do_create_molecule(
         &traits,
         teacher_id,
     )?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "molecule", "create", &name, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -788,6 +848,7 @@ pub fn do_update_molecule(
     let id = payload.molecule_id;
     let current_category = BiomoleculeRepo::molecule_category(conn, &id)?
         .ok_or_else(|| DbError::NotFound(format!("Molecule {id} not found")))?;
+    let old_name = BiomoleculeRepo::molecule_name(conn, &id)?;
     check_version(
         &format!("Molecule {id}"),
         BiomoleculeRepo::molecule_version(conn, &id)?,
@@ -849,6 +910,25 @@ pub fn do_update_molecule(
         relocation.as_ref(),
         teacher_id,
     )?;
+    let detail = if old_name.as_deref() != Some(name.as_str()) {
+        format!(
+            "name: {} → {}",
+            old_name.as_deref().unwrap_or("—"),
+            name.as_str()
+        )
+    } else if relocation.is_some() {
+        "moved to another category".to_string()
+    } else {
+        "traits/structure updated".to_string()
+    };
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "molecule",
+        "update",
+        &name,
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -862,6 +942,7 @@ pub struct DeleteMoleculePayload {
 
 pub fn do_delete_molecule(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: DeleteMoleculePayload,
 ) -> Result<BiomoleculeData, DbError> {
     check_version(
@@ -869,7 +950,10 @@ pub fn do_delete_molecule(
         BiomoleculeRepo::molecule_version(conn, &payload.molecule_id)?,
         payload.expected_updated_at.as_deref(),
     )?;
+    let label = BiomoleculeRepo::molecule_name(conn, &payload.molecule_id)?
+        .unwrap_or_else(|| payload.molecule_id.to_string());
     BiomoleculeRepo::delete_molecule(conn, &payload.molecule_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "molecule", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -885,6 +969,7 @@ pub struct ReorderTopicsPayload {
 
 pub fn do_reorder_topics(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: ReorderTopicsPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let current = BiomoleculeRepo::topic_order(conn)?;
@@ -895,6 +980,15 @@ pub fn do_reorder_topics(
         payload.expected_order.as_deref(),
     )?;
     BiomoleculeRepo::set_topic_order(conn, &payload.slugs)?;
+    let detail = format!("{}", payload.slugs.len());
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "topics",
+        "reorder",
+        "topics",
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -909,6 +1003,7 @@ pub struct ReorderCategoriesPayload {
 
 pub fn do_reorder_categories(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: ReorderCategoriesPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let current = BiomoleculeRepo::category_order(conn)?;
@@ -919,6 +1014,15 @@ pub fn do_reorder_categories(
         payload.expected_order.as_deref(),
     )?;
     BiomoleculeRepo::set_category_order(conn, &payload.slugs)?;
+    let detail = format!("{}", payload.slugs.len());
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "categories",
+        "reorder",
+        "categories",
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -934,6 +1038,7 @@ pub struct ReorderMoleculesPayload {
 
 pub fn do_reorder_molecules(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: ReorderMoleculesPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim();
@@ -950,6 +1055,15 @@ pub fn do_reorder_molecules(
         payload.expected_order.as_deref(),
     )?;
     BiomoleculeRepo::set_molecule_order(conn, &payload.ids)?;
+    let detail = format!("{}", payload.ids.len());
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "molecules",
+        "reorder",
+        category_id,
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -1132,6 +1246,16 @@ pub struct PeptidovkaLeaderboardPayload {
     pub mode: String,
 }
 
+/// History listing payload: optional page window (defaults 50/0 at the route).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeHistoryPayload {
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
 /// Each user's single best finished Peptidovka run of the mode — same table
 /// shape as the streak board, so the page reuses it verbatim.
 pub fn do_peptidovka_leaderboard(
@@ -1228,6 +1352,7 @@ pub fn do_list_peptidovka_settings(conn: &Connection) -> Result<Vec<PeptidovkaSe
 /// schema so the error messages reach the client.
 pub fn do_update_peptidovka_settings(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: UpdatePeptidovkaSettingsPayload,
 ) -> Result<(), DbError> {
     let mode = validate_peptidovka_mode(&payload.mode)?;
@@ -1284,6 +1409,21 @@ pub fn do_update_peptidovka_settings(
         payload.max_len,
         payload.seconds_per_aa,
         &slugs_json,
+    )?;
+    let detail = format!(
+        "{}–{} · {} s/aa · {} slugs",
+        payload.min_len,
+        payload.max_len,
+        payload.seconds_per_aa,
+        slugs.len()
+    );
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "peptidovka",
+        "settings",
+        mode,
+        Some(detail.as_str()),
     )
 }
 
@@ -1726,6 +1866,7 @@ mod tests {
 
         let data = do_delete_topic(
             &conn,
+            &teacher,
             DeleteTopicPayload {
                 topic_id: "vitaminy".into(),
                 expected_updated_at: None,
@@ -1736,6 +1877,7 @@ mod tests {
         assert!(matches!(
             do_delete_topic(
                 &conn,
+                &teacher,
                 DeleteTopicPayload {
                     topic_id: "vitaminy".into(),
                     expected_updated_at: None,
@@ -1830,8 +1972,10 @@ mod tests {
     #[test]
     fn deleting_a_topic_keeps_its_categories_and_ungroups_them() {
         let conn = setup_conn();
+        let teacher = insert_student(&conn, "ucitel");
         let data = do_delete_topic(
             &conn,
+            &teacher,
             DeleteTopicPayload {
                 topic_id: "nukleove-kyseliny".into(),
                 expected_updated_at: None,
@@ -1920,6 +2064,7 @@ mod tests {
         // Deleting a category cascades to its molecules and traits.
         let data = do_delete_category(
             &conn,
+            &teacher,
             DeleteCategoryPayload {
                 category_id: "dusikate-baze".into(),
                 expected_updated_at: None,
@@ -1932,6 +2077,7 @@ mod tests {
         assert!(matches!(
             do_delete_category(
                 &conn,
+                &teacher,
                 DeleteCategoryPayload {
                     category_id: "dusikate-baze".into(),
                     expected_updated_at: None,
@@ -2033,6 +2179,7 @@ mod tests {
 
         let data = do_delete_molecule(
             &conn,
+            &teacher,
             DeleteMoleculePayload {
                 molecule_id: created.id,
                 expected_updated_at: None,
@@ -2465,6 +2612,7 @@ mod tests {
         assert!(matches!(stale, Err(DbError::Conflict(_))));
         let stale_delete = do_delete_molecule(
             &conn,
+            &teacher,
             DeleteMoleculePayload {
                 molecule_id: alanine.id,
                 expected_updated_at: Some(alanine.updated_at.clone()),
@@ -2491,6 +2639,7 @@ mod tests {
         .expect("topic rename");
         let stale_topic = do_delete_topic(
             &conn,
+            &teacher,
             DeleteTopicPayload {
                 topic_id: topic.slug.clone(),
                 expected_updated_at: Some(topic.updated_at.clone()),
@@ -2544,6 +2693,7 @@ mod tests {
         let delete = |expected_molecules| {
             do_delete_category(
                 &conn,
+                &teacher,
                 DeleteCategoryPayload {
                     category_id: "dusikate-baze".into(),
                     expected_updated_at: None,
@@ -2560,12 +2710,14 @@ mod tests {
     #[test]
     fn reorder_takes_every_item_and_checks_the_order_it_was_based_on() {
         let conn = setup_conn();
+        let teacher = teacher_id(&conn);
         let current = BiomoleculeRepo::topic_order(&conn).expect("order");
         let mut reversed = current.clone();
         reversed.reverse();
 
         let data = do_reorder_topics(
             &conn,
+            &teacher,
             ReorderTopicsPayload {
                 slugs: reversed.clone(),
                 expected_order: Some(current.clone()),
@@ -2577,6 +2729,7 @@ mod tests {
 
         let stale = do_reorder_topics(
             &conn,
+            &teacher,
             ReorderTopicsPayload {
                 slugs: current.clone(),
                 expected_order: Some(current.clone()),
@@ -2585,6 +2738,7 @@ mod tests {
         assert!(matches!(stale, Err(DbError::Conflict(_))));
         let partial = do_reorder_topics(
             &conn,
+            &teacher,
             ReorderTopicsPayload {
                 slugs: current[..1].to_vec(),
                 expected_order: None,
@@ -2597,6 +2751,7 @@ mod tests {
         rotated.rotate_left(1);
         let data = do_reorder_molecules(
             &conn,
+            &teacher,
             ReorderMoleculesPayload {
                 category_id: "dusikate-baze".into(),
                 ids: rotated.clone(),
@@ -2617,6 +2772,7 @@ mod tests {
         swapped.swap(0, 1);
         let data = do_reorder_categories(
             &conn,
+            &teacher,
             ReorderCategoriesPayload {
                 slugs: swapped.clone(),
                 expected_order: Some(categories),
@@ -2661,9 +2817,11 @@ mod tests {
     #[test]
     fn peptidovka_settings_update_round_trips_each_mode() {
         let conn = setup_conn();
+        let teacher = teacher_id(&conn);
         for (mode, max_len) in [("ucen", 5_i64), ("mistr", 9_i64)] {
             do_update_peptidovka_settings(
                 &conn,
+                &teacher,
                 UpdatePeptidovkaSettingsPayload {
                     mode: mode.into(),
                     min_len: 4,
@@ -2696,10 +2854,12 @@ mod tests {
     #[test]
     fn peptidovka_settings_validation_rejects_bad_input() {
         let conn = setup_conn();
+        let teacher = teacher_id(&conn);
         let update =
             |mode: &str, min_len: i64, max_len: i64, seconds_per_aa: i64, slugs: Vec<String>| {
                 do_update_peptidovka_settings(
                     &conn,
+                    &teacher,
                     UpdatePeptidovkaSettingsPayload {
                         mode: mode.into(),
                         min_len,
@@ -2797,6 +2957,7 @@ mod tests {
                 matches!(
                     do_update_peptidovka_settings(
                         &conn,
+                        &student,
                         UpdatePeptidovkaSettingsPayload {
                             mode: stale.into(),
                             min_len: 3,
@@ -2935,6 +3096,7 @@ mod tests {
     #[test]
     fn peptidovka_update_rejects_unknown_slugs_and_dedupes() {
         let conn = setup_conn();
+        let teacher = teacher_id(&conn);
 
         // Well-formed but nonexistent slug — format checks alone used to let
         // this through, silently breaking the game's pool. Distinct numerics,
@@ -2943,6 +3105,7 @@ mod tests {
         assert!(matches!(
             do_update_peptidovka_settings(
                 &conn,
+                &teacher,
                 UpdatePeptidovkaSettingsPayload {
                     mode: "ucen".into(),
                     min_len: 4,
@@ -2965,6 +3128,7 @@ mod tests {
         // Duplicates collapse once, in first-seen order.
         do_update_peptidovka_settings(
             &conn,
+            &teacher,
             UpdatePeptidovkaSettingsPayload {
                 mode: "ucen".into(),
                 min_len: 3,
@@ -2984,6 +3148,80 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Vec<String>>(&slugs_json).expect("slugs json"),
             vec!["ala".to_string(), "gly".to_string()]
+        );
+    }
+
+    #[test]
+    fn teacher_mutations_leave_a_history_trail() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        let data = do_create_molecule(
+            &conn,
+            &teacher,
+            molecule_payload("aminokyseliny", "Histidinium", "C1=C(N)C=NC=1"),
+        )
+        .expect("create molecule");
+        let mapro_name = data
+            .molecules
+            .iter()
+            .find(|m| m.name == "Histidinium")
+            .expect("molecule")
+            .id;
+        do_delete_molecule(
+            &conn,
+            &teacher,
+            DeleteMoleculePayload {
+                molecule_id: mapro_name,
+                expected_updated_at: None,
+            },
+        )
+        .expect("delete molecule");
+        do_reorder_categories(
+            &conn,
+            &teacher,
+            ReorderCategoriesPayload {
+                slugs: BiomoleculeRepo::category_order(&conn).expect("categories"),
+                expected_order: None,
+            },
+        )
+        .expect("reorder");
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 3,
+                max_len: 6,
+                seconds_per_aa: 15,
+                slugs: vec!["ala".into(), "gly".into()],
+            },
+        )
+        .expect("settings");
+
+        let entries = BiomoleculeHistoryRepo::list_all(&conn, 50, 0).expect("history");
+        let actions: Vec<(&str, &str, &str)> = entries
+            .iter()
+            .map(|e| (e.kind.as_str(), e.action.as_str(), e.label.as_str()))
+            .collect();
+        assert_eq!(entries.len(), 4);
+        assert!(actions.contains(&("molecule", "create", "Histidinium")));
+        assert!(actions.contains(&("molecule", "delete", "Histidinium")));
+        assert!(actions.contains(&("categories", "reorder", "categories")));
+        assert!(actions.contains(&("peptidovka", "settings", "ucen")));
+        assert!(
+            entries.iter().all(|e| !e.username.is_empty()),
+            "every entry carries its actor"
+        );
+        // Newest first.
+        assert_eq!(entries[0].action, "settings");
+        assert_eq!(entries[1].action, "reorder");
+
+        BiomoleculeHistoryRepo::clear_all(&conn).expect("clear");
+        assert!(
+            BiomoleculeHistoryRepo::list_all(&conn, 50, 0)
+                .expect("after clear")
+                .is_empty()
         );
     }
 }

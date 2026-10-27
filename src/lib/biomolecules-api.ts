@@ -279,4 +279,29 @@ export const biomoleculesApi = {
     httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/peptidovka-leaderboard", {
       mode,
     }),
+
+  /** Teacher: the module's action history, newest first (defaults 50/0). */
+  biomoleculeHistory: (params?: {
+    limit?: number
+    offset?: number
+  }): Promise<BiomoleculeHistoryEntry[]> =>
+    httpRequest<BiomoleculeHistoryEntry[]>("/api/biomolecules/biomolecule-history", params ?? {}),
+
+  /** Teacher: wipe the module's history (confirm dialog collects consent first). */
+  clearBiomoleculeHistory: (): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/clear-biomolecule-history"),
+}
+
+/** One teacher action in the biomolecules module, as logged for the Historie page. */
+export interface BiomoleculeHistoryEntry {
+  id: string
+  userId: string
+  username: string
+  /** "molecule" | "category" | "topic" | "topics" | "categories" | "peptidovka". */
+  kind: string
+  /** "create" | "update" | "delete" | "reorder" | "settings". */
+  action: string
+  label: string
+  detail: string | null
+  createdAt: string
 }

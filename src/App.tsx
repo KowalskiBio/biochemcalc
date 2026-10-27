@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
 import { StudentShell } from "@/components/layout/student-shell"
 import { allowedSections } from "@/hooks/use-section"
+import { BiomoleculesHistoryPage } from "@/pages/biomolecules-history-page"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesProjectionPage } from "@/pages/biomolecules-projection-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
@@ -80,6 +81,7 @@ function TeacherRoutes() {
             <Route path="/biomolekuly" element={<BiomoleculesPage />} />
             <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
             <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
+            <Route path="/biomolekuly/historie" element={<BiomoleculesHistoryPage />} />
             <Route path="/biomolekuly/peptidovka" element={<PeptidovkaSettingsPage />} />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route

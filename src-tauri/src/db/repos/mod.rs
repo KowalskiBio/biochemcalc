@@ -1,3 +1,4 @@
+pub mod biomolecule_history_repo;
 pub mod biomolecule_question_report_repo;
 pub mod biomolecule_quiz_repo;
 pub mod biomolecule_repo;
@@ -24,6 +25,8 @@ pub mod user_repo;
 pub mod variable_history_repo;
 pub mod variable_repo;
 
+#[allow(unused_imports)]
+pub use biomolecule_history_repo::{BiomoleculeHistoryRecord, BiomoleculeHistoryRepo};
 pub use biomolecule_question_report_repo::{
     BiomoleculeQuestionReportRecord, BiomoleculeQuestionReportRepo,
 };

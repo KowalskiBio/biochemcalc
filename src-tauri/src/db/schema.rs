@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 56;
+const CURRENT_USER_VERSION: u32 = 57;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -286,6 +286,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 56 {
         apply_migration_v56(conn)?;
         conn.pragma_update(None, "user_version", "56")?;
+    }
+
+    if user_version < 57 {
+        apply_migration_v57(conn)?;
+        conn.pragma_update(None, "user_version", "57")?;
     }
 
     Ok(())
@@ -1964,6 +1969,30 @@ fn apply_migration_v56(conn: &Connection) -> Result<(), rusqlite::Error> {
 fn peptidovka_default_slugs_json() -> Result<String, rusqlite::Error> {
     serde_json::to_string(crate::db::biomolecule_seed::AMINO_ACID_SLUGS)
         .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
+/// Teacher-action log for the biomolecules module, mirroring the
+/// calculations history pattern: every mutation records who did what, so
+/// the "Historie" page can show a reviewable trail. `kind` scopes the entry
+/// (molecule | category | topic | peptidovka), `action` says what
+/// (create | update | delete | reorder | settings), `label` names the
+/// entity, and `detail` is an optional compact diff summary.
+fn apply_migration_v57(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_history (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            action TEXT NOT NULL,
+            label TEXT NOT NULL,
+            detail TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_biomolecule_history_created_at
+        ON biomolecule_history(created_at);
+        ",
+    )
 }
 
 #[cfg(test)]

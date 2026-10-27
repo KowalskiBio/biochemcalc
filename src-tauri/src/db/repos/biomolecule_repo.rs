@@ -344,12 +344,57 @@ impl BiomoleculeRepo {
         )?)
     }
 
+    pub fn category_name(conn: &Connection, slug: &str) -> Result<Option<String>, DbError> {
+        let name = conn
+            .query_row(
+                "SELECT name FROM biomolecule_categories WHERE slug = ?1",
+                params![slug],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(name)
+    }
+
+    /// Display name of a topic for the history log (None when absent).
+    pub fn topic_name(conn: &Connection, slug: &str) -> Result<Option<String>, DbError> {
+        let name = conn
+            .query_row("SELECT name FROM biomolecule_topics WHERE slug = ?1", params![slug], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(name)
+    }
+
+    /// The category's topic slug (None when ungrouped; row-absent when unknown).
+    pub fn category_topic_slug(
+        conn: &Connection,
+        slug: &str,
+    ) -> Result<Option<Option<String>>, DbError> {
+        let value: Option<Option<String>> = conn
+            .query_row(
+                "SELECT topic_slug FROM biomolecule_categories WHERE slug = ?1",
+                params![slug],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value)
+    }
+
     pub fn molecule_slug_exists(conn: &Connection, slug: &str) -> Result<bool, DbError> {
         Ok(conn.query_row(
             "SELECT EXISTS (SELECT 1 FROM biomolecules WHERE slug = ?1)",
             params![slug],
             |row| row.get(0),
         )?)
+    }
+
+    pub fn molecule_name(conn: &Connection, id: &Uuid) -> Result<Option<String>, DbError> {
+        let name = conn
+            .query_row("SELECT name FROM biomolecules WHERE id = ?1", params![id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(name)
     }
 
     /// Next free position within the hub / within one category.

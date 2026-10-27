@@ -16,15 +16,17 @@ use crate::commands::biomolecules::{
     do_record_quiz_result, do_record_streak_result, do_reorder_categories,
     do_reorder_molecules, do_reorder_topics, do_streak_leaderboard,
     do_update_category_meta, do_update_molecule, do_update_peptidovka_settings,
-    do_update_topic_meta, BiomoleculeLeaderboardEntry, BiomoleculeStreakLeaderboardEntry,
-    CreateCategoryPayload, CreateMoleculePayload, CreateTopicPayload, DeleteCategoryPayload,
-    DeleteMoleculePayload, DeleteTopicPayload, PeptidovkaLeaderboardPayload, PeptidovkaSettings,
-    QuizLeaderboardPayload, RecordPeptidovkaRunPayload, RecordQuizResultPayload,
-    RecordStreakResultPayload, ReorderCategoriesPayload, ReorderMoleculesPayload,
-    ReorderTopicsPayload, StreakLeaderboardPayload, UpdateCategoryMetaPayload,
-    UpdateMoleculePayload, UpdatePeptidovkaSettingsPayload, UpdateTopicMetaPayload,
+    do_update_topic_meta, BiomoleculeHistoryPayload, BiomoleculeLeaderboardEntry,
+    BiomoleculeStreakLeaderboardEntry, CreateCategoryPayload, CreateMoleculePayload,
+    CreateTopicPayload, DeleteCategoryPayload, DeleteMoleculePayload, DeleteTopicPayload,
+    PeptidovkaLeaderboardPayload, PeptidovkaSettings, QuizLeaderboardPayload,
+    RecordPeptidovkaRunPayload, RecordQuizResultPayload, RecordStreakResultPayload,
+    ReorderCategoriesPayload, ReorderMoleculesPayload, ReorderTopicsPayload,
+    StreakLeaderboardPayload, UpdateCategoryMetaPayload, UpdateMoleculePayload,
+    UpdatePeptidovkaSettingsPayload, UpdateTopicMetaPayload,
 };
 use crate::db::repos::biomolecule_repo::BiomoleculeData;
+use crate::db::repos::{BiomoleculeHistoryRecord, BiomoleculeHistoryRepo};
 use crate::db::AppState;
 use crate::http::error::HttpError;
 use crate::http::middleware::CurrentUser;
@@ -66,10 +68,11 @@ async fn update_category_meta(
 
 async fn delete_category(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<DeleteCategoryPayload>,
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_delete_category(&conn, payload)?))
+    Ok(Json(do_delete_category(&conn, &user.id, payload)?))
 }
 
 async fn create_topic(
@@ -92,10 +95,11 @@ async fn update_topic_meta(
 
 async fn delete_topic(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<DeleteTopicPayload>,
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_delete_topic(&conn, payload)?))
+    Ok(Json(do_delete_topic(&conn, &user.id, payload)?))
 }
 
 async fn create_molecule(
@@ -118,34 +122,38 @@ async fn update_molecule(
 
 async fn delete_molecule(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<DeleteMoleculePayload>,
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_delete_molecule(&conn, payload)?))
+    Ok(Json(do_delete_molecule(&conn, &user.id, payload)?))
 }
 
 async fn reorder_topics(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<ReorderTopicsPayload>,
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_reorder_topics(&conn, payload)?))
+    Ok(Json(do_reorder_topics(&conn, &user.id, payload)?))
 }
 
 async fn reorder_categories(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<ReorderCategoriesPayload>,
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_reorder_categories(&conn, payload)?))
+    Ok(Json(do_reorder_categories(&conn, &user.id, payload)?))
 }
 
 async fn reorder_molecules(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<ReorderMoleculesPayload>,
 ) -> Result<Json<BiomoleculeData>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    Ok(Json(do_reorder_molecules(&conn, payload)?))
+    Ok(Json(do_reorder_molecules(&conn, &user.id, payload)?))
 }
 
 async fn record_quiz_result(
@@ -201,10 +209,29 @@ async fn peptidovka_settings(
 
 async fn update_peptidovka_settings(
     State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
     Json(payload): Json<UpdatePeptidovkaSettingsPayload>,
 ) -> Result<(), HttpError> {
     let conn = crate::util::lock_db(&state.db);
-    do_update_peptidovka_settings(&conn, payload)?;
+    do_update_peptidovka_settings(&conn, &user.id, payload)?;
+    Ok(())
+}
+
+async fn biomolecule_history(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<BiomoleculeHistoryPayload>,
+) -> Result<Json<Vec<BiomoleculeHistoryRecord>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(BiomoleculeHistoryRepo::list_all(
+        &conn,
+        payload.limit.unwrap_or(50),
+        payload.offset.unwrap_or(0),
+    )?))
+}
+
+async fn clear_biomolecule_history(State(state): State<Arc<AppState>>) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    BiomoleculeHistoryRepo::clear_all(&conn)?;
     Ok(())
 }
 
@@ -293,6 +320,8 @@ pub fn teacher_router() -> Router<Arc<AppState>> {
             "/update-peptidovka-settings",
             post(update_peptidovka_settings),
         )
+        .route("/biomolecule-history", post(biomolecule_history))
+        .route("/clear-biomolecule-history", post(clear_biomolecule_history))
         .route("/list-question-reports", post(list_question_reports))
         .route("/get-question-report", post(get_question_report))
         .route("/delete-question-report", post(delete_question_report))

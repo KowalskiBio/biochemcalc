@@ -126,6 +126,11 @@ const biomoleculesNavItems: NavItem[] = [
     label: cs.navigation.hlaseni,
   },
   {
+    path: "/biomolekuly/historie",
+    icon: <History className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.history,
+  },
+  {
     path: "/leaderboard",
     icon: <Trophy className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.leaderboard,
@@ -137,11 +142,12 @@ const navBySection: Record<Section, { main: NavItem[]; bottom: NavItem[] }> = {
   biomolecules: { main: biomoleculesNavItems, bottom: [settingsNavItem] },
 }
 
-/** Biomolekuly owns its category pages; Projekce, Peptidovka and Hlášení have sibling nav items. */
+/** Biomolekuly owns its category pages; Projekce, Peptidovka, Hlášení and Historie have sibling nav items. */
 const BIOMOLECULES_SIBLING_PATHS = [
   "/biomolekuly/projekce",
   "/biomolekuly/peptidovka",
   "/biomolekuly/hlaseni",
+  "/biomolekuly/historie",
 ]
 
 function isNavItemActive(itemPath: string, pathname: string): boolean {

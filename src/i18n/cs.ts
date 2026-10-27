@@ -525,6 +525,27 @@ export const cs = {
 
   // Biomolekuly page
   biomolekuly: {
+    history: {
+      title: "Historie",
+      description: "Poslední změny v knihovně biomolekul — kdo co změnil a kdy.",
+      pageTitle: "Poslední akce",
+      pageDescription: "Všechny akce učitelů nad obsahem modulu.",
+      loadError: "Historii se nepodařilo načíst",
+      clearAction: "Vymazat historii",
+      clearConfirm: "Opravdu vymazat celou historii? Tuto akci nelze vrátit zpět.",
+      cleared: "Historie byla vymazána.",
+      clearError: "Historii se nepodařilo vymazat",
+      empty: "Zatím tu není žádná akce k zobrazení.",
+      whoColumn: "Kdo",
+      whenColumn: "Kdy",
+      actionColumn: "Akce",
+      detailColumn: "Detail",
+      actionCreated: "Přidáno",
+      actionUpdated: "Upraveno",
+      actionDeleted: "Odstraněno",
+      actionReordered: "Pořadí pozměněno",
+      actionSettings: "Nastavení upraveno",
+    },
     title: "Biomolekuly",
     pageDescription: "Struktury, názvy a zkratky biomolekul.",
     essentialBadge: "Esenciální",
