@@ -9,6 +9,7 @@ import {
   Flag,
   FlaskConical,
   FolderOpen,
+  GraduationCap,
   HelpCircle,
   History,
   Moon,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react"
 import type React from "react"
 import { useEffect, useState } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { Badge } from "@/components/ui/badge"
 import { useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
@@ -196,6 +197,7 @@ const themeToggleVariants = cva(
 
 export function Sidebar() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { section } = useSection()
   const { main: navItems, bottom: bottomNavItems } = navBySection[section]
   const darkMode = useUiStore((state) => state.theme === "dark")
@@ -204,6 +206,13 @@ export function Sidebar() {
 
   const toggleDarkMode = () => {
     useUiStore.getState().toggleTheme()
+  }
+
+  // Student and teacher routes differ, so land on the student home rather
+  // than on a teacher path the student shell would redirect anyway.
+  const enterStudentView = () => {
+    useUiStore.getState().setStudentView(true)
+    navigate("/", { replace: true })
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Re-fetch count when navigating to ensure badge stays up-to-date
@@ -315,18 +324,29 @@ export function Sidebar() {
 
       {/* Theme toggle and build info */}
       <div className="border-t border-white/5 p-2">
-        <button
-          type="button"
-          onClick={toggleDarkMode}
-          className={cn(themeToggleVariants())}
-          aria-label={darkMode ? cs.theme.light : cs.theme.dark}
-        >
-          {darkMode ? (
-            <Sun className="size-4" strokeWidth={1.75} />
-          ) : (
-            <Moon className="size-4" strokeWidth={1.75} />
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleDarkMode}
+            className={cn(themeToggleVariants())}
+            aria-label={darkMode ? cs.theme.light : cs.theme.dark}
+          >
+            {darkMode ? (
+              <Sun className="size-4" strokeWidth={1.75} />
+            ) : (
+              <Moon className="size-4" strokeWidth={1.75} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={enterStudentView}
+            className={cn(themeToggleVariants(), "gap-2 px-3 text-xs font-medium")}
+            title={cs.studentView.enter}
+          >
+            <GraduationCap className="size-4" strokeWidth={1.75} />
+            {cs.studentView.enter}
+          </button>
+        </div>
 
         <div className="px-3 pt-1 text-[10px] text-[hsl(var(--sidebar-foreground))]/30 font-mono">
           build: {__BUILD_VERSION__}

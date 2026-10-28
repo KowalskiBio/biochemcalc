@@ -18,17 +18,23 @@ interface UiState {
   // persisted — the durable choice is `user.preferredSection` on the server)
   lastSection: Section | null
 
+  // A teacher previewing the student shell (issue #14). Persisted so a
+  // reload doesn't silently drop the preview; the banner makes it obvious.
+  studentView: boolean
+
   // Actions
   setTheme: (theme: "light" | "dark") => void
   toggleTheme: () => void
   setCurrentPage: (page: string) => void
   setLastSection: (section: Section | null) => void
+  setStudentView: (on: boolean) => void
 }
 
-const defaultState: Pick<UiState, "theme" | "currentPage" | "lastSection"> = {
+const defaultState: Pick<UiState, "theme" | "currentPage" | "lastSection" | "studentView"> = {
   theme: "light",
   currentPage: "/",
   lastSection: null,
+  studentView: false,
 }
 
 /**
@@ -66,12 +72,15 @@ export const useUiStore = create<UiState>()(
       setCurrentPage: (page) => set({ currentPage: page }),
 
       setLastSection: (section) => set({ lastSection: section }),
+
+      setStudentView: (on) => set({ studentView: on }),
     }),
     {
-      // Only persist theme preference
+      // Persist the theme and the teacher's student-view toggle
       name: "ui-store",
       partialize: (state) => ({
         theme: state.theme,
+        studentView: state.studentView,
       }),
     },
   ),

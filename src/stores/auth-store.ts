@@ -53,6 +53,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await authApi.logout()
     useUiStore.getState().setLastSection(null)
+    useUiStore.getState().setStudentView(false)
     set({ user: null, status: "anonymous" })
   },
 
