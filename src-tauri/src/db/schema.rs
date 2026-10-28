@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 60;
+const CURRENT_USER_VERSION: u32 = 61;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -307,6 +307,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 60 {
         apply_migration_v60(conn)?;
         conn.pragma_update(None, "user_version", "60")?;
+    }
+
+    if user_version < 61 {
+        apply_migration_v61(conn)?;
+        conn.pragma_update(None, "user_version", "61")?;
     }
 
     Ok(())
@@ -2027,6 +2032,38 @@ fn apply_migration_v60(conn: &Connection) -> Result<(), rusqlite::Error> {
         PRAGMA foreign_keys = ON;
         ",
     )
+}
+
+/// Additive-only backfill of the special amino acids' trait vocabulary
+/// (selenocysteine U / pyrrolysine O, family, charge, polarity, facts).
+/// One corner of v59→v60-era data debt is partially-traited rows: a rollout
+/// applied molecules but left some special acids without their traits. This
+/// fills only missing (molecule_id, trait) slots — teacher edits and
+/// complete rows are never rewritten.
+fn apply_migration_v61(conn: &Connection) -> Result<(), rusqlite::Error> {
+    const TRAITS: &[(&str, &str, &str)] = &[
+        ("sec", "oneLetter", "U"),
+        ("sec", "abbreviation", "Sec"),
+        ("sec", "sideChain", "polar"),
+        ("sec", "polarity", "hydrophobic"),
+        ("sec", "charge", "neutral"),
+        ("sec", "facts", "21. aminokyselina; vkládá se recodingem UGA kodonu pomocí sekundární SECIS struktury.\nSelen stojí v active centrech (glutathion peroxidáza, thioredoxin reduktáza)."),
+        ("pyl", "oneLetter", "O"),
+        ("pyl", "abbreviation", "Pyl"),
+        ("pyl", "sideChain", "basic"),
+        ("pyl", "polarity", "hydrophilic"),
+        ("pyl", "charge", "neutral"),
+        ("pyl", "facts", "22. aminokyselina; vkládá se recodingem UAG kodonu u metanogenů.\nPostranní řetězec nese metylpyrrolinkarbonylamid na ε-dusíku lysinu."),
+    ];
+    for (slug, trait_key, value) in TRAITS {
+        conn.execute(
+            "INSERT OR IGNORE INTO biomolecule_traits (molecule_id, trait, value)
+             SELECT m.id, ?1, ?2 FROM biomolecules m
+             WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = ?3",
+            rusqlite::params![trait_key, value, slug],
+        )?;
+    }
+    Ok(())
 }
 
 /// Adds the `polarity` trait (hydrophobic/hydrophilic) to the twenty
@@ -3891,6 +3928,97 @@ mod tests {
         assert_eq!(data.categories.len(), 4);
         assert!(data.molecules.iter().any(|m| m.slug == "sec"));
         assert!(data.molecules.iter().any(|m| m.slug == "pyl"));
+
+        // Traits must survive the whole poisoned-then-repaired chain (the
+        // Sec row in production appeared traitless while Pyl did not).
+        for slug in ["sec", "pyl"] {
+            let trait_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*)
+                     FROM biomolecule_traits t
+                     JOIN biomolecules m ON m.id = t.molecule_id
+                     WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = ?1",
+                    rusqlite::params![slug],
+                    |row| row.get(0),
+                )
+                .expect("trait count");
+            assert_eq!(trait_count, 6, "{slug}: all six traits present");
+        }
+    }
+
+    /// v61's additive-only backfill repairs a partially-traited Sec without
+    /// ever rewriting a slot the teacher already filled — including values the
+    /// teacher changed AFTER v61 once ran.
+    #[test]
+    fn v61_backfills_missing_special_traits_only() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        // Poison into the state the user's report witnessed: Sec exists,
+        // sits correctly-typed, but its key traits never landed.
+        for key in ["oneLetter", "abbreviation", "sideChain", "charge"] {
+            conn.execute(
+                "DELETE FROM biomolecule_traits
+                 WHERE trait = ?1
+                   AND molecule_id = (
+                       SELECT id FROM biomolecules
+                       WHERE category_slug = 'specialni-aminokyseliny' AND slug = 'sec'
+                   )",
+                rusqlite::params![key],
+            )
+            .expect("remove sec trait");
+        }
+        conn.execute(
+            "UPDATE biomolecule_traits SET value = 'ethereal'
+             WHERE trait = 'facts'
+               AND molecule_id = (
+                   SELECT id FROM biomolecules
+                   WHERE category_slug = 'specialni-aminokyseliny' AND slug = 'sec'
+               )",
+            [],
+        )
+        .expect("teacher-edited facts");
+
+        conn.pragma_update(None, "user_version", "60").expect("backlevel");
+        run_migrations(&conn).expect("v61");
+
+        // Backfilled only the holes; teacher-set facts survive untouched.
+        let (letter, side, charge, facts): (String, String, String, String) = conn
+            .query_row(
+                "SELECT t1.value, t2.value, t3.value, t4.value
+                 FROM biomolecules m
+                 JOIN biomolecule_traits t1
+                     ON t1.molecule_id = m.id AND t1.trait = 'oneLetter'
+                 JOIN biomolecule_traits t2
+                     ON t2.molecule_id = m.id AND t2.trait = 'sideChain'
+                 JOIN biomolecule_traits t3
+                     ON t3.molecule_id = m.id AND t3.trait = 'charge'
+                 JOIN biomolecule_traits t4
+                     ON t4.molecule_id = m.id AND t4.trait = 'facts'
+                 WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = 'sec'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("sec traits");
+        assert_eq!(letter, "U");
+        assert_eq!(side, "polar");
+        assert_eq!(charge, "neutral");
+        assert_eq!(facts, "ethereal", "teacher-edited facts kept");
+
+        // Reruns are quiet: re-version down and replay once more.
+        conn.pragma_update(None, "user_version", "60").expect("backlevel");
+        run_migrations(&conn).expect("v61 again");
+        let trait_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = 'sec'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("final count");
+        assert_eq!(trait_count, 6, "six rows once, never duplicated");
     }
 
     #[test]
