@@ -110,6 +110,13 @@ function MicroLabel({ children }: { children: string }) {
   )
 }
 
+/** What the typed answer should look like — shared wording with procvičování. */
+function answerInstruction(type: QuizQuestionType): string {
+  return type === "nameToLetter" || type === "structureToLetter"
+    ? quizStrings.instructionLetter
+    : quizStrings.instructionName
+}
+
 function PromptView({ prompt, monochrome }: { prompt: QuizPrompt; monochrome: boolean }) {
   if (prompt.kind === "structure" && prompt.smiles) {
     return (
@@ -607,12 +614,17 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
       </div>
 
       {master ? (
-        <OpenAnswerForm
-          key={`${runId}-${questionNumber}`}
-          answered={failed}
-          verdict={failed ? "incorrect" : null}
-          onSubmit={submitOpenAnswer}
-        />
+        <div className="relative space-y-2">
+          <p className="text-center text-sm text-muted-foreground">
+            {answerInstruction(question.type)}
+          </p>
+          <OpenAnswerForm
+            key={`${runId}-${questionNumber}`}
+            answered={failed}
+            verdict={failed ? "incorrect" : null}
+            onSubmit={submitOpenAnswer}
+          />
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {question.options.map((option, i) => (
