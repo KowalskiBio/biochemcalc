@@ -1,15 +1,15 @@
 /**
  * Adaptive sizing for molecule depictions.
  *
- * The claimed premise of the grow mode is that every biomolecule shares one
- * canonical scale (natural bond length 24, the same ring and bond sizes
- * everywhere the molecule can show at all): below that scale the context's
- * window simply grows around the structure up to a viewport-safe cap, and
- * only when the structure can't fit the cap does the depiction shrink —
- * uniformly, so aspect always survives. Grids and option lists keep the
- * fixed `size` square (uniform tiles); `grow` is opt-in for single-molecule
- * contexts, where this natural/1:1-until-cap rule is exactly what students
- * mean by "same proportions everywhere".
+ * Grids and option lists keep the fixed `size` square (uniform tiles). In
+ * single-molecule contexts `grow` is on, and the principle is the one the
+ * teacher feedback assembled: every depiction is at least as readable as the
+ * grid preview, scaled to the shared natural bond length (currently 28 px)
+ * up to viewport-safe caps. Concretely, k = min(capK, max(fillScale, 1)):
+ * structures smaller than the square get the grid-parity fill scale first,
+ * big structures stay at their natural bond length until the viewport-safe
+ * cap, and only that cap — never the square — is permitted to shrink them
+ * (uniformly, so aspect always survives).
  */
 
 export interface DepictionBoundsInput {
@@ -17,13 +17,13 @@ export interface DepictionBoundsInput {
   vbw: number
   /** viewBox height of the drawn svg. */
   vbh: number
-  /** Square side length the depiction element would get today (px). */
+  /** Square side length the element would get in fixed mode (px). */
   size: number
   /** Width cap for grow mode (px). */
   capW: number
   /** Height cap for grow mode (px). */
   capH: number
-  /** false → today's fixed square; true → natural 1:1 up to the caps. */
+  /** false → today's fixed square; true → the described adaptive rule. */
   grow: boolean
 }
 
@@ -36,12 +36,13 @@ export interface DepictionBounds {
  * The depiction element's px dimensions for one drawn molecule.
  *
  * Fixed mode is today's behavior verbatim: a `size` × `size` square (the
- * svg letterboxes the viewBox into it, preserving aspect itself). Grow mode
- * keeps the natural 1:1 bond length up to the caps (`k = 1`), where the
- * window grows to the structure, and only the caps pull the scale below 1
- * (uniformly, preserving aspect). There is deliberately no enlargement past
- * natural bonds here — a degenerate viewBox (nothing drawn, unparseable
- * dims) falls back to the fixed square so the element never collapses to 0.
+ * svg letterboxes the viewBox into it, preserving aspect itself). Grow mode:
+ * scale = min(capK, max(fillScale, 1)) — grid-parity as the floor (so a
+ * small molecule never reads tinier than its grid preview), natural
+ * 1:1-style elsewhere, and anything exceeding the viewport-safe cap
+ * downscales uniformly, aspect intact. A degenerate viewBox (nothing drawn,
+ * unparseable dims) falls back to the fixed square so the element never
+ * collapses to 0.
  */
 export function computeDepictionBounds({
   vbw,
@@ -55,12 +56,10 @@ export function computeDepictionBounds({
     return { width: size, height: size }
   }
 
-  // A non-positive or non-finite cap reads as "no constraint" here; the
-  // component itself always resolves real caps before calling.
+  const fillScale = size / Math.max(vbw, vbh)
   const boundW = capW > 0 && Number.isFinite(capW) ? capW / vbw : Number.POSITIVE_INFINITY
   const boundH = capH > 0 && Number.isFinite(capH) ? capH / vbh : Number.POSITIVE_INFINITY
-  // Uniform natural scale: every molecule is drawn at its natural bond
-  // length until the caps stop it; there is no special fill-square scale.
-  const k = Math.min(1, boundW, boundH)
+  const capK = Math.min(boundW, boundH)
+  const k = Math.min(capK, Math.max(fillScale, 1))
   return { width: vbw * k, height: vbh * k }
 }

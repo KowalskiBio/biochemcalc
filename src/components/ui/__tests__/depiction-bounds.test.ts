@@ -28,10 +28,10 @@ describe("computeDepictionBounds", () => {
     )
   })
 
-  it("keeps the shared natural scale for small molecules (no fill-square zoom)", () => {
-    // The stated policy here is "every biomolecule, same bond pixels": a
-    // molecule smaller than the square stays at its natural bond length —
-    // the window never zooms small depictions up to fill a square.
+  it("never renders small molecules tinier than their grid preview (fill floor)", () => {
+    // The current policy's floor: structures under the square get the
+    // grid-parity scale first — never below it — so detail never punishes
+    // small molecules relative to the grid.
     const square = computeDepictionBounds({
       vbw: 100,
       vbh: 100,
@@ -40,9 +40,10 @@ describe("computeDepictionBounds", () => {
       capH: 560,
       grow: true,
     })
-    expectBounds(square, 100, 100)
+    expectBounds(square, 220, 220)
 
-    // Same natural scale for a non-square content box: both dims at k = 1.
+    // Slight undersized span: floor lifts it to at least fill, no cap
+    // pressure at this size.
     const wide = computeDepictionBounds({
       vbw: 100,
       vbh: 50,
@@ -51,7 +52,7 @@ describe("computeDepictionBounds", () => {
       capH: 560,
       grow: true,
     })
-    expectBounds(wide, 100, 50)
+    expectBounds(wide, 220, 110)
   })
 
   it("draws big molecules at natural 1:1 size within the caps", () => {
