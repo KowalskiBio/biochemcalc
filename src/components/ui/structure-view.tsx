@@ -240,7 +240,7 @@ function SmilesStructureView({
       mirror,
       theme: resolvedTheme,
       monochrome,
-      bondLength: 24,
+      bondLength: 28,
       natural: grow,
       haworth,
       fischer,

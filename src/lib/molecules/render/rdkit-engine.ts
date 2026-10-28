@@ -74,8 +74,8 @@ export interface NaturalDrawOptions {
   wedgeBonds?: boolean
 }
 
-/** Matches the old drawer's constant 24 px bond length. */
-const DEFAULT_NATURAL_BOND_LENGTH = 24
+/** Uniform depiction scale: one canvas pixel scale for every biomolecule bond. */
+const DEFAULT_NATURAL_BOND_LENGTH = 28
 /** Matches the old `SvgDrawer` padding. */
 const DEFAULT_NATURAL_PADDING = 12
 
