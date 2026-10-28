@@ -28,9 +28,10 @@ describe("computeDepictionBounds", () => {
     )
   })
 
-  it("keeps today's fill scale for small molecules (k == s0)", () => {
-    // Square viewBox smaller than the square: the molecule is upscaled
-    // exactly as the fixed square upscale it today (s0 = 220/100 = 2.2).
+  it("keeps the shared natural scale for small molecules (no fill-square zoom)", () => {
+    // The stated policy here is "every biomolecule, same bond pixels": a
+    // molecule smaller than the square stays at its natural bond length —
+    // the window never zooms small depictions up to fill a square.
     const square = computeDepictionBounds({
       vbw: 100,
       vbh: 100,
@@ -39,10 +40,9 @@ describe("computeDepictionBounds", () => {
       capH: 560,
       grow: true,
     })
-    expectBounds(square, 220, 220)
+    expectBounds(square, 100, 100)
 
-    // Non-square viewBox: the long side fills the square, the short side
-    // follows at the same k — the same letterboxed look as fixed mode.
+    // Same natural scale for a non-square content box: both dims at k = 1.
     const wide = computeDepictionBounds({
       vbw: 100,
       vbh: 50,
@@ -51,7 +51,7 @@ describe("computeDepictionBounds", () => {
       capH: 560,
       grow: true,
     })
-    expectBounds(wide, 220, 110)
+    expectBounds(wide, 100, 50)
   })
 
   it("draws big molecules at natural 1:1 size within the caps", () => {
