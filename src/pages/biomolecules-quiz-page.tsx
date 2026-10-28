@@ -762,13 +762,17 @@ export function BiomoleculesQuizPage() {
   if (loaded && !topicReady) {
     setTopicReady(true)
     setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
+    // A plain entry defaults to "všechny kategorie v tématu"; deep links keep
+    // their linked category, matching the selection a same-topic switch
+    // would leave behind. (Modes/topic changes already re-arm this way.)
+    setSlug(paramSlug === null ? ALL_CATEGORIES_VALUE : paramSlug)
   }
 
   // Navigating between deep links (or off one) re-arms the setup
   // (adjust-state-during-render, so the stale selection never commits).
   if (prevParamSlug !== paramSlug) {
     setPrevParamSlug(paramSlug)
-    setSlug(paramSlug)
+    setSlug(paramSlug === null ? ALL_CATEGORIES_VALUE : paramSlug)
     setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
     setChosenTypes(null)
     setActiveQuiz(null)

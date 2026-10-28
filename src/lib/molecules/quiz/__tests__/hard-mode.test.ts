@@ -238,22 +238,24 @@ describe("special amino acids (specialni-aminokyseliny)", () => {
     }),
   ]
 
-  it("quizzes with letters and one form: sec is U, pyl is O", () => {
+  function specialConfig() {
     const config = getCategoryQuizConfig("specialni-aminokyseliny", SPECIAL)
-    expect(config).toBeDefined()
-    if (config === undefined) return
+    if (config === undefined) throw new Error("special category must quiz")
+    return config
+  }
+
+  it("quizzes with letters and one form: sec is U, pyl is O", () => {
+    const config = specialConfig()
     expect(config.molecules.find((m) => m.id === "sec")?.oneLetter).toBe("U")
     expect(config.molecules.find((m) => m.id === "pyl")?.oneLetter).toBe("O")
   })
 
   it("matches the polarity axis like the canonical acids (sec nonpolar, pyl polar)", () => {
-    const config = getCategoryQuizConfig("specialni-aminokyseliny", SPECIAL)
-    expect(config).toBeDefined()
-    if (config === undefined) return
+    const config = specialConfig()
     const characteristics = requireCharacteristics(config)
     const sec = config.molecules.find((m) => m.id === "sec")
     const pyl = config.molecules.find((m) => m.id === "pyl")
-    if (sec === undefined || pyl === undefined) return
+    if (sec === undefined || pyl === undefined) throw new Error("sec/pyl")
     expect(
       characteristics.find((def) => def.predicate === "nonpolar")?.matches(sec),
       "selenocysteine mirrors cysteine on the polarity axis",
@@ -262,6 +264,27 @@ describe("special amino acids (specialni-aminokyseliny)", () => {
       characteristics.find((def) => def.predicate === "nonpolar")?.matches(pyl),
       "pyrrolysine is hydrophilic like lysine",
     ).toBe(false)
+  })
+
+  it("generates real quizzes for a two-molecule category (1 target + 1 distractor)", () => {
+    const config = specialConfig()
+    const types = generatableQuizTypes(config.molecules, config.characteristics)
+    expect(types).toContain("nameToLetter")
+    expect(types).toContain("characteristic")
+
+    const questions = generateQuizSession(config.molecules, {
+      types,
+      questionCount: 10,
+      seed: 7,
+      characteristics: config.characteristics,
+    })
+    expect(questions, "a two-acid category generates a full session").toHaveLength(10)
+    for (const question of questions) {
+      expect(
+        question.options.length,
+        `${question.type}: target + ≥1 distractor`,
+      ).toBeGreaterThanOrEqual(2)
+    }
   })
 })
 

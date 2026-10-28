@@ -234,7 +234,9 @@ function qualifyingPredicates(
 ): CharacteristicDef[] {
   return characteristics.filter((def) => {
     const matches = molecules.filter((molecule) => def.matches(molecule)).length
-    return matches >= 1 && molecules.length - matches >= 3
+    // One example on each side is enough: small categories (the special
+    // amino acids are two molecules by design) would otherwise quiz nothing.
+    return matches >= 1 && molecules.length - matches >= 1
   })
 }
 
@@ -248,8 +250,9 @@ function isGeneratable(
       characteristics !== undefined && qualifyingPredicates(molecules, characteristics).length > 0
     )
   }
-  // Needs the target plus three distinct distractors.
-  return molecules.length >= 4
+  // Needs at least one distinct distractor; the option builders slice
+  // whatever is left below that.
+  return molecules.length >= 2
 }
 
 function optionDisplayFor(type: QuizQuestionType): "name" | "letter" | "structure" {
