@@ -96,11 +96,19 @@ describe("getMergedQuizConfig", () => {
   })
 
   it("re-qualifies characteristics against the merged molecule pool", () => {
-    // β-anomer matches 7 of 9 saccharides, so it has only 2 distractors and
-    // the saccharides adapter drops it on its own.
+    // Sugars now ship only the deoxy predicate by policy (anomer/ringForm
+    // retired); it qualifies already in the category adapter.
+    expect(predicates(requireConfig(SACCHARIDES_SLUG, TEST_SACCHARIDES))).toContain(
+      traitPredicate("deoxy", "true"),
+    )
+    // and nothing else — the retired sugar-class prompts stay out.
+    expect(predicates(requireConfig(SACCHARIDES_SLUG, TEST_SACCHARIDES))).not.toContain(
+      traitPredicate("anomer", "alpha"),
+    )
     expect(predicates(requireConfig(SACCHARIDES_SLUG, TEST_SACCHARIDES))).not.toContain(
       traitPredicate("anomer", "beta"),
     )
+
     // Hydrophilic matches 4 of the 5 generic molecules — one distractor.
     expect(predicates(requireConfig(GENERIC_SLUG, GENERIC_MOLECULES))).not.toContain(
       traitPredicate("polarity", "hydrophilic"),
@@ -108,23 +116,12 @@ describe("getMergedQuizConfig", () => {
 
     const merged = requireMerged([SACCHARIDES_ENTRY, GENERIC_ENTRY])
     const mergedPredicates = predicates(merged)
-    // Merged, both predicates find the three distractors they needed.
-    expect(mergedPredicates).toContain(traitPredicate("anomer", "beta"))
+    // Merged, the single non-distractor hydrophilic predicate finds its pool.
     expect(mergedPredicates).toContain(traitPredicate("polarity", "hydrophilic"))
     // Predicates that already qualified keep qualifying.
-    expect(mergedPredicates).toContain(traitPredicate("anomer", "alpha"))
     expect(mergedPredicates).toContain(traitPredicate("polarity", "hydrophobic"))
-
-    // The merged definitions grade against the merged pool: the β-anomer now
-    // has its seven saccharide matches plus the generic molecules as
-    // distractors.
-    const beta = merged.characteristics?.find(
-      (definition) => definition.predicate === traitPredicate("anomer", "beta"),
-    )
-    if (beta === undefined) {
-      throw new Error("merged config lost the β-anomer predicate")
-    }
-    expect(merged.molecules.filter(beta.matches)).toHaveLength(7)
+    expect(mergedPredicates).toContain(traitPredicate("deoxy", "true"))
+    expect(mergedPredicates).not.toContain(traitPredicate("anomer", "beta"))
   })
 
   it("drops characteristics that still lack three distractors", () => {

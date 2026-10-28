@@ -164,34 +164,19 @@ function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
 }
 
 /**
- * Saccharides (Haworth projections): name↔structure plus trait predicates
- * (anomer, ring form, deoxy); the ring form groups same-class distractors.
- * Predicates that can't fill three distractors are dropped, exactly like the
- * generic adapter does.
+ * Saccharides (Haworth projections): name↔structure plus the deoxy trait
+ * predicate only — anomer and ring-form were retired because teacher-added
+ * sugars can't carry those trait types anywhere in the edit UI, so the
+ * questions would be anchored to a dwindling built-in set. The ring form
+ * trait still freely groups same-class distractors below.
  */
 function saccharidesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   const quizMolecules = molecules.map((molecule) =>
     baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringForm), quizAliases(molecule)),
   )
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
-  const traitIs =
-    (key: TraitKey, value: string) =>
-    (quiz: QuizMolecule): boolean => {
-      const molecule = byId.get(quiz.id)
-      return molecule !== undefined && traitOf(molecule, key) === value
-    }
 
   const candidates: CharacteristicDef[] = [
-    { predicate: traitPredicate(TRAIT.anomer, "alpha"), matches: traitIs(TRAIT.anomer, "alpha") },
-    { predicate: traitPredicate(TRAIT.anomer, "beta"), matches: traitIs(TRAIT.anomer, "beta") },
-    {
-      predicate: traitPredicate(TRAIT.ringForm, "pyranose"),
-      matches: traitIs(TRAIT.ringForm, "pyranose"),
-    },
-    {
-      predicate: traitPredicate(TRAIT.ringForm, "furanose"),
-      matches: traitIs(TRAIT.ringForm, "furanose"),
-    },
     {
       predicate: traitPredicate(TRAIT.deoxy, "true"),
       matches: (quiz) => {

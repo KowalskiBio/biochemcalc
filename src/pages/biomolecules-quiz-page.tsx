@@ -120,6 +120,13 @@ function BackLink({ href, label }: { href: string; label: string }) {
   )
 }
 
+/** What the free-text answer should look like, per question type. */
+function answerInstruction(type: QuizQuestionType): string {
+  return type === "nameToLetter" || type === "structureToLetter"
+    ? quizStrings.instructionLetter
+    : quizStrings.instructionName
+}
+
 function MicroLabel({ children }: { children: string }) {
   return (
     <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -554,12 +561,17 @@ function QuestionScreen({
       </div>
 
       {mode === "hard" ? (
-        <OpenAnswerForm
-          key={index}
-          answered={answered}
-          verdict={answered ? (wasCorrect ? "correct" : "incorrect") : null}
-          onSubmit={onOpenSubmit}
-        />
+        <div className="space-y-2">
+          <p className="text-center text-sm text-muted-foreground">
+            {answerInstruction(question.type)}
+          </p>
+          <OpenAnswerForm
+            key={index}
+            answered={answered}
+            verdict={answered ? (wasCorrect ? "correct" : "incorrect") : null}
+            onSubmit={onOpenSubmit}
+          />
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {question.options.map((option, i) => (
