@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom"
 
 import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
+import { LocalRunBadge } from "@/components/layout/local-run-badge"
 import { StudentShell } from "@/components/layout/student-shell"
 import { allowedSections } from "@/hooks/use-section"
 import { BiomoleculesHistoryPage } from "@/pages/biomolecules-history-page"
@@ -179,6 +180,7 @@ function StudentRoutes() {
 export function App() {
   const fetchMe = useAuthStore((s) => s.fetchMe)
   const user = useAuthStore((s) => s.user)
+  const studentView = useUiStore((s) => s.studentView)
 
   useEffect(() => {
     const theme = useUiStore.getState().theme
@@ -200,11 +202,12 @@ export function App() {
           path="/*"
           element={
             <RequireAuth>
-              {user?.role === "teacher" ? <TeacherRoutes /> : <StudentRoutes />}
+              {user?.role === "teacher" && !studentView ? <TeacherRoutes /> : <StudentRoutes />}
             </RequireAuth>
           }
         />
       </Routes>
+      <LocalRunBadge />
     </div>
   )
 }

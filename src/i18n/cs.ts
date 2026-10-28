@@ -1635,6 +1635,18 @@ export const cs = {
   },
 
   // Theme and UI
+  // Teacher previewing the app as a student sees it (issue #14)
+  studentView: {
+    enter: "Zobrazit jako student",
+    banner: "Náhled studenta",
+    exit: "Zpět do učitelského režimu",
+  },
+
+  // Marker shown only when the app runs locally, never on the live site
+  localRun: {
+    label: "Lokální běh",
+  },
+
   theme: {
     light: "Světlý režim",
     dark: "Tmavý režim",

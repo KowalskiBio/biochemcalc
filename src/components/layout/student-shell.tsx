@@ -1,6 +1,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { cva } from "class-variance-authority"
 import {
+  ArrowLeft,
   Atom,
   Dna,
   FlaskConical,
@@ -227,6 +228,35 @@ function StudentSidebar({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+/**
+ * Shown only to a teacher previewing the student shell (issue #14): says
+ * plainly that this is a preview and is the one way back to teacher mode.
+ */
+function StudentViewBanner() {
+  const navigate = useNavigate()
+  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  if (!isTeacher) return null
+
+  const exit = () => {
+    useUiStore.getState().setStudentView(false)
+    navigate("/", { replace: true })
+  }
+
+  return (
+    <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--accent))]/40 bg-[hsl(var(--accent))]/15 px-4 py-2 text-sm">
+      <span className="font-medium">{cs.studentView.banner}</span>
+      <button
+        type="button"
+        onClick={exit}
+        className="flex items-center gap-1.5 rounded-[4px] border border-current/20 px-2.5 py-1 text-xs font-medium transition-colors duration-100 hover:bg-[hsl(var(--accent))]/20"
+      >
+        <ArrowLeft className="size-3.5" strokeWidth={1.75} />
+        {cs.studentView.exit}
+      </button>
+    </div>
+  )
+}
+
 export function StudentShell({ children }: { children: ReactNode }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
   const { needsChoice } = useSection()
@@ -278,6 +308,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
       </DialogPrimitive.Root>
 
       <main className="flex flex-1 flex-col md:ml-[var(--sidebar-width)]">
+        <StudentViewBanner />
         <div className="sticky top-0 z-30 flex items-center justify-between border-b border-black/20 bg-[hsl(var(--sidebar))] px-4 py-3 md:hidden">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-[4px] bg-[hsl(var(--accent))] flex items-center justify-center flex-shrink-0">
