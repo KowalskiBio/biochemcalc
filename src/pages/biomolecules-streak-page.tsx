@@ -6,6 +6,7 @@ import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/repor
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { RichText } from "@/components/ui/rich-text"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
@@ -25,6 +26,7 @@ import {
   type QuizQuestion,
   type QuizQuestionType,
 } from "@/lib/molecules/quiz"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn, formatDecimalComma } from "@/lib/utils"
 import {
   useBiomoleculeDataLoaded,
@@ -108,24 +110,34 @@ function MicroLabel({ children }: { children: string }) {
   )
 }
 
-function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: boolean }) {
+/** What the typed answer should look like — shared wording with procvičování. */
+function answerInstruction(type: QuizQuestionType): string {
+  return type === "nameToLetter" || type === "structureToLetter"
+    ? quizStrings.instructionLetter
+    : quizStrings.instructionName
+}
+
+function PromptView({ prompt, monochrome }: { prompt: QuizPrompt; monochrome: boolean }) {
   if (prompt.kind === "structure" && prompt.smiles) {
     return (
-      // Mistr draws structures colorlessly — atom color coding would give
-      // away part of what the open answer is supposed to test. The arbitrary
-      // variant grays only the svg, never the error fallback; a projection,
-      // when the molecule carries one, is a plain svg and grays the same.
-      // Like the quiz prompt, this is a single-molecule context, so `grow`
-      // keeps large molecules at 1:1 bonds instead of an unreadable square.
+      // Mistr draws structures in a single flat ink — atom colour coding
+      // would give away part of what the open answer is supposed to test.
+      // The palette crush happens in applyTheme on the SMILES path and as a
+      // label colour swap on the projection branch: one neutral ink per
+      // theme, never the error fallback. Like the quiz prompt, this is a
+      // single-molecule context, so `grow` keeps large molecules at 1:1
+      // bonds instead of an unreadable square.
       <StructureView
         smiles={prompt.smiles}
         projection={prompt.projection}
         haworth={prompt.haworth ?? true}
+        fischer={prompt.fischer ?? true}
         orientationDeg={prompt.orientationDeg}
         size={220}
         grow
+        monochrome={monochrome}
         title={quizStrings.promptStructureLabel}
-        className={cn("mx-auto", grayscale && "[&_svg]:grayscale")}
+        className="mx-auto"
       />
     )
   }
@@ -139,7 +151,11 @@ function PromptView({ prompt, grayscale }: { prompt: QuizPrompt; grayscale: bool
       </p>
     )
   }
-  return <p className="text-2xl font-semibold tracking-tight">{prompt.text}</p>
+  return (
+    <p className="text-2xl font-semibold tracking-tight">
+      <RichText text={prompt.text} />
+    </p>
+  )
 }
 
 interface OptionButtonProps {
@@ -148,7 +164,7 @@ interface OptionButtonProps {
   index: number
   answered: boolean
   isSelected: boolean
-  grayscale: boolean
+  monochrome: boolean
   onSelect: () => void
 }
 
@@ -158,7 +174,7 @@ function OptionButton({
   index,
   answered,
   isSelected,
-  grayscale,
+  monochrome,
   onSelect,
 }: OptionButtonProps) {
   const stateClass = answered
@@ -192,9 +208,10 @@ function OptionButton({
             smiles={option.smiles ?? ""}
             projection={option.projection}
             haworth={option.haworth ?? true}
+            fischer={option.fischer ?? true}
             orientationDeg={option.orientationDeg}
             size={150}
-            className={cn(grayscale && "[&_svg]:grayscale")}
+            monochrome={monochrome}
           />
         </div>
       ) : (
@@ -203,7 +220,7 @@ function OptionButton({
             option.display === "letter" ? "font-mono tabular text-lg" : "text-sm font-medium",
           )}
         >
-          {optionLabel(molecules, option)}
+          <RichText text={optionLabel(molecules, option)} />
         </span>
       )}
     </button>
@@ -302,6 +319,8 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   const [run, setRun] = useState<Run | null>(null)
   const [round, setRound] = useState<Round | null>(null)
   const [questionNumber, setQuestionNumber] = useState(1)
+  // Run identity for the answer form's remount key (see OpenAnswerForm below).
+  const [runId, setRunId] = useState(0)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
@@ -342,6 +361,9 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
     gradingRef.current = false
     runSeedRef.current = Date.now()
     questionCounterRef.current = 0
+    // Bumped as run identity for the answer form's key — without it the key
+    // is 1→1 on a round-1 restart and React keeps the stale draft mounted.
+    setRunId((id) => id + 1)
     setSelectedKey(null)
     setQuestionNumber(1)
     setIsReportDialogOpen(false)
@@ -400,9 +422,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   }
 
   const showResults = () => {
-    setRun((current) =>
-      current?.phase === "failed" ? { ...current, phase: "results" } : current,
-    )
+    setRun((current) => (current?.phase === "failed" ? { ...current, phase: "results" } : current))
   }
 
   // The live timer: ticks once a second while the run is active, freezes the
@@ -590,16 +610,21 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
           <Flag className="size-4" />
         </Button>
         <MicroLabel>{quizStrings.types[question.type]}</MicroLabel>
-        <PromptView prompt={question.prompt} grayscale={master} />
+        <PromptView prompt={question.prompt} monochrome={master} />
       </div>
 
       {master ? (
-        <OpenAnswerForm
-          key={questionNumber}
-          answered={failed}
-          verdict={failed ? "incorrect" : null}
-          onSubmit={submitOpenAnswer}
-        />
+        <div className="relative space-y-2">
+          <p className="text-center text-sm text-muted-foreground">
+            {answerInstruction(question.type)}
+          </p>
+          <OpenAnswerForm
+            key={`${runId}-${questionNumber}`}
+            answered={failed}
+            verdict={failed ? "incorrect" : null}
+            onSubmit={submitOpenAnswer}
+          />
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {question.options.map((option, i) => (
@@ -610,7 +635,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
               index={i}
               answered={failed}
               isSelected={option.key === selectedKey}
-              grayscale={false}
+              monochrome={false}
               onSelect={() => selectOption(option.key)}
             />
           ))}
@@ -629,7 +654,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
               <p className="text-sm text-muted-foreground">
                 {quizStrings.correctAnswerWas.replace(
                   "{answer}",
-                  correctAnswerText(question, round.config.molecules),
+                  stripRichMarkup(correctAnswerText(question, round.config.molecules)),
                 )}
               </p>
             )}

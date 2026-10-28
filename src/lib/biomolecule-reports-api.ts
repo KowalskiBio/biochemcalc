@@ -12,6 +12,7 @@ export interface BiomoleculeReportOptionSnapshot {
   name: string
   smiles?: string
   haworth?: boolean
+  fischer?: boolean
   /** Passed through opaquely — the frontend's `ProjectionSpec` union. */
   projection?: unknown | null
   correct: boolean
@@ -28,6 +29,7 @@ export interface BiomoleculeQuestionReportSnapshot {
     text: string
     smiles?: string
     haworth?: boolean
+    fischer?: boolean
     projection?: unknown | null
   }
   options: BiomoleculeReportOptionSnapshot[]
@@ -92,12 +94,14 @@ export function snapshotOfQuestion(
       text: prompt.text,
       ...(prompt.smiles !== undefined ? { smiles: prompt.smiles } : {}),
       ...(prompt.haworth !== undefined ? { haworth: prompt.haworth } : {}),
+      ...(prompt.fischer !== undefined ? { fischer: prompt.fischer } : {}),
       projection: prompt.projection ?? null,
     },
     options: question.options.map((option) => {
       const molecule = byId.get(option.moleculeId)
       const smiles = option.smiles ?? molecule?.smiles
       const haworth = option.haworth ?? molecule?.haworth
+      const fischer = option.fischer ?? molecule?.fischer
       const projection = option.projection ?? molecule?.projection
       return {
         key: option.key,
@@ -105,6 +109,7 @@ export function snapshotOfQuestion(
         name: molecule?.name ?? option.key,
         ...(smiles !== undefined ? { smiles } : {}),
         ...(haworth !== undefined ? { haworth } : {}),
+        ...(fischer !== undefined ? { fischer } : {}),
         ...(projection !== undefined ? { projection } : {}),
         correct: option.correct,
       }

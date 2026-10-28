@@ -18,6 +18,7 @@ import {
   moleculeAliases,
   NITROGEN_BASES_SLUG,
   SACCHARIDES_SLUG,
+  SPECIAL_AMINO_ACIDS_SLUG,
   TRAIT,
   type TraitKey,
   traitOf,
@@ -48,10 +49,7 @@ export function traitPredicate(trait: string, value: string): string {
  * any alias equal to the molecule name is ignored, and an empty result is
  * `undefined` (the engine's "no aliases" shape).
  */
-function quizAliases(
-  molecule: Biomolecule,
-  abbreviationAlias?: string,
-): string[] | undefined {
+function quizAliases(molecule: Biomolecule, abbreviationAlias?: string): string[] | undefined {
   const name = molecule.name.trim().toLowerCase()
   const seen = new Set<string>()
   const aliases: string[] = []
@@ -89,6 +87,7 @@ function baseQuizMolecule(
     achiral: projection !== null ? false : isAchiral(molecule),
     projection: projection ?? undefined,
     haworth,
+    fischer: molecule.fischer !== false,
   }
 }
 
@@ -113,11 +112,20 @@ function aminoAcidsQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
       const molecule = byId.get(quiz.id)
       return molecule !== undefined && traitOf(molecule, TRAIT.sideChain) === classKey
     }
+  // Polarity questions ask the hydrophobic/hydrophilic axis on purpose, not
+  // the display family: phenylalanine is aromatic BY FAMILY yet hydrophobic
+  // BY BEHAVIOUR, and students deserve both answers, one per axis.
+  const polarityIs =
+    (value: string) =>
+    (quiz: QuizMolecule): boolean => {
+      const molecule = byId.get(quiz.id)
+      return molecule !== undefined && traitOf(molecule, TRAIT.polarity) === value
+    }
 
   // Order mirrors `CHARACTERISTIC_PREDICATES` so predicate selection stays stable.
   const characteristics: CharacteristicDef[] = [
-    { predicate: "nonpolar", matches: classIs("nonpolar") },
-    { predicate: "polar", matches: classIs("polar") },
+    { predicate: "nonpolar", matches: polarityIs("hydrophobic") },
+    { predicate: "polar", matches: polarityIs("hydrophilic") },
     { predicate: "aromatic", matches: classIs("aromatic") },
     { predicate: "acidic", matches: classIs("acidic") },
     { predicate: "basic", matches: classIs("basic") },
@@ -156,39 +164,19 @@ function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
 }
 
 /**
- * Saccharides (Haworth projections): name↔structure plus trait predicates
- * (anomer, ring form, deoxy); the ring form groups same-class distractors.
- * Predicates that can't fill three distractors are dropped, exactly like the
- * generic adapter does.
+ * Saccharides (Haworth projections): name↔structure plus the deoxy trait
+ * predicate only — anomer and ring-form were retired because teacher-added
+ * sugars can't carry those trait types anywhere in the edit UI, so the
+ * questions would be anchored to a dwindling built-in set. The ring form
+ * trait still freely groups same-class distractors below.
  */
 function saccharidesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
   const quizMolecules = molecules.map((molecule) =>
-    baseQuizMolecule(
-      molecule,
-      undefined,
-      traitOf(molecule, TRAIT.ringForm),
-      quizAliases(molecule),
-    ),
+    baseQuizMolecule(molecule, undefined, traitOf(molecule, TRAIT.ringForm), quizAliases(molecule)),
   )
   const byId = new Map(molecules.map((molecule) => [molecule.slug, molecule]))
-  const traitIs =
-    (key: TraitKey, value: string) =>
-    (quiz: QuizMolecule): boolean => {
-      const molecule = byId.get(quiz.id)
-      return molecule !== undefined && traitOf(molecule, key) === value
-    }
 
   const candidates: CharacteristicDef[] = [
-    { predicate: traitPredicate(TRAIT.anomer, "alpha"), matches: traitIs(TRAIT.anomer, "alpha") },
-    { predicate: traitPredicate(TRAIT.anomer, "beta"), matches: traitIs(TRAIT.anomer, "beta") },
-    {
-      predicate: traitPredicate(TRAIT.ringForm, "pyranose"),
-      matches: traitIs(TRAIT.ringForm, "pyranose"),
-    },
-    {
-      predicate: traitPredicate(TRAIT.ringForm, "furanose"),
-      matches: traitIs(TRAIT.ringForm, "furanose"),
-    },
     {
       predicate: traitPredicate(TRAIT.deoxy, "true"),
       matches: (quiz) => {
@@ -322,7 +310,9 @@ export function getCategoryQuizConfig(
   if (molecules.length === 0) {
     return undefined
   }
-  if (categoryId === AMINO_ACIDS_SLUG) {
+  if (categoryId === AMINO_ACIDS_SLUG || categoryId === SPECIAL_AMINO_ACIDS_SLUG) {
+    // Both amino-acid categories quiz the same way: letters from `oneLetter`,
+    // polarity on the hydrophobic/hydrophilic axis, family classes, flags.
     return aminoAcidsQuizConfig(molecules)
   }
   if (categoryId === NITROGEN_BASES_SLUG) {

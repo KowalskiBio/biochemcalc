@@ -44,6 +44,11 @@ export interface Biomolecule {
    * `undefined`/absent means `true` (the default behavior).
    */
   haworth?: boolean
+  /**
+   * Whether to recognize open-chain sugars and draw them as a Fischer
+   * projection. `undefined`/absent means `true` (the default behavior).
+   */
+  fischer?: boolean
   position: number
   traits: BiomoleculeTraits
   updatedAt?: string
@@ -76,6 +81,30 @@ export interface BiomoleculeLeaderboardEntry {
 
 /** The two Biomolekuly streak variants: Učeň and Mistr. */
 export type BiomoleculeStreakKind = "apprentice" | "master"
+
+/** The two Peptidovka modes: Učeň and Mistr. */
+export type PeptidovkaMode = "ucen" | "mistr"
+
+/** One mode's teacher-editable Peptidovka settings. */
+export interface PeptidovkaSettings {
+  mode: PeptidovkaMode
+  minLen: number
+  maxLen: number
+  secondsPerAa: number
+  slugs: string[]
+}
+
+/** The aggregate of one finished Peptidovka run, as recorded for the leaderboard. */
+export interface PeptidovkaRunResult {
+  mode: PeptidovkaMode
+  /**
+   * Number of peptides GUESSED CORRECTLY in the run — the leaderboard's
+   * "Nejlepší série" metric. Points (their in-game summary) are computed
+   * but NOT recorded: time/answer needs a per-peptide unit to avg over.
+   */
+  correctCount: number
+  totalSeconds: number
+}
 
 /** One user's best finished Biomolekuly streak of a given kind. */
 export interface BiomoleculeStreakLeaderboardEntry {
@@ -144,6 +173,7 @@ export const biomoleculesApi = {
     traits: BiomoleculeTraits,
     projection?: string | null,
     haworth?: boolean,
+    fischer?: boolean,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/create-molecule", {
       categoryId,
@@ -152,6 +182,7 @@ export const biomoleculesApi = {
       projection: projection ?? null,
       traits,
       ...(haworth === undefined ? {} : { haworth }),
+      ...(fischer === undefined ? {} : { fischer }),
     }),
 
   /**
@@ -166,6 +197,7 @@ export const biomoleculesApi = {
     projection?: string | null,
     haworth?: boolean,
     categoryId?: string,
+    fischer?: boolean,
   ): Promise<BiomoleculeData> =>
     httpRequest<BiomoleculeData>("/api/biomolecules/update-molecule", {
       moleculeId,
@@ -175,6 +207,7 @@ export const biomoleculesApi = {
       traits,
       ...(haworth === undefined ? {} : { haworth }),
       ...(categoryId === undefined ? {} : { categoryId }),
+      ...(fischer === undefined ? {} : { fischer }),
     }),
 
   /**
@@ -230,4 +263,50 @@ export const biomoleculesApi = {
     httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/streak-leaderboard", {
       kind,
     }),
+
+  /** Any logged-in user: both Peptidovka modes' settings, Učeň first. */
+  peptidovkaSettings: (): Promise<PeptidovkaSettings[]> =>
+    httpRequest<PeptidovkaSettings[]>("/api/biomolecules/peptidovka-settings"),
+
+  /** Teacher: replace one mode's settings (bounds validated server-side). */
+  updatePeptidovkaSettings: (
+    mode: PeptidovkaMode,
+    settings: Omit<PeptidovkaSettings, "mode">,
+  ): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/update-peptidovka-settings", { mode, ...settings }),
+
+  /** Store the aggregate of one finished Peptidovka run. */
+  recordPeptidovkaRun: (run: PeptidovkaRunResult): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/record-peptidovka-run", run),
+
+  /** Any logged-in user: each user's single best finished Peptidovka run of the mode. */
+  peptidovkaLeaderboard: (mode: PeptidovkaMode): Promise<BiomoleculeStreakLeaderboardEntry[]> =>
+    httpRequest<BiomoleculeStreakLeaderboardEntry[]>("/api/biomolecules/peptidovka-leaderboard", {
+      mode,
+    }),
+
+  /** Teacher: the module's action history, newest first (defaults 50/0). */
+  biomoleculeHistory: (params?: {
+    limit?: number
+    offset?: number
+  }): Promise<BiomoleculeHistoryEntry[]> =>
+    httpRequest<BiomoleculeHistoryEntry[]>("/api/biomolecules/biomolecule-history", params ?? {}),
+
+  /** Teacher: wipe the module's history (confirm dialog collects consent first). */
+  clearBiomoleculeHistory: (): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/clear-biomolecule-history"),
+}
+
+/** One teacher action in the biomolecules module, as logged for the Historie page. */
+export interface BiomoleculeHistoryEntry {
+  id: string
+  userId: string
+  username: string
+  /** "molecule" | "category" | "topic" | "topics" | "categories" | "peptidovka". */
+  kind: string
+  /** "create" | "update" | "delete" | "reorder" | "settings". */
+  action: string
+  label: string
+  detail: string | null
+  createdAt: string
 }

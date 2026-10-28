@@ -13,6 +13,9 @@ use uuid::Uuid;
 pub const AMINO_ACIDS_SLUG: &str = "aminokyseliny";
 pub const NITROGEN_BASES_SLUG: &str = "dusikate-baze";
 pub const SACCHARIDES_SLUG: &str = "sacharidy";
+/// Special proteinogenic amino acids beyond the canonical 20 (Sec, Pyl).
+/// Opted into games individually — the Peptidovka defaults leave them out.
+pub const SPECIAL_AMINO_ACIDS_SLUG: &str = "specialni-aminokyseliny";
 
 pub const AMINO_ACIDS_TOPIC_SLUG: &str = "aminokyseliny";
 pub const NUCLEIC_ACIDS_TOPIC_SLUG: &str = "nukleove-kyseliny";
@@ -81,6 +84,41 @@ const SACCHARIDES_CATEGORY: SeedCategory = SeedCategory {
     topic_slug: SACCHARIDES_TOPIC_SLUG,
 };
 
+const SPECIAL_AMINO_ACIDS_CATEGORY: SeedCategory = SeedCategory {
+    slug: SPECIAL_AMINO_ACIDS_SLUG,
+    name: "Speciální aminokyseliny",
+    description: "21. a 22. proteinogenní aminokyselina — selenocystein a pyrrolysin.",
+    topic_slug: AMINO_ACIDS_TOPIC_SLUG,
+};
+
+/// Selenocysteine and pyrrolysine with the same trait vocabulary as the
+/// canonical twenty: single letters (U / O), codes, family, charge, polarity
+/// axis, and facts. SMILES are the neutral isomeric L forms (PubChem).
+#[rustfmt::skip]
+const SPECIAL_AMINO_ACIDS: &[SeedMolecule] = &[
+    SeedMolecule {
+        slug: "sec", name: "Selenocystein", smiles: "N[C@@H](C[SeH])C(=O)O",
+        projection: None,
+        traits: &[("oneLetter", "U"), ("abbreviation", "Sec"), ("sideChain", "polar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"),
+                  ("facts", "21. aminokyselina; vkládá se recodingem UGA kodonu pomocí sekundární SECIS struktury.\nSelen stojí v active centrech (glutathion peroxidáza, thioredoxin reduktáza).")],
+    },
+    SeedMolecule {
+        slug: "pyl", name: "Pyrrolysin", smiles: "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O",
+        projection: None,
+        traits: &[("oneLetter", "O"), ("abbreviation", "Pyl"), ("sideChain", "basic"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
+                  ("facts", "22. aminokyselina; vkládá se recodingem UAG kodonu u metanogenů.\nPostranní řetězec nese metylpyrrolinkarbonylamid na ε-dusíku lysinu.")],
+    },
+];
+
+/// Canonical slugs of the 20 proteinogenic amino acids, in seed order. Used
+/// as the default Peptidovka slug set (migration v56).
+pub const AMINO_ACID_SLUGS: &[&str] = &[
+    "ala", "arg", "asn", "asp", "cys", "gln", "glu", "gly", "his", "ile", "leu", "lys", "met",
+    "phe", "pro", "ser", "thr", "trp", "tyr", "val",
+];
+
 /// The 20 proteinogenic L-amino acids. SMILES are the PubChem canonical
 /// isomeric forms in the neutral (non-zwitterionic) state; glycine is the
 /// only achiral one (no `@`). Traits: `oneLetter` (quiz letter),
@@ -91,121 +129,141 @@ const AMINO_ACIDS: &[SeedMolecule] = &[
     SeedMolecule {
         slug: "ala", name: "Alanin", smiles: "C[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "A"), ("abbreviation", "Ala"), ("sideChain", "nonpolar"), ("charge", "neutral"),
+        traits: &[("oneLetter", "A"), ("abbreviation", "Ala"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"),
                   ("facts", "Nejmenší chirální aminokyselina.")],
     },
     SeedMolecule {
         slug: "arg", name: "Arginin", smiles: "C(C[C@@H](C(=O)O)N)CN=C(N)N",
         projection: None,
-        traits: &[("oneLetter", "R"), ("abbreviation", "Arg"), ("sideChain", "basic"), ("charge", "positive"),
+        traits: &[("oneLetter", "R"), ("abbreviation", "Arg"), ("sideChain", "basic"),
+                  ("polarity", "hydrophilic"), ("charge", "positive"),
                   ("facts", "Guanidiniová skupina je v těle prakticky stále kladně nabitá.\nNejvyšší pKa postranního řetězce (≈ 12,5).")],
     },
     SeedMolecule {
         slug: "asn", name: "Asparagin", smiles: "C([C@@H](C(=O)O)N)C(=O)N",
         projection: None,
-        traits: &[("oneLetter", "N"), ("abbreviation", "Asn"), ("sideChain", "polar"), ("charge", "neutral"),
+        traits: &[("oneLetter", "N"), ("abbreviation", "Asn"), ("sideChain", "polar"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
                   ("facts", "Amid kyseliny asparagové.")],
     },
     SeedMolecule {
         slug: "asp", name: "Kyselina asparagová", smiles: "C([C@@H](C(=O)O)N)C(=O)O",
         projection: None,
-        traits: &[("oneLetter", "D"), ("abbreviation", "Asp"), ("sideChain", "acidic"), ("charge", "negative"),
+        traits: &[("oneLetter", "D"), ("abbreviation", "Asp"), ("sideChain", "acidic"),
+                  ("polarity", "hydrophilic"), ("charge", "negative"),
                   ("facts", "Při fyziologickém pH nese záporný náboj (aspartát).")],
     },
     SeedMolecule {
         slug: "cys", name: "Cystein", smiles: "C([C@@H](C(=O)O)N)S",
         projection: None,
-        traits: &[("oneLetter", "C"), ("abbreviation", "Cys"), ("sideChain", "polar"), ("charge", "neutral"), ("sulfur", "true"),
+        traits: &[("oneLetter", "C"), ("abbreviation", "Cys"), ("sideChain", "polar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("sulfur", "true"),
                   ("facts", "Sulfhydrylové skupiny (–SH) dvou cysteinů tvoří disulfidový můstek (–S–S–).\nJako jediná chirální AMK má konfiguraci R — kvůli prioritě síry.")],
     },
     SeedMolecule {
         slug: "gln", name: "Glutamin", smiles: "C(CC(=O)N)[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "Q"), ("abbreviation", "Gln"), ("sideChain", "polar"), ("charge", "neutral"),
+        traits: &[("oneLetter", "Q"), ("abbreviation", "Gln"), ("sideChain", "polar"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
                   ("facts", "Amid kyseliny glutamové; hlavní transportní forma dusíku v krvi.")],
     },
     SeedMolecule {
         slug: "glu", name: "Kyselina glutamová", smiles: "C(CC(=O)O)[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "E"), ("abbreviation", "Glu"), ("sideChain", "acidic"), ("charge", "negative"),
+        traits: &[("oneLetter", "E"), ("abbreviation", "Glu"), ("sideChain", "acidic"),
+                  ("polarity", "hydrophilic"), ("charge", "negative"),
                   ("facts", "Při fyziologickém pH nese záporný náboj (glutamát).\nDůležitý excitační neurotransmiter.")],
     },
     SeedMolecule {
         slug: "gly", name: "Glycin", smiles: "NCC(=O)O",
         projection: None,
-        traits: &[("oneLetter", "G"), ("abbreviation", "Gly"), ("sideChain", "nonpolar"), ("charge", "neutral"),
+        traits: &[("oneLetter", "G"), ("abbreviation", "Gly"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"),
                   ("facts", "Jediná achirální proteinogenní aminokyselina — postranní řetězec je pouze H.")],
     },
     SeedMolecule {
         slug: "his", name: "Histidin", smiles: "C1=C(NC=N1)C[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "H"), ("abbreviation", "His"), ("sideChain", "basic"), ("charge", "neutral"),
+        traits: &[("oneLetter", "H"), ("abbreviation", "His"), ("sideChain", "basic"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
                   ("facts", "Imidazol má pKa ≈ 6,0 — při fyziologickém pH je částečně nabitý.\nProto je častý v aktivních centrech enzymů.")],
     },
     SeedMolecule {
         slug: "ile", name: "Isoleucin", smiles: "CC[C@H](C)[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "I"), ("abbreviation", "Ile"), ("sideChain", "nonpolar"), ("charge", "neutral"), ("essential", "true"),
+        traits: &[("oneLetter", "I"), ("abbreviation", "Ile"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("essential", "true"),
                   ("facts", "Rozvětvený řetězec (BCAA); má dvě chirální centra.")],
     },
     SeedMolecule {
         slug: "leu", name: "Leucin", smiles: "CC(C)C[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "L"), ("abbreviation", "Leu"), ("sideChain", "nonpolar"), ("charge", "neutral"), ("essential", "true"),
+        traits: &[("oneLetter", "L"), ("abbreviation", "Leu"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("essential", "true"),
                   ("facts", "Rozvětvený řetězec (BCAA); častý v leucinových ziprech.")],
     },
     SeedMolecule {
         slug: "lys", name: "Lysin", smiles: "C(CCN)C[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "K"), ("abbreviation", "Lys"), ("sideChain", "basic"), ("charge", "positive"), ("essential", "true"),
+        traits: &[("oneLetter", "K"), ("abbreviation", "Lys"), ("sideChain", "basic"),
+                  ("polarity", "hydrophilic"), ("charge", "positive"), ("essential", "true"),
                   ("facts", "Dlouhý řetězec zakončený primárním aminem — při fyziologickém pH kladně nabitý.")],
     },
     SeedMolecule {
         slug: "met", name: "Methionin", smiles: "CSCC[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "M"), ("abbreviation", "Met"), ("sideChain", "nonpolar"), ("charge", "neutral"), ("essential", "true"), ("sulfur", "true"),
+        traits: &[("oneLetter", "M"), ("abbreviation", "Met"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("essential", "true"), ("sulfur", "true"),
                   ("facts", "Startovací aminokyselina translace (kodon AUG).\nObsahuje síru (thioether).")],
     },
     SeedMolecule {
         slug: "phe", name: "Fenylalanin", smiles: "C1=CC=C(C=C1)C[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "F"), ("abbreviation", "Phe"), ("sideChain", "aromatic"), ("charge", "neutral"), ("essential", "true"),
+        traits: &[("oneLetter", "F"), ("abbreviation", "Phe"), ("sideChain", "aromatic"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("essential", "true"),
                   ("facts", "Benzolový kruh; vysoce hydrofobní.")],
     },
     SeedMolecule {
         slug: "pro", name: "Prolin", smiles: "C1C[C@H](NC1)C(=O)O",
         projection: None,
-        traits: &[("oneLetter", "P"), ("abbreviation", "Pro"), ("sideChain", "nonpolar"), ("charge", "neutral"),
+        traits: &[("oneLetter", "P"), ("abbreviation", "Pro"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"),
                   ("facts", "Iminokyselina — dusík je součástí pyrrolidinového kruhu.\nZalamuje α-helixy (helix-breaker).")],
     },
     SeedMolecule {
         slug: "ser", name: "Serin", smiles: "C([C@@H](C(=O)O)N)O",
         projection: None,
-        traits: &[("oneLetter", "S"), ("abbreviation", "Ser"), ("sideChain", "polar"), ("charge", "neutral"),
+        traits: &[("oneLetter", "S"), ("abbreviation", "Ser"), ("sideChain", "polar"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
                   ("facts", "Hydroxyskupina je častým místem fosforylace.")],
     },
     SeedMolecule {
         slug: "thr", name: "Threonin", smiles: "C[C@H]([C@@H](C(=O)O)N)O",
         projection: None,
-        traits: &[("oneLetter", "T"), ("abbreviation", "Thr"), ("sideChain", "polar"), ("charge", "neutral"), ("essential", "true"),
+        traits: &[("oneLetter", "T"), ("abbreviation", "Thr"), ("sideChain", "polar"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"), ("essential", "true"),
                   ("facts", "Hydroxyskupina je častým místem fosforylace; má dvě chirální centra.")],
     },
     SeedMolecule {
         slug: "trp", name: "Tryptofan", smiles: "C1=CC=C2C(=C1)C(=CN2)C[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "W"), ("abbreviation", "Trp"), ("sideChain", "aromatic"), ("charge", "neutral"), ("essential", "true"),
+        traits: &[("oneLetter", "W"), ("abbreviation", "Trp"), ("sideChain", "aromatic"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("essential", "true"),
                   ("facts", "Největší standardní aminokyselina; indolový kruh.\nPředstupeň serotoninu a melatoninu.")],
     },
     SeedMolecule {
         slug: "tyr", name: "Tyrosin", smiles: "C1=CC(=CC=C1C[C@@H](C(=O)O)N)O",
         projection: None,
-        traits: &[("oneLetter", "Y"), ("abbreviation", "Tyr"), ("sideChain", "aromatic"), ("charge", "neutral"),
+        traits: &[("oneLetter", "Y"), ("abbreviation", "Tyr"), ("sideChain", "aromatic"),
+                  ("polarity", "hydrophilic"), ("charge", "neutral"),
                   ("facts", "Fenolová –OH; místo fosforylace.\nPředstupeň dopaminu a adrenalínu.")],
     },
     SeedMolecule {
         slug: "val", name: "Valin", smiles: "CC(C)[C@@H](C(=O)O)N",
         projection: None,
-        traits: &[("oneLetter", "V"), ("abbreviation", "Val"), ("sideChain", "nonpolar"), ("charge", "neutral"), ("essential", "true"),
+        traits: &[("oneLetter", "V"), ("abbreviation", "Val"), ("sideChain", "nonpolar"),
+                  ("polarity", "hydrophobic"), ("charge", "neutral"), ("essential", "true"),
                   ("facts", "Rozvětvený řetězec (BCAA).")],
     },
 ];
@@ -353,6 +411,7 @@ pub fn seed_builtins_if_empty(conn: &Connection) -> Result<(), rusqlite::Error> 
         (&AMINO_ACIDS_CATEGORY, AMINO_ACIDS),
         (&NITROGEN_BASES_CATEGORY, NITROGEN_BASES),
         (&SACCHARIDES_CATEGORY, SACCHARIDES),
+        (&SPECIAL_AMINO_ACIDS_CATEGORY, SPECIAL_AMINO_ACIDS),
     ]
     .into_iter()
     .enumerate()

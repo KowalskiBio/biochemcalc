@@ -30,6 +30,7 @@ import {
   centerIsolatedMetal,
   type FrontRingBond,
   type OhLabelHint,
+  raiseAtomLetters,
 } from "@/lib/molecules/render/svg-post"
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -44,6 +45,12 @@ export interface RenderStructureOptions {
   /** Mirror across the vertical axis (also ignored for recognised skeletons' orientation). */
   mirror?: boolean
   theme: "light" | "dark"
+  /**
+   * Erase the atom palette entirely: every bond and label draws in the
+   * theme's single neutral ink. Used by Mistr quiz prompts, where colour
+   * coding would give away part of the answer. Default false.
+   */
+  monochrome?: boolean
   /** Bond length used by the Haworth layout and coordination insets. */
   bondLength?: number
   /**
@@ -57,11 +64,17 @@ export interface RenderStructureOptions {
    * depiction (and suppressing the Haworth overlay). Default true.
    */
   haworth?: boolean
+  /**
+   * False disables open-chain Fischer auto-recognition (runs only when no
+   * sugar ring is recognized — the two projections stay mutually exclusive).
+   * Default true.
+   */
+  fischer?: boolean
 }
 
 export interface RenderedStructure {
   svg: SVGSVGElement
-  recognized: "haworth" | false
+  recognized: "haworth" | "fischer" | false
 }
 
 /**
@@ -79,6 +92,7 @@ export function renderStructure(
     bondLength: options.bondLength,
     natural,
     haworth: options.haworth,
+    fischer: options.fischer,
   })
   if (prepared === null) {
     return null
@@ -108,7 +122,7 @@ export function renderStructure(
           natural,
         }) ?? prepared.svg
     }
-  } else if (orientationDeg !== 0 || mirror) {
+  } else if (recognized === false && (orientationDeg !== 0 || mirror)) {
     const transformed = transformedMolblock(molblock, orientationDeg, mirror)
     if (transformed !== null) {
       molblock = transformed.molblock
@@ -128,7 +142,7 @@ export function renderStructure(
     return null
   }
 
-  applyTheme(host, options.theme)
+  applyTheme(host, options.theme, options.monochrome === true)
 
   if (recognized === "haworth" && prepared.overlay !== undefined) {
     // A mirrored sugar flips left/right, so the HO hints flip with it.
@@ -137,7 +151,7 @@ export function renderStructure(
     )
     applyOhLabelHints(host, hints)
     const frontBonds: FrontRingBond[] = prepared.overlay.frontRingBonds
-    applyBoldFrontEdges(host, frontBonds)
+    applyBoldFrontEdges(host, frontBonds, prepared.overlay.cyclePositions)
   }
 
   if (ISOLATED_METAL_PATTERN.test(smiles)) {
@@ -151,6 +165,11 @@ export function renderStructure(
       }
     }
   }
+
+  // Letters are the read layer: after every decoration pass so nothing —
+  // front-edge bands, seals, coordination lines, or a crossing bond — can
+  // paint over a heteroatom glyph.
+  raiseAtomLetters(host)
 
   return { svg: host, recognized }
 }

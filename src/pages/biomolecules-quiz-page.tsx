@@ -6,6 +6,7 @@ import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/repor
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { RichText } from "@/components/ui/rich-text"
 import {
   Select,
   SelectContent,
@@ -36,6 +37,7 @@ import {
   type QuizQuestionType,
   quizSessionReducer,
 } from "@/lib/molecules/quiz"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 import {
   useBiomoleculeDataLoaded,
@@ -118,6 +120,13 @@ function BackLink({ href, label }: { href: string; label: string }) {
   )
 }
 
+/** What the free-text answer should look like, per question type. */
+function answerInstruction(type: QuizQuestionType): string {
+  return type === "nameToLetter" || type === "structureToLetter"
+    ? quizStrings.instructionLetter
+    : quizStrings.instructionName
+}
+
 function MicroLabel({ children }: { children: string }) {
   return (
     <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -137,6 +146,7 @@ function PromptView({ prompt }: { prompt: QuizPrompt }) {
         smiles={prompt.smiles}
         projection={prompt.projection}
         haworth={prompt.haworth ?? true}
+        fischer={prompt.fischer ?? true}
         orientationDeg={prompt.orientationDeg}
         size={220}
         grow
@@ -155,7 +165,11 @@ function PromptView({ prompt }: { prompt: QuizPrompt }) {
       </p>
     )
   }
-  return <p className="text-2xl font-semibold tracking-tight">{prompt.text}</p>
+  return (
+    <p className="text-2xl font-semibold tracking-tight">
+      <RichText text={prompt.text} />
+    </p>
+  )
 }
 
 interface OptionButtonProps {
@@ -208,6 +222,7 @@ function OptionButton({
             smiles={option.smiles ?? ""}
             projection={option.projection}
             haworth={option.haworth ?? true}
+            fischer={option.fischer ?? true}
             orientationDeg={option.orientationDeg}
             size={150}
           />
@@ -218,7 +233,7 @@ function OptionButton({
             option.display === "letter" ? "font-mono tabular text-lg" : "text-sm font-medium",
           )}
         >
-          {optionLabel(molecules, option)}
+          <RichText text={optionLabel(molecules, option)} />
         </span>
       )}
     </button>
@@ -365,7 +380,7 @@ function SetupScreen({
           <SelectContent>
             {categoryOptions.map((option) => (
               <SelectItem key={option.slug} value={option.slug}>
-                {option.name}
+                <RichText text={option.name} />
               </SelectItem>
             ))}
           </SelectContent>
@@ -546,12 +561,17 @@ function QuestionScreen({
       </div>
 
       {mode === "hard" ? (
-        <OpenAnswerForm
-          key={index}
-          answered={answered}
-          verdict={answered ? (wasCorrect ? "correct" : "incorrect") : null}
-          onSubmit={onOpenSubmit}
-        />
+        <div className="space-y-2">
+          <p className="text-center text-sm text-muted-foreground">
+            {answerInstruction(question.type)}
+          </p>
+          <OpenAnswerForm
+            key={index}
+            answered={answered}
+            verdict={answered ? (wasCorrect ? "correct" : "incorrect") : null}
+            onSubmit={onOpenSubmit}
+          />
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {question.options.map((option, i) => (
@@ -580,7 +600,7 @@ function QuestionScreen({
               <p className="text-sm text-muted-foreground">
                 {quizStrings.correctAnswerWas.replace(
                   "{answer}",
-                  correctAnswerText(question, molecules),
+                  stripRichMarkup(correctAnswerText(question, molecules)),
                 )}
               </p>
             )}
@@ -754,13 +774,17 @@ export function BiomoleculesQuizPage() {
   if (loaded && !topicReady) {
     setTopicReady(true)
     setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
+    // A plain entry defaults to "všechny kategorie v tématu"; deep links keep
+    // their linked category, matching the selection a same-topic switch
+    // would leave behind. (Modes/topic changes already re-arm this way.)
+    setSlug(paramSlug === null ? ALL_CATEGORIES_VALUE : paramSlug)
   }
 
   // Navigating between deep links (or off one) re-arms the setup
   // (adjust-state-during-render, so the stale selection never commits).
   if (prevParamSlug !== paramSlug) {
     setPrevParamSlug(paramSlug)
-    setSlug(paramSlug)
+    setSlug(paramSlug === null ? ALL_CATEGORIES_VALUE : paramSlug)
     setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
     setChosenTypes(null)
     setActiveQuiz(null)
@@ -956,9 +980,7 @@ export function BiomoleculesQuizPage() {
   // picker URL, so the hub is used instead — navigating to the current route
   // would look like a dead link.
   const runBackHref =
-    activeQuiz.slug === ALL_CATEGORIES_VALUE
-      ? "/biomolekuly"
-      : `/biomolekuly/${activeQuiz.slug}`
+    activeQuiz.slug === ALL_CATEGORIES_VALUE ? "/biomolekuly" : `/biomolekuly/${activeQuiz.slug}`
   const runBackLabel =
     activeQuiz.slug === ALL_CATEGORIES_VALUE
       ? cs.biomolekuly.backToCategories

@@ -18,6 +18,7 @@ export interface Mol {
   get_svg_with_highlights(details: string): string
   get_json(): string
   get_molblock(): string
+  get_smiles(): string
   get_num_atoms(): number
   get_num_bonds(): number
   delete(): void
@@ -48,6 +49,10 @@ export interface MolRingSnapshot {
 }
 
 export interface MolGraphSnapshot {
+  /**
+   * Atom (and bond) ordering mirrors the source SMILES/molblock parse order,
+   * so index-based anchors computed while assembling the input stay valid.
+   */
   atoms: MolAtomSnapshot[]
   bonds: MolBondSnapshot[]
   rings: MolRingSnapshot[]
@@ -69,8 +74,8 @@ export interface NaturalDrawOptions {
   wedgeBonds?: boolean
 }
 
-/** Matches the old drawer's constant 24 px bond length. */
-const DEFAULT_NATURAL_BOND_LENGTH = 24
+/** Uniform depiction scale: one canvas pixel scale for every biomolecule bond. */
+const DEFAULT_NATURAL_BOND_LENGTH = 28
 /** Matches the old `SvgDrawer` padding. */
 const DEFAULT_NATURAL_PADDING = 12
 

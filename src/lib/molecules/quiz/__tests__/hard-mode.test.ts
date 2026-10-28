@@ -149,7 +149,143 @@ describe("hard-mode openAnswer content", () => {
       }
     }
   })
+})
 
+describe("polarity axis vs side-chain family", () => {
+  function characteristicOf(predicate: string): CharacteristicDef {
+    const def = AA_CHARACTERISTICS.find((d) => d.predicate === predicate)
+    if (def === undefined) {
+      throw new Error(`missing characteristic ${predicate}`)
+    }
+    return def
+  }
+
+  function quizMoleculeOf(slug: string) {
+    const molecule = AMINO_ACIDS.molecules.find((candidate) => candidate.id === slug)
+    if (molecule === undefined) {
+      throw new Error(`unknown quiz molecule: ${slug}`)
+    }
+    return molecule
+  }
+
+  it("treats phenylalanine as nonpolar AND aromatic (the reported bug)", () => {
+    const phe = quizMoleculeOf("phe")
+    expect(characteristicOf("nonpolar").matches(phe), "Phe is hydrophobic").toBe(true)
+    expect(characteristicOf("aromatic").matches(phe), "Phe is also aromatic").toBe(true)
+  })
+
+  it("keeps tyrosine out of nonpolar — the phenol –OH is hydrophilic", () => {
+    const tyr = quizMoleculeOf("tyr")
+    expect(characteristicOf("nonpolar").matches(tyr)).toBe(false)
+    expect(characteristicOf("polar").matches(tyr)).toBe(true)
+    expect(characteristicOf("aromatic").matches(tyr)).toBe(true)
+  })
+
+  it("counts tryptophan among nonpolar aromatics", () => {
+    const trp = quizMoleculeOf("trp")
+    expect(characteristicOf("nonpolar").matches(trp)).toBe(true)
+    expect(characteristicOf("aromatic").matches(trp)).toBe(true)
+  })
+
+  it("does not let histidine masquerade as nonpolar", () => {
+    const his = quizMoleculeOf("his")
+    expect(characteristicOf("nonpolar").matches(his)).toBe(false)
+    expect(characteristicOf("basic").matches(his)).toBe(true)
+  })
+
+  it("keeps classic nonpolar rows nonpolar and charged rows out", () => {
+    for (const slug of ["gly", "ala", "val", "leu", "ile", "met", "pro", "cys"]) {
+      expect(characteristicOf("nonpolar").matches(quizMoleculeOf(slug)), slug).toBe(true)
+    }
+    for (const slug of ["asp", "glu", "lys", "arg"]) {
+      expect(characteristicOf("nonpolar").matches(quizMoleculeOf(slug)), slug).toBe(false)
+    }
+  })
+})
+
+describe("special amino acids (specialni-aminokyseliny)", () => {
+  function specialRow(
+    slug: string,
+    name: string,
+    smiles: string,
+    traits: Record<string, string>,
+  ): import("@/lib/biomolecules-api").Biomolecule {
+    return {
+      id: `specialni-aminokyseliny-${slug}`,
+      categorySlug: "specialni-aminokyseliny",
+      slug,
+      name,
+      smiles,
+      traits,
+      position: 0,
+    }
+  }
+
+  const SPECIAL = [
+    specialRow("sec", "Selenocystein", "N[C@@H](C[SeH])C(=O)O", {
+      oneLetter: "U",
+      abbreviation: "Sec",
+      sideChain: "polar",
+      polarity: "hydrophobic",
+      charge: "neutral",
+    }),
+    specialRow("pyl", "Pyrrolysin", "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O", {
+      oneLetter: "O",
+      abbreviation: "Pyl",
+      sideChain: "basic",
+      polarity: "hydrophilic",
+      charge: "neutral",
+    }),
+  ]
+
+  function specialConfig() {
+    const config = getCategoryQuizConfig("specialni-aminokyseliny", SPECIAL)
+    if (config === undefined) throw new Error("special category must quiz")
+    return config
+  }
+
+  it("quizzes with letters and one form: sec is U, pyl is O", () => {
+    const config = specialConfig()
+    expect(config.molecules.find((m) => m.id === "sec")?.oneLetter).toBe("U")
+    expect(config.molecules.find((m) => m.id === "pyl")?.oneLetter).toBe("O")
+  })
+
+  it("matches the polarity axis like the canonical acids (sec nonpolar, pyl polar)", () => {
+    const config = specialConfig()
+    const characteristics = requireCharacteristics(config)
+    const sec = config.molecules.find((m) => m.id === "sec")
+    const pyl = config.molecules.find((m) => m.id === "pyl")
+    if (sec === undefined || pyl === undefined) throw new Error("sec/pyl")
+    expect(
+      characteristics.find((def) => def.predicate === "nonpolar")?.matches(sec),
+      "selenocysteine mirrors cysteine on the polarity axis",
+    ).toBe(true)
+    expect(
+      characteristics.find((def) => def.predicate === "nonpolar")?.matches(pyl),
+      "pyrrolysine is hydrophilic like lysine",
+    ).toBe(false)
+  })
+
+  it("generates real quizzes for a two-molecule category (1 target + 1 distractor)", () => {
+    const config = specialConfig()
+    const types = generatableQuizTypes(config.molecules, config.characteristics)
+    expect(types).toContain("nameToLetter")
+    expect(types).toContain("characteristic")
+
+    const questions = generateQuizSession(config.molecules, {
+      types,
+      questionCount: 10,
+      seed: 7,
+      characteristics: config.characteristics,
+    })
+    expect(questions, "a two-acid category generates a full session").toHaveLength(10)
+    for (const question of questions) {
+      expect(
+        question.options.length,
+        `${question.type}: target + ≥1 distractor`,
+      ).toBeGreaterThanOrEqual(2)
+    }
+  })
 })
 
 describe("aliases propagation", () => {

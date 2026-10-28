@@ -23,6 +23,12 @@ export interface StructureViewProps {
    * force skeletal rendering and ignore Haworth projections; default true.
    */
   haworth?: boolean
+  /**
+   * Gate open-chain sugar auto-recognition into a Fischer projection (runs
+   * only when no sugar ring is recognized — mutually exclusive by structure).
+   * Default true.
+   */
+  fischer?: boolean
   /** Square canvas side length in px. */
   size?: number
   /**
@@ -57,6 +63,13 @@ export interface StructureViewProps {
   mirror?: boolean
   /** Drawing theme. Defaults to the app theme from `useUiStore`. */
   theme?: "light" | "dark"
+  /**
+   * Draw the whole structure — bonds and atom labels alike — in the theme's
+   * single neutral ink, hiding the colour coding. Mistr quiz prompts use
+   * this so the palette can't give away part of the answer. On the
+   * projection branch it swaps the label ink instead. Default false.
+   */
+  monochrome?: boolean
   className?: string
   /** Accessible name; falls back to the SMILES string when omitted. */
   title?: string
@@ -121,6 +134,7 @@ function ProjectionStructureView({
   className,
   title,
   smiles,
+  monochrome,
   onValidityChange,
 }: StructureViewProps & { projection: ProjectionSpec }) {
   useEffect(() => {
@@ -133,6 +147,7 @@ function ProjectionStructureView({
       spec={projection}
       orientationDeg={orientationDeg}
       mirror={mirror}
+      monochrome={monochrome}
       className={className}
       ariaLabel={title ?? smiles}
     />
@@ -163,12 +178,14 @@ function SmilesStructureView({
   orientationDeg = 0,
   mirror = false,
   theme,
+  monochrome = false,
   className,
   title,
   onValidityChange,
   grow = false,
   maxWidth,
   haworth = true,
+  fischer = true,
 }: StructureViewProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -222,9 +239,11 @@ function SmilesStructureView({
       orientationDeg,
       mirror,
       theme: resolvedTheme,
-      bondLength: 24,
+      monochrome,
+      bondLength: 28,
       natural: grow,
       haworth,
+      fischer,
     })
     if (rendered === null) {
       setHasError(true)
@@ -243,7 +262,7 @@ function SmilesStructureView({
     }
     // onValidityChange is intentionally not a dependency: its identity can
     // change per parent render, and only real inputs should trigger a redraw.
-  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, grow, maxWidth, haworth])
+  }, [ready, smiles, size, orientationDeg, mirror, resolvedTheme, monochrome, grow, maxWidth, haworth, fischer])
 
   return (
     <div

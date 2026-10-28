@@ -13,8 +13,9 @@ use crate::db::repos::biomolecule_repo::{
     BiomoleculeData, CategoryField, MoleculeRelocation, TopicField,
 };
 use crate::db::repos::{
-    BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
-    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo,
+    BiomoleculeHistoryRepo, BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
+    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaLeaderboardRow,
+    PeptidovkaRepo, PeptidovkaSettingsRecord,
 };
 use crate::db::DbError;
 use rusqlite::Connection;
@@ -48,6 +49,17 @@ const MAX_STREAK_SECONDS: f64 = 86_400.0;
 /// kept as text here since the Biomolekuly streak lives entirely in the
 /// frontend and is only validated on record.
 const STREAK_KINDS: [&str; 2] = ["apprentice", "master"];
+
+/// The two Peptidovka modes. Text-only server-side (the game is graded in the
+/// frontend), validated on every settings write and run record.
+const PEPTIDOVKA_MODES: [&str; 2] = ["ucen", "mistr"];
+
+/// Settings bounds mirroring the teacher-facing form: a run picks at least
+/// two and at most all 20 amino acids, at 3-120 seconds per answer.
+const PEPTIDOVKA_MIN_LEN_FLOOR: i64 = 2;
+const PEPTIDOVKA_MAX_LEN_CEILING: i64 = 20;
+const PEPTIDOVKA_SECONDS_PER_AA_MIN: i64 = 3;
+const PEPTIDOVKA_SECONDS_PER_AA_MAX: i64 = 120;
 
 /// The validated trait vocabulary (values stored as text in
 /// `biomolecule_traits`; adding a kind needs no schema change).
@@ -473,6 +485,7 @@ pub fn do_create_category(
         position,
         teacher_id,
     )?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "category", "create", name, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -509,7 +522,38 @@ pub fn do_update_category_meta(
         CategoryField::Description => validate_description(payload.value.as_deref())?,
         CategoryField::Topic => validate_optional_topic(conn, payload.value.as_deref())?,
     };
+    // Diff capture before the write: the history entry shows what changed,
+    // in "field: old → new" form, one logical row per save.
+    let old_name = BiomoleculeRepo::category_name(conn, category_id)?;
+    let old_topic_slug = if payload.field == CategoryField::Topic {
+        BiomoleculeRepo::category_topic_slug(conn, category_id)?.flatten()
+    } else {
+        None
+    };
     BiomoleculeRepo::update_category_field(conn, category_id, payload.field, value.as_deref(), teacher_id)?;
+    let new_name = BiomoleculeRepo::category_name(conn, category_id)?
+        .unwrap_or_else(|| category_id.to_string());
+    let detail = match payload.field {
+        CategoryField::Name => format!(
+            "name: {} → {}",
+            old_name.as_deref().unwrap_or("—"),
+            new_name.as_str()
+        ),
+        CategoryField::Description => "description changed".to_string(),
+        CategoryField::Topic => format!(
+            "topic: {} → {}",
+            old_topic_slug.as_deref().unwrap_or("—"),
+            value.as_deref().unwrap_or("—")
+        ),
+    };
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "category",
+        "update",
+        new_name.as_str(),
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -530,6 +574,7 @@ pub struct DeleteCategoryPayload {
 /// quiz results keep their slug — the leaderboard rows survive the deletion.
 pub fn do_delete_category(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: DeleteCategoryPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim();
@@ -548,7 +593,10 @@ pub fn do_delete_category(
             )));
         }
     }
+    let label = BiomoleculeRepo::category_name(conn, category_id)?
+        .unwrap_or_else(|| category_id.to_string());
     BiomoleculeRepo::delete_category(conn, category_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "category", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -578,6 +626,7 @@ pub fn do_create_topic(
         position,
         teacher_id,
     )?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "topic", "create", name, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -613,12 +662,31 @@ pub fn do_update_topic_meta(
         }
         TopicField::Description => validate_description(payload.value.as_deref())?,
     };
+    let old_name = BiomoleculeRepo::topic_name(conn, topic_id)?;
     BiomoleculeRepo::update_topic_field(
         conn,
         topic_id,
         payload.field,
         value.as_deref(),
         teacher_id,
+    )?;
+    let new_name = BiomoleculeRepo::topic_name(conn, topic_id)?
+        .unwrap_or_else(|| topic_id.to_string());
+    let detail = match payload.field {
+        TopicField::Name => format!(
+            "name: {} → {}",
+            old_name.as_deref().unwrap_or("—"),
+            new_name.as_str()
+        ),
+        TopicField::Description => "description changed".to_string(),
+    };
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "topic",
+        "update",
+        new_name.as_str(),
+        Some(detail.as_str()),
     )?;
     BiomoleculeRepo::list_data(conn)
 }
@@ -635,6 +703,7 @@ pub struct DeleteTopicPayload {
 /// (`ON DELETE SET NULL`).
 pub fn do_delete_topic(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: DeleteTopicPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let topic_id = payload.topic_id.trim();
@@ -646,7 +715,9 @@ pub fn do_delete_topic(
         BiomoleculeRepo::topic_version(conn, topic_id)?,
         payload.expected_updated_at.as_deref(),
     )?;
+    let label = BiomoleculeRepo::topic_name(conn, topic_id)?.unwrap_or_else(|| topic_id.to_string());
     BiomoleculeRepo::delete_topic(conn, topic_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "topic", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -667,6 +738,10 @@ pub struct CreateMoleculePayload {
     /// Draw a Haworth projection (true) or a plain skeletal one (false).
     #[serde(default = "default_true")]
     pub haworth: bool,
+    /// Draw a Fischer projection for open-chain sugars (true) or a plain
+    /// skeletal one (false). Older clients omit it; detection stays on.
+    #[serde(default = "default_true")]
+    pub fischer: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
 }
@@ -731,10 +806,12 @@ pub fn do_create_molecule(
         &smiles,
         projection.as_deref(),
         payload.haworth,
+        payload.fischer,
         position,
         &traits,
         teacher_id,
     )?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "molecule", "create", &name, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -750,6 +827,10 @@ pub struct UpdateMoleculePayload {
     /// Draw a Haworth projection (true) or a plain skeletal one (false).
     #[serde(default = "default_true")]
     pub haworth: bool,
+    /// Draw a Fischer projection for open-chain sugars (true) or a plain
+    /// skeletal one (false). Older clients omit it; detection stays on.
+    #[serde(default = "default_true")]
+    pub fischer: bool,
     #[serde(default)]
     pub traits: HashMap<String, String>,
     /// Moves the molecule to this category (to its end); omitted keeps it.
@@ -767,6 +848,7 @@ pub fn do_update_molecule(
     let id = payload.molecule_id;
     let current_category = BiomoleculeRepo::molecule_category(conn, &id)?
         .ok_or_else(|| DbError::NotFound(format!("Molecule {id} not found")))?;
+    let old_name = BiomoleculeRepo::molecule_name(conn, &id)?;
     check_version(
         &format!("Molecule {id}"),
         BiomoleculeRepo::molecule_version(conn, &id)?,
@@ -823,9 +905,29 @@ pub fn do_update_molecule(
         &smiles,
         projection.as_deref(),
         payload.haworth,
+        payload.fischer,
         &traits,
         relocation.as_ref(),
         teacher_id,
+    )?;
+    let detail = if old_name.as_deref() != Some(name.as_str()) {
+        format!(
+            "name: {} → {}",
+            old_name.as_deref().unwrap_or("—"),
+            name.as_str()
+        )
+    } else if relocation.is_some() {
+        "moved to another category".to_string()
+    } else {
+        "traits/structure updated".to_string()
+    };
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "molecule",
+        "update",
+        &name,
+        Some(detail.as_str()),
     )?;
     BiomoleculeRepo::list_data(conn)
 }
@@ -840,6 +942,7 @@ pub struct DeleteMoleculePayload {
 
 pub fn do_delete_molecule(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: DeleteMoleculePayload,
 ) -> Result<BiomoleculeData, DbError> {
     check_version(
@@ -847,7 +950,10 @@ pub fn do_delete_molecule(
         BiomoleculeRepo::molecule_version(conn, &payload.molecule_id)?,
         payload.expected_updated_at.as_deref(),
     )?;
+    let label = BiomoleculeRepo::molecule_name(conn, &payload.molecule_id)?
+        .unwrap_or_else(|| payload.molecule_id.to_string());
     BiomoleculeRepo::delete_molecule(conn, &payload.molecule_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "molecule", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -863,6 +969,7 @@ pub struct ReorderTopicsPayload {
 
 pub fn do_reorder_topics(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: ReorderTopicsPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let current = BiomoleculeRepo::topic_order(conn)?;
@@ -873,6 +980,15 @@ pub fn do_reorder_topics(
         payload.expected_order.as_deref(),
     )?;
     BiomoleculeRepo::set_topic_order(conn, &payload.slugs)?;
+    let detail = format!("{}", payload.slugs.len());
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "topics",
+        "reorder",
+        "topics",
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -887,6 +1003,7 @@ pub struct ReorderCategoriesPayload {
 
 pub fn do_reorder_categories(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: ReorderCategoriesPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let current = BiomoleculeRepo::category_order(conn)?;
@@ -897,6 +1014,15 @@ pub fn do_reorder_categories(
         payload.expected_order.as_deref(),
     )?;
     BiomoleculeRepo::set_category_order(conn, &payload.slugs)?;
+    let detail = format!("{}", payload.slugs.len());
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "categories",
+        "reorder",
+        "categories",
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -912,6 +1038,7 @@ pub struct ReorderMoleculesPayload {
 
 pub fn do_reorder_molecules(
     conn: &Connection,
+    teacher_id: &Uuid,
     payload: ReorderMoleculesPayload,
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim();
@@ -928,6 +1055,15 @@ pub fn do_reorder_molecules(
         payload.expected_order.as_deref(),
     )?;
     BiomoleculeRepo::set_molecule_order(conn, &payload.ids)?;
+    let detail = format!("{}", payload.ids.len());
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "molecules",
+        "reorder",
+        category_id,
+        Some(detail.as_str()),
+    )?;
     BiomoleculeRepo::list_data(conn)
 }
 
@@ -1103,6 +1239,46 @@ pub fn do_streak_leaderboard(
         .collect())
 }
 
+/// Leaderboard payload for one Peptidovka mode (`"ucen"` / `"mistr"`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaLeaderboardPayload {
+    pub mode: String,
+}
+
+/// History listing payload: optional page window (defaults 50/0 at the route).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeHistoryPayload {
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+/// Each user's single best finished Peptidovka run of the mode — same table
+/// shape as the streak board, so the page reuses it verbatim.
+pub fn do_peptidovka_leaderboard(
+    conn: &Connection,
+    payload: &PeptidovkaLeaderboardPayload,
+) -> Result<Vec<BiomoleculeStreakLeaderboardEntry>, DbError> {
+    let mode = validate_peptidovka_mode(&payload.mode)?;
+    Ok(PeptidovkaRepo::best_per_user(conn, mode)?
+        .into_iter()
+        .map(
+            |row: PeptidovkaLeaderboardRow| BiomoleculeStreakLeaderboardEntry {
+                user_id: row.user_id.to_string(),
+                username: row.username,
+                best_correct_count: row.best_correct_count,
+                total_seconds: row.total_seconds,
+                // The run always ends on one failed/expired round: that round
+                // counts as answered, exactly like the streak's +1.
+                seconds_per_answer: row.total_seconds / (row.best_correct_count + 1) as f64,
+            },
+        )
+        .collect())
+}
+
 /// Trim and validate a streak-run variant, returning the canonical `&str`.
 fn validate_streak_kind(kind: &str) -> Result<&str, DbError> {
     let kind = kind.trim();
@@ -1111,6 +1287,170 @@ fn validate_streak_kind(kind: &str) -> Result<&str, DbError> {
     } else {
         Err(DbError::Validation(format!("Invalid streak kind: {kind}")))
     }
+}
+
+/// One mode's Peptidovka settings as the API returns them.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaSettings {
+    pub mode: String,
+    pub min_len: i64,
+    pub max_len: i64,
+    pub seconds_per_aa: i64,
+    pub slugs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePeptidovkaSettingsPayload {
+    /// `"ucen"` or `"mistr"`.
+    pub mode: String,
+    pub min_len: i64,
+    pub max_len: i64,
+    pub seconds_per_aa: i64,
+    pub slugs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordPeptidovkaRunPayload {
+    /// `"ucen"` or `"mistr"`.
+    pub mode: String,
+    /// Peptides solved correctly in the run — the leaderboard's best-series
+    /// metric (in-game points are decoration only and are never recorded).
+    pub correct_count: i64,
+    pub total_seconds: f64,
+}
+
+fn validate_peptidovka_mode(mode: &str) -> Result<&str, DbError> {
+    let mode = mode.trim();
+    if PEPTIDOVKA_MODES.contains(&mode) {
+        Ok(mode)
+    } else {
+        Err(DbError::Validation(format!(
+            "Invalid peptidovka mode: {mode}"
+        )))
+    }
+}
+
+/// Both modes' settings, Učeň first.
+pub fn do_list_peptidovka_settings(conn: &Connection) -> Result<Vec<PeptidovkaSettings>, DbError> {
+    PeptidovkaRepo::list_settings(conn)?
+        .into_iter()
+        .map(|row: PeptidovkaSettingsRecord| {
+            Ok(PeptidovkaSettings {
+                mode: row.mode,
+                min_len: row.min_len,
+                max_len: row.max_len,
+                seconds_per_aa: row.seconds_per_aa,
+                slugs: serde_json::from_str(&row.slugs_json)?,
+            })
+        })
+        .collect()
+}
+
+/// Replace one mode's settings. The teacher form owns the whole row, so this
+/// is a wholesale upsert; all bounds are checked here rather than in the
+/// schema so the error messages reach the client.
+pub fn do_update_peptidovka_settings(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    payload: UpdatePeptidovkaSettingsPayload,
+) -> Result<(), DbError> {
+    let mode = validate_peptidovka_mode(&payload.mode)?;
+    if payload.min_len < PEPTIDOVKA_MIN_LEN_FLOOR {
+        return Err(DbError::Validation(format!(
+            "Minimum length must be at least {PEPTIDOVKA_MIN_LEN_FLOOR}"
+        )));
+    }
+    if payload.max_len < payload.min_len {
+        return Err(DbError::Validation(
+            "Maximum length must not be shorter than the minimum".into(),
+        ));
+    }
+    if payload.max_len > PEPTIDOVKA_MAX_LEN_CEILING {
+        return Err(DbError::Validation(format!(
+            "Maximum length must be at most {PEPTIDOVKA_MAX_LEN_CEILING}"
+        )));
+    }
+    if !(PEPTIDOVKA_SECONDS_PER_AA_MIN..=PEPTIDOVKA_SECONDS_PER_AA_MAX)
+        .contains(&payload.seconds_per_aa)
+    {
+        return Err(DbError::Validation(format!(
+            "Seconds per amino acid must be {PEPTIDOVKA_SECONDS_PER_AA_MIN}-{PEPTIDOVKA_SECONDS_PER_AA_MAX}"
+        )));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let slugs: Vec<String> = payload
+        .slugs
+        .iter()
+        .map(|slug| slug.trim().to_string())
+        .filter(|slug| !slug.is_empty())
+        .filter(|slug| seen.insert(slug.clone()))
+        .collect();
+    if slugs.is_empty() || slugs.iter().any(|slug| !is_valid_slug(slug)) {
+        return Err(DbError::Validation(
+            "Slugs must be a non-empty list of amino-acid slugs".into(),
+        ));
+    }
+    // Format alone lets a typo'd slug silently break the game pool later;
+    // demand every slug names a real molecule (any category — a teacher's
+    // custom amino-acid entry is just as valid as a seeded one).
+    for slug in &slugs {
+        if !BiomoleculeRepo::molecule_slug_exists(conn, slug)? {
+            return Err(DbError::Validation(format!(
+                "Unknown molecule slug: {slug}"
+            )));
+        }
+    }
+    let slugs_json = serde_json::to_string(&slugs)?;
+    PeptidovkaRepo::upsert_settings(
+        conn,
+        mode,
+        payload.min_len,
+        payload.max_len,
+        payload.seconds_per_aa,
+        &slugs_json,
+    )?;
+    let detail = format!(
+        "{}–{} · {} s/aa · {} slugs",
+        payload.min_len,
+        payload.max_len,
+        payload.seconds_per_aa,
+        slugs.len()
+    );
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "peptidovka",
+        "settings",
+        mode,
+        Some(detail.as_str()),
+    )
+}
+
+/// Store the aggregate of one finished Peptidovka run for the acting user.
+/// Graded client-side, so this only sanity-checks the numbers, exactly like
+/// `do_record_streak_result`.
+pub fn do_record_peptidovka_run(
+    conn: &Connection,
+    user_id: &Uuid,
+    payload: RecordPeptidovkaRunPayload,
+) -> Result<(), DbError> {
+    let mode = validate_peptidovka_mode(&payload.mode)?;
+    if !(0..=MAX_STREAK_CORRECT).contains(&payload.correct_count) {
+        return Err(DbError::Validation("Invalid peptidovka run score".into()));
+    }
+    if !(payload.total_seconds > 0.0 && payload.total_seconds <= MAX_STREAK_SECONDS) {
+        return Err(DbError::Validation("Invalid peptidovka run time".into()));
+    }
+    PeptidovkaRepo::insert_run(
+        conn,
+        user_id,
+        mode,
+        payload.correct_count,
+        payload.total_seconds,
+    )
 }
 
 #[cfg(test)]
@@ -1161,6 +1501,7 @@ mod tests {
             smiles: smiles.into(),
             projection: None,
             haworth: true,
+            fischer: true,
             traits: HashMap::new(),
         }
     }
@@ -1169,7 +1510,7 @@ mod tests {
     fn seeded_categories_are_listed() {
         let conn = setup_conn();
         let data = do_list_data(&conn).expect("list");
-        assert_eq!(data.categories.len(), 3);
+        assert_eq!(data.categories.len(), 4);
         assert_eq!(data.categories[0].slug, "aminokyseliny");
         assert!(data.categories[0].built_in);
         assert_eq!(data.categories[0].molecule_count, 20);
@@ -1178,6 +1519,9 @@ mod tests {
         assert_eq!(data.categories[2].slug, "sacharidy");
         assert!(data.categories[2].built_in);
         assert_eq!(data.categories[2].molecule_count, 9);
+        assert_eq!(data.categories[3].slug, "specialni-aminokyseliny");
+        assert!(data.categories[3].built_in);
+        assert_eq!(data.categories[3].molecule_count, 2);
         let ala = data
             .molecules
             .iter()
@@ -1527,6 +1871,7 @@ mod tests {
 
         let data = do_delete_topic(
             &conn,
+            &teacher,
             DeleteTopicPayload {
                 topic_id: "vitaminy".into(),
                 expected_updated_at: None,
@@ -1537,6 +1882,7 @@ mod tests {
         assert!(matches!(
             do_delete_topic(
                 &conn,
+                &teacher,
                 DeleteTopicPayload {
                     topic_id: "vitaminy".into(),
                     expected_updated_at: None,
@@ -1631,8 +1977,10 @@ mod tests {
     #[test]
     fn deleting_a_topic_keeps_its_categories_and_ungroups_them() {
         let conn = setup_conn();
+        let teacher = insert_student(&conn, "ucitel");
         let data = do_delete_topic(
             &conn,
+            &teacher,
             DeleteTopicPayload {
                 topic_id: "nukleove-kyseliny".into(),
                 expected_updated_at: None,
@@ -1721,6 +2069,7 @@ mod tests {
         // Deleting a category cascades to its molecules and traits.
         let data = do_delete_category(
             &conn,
+            &teacher,
             DeleteCategoryPayload {
                 category_id: "dusikate-baze".into(),
                 expected_updated_at: None,
@@ -1733,6 +2082,7 @@ mod tests {
         assert!(matches!(
             do_delete_category(
                 &conn,
+                &teacher,
                 DeleteCategoryPayload {
                     category_id: "dusikate-baze".into(),
                     expected_updated_at: None,
@@ -1761,6 +2111,7 @@ mod tests {
                 smiles: "C[C@@H](C(=O)O)N".into(),
                 projection: None,
                 haworth: true,
+                fischer: true,
                 traits,
             },
         )
@@ -1798,6 +2149,7 @@ mod tests {
                     smiles: "CCO".into(),
                     projection: None,
                     haworth: true,
+                    fischer: true,
                     traits: letter,
                 },
             ),
@@ -1816,6 +2168,7 @@ mod tests {
                 smiles: "CCO".into(),
                 projection: None,
                 haworth: false,
+                fischer: true,
                 traits: new_traits,
                 category_id: None,
                 expected_updated_at: None,
@@ -1831,6 +2184,7 @@ mod tests {
 
         let data = do_delete_molecule(
             &conn,
+            &teacher,
             DeleteMoleculePayload {
                 molecule_id: created.id,
                 expected_updated_at: None,
@@ -1841,11 +2195,11 @@ mod tests {
     }
 
     #[test]
-    fn molecule_haworth_flag_round_trips() {
+    fn molecule_projection_flags_round_trip() {
         let conn = setup_conn();
         let teacher = teacher_id(&conn);
 
-        // Explicit false disables saccharide recognition for this molecule.
+        // Explicit false disables each projection detection for this molecule.
         let data = do_create_molecule(
             &conn,
             &teacher,
@@ -1855,6 +2209,7 @@ mod tests {
                 smiles: "OCC1OC(O)C(O)C(O)C1O".into(),
                 projection: None,
                 haworth: false,
+                fischer: false,
                 traits: HashMap::new(),
             },
         )
@@ -1865,6 +2220,7 @@ mod tests {
             .find(|m| m.name == "Testoza")
             .expect("created");
         assert!(!created.haworth, "explicit false survives create");
+        assert!(!created.fischer, "explicit false survives create");
 
         let data = do_update_molecule(
             &conn,
@@ -1875,6 +2231,7 @@ mod tests {
                 smiles: "OCC1OC(O)C(O)C(O)C1O".into(),
                 projection: None,
                 haworth: true,
+                fischer: true,
                 traits: HashMap::new(),
                 category_id: None,
                 expected_updated_at: None,
@@ -1883,6 +2240,7 @@ mod tests {
         .expect("update");
         let updated = data.molecules.iter().find(|m| m.id == created.id).unwrap();
         assert!(updated.haworth, "explicit true survives update");
+        assert!(updated.fischer, "explicit true survives update");
     }
 
     #[test]
@@ -1901,6 +2259,7 @@ mod tests {
                     smiles: "CCO".into(),
                     projection: None,
                     haworth: true,
+                    fischer: true,
                     traits,
                 },
             )
@@ -2128,6 +2487,7 @@ mod tests {
             smiles: m.smiles.clone(),
             projection: m.projection.clone(),
             haworth: m.haworth,
+            fischer: m.fischer,
             traits: m.traits.clone(),
             category_id: None,
             expected_updated_at: None,
@@ -2257,6 +2617,7 @@ mod tests {
         assert!(matches!(stale, Err(DbError::Conflict(_))));
         let stale_delete = do_delete_molecule(
             &conn,
+            &teacher,
             DeleteMoleculePayload {
                 molecule_id: alanine.id,
                 expected_updated_at: Some(alanine.updated_at.clone()),
@@ -2283,6 +2644,7 @@ mod tests {
         .expect("topic rename");
         let stale_topic = do_delete_topic(
             &conn,
+            &teacher,
             DeleteTopicPayload {
                 topic_id: topic.slug.clone(),
                 expected_updated_at: Some(topic.updated_at.clone()),
@@ -2336,6 +2698,7 @@ mod tests {
         let delete = |expected_molecules| {
             do_delete_category(
                 &conn,
+                &teacher,
                 DeleteCategoryPayload {
                     category_id: "dusikate-baze".into(),
                     expected_updated_at: None,
@@ -2352,12 +2715,14 @@ mod tests {
     #[test]
     fn reorder_takes_every_item_and_checks_the_order_it_was_based_on() {
         let conn = setup_conn();
+        let teacher = teacher_id(&conn);
         let current = BiomoleculeRepo::topic_order(&conn).expect("order");
         let mut reversed = current.clone();
         reversed.reverse();
 
         let data = do_reorder_topics(
             &conn,
+            &teacher,
             ReorderTopicsPayload {
                 slugs: reversed.clone(),
                 expected_order: Some(current.clone()),
@@ -2369,6 +2734,7 @@ mod tests {
 
         let stale = do_reorder_topics(
             &conn,
+            &teacher,
             ReorderTopicsPayload {
                 slugs: current.clone(),
                 expected_order: Some(current.clone()),
@@ -2377,6 +2743,7 @@ mod tests {
         assert!(matches!(stale, Err(DbError::Conflict(_))));
         let partial = do_reorder_topics(
             &conn,
+            &teacher,
             ReorderTopicsPayload {
                 slugs: current[..1].to_vec(),
                 expected_order: None,
@@ -2389,6 +2756,7 @@ mod tests {
         rotated.rotate_left(1);
         let data = do_reorder_molecules(
             &conn,
+            &teacher,
             ReorderMoleculesPayload {
                 category_id: "dusikate-baze".into(),
                 ids: rotated.clone(),
@@ -2409,6 +2777,7 @@ mod tests {
         swapped.swap(0, 1);
         let data = do_reorder_categories(
             &conn,
+            &teacher,
             ReorderCategoriesPayload {
                 slugs: swapped.clone(),
                 expected_order: Some(categories),
@@ -2417,5 +2786,447 @@ mod tests {
         .expect("reorder categories");
         let order: Vec<String> = data.categories.iter().map(|c| c.slug.clone()).collect();
         assert_eq!(order, swapped);
+    }
+
+    #[test]
+    fn peptidovka_defaults_are_seeded_for_both_modes() {
+        let conn = setup_conn();
+        let settings = do_list_peptidovka_settings(&conn).expect("settings");
+
+        assert_eq!(settings.len(), 2);
+        assert_eq!(settings[0].mode, "ucen");
+        assert_eq!(
+            (
+                settings[0].min_len,
+                settings[0].max_len,
+                settings[0].seconds_per_aa
+            ),
+            (3, 6, 15)
+        );
+        assert_eq!(settings[1].mode, "mistr");
+        assert_eq!(
+            (
+                settings[1].min_len,
+                settings[1].max_len,
+                settings[1].seconds_per_aa
+            ),
+            (3, 10, 15)
+        );
+
+        // Both modes default to the canonical 20 amino-acid slugs.
+        assert_eq!(settings[0].slugs.len(), 20);
+        assert!(settings[0].slugs.iter().any(|slug| slug == "ala"));
+        assert_eq!(settings[0].slugs, settings[1].slugs);
+    }
+
+    #[test]
+    fn peptidovka_settings_update_round_trips_each_mode() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        for (mode, max_len) in [("ucen", 5_i64), ("mistr", 9_i64)] {
+            do_update_peptidovka_settings(
+                &conn,
+                &teacher,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: mode.into(),
+                    min_len: 4,
+                    max_len,
+                    seconds_per_aa: 30,
+                    slugs: vec!["ala".into(), "gly".into()],
+                },
+            )
+            .expect("update");
+        }
+
+        let settings = do_list_peptidovka_settings(&conn).expect("settings");
+        let ucen = settings
+            .iter()
+            .find(|s| s.mode == "ucen")
+            .expect("ucen settings");
+        assert_eq!((ucen.min_len, ucen.max_len), (4, 5));
+        assert_eq!(ucen.seconds_per_aa, 30);
+        assert_eq!(ucen.slugs, vec!["ala".to_string(), "gly".to_string()]);
+
+        let mistr = settings
+            .iter()
+            .find(|s| s.mode == "mistr")
+            .expect("mistr settings");
+        assert_eq!((mistr.min_len, mistr.max_len), (4, 9));
+        assert_eq!(mistr.seconds_per_aa, 30);
+        assert_eq!(mistr.slugs, vec!["ala".to_string(), "gly".to_string()]);
+    }
+
+    #[test]
+    fn peptidovka_settings_validation_rejects_bad_input() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let update =
+            |mode: &str, min_len: i64, max_len: i64, seconds_per_aa: i64, slugs: Vec<String>| {
+                do_update_peptidovka_settings(
+                    &conn,
+                    &teacher,
+                    UpdatePeptidovkaSettingsPayload {
+                        mode: mode.into(),
+                        min_len,
+                        max_len,
+                        seconds_per_aa,
+                        slugs,
+                    },
+                )
+            };
+        let aa = || vec!["ala".to_string()];
+
+        assert!(matches!(
+            update("beginner", 3, 6, 15, aa()),
+            Err(DbError::Validation(_))
+        ));
+        assert!(
+            matches!(update("ucen", 1, 6, 15, aa()), Err(DbError::Validation(_))),
+            "minimum length below 2 must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 8, 4, 15, aa()), Err(DbError::Validation(_))),
+            "inverted lengths must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 3, 21, 15, aa()), Err(DbError::Validation(_))),
+            "maximum length above 20 must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 3, 6, 2, aa()), Err(DbError::Validation(_))),
+            "seconds per amino acid below 3 must be rejected"
+        );
+        assert!(
+            matches!(update("ucen", 3, 6, 121, aa()), Err(DbError::Validation(_))),
+            "seconds per amino acid above 120 must be rejected"
+        );
+        assert!(
+            matches!(
+                update("ucen", 3, 6, 15, vec![]),
+                Err(DbError::Validation(_))
+            ),
+            "an empty slug set must be rejected"
+        );
+    }
+
+    #[test]
+    fn peptidovka_run_is_recorded() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "peptak");
+
+        do_record_peptidovka_run(
+            &conn,
+            &student,
+            RecordPeptidovkaRunPayload {
+                mode: "ucen".into(),
+                correct_count: 7,
+                total_seconds: 12.5,
+            },
+        )
+        .expect("record run");
+
+        let (mode, correct_count, total_seconds): (String, i64, f64) = conn
+            .query_row(
+                "SELECT mode, correct_count, total_seconds FROM peptidovka_runs",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("stored run");
+        assert_eq!(mode, "ucen");
+        assert_eq!(correct_count, 7);
+        assert_eq!(total_seconds, 12.5);
+    }
+
+    #[test]
+    fn peptidovka_rejects_stale_mode_strings() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "peptak");
+
+        for stale in ["apprentice", "master", ""] {
+            assert!(
+                matches!(
+                    do_record_peptidovka_run(
+                        &conn,
+                        &student,
+                        RecordPeptidovkaRunPayload {
+                            mode: stale.into(),
+                            correct_count: 3,
+                            total_seconds: 10.0,
+                        },
+                    ),
+                    Err(DbError::Validation(_))
+                ),
+                "run mode {stale:?} must be rejected"
+            );
+            assert!(
+                matches!(
+                    do_update_peptidovka_settings(
+                        &conn,
+                        &student,
+                        UpdatePeptidovkaSettingsPayload {
+                            mode: stale.into(),
+                            min_len: 3,
+                            max_len: 6,
+                            seconds_per_aa: 15,
+                            slugs: vec!["ala".into()],
+                        },
+                    ),
+                    Err(DbError::Validation(_))
+                ),
+                "settings mode {stale:?} must be rejected"
+            );
+        }
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM peptidovka_runs", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("count"),
+            0,
+            "rejected runs write nothing"
+        );
+    }
+
+    #[test]
+    fn peptidovka_record_run_validates_bounds() {
+        let conn = setup_conn();
+        let student = insert_student(&conn, "peptak");
+        let record = |mode: &str, correct: i64, seconds: f64| {
+            do_record_peptidovka_run(
+                &conn,
+                &student,
+                RecordPeptidovkaRunPayload {
+                    mode: mode.into(),
+                    correct_count: correct,
+                    total_seconds: seconds,
+                },
+            )
+        };
+
+        assert!(matches!(
+            record("ucen", -1, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("ucen", MAX_STREAK_CORRECT + 1, 30.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(record("ucen", 5, 0.0), Err(DbError::Validation(_))));
+        assert!(matches!(
+            record("ucen", 5, -4.0),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            record("ucen", 5, MAX_STREAK_SECONDS + 1.0),
+            Err(DbError::Validation(_))
+        ));
+        record("mistr", 5, 30.0).expect("valid mistr run");
+        record("ucen", 0, 4.0).expect("zero-answer run is valid");
+    }
+
+    #[test]
+    fn peptidovka_leaderboard_reports_each_users_best_run_per_mode() {
+        let conn = setup_conn();
+        let petri = insert_student(&conn, "petri");
+        let other = insert_student(&conn, "jinek");
+
+        for (count, seconds) in [(2_i64, 30.0_f64), (5, 40.0), (3, 10.0)] {
+            do_record_peptidovka_run(
+                &conn,
+                &petri,
+                RecordPeptidovkaRunPayload {
+                    mode: "ucen".into(),
+                    correct_count: count,
+                    total_seconds: seconds,
+                },
+            )
+            .expect("petri run");
+        }
+        do_record_peptidovka_run(
+            &conn,
+            &other,
+            RecordPeptidovkaRunPayload {
+                mode: "ucen".into(),
+                correct_count: 4,
+                total_seconds: 20.0,
+            },
+        )
+        .expect("other run");
+        do_record_peptidovka_run(
+            &conn,
+            &petri,
+            RecordPeptidovkaRunPayload {
+                mode: "mistr".into(),
+                correct_count: 1,
+                total_seconds: 8.0,
+            },
+        )
+        .expect("mistr run separate");
+
+        let board = do_peptidovka_leaderboard(
+            &conn,
+            &PeptidovkaLeaderboardPayload {
+                mode: "ucen".into(),
+            },
+        )
+        .expect("leaderboard");
+        assert_eq!(board.len(), 2);
+        // Petri's best is 5 correct from the second run; the slower 3-correct
+        // run and the worse 2-correct run are folded away, and the other
+        // student sits behind despite more correct than petri's worst runs.
+        assert_eq!(board[0].best_correct_count, 5);
+        assert_eq!(board[0].username, "petri");
+        assert_eq!(board[0].seconds_per_answer, 40.0 / 6.0);
+        assert_eq!(board[1].best_correct_count, 4);
+
+        let mistr = do_peptidovka_leaderboard(
+            &conn,
+            &PeptidovkaLeaderboardPayload {
+                mode: "mistr".into(),
+            },
+        )
+        .expect("mistr leaderboard");
+        assert_eq!(mistr.len(), 1, "modes stay isolated on the board");
+
+        assert!(matches!(
+            do_peptidovka_leaderboard(
+                &conn,
+                &PeptidovkaLeaderboardPayload {
+                    mode: "apprentice".into(),
+                },
+            ),
+            Err(DbError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn peptidovka_update_rejects_unknown_slugs_and_dedupes() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        // Well-formed but nonexistent slug — format checks alone used to let
+        // this through, silently breaking the game's pool. Distinct numerics,
+        // so the "stored untouched" assertion below actually discriminates
+        // (seed defaults are 3/6/15).
+        assert!(matches!(
+            do_update_peptidovka_settings(
+                &conn,
+                &teacher,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: "ucen".into(),
+                    min_len: 4,
+                    max_len: 8,
+                    seconds_per_aa: 20,
+                    slugs: vec!["ala".into(), "gly".into(), "nesmysl-123".into()],
+                },
+            ),
+            Err(DbError::Validation(_))
+        ));
+        let stored_seconds: i64 = conn
+            .query_row(
+                "SELECT seconds_per_aa FROM peptidovka_settings WHERE mode = 'ucen'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("untouched settings");
+        assert_eq!(stored_seconds, 15, "a rejected update writes nothing");
+
+        // Duplicates collapse once, in first-seen order.
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 3,
+                max_len: 6,
+                seconds_per_aa: 15,
+                slugs: vec!["ala".into(), "ala".into(), "gly".into()],
+            },
+        )
+        .expect("deduped update");
+        let slugs_json: String = conn
+            .query_row(
+                "SELECT slugs FROM peptidovka_settings WHERE mode = 'ucen'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("slugs");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&slugs_json).expect("slugs json"),
+            vec!["ala".to_string(), "gly".to_string()]
+        );
+    }
+
+    #[test]
+    fn teacher_mutations_leave_a_history_trail() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        let data = do_create_molecule(
+            &conn,
+            &teacher,
+            molecule_payload("aminokyseliny", "Histidinium", "C1=C(N)C=NC=1"),
+        )
+        .expect("create molecule");
+        let mapro_name = data
+            .molecules
+            .iter()
+            .find(|m| m.name == "Histidinium")
+            .expect("molecule")
+            .id;
+        do_delete_molecule(
+            &conn,
+            &teacher,
+            DeleteMoleculePayload {
+                molecule_id: mapro_name,
+                expected_updated_at: None,
+            },
+        )
+        .expect("delete molecule");
+        do_reorder_categories(
+            &conn,
+            &teacher,
+            ReorderCategoriesPayload {
+                slugs: BiomoleculeRepo::category_order(&conn).expect("categories"),
+                expected_order: None,
+            },
+        )
+        .expect("reorder");
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 3,
+                max_len: 6,
+                seconds_per_aa: 15,
+                slugs: vec!["ala".into(), "gly".into()],
+            },
+        )
+        .expect("settings");
+
+        let entries = BiomoleculeHistoryRepo::list_all(&conn, 50, 0).expect("history");
+        let actions: Vec<(&str, &str, &str)> = entries
+            .iter()
+            .map(|e| (e.kind.as_str(), e.action.as_str(), e.label.as_str()))
+            .collect();
+        assert_eq!(entries.len(), 4);
+        assert!(actions.contains(&("molecule", "create", "Histidinium")));
+        assert!(actions.contains(&("molecule", "delete", "Histidinium")));
+        assert!(actions.contains(&("categories", "reorder", "categories")));
+        assert!(actions.contains(&("peptidovka", "settings", "ucen")));
+        assert!(
+            entries.iter().all(|e| !e.username.is_empty()),
+            "every entry carries its actor"
+        );
+        // Newest first.
+        assert_eq!(entries[0].action, "settings");
+        assert_eq!(entries[1].action, "reorder");
+
+        BiomoleculeHistoryRepo::clear_all(&conn).expect("clear");
+        assert!(
+            BiomoleculeHistoryRepo::list_all(&conn, 50, 0)
+                .expect("after clear")
+                .is_empty()
+        );
     }
 }

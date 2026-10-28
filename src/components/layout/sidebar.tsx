@@ -3,6 +3,7 @@ import {
   Atom,
   BookOpen,
   Database,
+  Dna,
   Eye,
   FileText,
   Flag,
@@ -115,9 +116,19 @@ const biomoleculesNavItems: NavItem[] = [
     label: cs.navigation.projections,
   },
   {
+    path: "/biomolekuly/peptidovka",
+    icon: <Dna className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.peptidovka,
+  },
+  {
     path: "/biomolekuly/hlaseni",
     icon: <Flag className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.hlaseni,
+  },
+  {
+    path: "/biomolekuly/historie",
+    icon: <History className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.history,
   },
   {
     path: "/leaderboard",
@@ -131,8 +142,13 @@ const navBySection: Record<Section, { main: NavItem[]; bottom: NavItem[] }> = {
   biomolecules: { main: biomoleculesNavItems, bottom: [settingsNavItem] },
 }
 
-/** Biomolekuly owns its category pages; Projekce and Hlášení have sibling nav items. */
-const BIOMOLECULES_SIBLING_PATHS = ["/biomolekuly/projekce", "/biomolekuly/hlaseni"]
+/** Biomolekuly owns its category pages; Projekce, Peptidovka, Hlášení and Historie have sibling nav items. */
+const BIOMOLECULES_SIBLING_PATHS = [
+  "/biomolekuly/projekce",
+  "/biomolekuly/peptidovka",
+  "/biomolekuly/hlaseni",
+  "/biomolekuly/historie",
+]
 
 function isNavItemActive(itemPath: string, pathname: string): boolean {
   if (itemPath === "/biomolekuly") {

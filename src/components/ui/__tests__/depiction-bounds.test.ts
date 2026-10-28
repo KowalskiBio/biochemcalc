@@ -28,9 +28,10 @@ describe("computeDepictionBounds", () => {
     )
   })
 
-  it("keeps today's fill scale for small molecules (k == s0)", () => {
-    // Square viewBox smaller than the square: the molecule is upscaled
-    // exactly as the fixed square upscale it today (s0 = 220/100 = 2.2).
+  it("never renders small molecules tinier than their grid preview (fill floor)", () => {
+    // The current policy's floor: structures under the square get the
+    // grid-parity scale first — never below it — so detail never punishes
+    // small molecules relative to the grid.
     const square = computeDepictionBounds({
       vbw: 100,
       vbh: 100,
@@ -41,8 +42,8 @@ describe("computeDepictionBounds", () => {
     })
     expectBounds(square, 220, 220)
 
-    // Non-square viewBox: the long side fills the square, the short side
-    // follows at the same k — the same letterboxed look as fixed mode.
+    // Slight undersized span: floor lifts it to at least fill, no cap
+    // pressure at this size.
     const wide = computeDepictionBounds({
       vbw: 100,
       vbh: 50,

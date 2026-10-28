@@ -1,5 +1,6 @@
-import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 import { createSeededRandom, pick, randomInt, shuffle } from "@/lib/molecules/quiz/random"
+import type { ProjectionSpec } from "@/lib/molecules/render/projection"
+import { stripRichMarkup } from "@/lib/rich-text"
 
 export type QuizQuestionType =
   | "nameToLetter"
@@ -53,9 +54,9 @@ export interface QuizMolecule {
   projection?: ProjectionSpec
   /** False forces skeletal rendering, ignoring Haworth projections. Default true. */
   haworth?: boolean
+  /** False forces skeletal rendering instead of a Fischer projection for open-chain sugars. Default true. */
+  fischer?: boolean
 }
-
-/** A named predicate plus its molecule test, supplied by the category adapter. */
 export interface CharacteristicDef {
   predicate: CharacteristicPredicate
   matches: (molecule: QuizMolecule) => boolean
@@ -75,6 +76,8 @@ export interface QuizOption {
   projection?: ProjectionSpec
   /** False forces skeletal rendering, ignoring Haworth projections. Default true. */
   haworth?: boolean
+  /** False forces skeletal rendering instead of a Fischer projection for open-chain sugars. Default true. */
+  fischer?: boolean
 }
 
 export interface QuizPrompt {
@@ -91,6 +94,8 @@ export interface QuizPrompt {
   projection?: ProjectionSpec
   /** False forces skeletal rendering, ignoring Haworth projections. Default true. */
   haworth?: boolean
+  /** False forces skeletal rendering instead of a Fischer projection for open-chain sugars. Default true. */
+  fischer?: boolean
 }
 
 /**
@@ -229,7 +234,9 @@ function qualifyingPredicates(
 ): CharacteristicDef[] {
   return characteristics.filter((def) => {
     const matches = molecules.filter((molecule) => def.matches(molecule)).length
-    return matches >= 1 && molecules.length - matches >= 3
+    // One example on each side is enough: small categories (the special
+    // amino acids are two molecules by design) would otherwise quiz nothing.
+    return matches >= 1 && molecules.length - matches >= 1
   })
 }
 
@@ -243,8 +250,9 @@ function isGeneratable(
       characteristics !== undefined && qualifyingPredicates(molecules, characteristics).length > 0
     )
   }
-  // Needs the target plus three distinct distractors.
-  return molecules.length >= 4
+  // Needs at least one distinct distractor; the option builders slice
+  // whatever is left below that.
+  return molecules.length >= 2
 }
 
 function optionDisplayFor(type: QuizQuestionType): "name" | "letter" | "structure" {
@@ -278,6 +286,7 @@ function makeOption(
       orientationDeg: orientationForStructure(molecule, rng),
       projection: molecule.projection,
       haworth: molecule.haworth,
+      fischer: molecule.fischer,
     }
   }
   return { key: molecule.id, display, moleculeId: molecule.id, correct }
@@ -333,6 +342,7 @@ function buildPrompt(target: QuizMolecule, type: QuizQuestionType, rng: () => nu
         orientationDeg: orientationForStructure(target, rng),
         projection: target.projection,
         haworth: target.haworth,
+        fischer: target.fischer,
       }
     case "characteristic":
       // Built by buildCharacteristicQuestion, which knows the predicate.
@@ -411,21 +421,26 @@ function buildQuestion(
 
 /**
  * Normalize a free-text quiz answer for tolerant comparison: Unicode-decompose,
- * strip combining diacritics, lowercase, trim, and collapse inner whitespace.
- * So "Kyselina asparagová" and "  kyselina   asparagova " compare equal.
+ * strip combining diacritics, lowercase, trim, collapse inner whitespace, and
+ * strip rich-text script markup (`_{...}`/`^{...}`) — teacher-stored names may
+ * carry display braces, but students always type the plain form.
+ * So "Kyselina asparagová" and "  kyselina   asparagova " compare equal,
+ * and "FADH_{2}" accepts "FADH2".
  */
 export function normalizeQuizAnswer(input: string): string {
-  return input.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ")
+  return stripRichMarkup(input)
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
 }
 
 /**
  * The accepted free-text answer for a hard-mode question. Name answers accept
  * the molecule's name plus any aliases; letter answers accept the letter.
  */
-function buildOpenAnswer(
-  question: QuizQuestion,
-  target: QuizMolecule,
-): OpenAnswer {
+function buildOpenAnswer(question: QuizQuestion, target: QuizMolecule): OpenAnswer {
   switch (question.type) {
     case "nameToLetter":
     case "structureToLetter":
@@ -518,14 +533,7 @@ export function generateQuizSession(
   for (let i = 0; i < config.questionCount; i++) {
     const type = nextType()
     const target = nextTarget()
-    const question = buildQuestion(
-      molecules,
-      target,
-      type,
-      rng,
-      classKeyOf,
-      config.characteristics,
-    )
+    const question = buildQuestion(molecules, target, type, rng, classKeyOf, config.characteristics)
     if (mode === "hard") {
       question.openAnswer = buildOpenAnswer(question, target)
     }

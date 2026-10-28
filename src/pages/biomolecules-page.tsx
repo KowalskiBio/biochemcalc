@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowUpDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
 
 import { ReorderDialog } from "@/components/biomolecules/reorder-dialog"
@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ProjectionView } from "@/components/ui/projection-view"
+import { RichText } from "@/components/ui/rich-text"
 import {
   Select,
   SelectContent,
@@ -43,6 +44,7 @@ import {
   type QuizQuestionType,
 } from "@/lib/molecules/quiz"
 import { type ProjectionSpec, parseProjection } from "@/lib/molecules/render/projection"
+import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/stores/auth-store"
 import {
@@ -84,7 +86,11 @@ const NO_TOPIC_VALUE = "none"
 type CategoryKind = "aminoAcids" | "nitrogenBases" | "custom"
 
 function categoryKind(categoryId: string): CategoryKind {
-  if (categoryId === "aminokyseliny") return "aminoAcids"
+  // The special (Sec, Pyl) category shares its kind with amino acids: same
+  // traits vocabulary, same one-letter code-line, same polarity-hidden UI.
+  if (categoryId === "aminokyseliny" || categoryId === "specialni-aminokyseliny") {
+    return "aminoAcids"
+  }
   if (categoryId === "dusikate-baze") return "nitrogenBases"
   return "custom"
 }
@@ -165,6 +171,23 @@ export function BiomoleculesPage() {
   // Students skip empty topic sections; teachers see them so they can manage.
   const visibleSections = sections.filter(
     (section) => section.categories.length > 0 || (isTeacher && section.topic !== null),
+  )
+
+  // Sections for the category reorder dialog: the hub grouping minus empty
+  // topics. Moves stay inside a topic; the dialog concatenates on save, so
+  // ungrouped categories ("Ostatní") end up last, matching the hub.
+  const categoryReorderSections = useMemo(
+    () =>
+      sections
+        .filter((section) => section.categories.length > 0)
+        .map((section) => ({
+          title: section.topic ? topicNameOf(section.topic.slug) : cs.biomolekuly.noTopic,
+          items: section.categories.map((category) => ({
+            id: category.slug,
+            label: nameOf(category.slug),
+          })),
+        })),
+    [sections, topicNameOf, nameOf],
   )
 
   const handleDeleteTopic = async () => {
@@ -319,11 +342,7 @@ export function BiomoleculesPage() {
         open={reordering === "categories"}
         onOpenChange={(open) => !open && setReordering(null)}
         title={manage.reorderCategories}
-        items={categories.map((category) => ({
-          id: category.slug,
-          label: nameOf(category.slug),
-          hint: category.topicSlug ? topicNameOf(category.topicSlug) : cs.biomolekuly.noTopic,
-        }))}
+        sections={categoryReorderSections}
         onSave={reorderCategories}
       />
       <ConfirmDialog
@@ -662,8 +681,19 @@ function monoRow(label: string, value: string): DetailRow {
   return { label, value: <span className="font-mono tabular">{value}</span> }
 }
 
-function labelRow(label: string, value: string): DetailRow {
+function labelRow(label: string, value: ReactNode): DetailRow {
   return { label, value }
+}
+
+/** Comma-separated teacher names, each rendered through <RichText/>. */
+function richNamesValue(names: string[]): ReactNode {
+  return names.map((name, index) => (
+    // biome-ignore lint/suspicious/noArrayIndexKey: names are positional display fragments
+    <Fragment key={index}>
+      {index > 0 ? ", " : null}
+      <RichText text={name} />
+    </Fragment>
+  ))
 }
 
 function essentialRow(molecule: Biomolecule): DetailRow {
@@ -708,7 +738,9 @@ const aminoAcidBits: CategoryBits = {
   ),
   dialogDescription: (molecule) => (
     <>
-      <span className="font-mono tabular">{codeLine(molecule, true)}</span>
+      <span className="font-mono tabular">
+        <RichText text={codeLine(molecule, true)} />
+      </span>
       {traitOf(molecule, TRAIT.sideChain) && (
         <>
           {" — "}
@@ -748,8 +780,7 @@ const nitrogenBaseBits: CategoryBits = {
       const names = pairsWith
         .split(",")
         .map((slug) => molecules?.find((m) => m.slug === slug)?.name ?? slug)
-        .join(", ")
-      rows.push(labelRow(labels.detail.pairingLabel, names))
+      rows.push(labelRow(labels.detail.pairingLabel, richNamesValue(names)))
     }
     const inDna = traitOf(molecule, TRAIT.inDna) === "true"
     const inRna = traitOf(molecule, TRAIT.inRna) === "true"
@@ -838,8 +869,7 @@ const customBits: CategoryBits = {
       const names = pairsWith
         .split(",")
         .map((slug) => molecules?.find((m) => m.slug === slug)?.name ?? slug)
-        .join(", ")
-      rows.push(labelRow(labels.detail.pairingLabel, names))
+      rows.push(labelRow(labels.detail.pairingLabel, richNamesValue(names)))
     }
     return rows
   },
@@ -911,6 +941,7 @@ function MoleculeBrowser({
 
   const facts = selected ? moleculeFacts(selected) : []
   const selectedHaworthOk = selected?.haworth ?? true
+  const selectedFischerOk = selected?.fischer ?? true
 
   return (
     <>
@@ -934,14 +965,17 @@ function MoleculeBrowser({
                   smiles={molecule.smiles}
                   projection={haworthOk ? projections.get(molecule.id) : undefined}
                   haworth={haworthOk}
+                  fischer={molecule.fischer ?? true}
                   size={140}
-                  title={molecule.name}
+                  title={stripRichMarkup(molecule.name)}
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <div className="text-sm font-semibold tracking-tight">{molecule.name}</div>
+                <div className="text-sm font-semibold tracking-tight">
+                  <RichText text={molecule.name} />
+                </div>
                 <div className="font-mono tabular text-xs text-muted-foreground">
-                  {bits.cardCodeLine(molecule)}
+                  <RichText text={bits.cardCodeLine(molecule)} />
                 </div>
               </div>
               {bits.cardBadges && (
@@ -956,73 +990,90 @@ function MoleculeBrowser({
 
       {/* Detail dialog */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-full max-w-md max-h-[85vh] overflow-y-auto sm:w-auto sm:max-w-[min(48rem,100vw_-_2rem)]">
           {selected && (
             <>
               <DialogHeader>
-                <DialogTitle>{selected.name}</DialogTitle>
+                <DialogTitle>
+                  <RichText text={selected.name} />
+                </DialogTitle>
                 <DialogDescription>{bits.dialogDescription(selected)}</DialogDescription>
               </DialogHeader>
 
-              <div className="flex justify-center">
-                {/* The dialog is a single-molecule context: `grow` keeps big
-                    molecules (acetyl-CoA, peptides) at 1:1 bonds. The dialog's
-                    own width is the width cap, so the depiction can't burst it. */}
+              <div className="flex min-w-0 justify-center">
+                {/* Single-molecule context: `grow` keeps big molecules
+                    (acetyl-CoA, peptides) at 1:1 bonds. The dialog shrink-fits
+                    its content on sm+ screens, so its own width would feed
+                    back on the grown depiction — maxWidth caps it at the
+                    dialog's inner width at its widest (768 px − 2×24 px
+                    padding = 720 px). On screens narrower than the grown
+                    draw, the svg scales down with its wrapper instead of
+                    bursting the dialog. */}
                 <StructureView
                   smiles={selected.smiles}
                   projection={selectedHaworthOk ? projections.get(selected.id) : undefined}
                   haworth={selectedHaworthOk}
+                  fischer={selectedFischerOk}
                   size={260}
                   grow
-                  title={selected.name}
+                  maxWidth={720}
+                  title={stripRichMarkup(selected.name)}
+                  className="max-w-full !h-auto [&>svg]:h-auto [&>svg]:max-w-full"
                 />
               </div>
 
-              {/* Meta rows */}
-              <dl className="divide-y divide-border rounded-[4px] border">
-                {bits.detailRows(selected, molecules).map((row) => (
-                  <div key={row.label} className="flex items-center justify-between px-3 py-2">
-                    <dt className="text-sm text-muted-foreground">{row.label}</dt>
-                    <dd className={cn("text-sm font-medium", row.valueClassName)}>{row.value}</dd>
+              {/* Keep the text blocks at their reading width (max-w-md,
+                  centred) even when the depiction above opens the dialog wide
+                  for a long molecule. */}
+              <div className="mx-auto w-full max-w-md space-y-4">
+                {/* Meta rows */}
+                <dl className="divide-y divide-border rounded-[4px] border">
+                  {bits.detailRows(selected, molecules).map((row) => (
+                    <div key={row.label} className="flex items-center justify-between px-3 py-2">
+                      <dt className="text-sm text-muted-foreground">{row.label}</dt>
+                      <dd className={cn("text-sm font-medium", row.valueClassName)}>{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+
+                {/* Facts */}
+                {facts.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold">{labels.detail.factsLabel}</h3>
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                      {facts.map((fact) => (
+                        <li key={fact}>
+                          <RichText text={fact} />
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                ))}
-              </dl>
+                )}
 
-              {/* Facts */}
-              {facts.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold">{labels.detail.factsLabel}</h3>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                    {facts.map((fact) => (
-                      <li key={fact}>{fact}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {isTeacher && (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setDeleteOpen(true)
-                    }}
-                  >
-                    <Trash2 className="size-4 mr-1.5" strokeWidth={1.75} />
-                    {manage.deleteMolecule}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setFormOpen(true)
-                    }}
-                  >
-                    <Pencil className="size-4 mr-1.5" strokeWidth={1.75} />
-                    {manage.editMolecule}
-                  </Button>
-                </div>
-              )}
+                {isTeacher && (
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setDeleteOpen(true)
+                      }}
+                    >
+                      <Trash2 className="size-4 mr-1.5" strokeWidth={1.75} />
+                      {manage.deleteMolecule}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setFormOpen(true)
+                      }}
+                    >
+                      <Pencil className="size-4 mr-1.5" strokeWidth={1.75} />
+                      {manage.editMolecule}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </DialogContent>
@@ -1042,7 +1093,10 @@ function MoleculeBrowser({
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         title={manage.deleteMoleculeTitle}
-        description={manage.deleteMoleculeDescription.replace("{name}", selected?.name ?? "")}
+        description={manage.deleteMoleculeDescription.replace(
+          "{name}",
+          stripRichMarkup(selected?.name ?? ""),
+        )}
         confirmLabel={manage.deleteAction}
         cancelLabel={manage.cancelAction}
         onConfirm={() => void handleDelete()}
@@ -1102,6 +1156,7 @@ function MoleculeFormDialog({
   const [inDna, setInDna] = useState(false)
   const [inRna, setInRna] = useState(false)
   const [haworth, setHaworth] = useState(true)
+  const [fischer, setFischer] = useState(true)
   const [facts, setFacts] = useState("")
   const [saving, setSaving] = useState(false)
 
@@ -1131,6 +1186,7 @@ function MoleculeFormDialog({
     setInDna(molecule ? traitOf(molecule, TRAIT.inDna) === "true" : false)
     setInRna(molecule ? traitOf(molecule, TRAIT.inRna) === "true" : false)
     setHaworth(molecule?.haworth ?? true)
+    setFischer(molecule?.fischer ?? true)
     setFacts(molecule ? moleculeFacts(molecule).join("\n") : "")
   }, [open, molecule, categoryId])
 
@@ -1180,6 +1236,7 @@ function MoleculeFormDialog({
           molecule.projection,
           haworth,
           moving ? targetCategory : undefined,
+          fischer,
         )
         toast({
           title: moving
@@ -1187,7 +1244,7 @@ function MoleculeFormDialog({
             : manage.saveSuccess,
         })
       } else {
-        await createMolecule(categoryId, name.trim(), smiles.trim(), traits, haworth)
+        await createMolecule(categoryId, name.trim(), smiles.trim(), traits, haworth, fischer)
         toast({ title: manage.saveSuccess })
       }
       onOpenChange(false)
@@ -1323,7 +1380,10 @@ function MoleculeFormDialog({
                 the spec itself is read-only here, so a hint says so. */}
             {savedProjection && haworth ? (
               <div className="flex justify-center rounded-[4px] border p-3">
-                <ProjectionView spec={savedProjection} ariaLabel={name.trim() || smiles.trim()} />
+                <ProjectionView
+                  spec={savedProjection}
+                  ariaLabel={stripRichMarkup(name.trim()) || smiles.trim()}
+                />
               </div>
             ) : smiles.trim() ? (
               // Keep the preview mounted for ANY non-empty SMILES — only a
@@ -1332,6 +1392,7 @@ function MoleculeFormDialog({
                 <StructureView
                   smiles={smiles.trim()}
                   haworth={haworth}
+                  fischer={fischer}
                   size={180}
                   title={smiles.trim()}
                   onValidityChange={setSmilesValid}
@@ -1376,8 +1437,17 @@ function MoleculeFormDialog({
               >
                 {manage.haworthLabel}
               </button>
+              <button
+                type="button"
+                aria-pressed={fischer}
+                onClick={() => setFischer((v) => !v)}
+                className={flagButtonClass(fischer)}
+              >
+                {manage.fischerLabel}
+              </button>
             </div>
             <p className="text-xs text-muted-foreground">{manage.haworthHint}</p>
+            <p className="text-xs text-muted-foreground">{manage.fischerHint}</p>
           </div>
 
           {kind === "aminoAcids" && (
@@ -1531,6 +1601,7 @@ function MoleculeFormDialog({
               rows={3}
               maxLength={1000}
             />
+            <p className="text-xs text-muted-foreground">{manage.scriptHint}</p>
           </div>
 
           <div className="flex justify-end gap-2">
@@ -1826,7 +1897,11 @@ export function BiomoleculesCategoryPage() {
         open={reorderOpen}
         onOpenChange={setReorderOpen}
         title={manage.reorderMolecules}
-        items={molecules.map((molecule) => ({ id: molecule.id, label: molecule.name }))}
+        items={molecules.map((molecule) => ({
+          id: molecule.id,
+          label: stripRichMarkup(molecule.name),
+        }))}
+        sortAlphabeticalLabel={manage.sortAlphabetically}
         onSave={(ids) => reorderMolecules(category.slug, ids)}
       />
 

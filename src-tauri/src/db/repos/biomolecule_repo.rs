@@ -94,6 +94,9 @@ pub struct BiomoleculeInfo {
     /// Whether to recognize saccharides and draw a Haworth projection
     /// (true) or a plain skeletal structure (false).
     pub haworth: bool,
+    /// Whether to recognize open-chain sugars and draw a Fischer projection
+    /// (true) or a plain skeletal structure (false).
+    pub fischer: bool,
     pub traits: HashMap<String, String>,
     /// Row version, as on [`BiomoleculeTopicInfo::updated_at`]. Covers the
     /// traits too — they are only ever rewritten together with the row.
@@ -167,7 +170,7 @@ impl BiomoleculeRepo {
     /// Every molecule with its traits, ordered per category.
     pub fn list_molecules(conn: &Connection) -> Result<Vec<BiomoleculeInfo>, DbError> {
         let mut stmt = conn.prepare(
-            "SELECT id, category_slug, slug, name, smiles, position, projection, haworth,
+            "SELECT id, category_slug, slug, name, smiles, position, projection, haworth, fischer,
                     updated_at
              FROM biomolecules ORDER BY category_slug, position, slug",
         )?;
@@ -182,7 +185,8 @@ impl BiomoleculeRepo {
                     row.get::<_, i64>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, i64>(7)? != 0,
-                    row.get::<_, String>(8)?,
+                    row.get::<_, i64>(8)? != 0,
+                    row.get::<_, String>(9)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -208,7 +212,7 @@ impl BiomoleculeRepo {
         Ok(molecules
             .into_iter()
             .map(
-                |(id, category_slug, slug, name, smiles, position, projection, haworth, updated_at)| BiomoleculeInfo {
+                |(id, category_slug, slug, name, smiles, position, projection, haworth, fischer, updated_at)| BiomoleculeInfo {
                     id,
                     category_slug,
                     slug,
@@ -217,6 +221,7 @@ impl BiomoleculeRepo {
                     position,
                     projection,
                     haworth,
+                    fischer,
                     traits: traits_by_molecule.remove(&id).unwrap_or_default().into_iter()
                         .collect(),
                     updated_at,
@@ -337,6 +342,59 @@ impl BiomoleculeRepo {
             params![slug],
             |row| row.get(0),
         )?)
+    }
+
+    pub fn category_name(conn: &Connection, slug: &str) -> Result<Option<String>, DbError> {
+        let name = conn
+            .query_row(
+                "SELECT name FROM biomolecule_categories WHERE slug = ?1",
+                params![slug],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(name)
+    }
+
+    /// Display name of a topic for the history log (None when absent).
+    pub fn topic_name(conn: &Connection, slug: &str) -> Result<Option<String>, DbError> {
+        let name = conn
+            .query_row("SELECT name FROM biomolecule_topics WHERE slug = ?1", params![slug], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(name)
+    }
+
+    /// The category's topic slug (None when ungrouped; row-absent when unknown).
+    pub fn category_topic_slug(
+        conn: &Connection,
+        slug: &str,
+    ) -> Result<Option<Option<String>>, DbError> {
+        let value: Option<Option<String>> = conn
+            .query_row(
+                "SELECT topic_slug FROM biomolecule_categories WHERE slug = ?1",
+                params![slug],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value)
+    }
+
+    pub fn molecule_slug_exists(conn: &Connection, slug: &str) -> Result<bool, DbError> {
+        Ok(conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM biomolecules WHERE slug = ?1)",
+            params![slug],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn molecule_name(conn: &Connection, id: &Uuid) -> Result<Option<String>, DbError> {
+        let name = conn
+            .query_row("SELECT name FROM biomolecules WHERE id = ?1", params![id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(name)
     }
 
     /// Next free position within the hub / within one category.
@@ -489,6 +547,7 @@ impl BiomoleculeRepo {
         smiles: &str,
         projection: Option<&str>,
         haworth: bool,
+        fischer: bool,
         position: i64,
         traits: &[(String, String)],
         created_by: &Uuid,
@@ -498,9 +557,9 @@ impl BiomoleculeRepo {
         let now = Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO biomolecules
-                 (id, category_slug, slug, name, smiles, projection, haworth, position, created_at, created_by, updated_at, updated_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?9, ?10)",
-            params![id, category_slug, slug, name, smiles, projection, haworth as i64, position, now, created_by],
+                 (id, category_slug, slug, name, smiles, projection, haworth, fischer, position, created_at, created_by, updated_at, updated_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?10, ?11)",
+            params![id, category_slug, slug, name, smiles, projection, haworth as i64, fischer as i64, position, now, created_by],
         )?;
         for (trait_key, value) in traits {
             tx.execute(
@@ -523,6 +582,7 @@ impl BiomoleculeRepo {
         smiles: &str,
         projection: Option<&str>,
         haworth: bool,
+        fischer: bool,
         traits: &[(String, String)],
         relocation: Option<&MoleculeRelocation>,
         updated_by: &Uuid,
@@ -536,10 +596,10 @@ impl BiomoleculeRepo {
         }
         let changed = tx.execute(
             "UPDATE biomolecules
-             SET name = ?2, smiles = ?3, projection = ?4, haworth = ?5,
-                 updated_at = ?6, updated_by = ?7
+             SET name = ?2, smiles = ?3, projection = ?4, haworth = ?5, fischer = ?6,
+                 updated_at = ?7, updated_by = ?8
              WHERE id = ?1",
-            params![id, name, smiles, projection, haworth as i64, Utc::now().to_rfc3339(), updated_by],
+            params![id, name, smiles, projection, haworth as i64, fischer as i64, Utc::now().to_rfc3339(), updated_by],
         )?;
         if changed == 0 {
             return Err(DbError::NotFound(format!("Molecule {id} not found")));

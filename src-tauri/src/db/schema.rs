@@ -1,8 +1,9 @@
 use rusqlite::Connection;
+use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 54;
+const CURRENT_USER_VERSION: u32 = 61;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -276,6 +277,41 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 54 {
         apply_migration_v54(conn)?;
         conn.pragma_update(None, "user_version", "54")?;
+    }
+
+    if user_version < 55 {
+        apply_migration_v55(conn)?;
+        conn.pragma_update(None, "user_version", "55")?;
+    }
+
+    if user_version < 56 {
+        apply_migration_v56(conn)?;
+        conn.pragma_update(None, "user_version", "56")?;
+    }
+
+    if user_version < 57 {
+        apply_migration_v57(conn)?;
+        conn.pragma_update(None, "user_version", "57")?;
+    }
+
+    if user_version < 58 {
+        apply_migration_v58(conn)?;
+        conn.pragma_update(None, "user_version", "58")?;
+    }
+
+    if user_version < 59 {
+        apply_migration_v59(conn)?;
+        conn.pragma_update(None, "user_version", "59")?;
+    }
+
+    if user_version < 60 {
+        apply_migration_v60(conn)?;
+        conn.pragma_update(None, "user_version", "60")?;
+    }
+
+    if user_version < 61 {
+        apply_migration_v61(conn)?;
+        conn.pragma_update(None, "user_version", "61")?;
     }
 
     Ok(())
@@ -1562,6 +1598,9 @@ fn apply_migration_v47(conn: &Connection) -> Result<(), rusqlite::Error> {
             -- Whether the client should recognize saccharides and draw a
             -- Haworth projection instead of a plain skeletal structure (v52).
             haworth INTEGER NOT NULL DEFAULT 1,
+            -- Whether the client should recognize open-chain sugars and draw a
+            -- Fischer projection instead of a plain skeletal structure (v54).
+            fischer INTEGER NOT NULL DEFAULT 1,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             created_by BLOB REFERENCES users(id) ON DELETE SET NULL,
@@ -1861,6 +1900,347 @@ fn apply_migration_v54(conn: &Connection) -> Result<(), rusqlite::Error> {
         )?;
     }
     Ok(())
+}
+
+/// Per-molecule switch between the plain skeletal depiction and the Fischer
+/// projection for open-chain sugars. Existing rows default to 1 (true) so an
+/// upgrade keeps the current detection behavior.
+fn apply_migration_v55(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // Fresh databases already get the column from v47's CREATE TABLE; older
+    // ones need the additive ALTER here. A synthetic pre-v47 database (some
+    // migration tests) has no biomolecules table at all — then there is
+    // nothing to alter.
+    let has_molecules: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND name = 'biomolecules')",
+        [],
+        |row| row.get(0),
+    )?;
+    let has_fischer: bool = has_molecules
+        && conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('biomolecules')
+                            WHERE name = 'fischer')",
+            [],
+            |row| row.get(0),
+        )?;
+    if has_molecules && !has_fischer {
+        conn.execute_batch(
+            "
+            ALTER TABLE biomolecules ADD COLUMN fischer INTEGER NOT NULL DEFAULT 1;
+            ",
+        )?;
+    }
+    Ok(())
+}
+
+/// Peptidovka game state: per-mode teacher-editable settings (length range,
+/// seconds per amino acid, and the slug set to draw from) plus finished-run
+/// aggregates for a future leaderboard.
+///
+/// The settings defaults are seeded only when the table is empty, so a
+/// re-run/upgrade never overwrites a teacher's edits. Both defaults use the
+/// canonical 20 amino-acid slugs; runs mirror `biomolecule_streak_runs` with
+/// `kind` renamed to `mode`.
+fn apply_migration_v56(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS peptidovka_settings (
+            mode TEXT PRIMARY KEY NOT NULL CHECK (mode IN ('ucen','mistr')),
+            min_len INTEGER NOT NULL,
+            max_len INTEGER NOT NULL,
+            seconds_per_aa INTEGER NOT NULL,
+            slugs TEXT NOT NULL DEFAULT '[]'
+        );
+
+        CREATE TABLE IF NOT EXISTS peptidovka_runs (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            mode TEXT NOT NULL,
+            correct_count INTEGER NOT NULL CHECK (correct_count >= 0),
+            total_seconds REAL NOT NULL CHECK (total_seconds > 0),
+            finished_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_peptidovka_runs_mode_user
+        ON peptidovka_runs(mode, user_id);
+        ",
+    )?;
+
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM peptidovka_settings", [], |row| {
+        row.get(0)
+    })?;
+    if count == 0 {
+        let slugs_json = peptidovka_default_slugs_json()?;
+        for (mode, min_len, max_len, seconds_per_aa) in [
+            ("ucen", 3_i64, 6_i64, 15_i64),
+            ("mistr", 3_i64, 10_i64, 15_i64),
+        ] {
+            conn.execute(
+                "INSERT INTO peptidovka_settings
+                     (mode, min_len, max_len, seconds_per_aa, slugs)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![mode, min_len, max_len, seconds_per_aa, slugs_json],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// JSON array of the canonical amino-acid slugs, built from the seed module so
+/// the settings defaults cannot drift from the library.
+fn peptidovka_default_slugs_json() -> Result<String, rusqlite::Error> {
+    serde_json::to_string(crate::db::biomolecule_seed::AMINO_ACID_SLUGS)
+        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
+/// Match the blob-typed Uuid storage every other biomolecule write uses —
+/// immediately lowering any TEXT-shaped id written by a pre-v60 upgrade
+/// through `unhex(replace(...))`. BLOB rows are untouched, so the statement
+/// is a no-op on healthy data.
+fn apply_migration_v60(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        -- Repair for a real deployment bug: one v59 insert path wrote Uuids
+        -- as dashed TEXT while every other molecule id is a BLOB, which made
+        -- the whole dataset unreadable (list_data errors on InvalidColumnType
+        -- for the id column). Rewrite the TEXT ids (and their trait FKs) to
+        -- BLOB form; idempotent on untouched/on-heading data.
+        CREATE TABLE IF NOT EXISTS biomolecules (
+            id BLOB PRIMARY KEY NOT NULL,
+            category_slug TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            smiles TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS biomolecule_traits (
+            molecule_id BLOB NOT NULL,
+            trait TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (molecule_id, trait)
+        );
+
+        PRAGMA foreign_keys = OFF;
+
+        UPDATE biomolecules SET id = unhex(replace(id, '-', '')) WHERE typeof(id) = 'text';
+        UPDATE biomolecule_traits
+        SET molecule_id = unhex(replace(molecule_id, '-', ''))
+        WHERE typeof(molecule_id) = 'text';
+
+        PRAGMA foreign_keys = ON;
+        ",
+    )
+}
+
+/// Additive-only backfill of the special amino acids' trait vocabulary
+/// (selenocysteine U / pyrrolysine O, family, charge, polarity, facts).
+/// One corner of v59→v60-era data debt is partially-traited rows: a rollout
+/// applied molecules but left some special acids without their traits. This
+/// fills only missing (molecule_id, trait) slots — teacher edits and
+/// complete rows are never rewritten.
+fn apply_migration_v61(conn: &Connection) -> Result<(), rusqlite::Error> {
+    const TRAITS: &[(&str, &str, &str)] = &[
+        ("sec", "oneLetter", "U"),
+        ("sec", "abbreviation", "Sec"),
+        ("sec", "sideChain", "polar"),
+        ("sec", "polarity", "hydrophobic"),
+        ("sec", "charge", "neutral"),
+        ("sec", "facts", "21. aminokyselina; vkládá se recodingem UGA kodonu pomocí sekundární SECIS struktury.\nSelen stojí v active centrech (glutathion peroxidáza, thioredoxin reduktáza)."),
+        ("pyl", "oneLetter", "O"),
+        ("pyl", "abbreviation", "Pyl"),
+        ("pyl", "sideChain", "basic"),
+        ("pyl", "polarity", "hydrophilic"),
+        ("pyl", "charge", "neutral"),
+        ("pyl", "facts", "22. aminokyselina; vkládá se recodingem UAG kodonu u metanogenů.\nPostranní řetězec nese metylpyrrolinkarbonylamid na ε-dusíku lysinu."),
+    ];
+    for (slug, trait_key, value) in TRAITS {
+        conn.execute(
+            "INSERT OR IGNORE INTO biomolecule_traits (molecule_id, trait, value)
+             SELECT m.id, ?1, ?2 FROM biomolecules m
+             WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = ?3",
+            rusqlite::params![trait_key, value, slug],
+        )?;
+    }
+    Ok(())
+}
+
+/// Adds the `polarity` trait (hydrophobic/hydrophilic) to the twenty
+/// canonical amino acids so the quiz can ask polarity on its own axis,
+/// independent of the side-chain family label (see aminoAcidsQuizConfig).
+/// INSERT OR IGNORE so a polarity the teacher already set by hand wins —
+/// the migration only fills gaps, exactly like v56's empty-table seeding.
+fn apply_migration_v58(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        -- Self-sufficient on synthetic partial replays (the house tests build
+        -- the pre-v47 schema ladder by hand and would otherwise find no
+        -- traits table); IF NOT EXISTS makes the CREATE a no-op in production.
+        CREATE TABLE IF NOT EXISTS biomolecule_traits (
+            molecule_id BLOB NOT NULL REFERENCES biomolecules(id) ON DELETE CASCADE,
+            trait TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (molecule_id, trait)
+        );
+
+        INSERT OR IGNORE INTO biomolecule_traits (molecule_id, trait, value)
+        SELECT m.id, 'polarity',
+               CASE WHEN m.slug IN ('ala','gly','val','leu','ile','met','pro','cys','phe','trp')
+                    THEN 'hydrophobic' ELSE 'hydrophilic' END
+        FROM biomolecules m
+        WHERE m.category_slug = 'aminokyseliny'
+          AND m.slug IN ('ala','arg','asn','asp','cys','gln','glu','gly','his','ile',
+                         'leu','lys','met','phe','pro','ser','thr','trp','tyr','val');
+        ",
+    )
+}
+
+/// The "Speciální aminokyseliny" category with selenocysteine and
+/// pyrrolysine (same trait vocabulary as the canonical twenty). Idempotent
+/// everywhere: category via INSERT OR IGNORE, molecules only when their
+/// (category, slug) pair is missing — a teacher's edit survives replays,
+/// exactly like the v48-58 seed-update policy.
+fn apply_migration_v59(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Synthetic replays build pre-v47 tables by hand; guard like v58 does.
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_categories (
+            slug TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            topic_slug TEXT,
+            position INTEGER NOT NULL,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS biomolecules (
+            id BLOB PRIMARY KEY NOT NULL,
+            category_slug TEXT NOT NULL REFERENCES biomolecule_categories(slug),
+            slug TEXT NOT NULL,
+            name TEXT NOT NULL,
+            smiles TEXT NOT NULL,
+            projection TEXT,
+            haworth INTEGER NOT NULL DEFAULT 1,
+            fischer INTEGER NOT NULL DEFAULT 1,
+            position INTEGER NOT NULL,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by BLOB
+        );
+        CREATE TABLE IF NOT EXISTS biomolecule_traits (
+            molecule_id BLOB NOT NULL REFERENCES biomolecules(id) ON DELETE CASCADE,
+            trait TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (molecule_id, trait)
+        );
+        ",
+    )?;
+
+    conn.execute(
+        "INSERT OR IGNORE INTO biomolecule_categories
+             (slug, name, description, topic_slug, position, built_in, created_at, updated_at)
+         VALUES ('specialni-aminokyseliny', 'Speciální aminokyseliny',
+                 '21. a 22. proteinogenní aminokyselina — selenocystein a pyrrolysin.',
+                 'aminokyseliny', 3, 1, ?1, ?1)",
+        rusqlite::params![now],
+    )?;
+    // The v47-era seed writes this category without its topic (that column
+    // did not exist yet) and v51's backfill only knows the original three —
+    // fill the topic idempotently whichever era planted the row.
+    conn.execute(
+        "UPDATE biomolecule_categories SET topic_slug = 'aminokyseliny'
+         WHERE slug = 'specialni-aminokyseliny' AND topic_slug IS NULL",
+        [],
+    )?;
+
+    const MOLECULES: [(&str, &str, &str, i64); 2] = [
+        ("sec", "Selenocystein", "N[C@@H](C[SeH])C(=O)O", 0),
+        ("pyl", "Pyrrolysin", "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O", 1),
+    ];
+    const TRAITS: [(&str, &[(&str, &str)]); 2] = [
+        (
+            "sec",
+            &[
+                ("oneLetter", "U"),
+                ("abbreviation", "Sec"),
+                ("sideChain", "polar"),
+                ("polarity", "hydrophobic"),
+                ("charge", "neutral"),
+                ("facts", "21. aminokyselina; vkládá se recodingem UGA kodonu pomocí sekundární SECIS struktury.\nSelen stojí v active centrech (glutathion peroxidáza, thioredoxin reduktáza)."),
+            ],
+        ),
+        (
+            "pyl",
+            &[
+                ("oneLetter", "O"),
+                ("abbreviation", "Pyl"),
+                ("sideChain", "basic"),
+                ("polarity", "hydrophilic"),
+                ("charge", "neutral"),
+                ("facts", "22. aminokyselina; vkládá se recodingem UAG kodonu u metanogenů.\nPostranní řetězec nese metylpyrrolinkarbonylamid na ε-dusíku lysinu."),
+            ],
+        ),
+    ];
+    for (slug, name, smiles, position) in MOLECULES {
+        // Fresh Uuid per attempt, but the row appears only once: NOT EXISTS is
+        // the idempotency contract of this migration. Bound as Uuid (BLOB),
+        // never as dashed TEXT — that mismatch already shipped a hotfix
+        // (v60) once, do not reintroduce it.
+        let molecule_id = Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO biomolecules
+                 (id, category_slug, slug, name, smiles, projection, position, created_at, updated_at)
+             SELECT ?1, 'specialni-aminokyseliny', ?2, ?3, ?4, NULL, ?5, ?6, ?6
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM biomolecules
+                 WHERE category_slug = 'specialni-aminokyseliny' AND slug = ?2
+             )",
+            rusqlite::params![molecule_id, slug, name, smiles, position, now],
+        )?;
+        for (trait_slug, pairs) in TRAITS {
+            if trait_slug != slug {
+                continue;
+            }
+            for (key, value) in pairs {
+                conn.execute(
+                    "INSERT OR IGNORE INTO biomolecule_traits (molecule_id, trait, value)
+                     SELECT m.id, ?1, ?2 FROM biomolecules m
+                     WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = ?3",
+                    rusqlite::params![key, value, slug],
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Teacher-action log for the biomolecules module, mirroring the
+/// calculations history pattern: every mutation records who did what, so
+/// the "Historie" page can show a reviewable trail. `kind` scopes the entry
+/// (molecule | category | topic | peptidovka), `action` says what
+/// (create | update | delete | reorder | settings), `label` names the
+/// entity, and `detail` is an optional compact diff summary.
+fn apply_migration_v57(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_history (
+            id BLOB PRIMARY KEY NOT NULL,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            action TEXT NOT NULL,
+            label TEXT NOT NULL,
+            detail TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_biomolecule_history_created_at
+        ON biomolecule_history(created_at);
+        ",
+    )
 }
 
 #[cfg(test)]
@@ -2214,6 +2594,164 @@ mod tests {
             !columns.iter().any(|(name, _, _)| name == "difficulty"),
             "a fresh database must have no difficulty column on templates"
         );
+    }
+
+    /// The v56 defaults seed only when the settings table is empty, so an
+    /// upgrade re-run must never clobber a teacher's saved Peptidovka config.
+    #[test]
+    fn v56_seeding_preserves_teacher_edits_on_remigration() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        conn.execute(
+            "UPDATE peptidovka_settings
+             SET min_len = 4, max_len = 8, seconds_per_aa = 20, slugs = ?1
+             WHERE mode = 'ucen'",
+            rusqlite::params!["[\"ala\",\"gly\"]"],
+        )
+        .expect("teacher edit");
+
+        // Replaying after the edit must hands-off the row — reset the version
+        // so v56 really re-runs (the house idiom: same pragma trick as the
+        // earlier upgrade tests) and its `count == 0` guard is the load
+        // being pinned, not the version gate.
+        conn.pragma_update(None, "user_version", "55")
+            .expect("reset version");
+        run_migrations(&conn).expect("re-migration");
+
+        let (min_len, max_len, seconds_per_aa, slugs): (i64, i64, i64, String) = conn
+            .query_row(
+                "SELECT min_len, max_len, seconds_per_aa, slugs
+                 FROM peptidovka_settings WHERE mode = 'ucen'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read settings");
+        assert_eq!((min_len, max_len), (4, 8));
+        assert_eq!(seconds_per_aa, 20);
+        assert_eq!(slugs, "[\"ala\",\"gly\"]");
+    }
+
+    /// v58 fills the amino acids' polarity trait but never second-guesses a
+    /// polarity the teacher already assigned (INSERT OR IGNORE semantics).
+    #[test]
+    fn v58_fills_polarity_without_overwriting_teacher_edits() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        let (hydrophobic, hydrophilic): (i64, i64) = conn
+            .query_row(
+                "SELECT
+                     SUM(CASE WHEN t.value = 'hydrophobic' THEN 1 ELSE 0 END),
+                     SUM(CASE WHEN t.value = 'hydrophilic' THEN 1 ELSE 0 END)
+                 FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.category_slug = 'aminokyseliny' AND t.trait = 'polarity'",
+                [],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )
+            .map(|(a, b)| (a.unwrap_or(0), b.unwrap_or(0)))
+            .expect("polarity counts");
+        assert_eq!((hydrophobic, hydrophilic), (10, 10));
+        let phe: String = conn
+            .query_row(
+                "SELECT t.value FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.slug = 'phe' AND t.trait = 'polarity'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("phe polarity");
+        assert_eq!(phe, "hydrophobic");
+
+        // A teacher edit loses out: pretend phe's polarity was changed by hand
+        // and replay the migration; the hand-set value must survive.
+        conn.execute(
+            "UPDATE biomolecule_traits
+             SET value = 'hydrophilic'
+             WHERE trait = 'polarity'
+               AND molecule_id = (SELECT id FROM biomolecules WHERE slug = 'phe')",
+            [],
+        )
+        .expect("teacher edit");
+        conn.pragma_update(None, "user_version", "57")
+            .expect("backlevel version");
+        run_migrations(&conn).expect("re-migration");
+        let kept: String = conn
+            .query_row(
+                "SELECT t.value FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.slug = 'phe' AND t.trait = 'polarity'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("kept polarity");
+        assert_eq!(kept, "hydrophilic", "teacher-set polarity is authoritative");
+    }
+
+    /// v59 adds the special-amino-acids category with sec/pyl, fully
+    /// trait-populated, and leaves re-runs alone (the NOT EXISTS gate on
+    /// (category, slug) keeps teacher edits untouched, never duplicates).
+    #[test]
+    fn v59_seeds_special_amino_acids_idempotently() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        let (molecules, traits): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT m.id), COUNT(t.trait)
+                 FROM biomolecules m
+                 LEFT JOIN biomolecule_traits t
+                     ON t.molecule_id = m.id
+                    AND m.category_slug = 'specialni-aminokyseliny'
+                 WHERE m.category_slug = 'specialni-aminokyseliny'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("counts");
+        assert_eq!(molecules, 2, "exactly selenocysteine and pyrrolysine");
+        assert_eq!(traits, 12, "six traits per special amino acid");
+
+        let (letter, polarity): (String, String) = conn
+            .query_row(
+                "SELECT t1.value, t2.value
+                 FROM biomolecules m
+                 JOIN biomolecule_traits t1
+                     ON t1.molecule_id = m.id AND t1.trait = 'oneLetter'
+                 JOIN biomolecule_traits t2
+                     ON t2.molecule_id = m.id AND t2.trait = 'polarity'
+                 WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = 'pyl'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("pyl traits");
+        assert_eq!((letter.as_str(), polarity.as_str()), ("O", "hydrophilic"));
+
+        // Teacher edits the category name; replaying must not restore the
+        // seed name NOR duplicate the molecules (fresh UUIDs stay unused).
+        conn.execute(
+            "UPDATE biomolecule_categories SET name = 'Exotic'
+             WHERE slug = 'specialni-aminokyseliny'",
+            [],
+        )
+        .expect("teacher edit");
+        conn.pragma_update(None, "user_version", "58")
+            .expect("backlevel");
+        run_migrations(&conn).expect("re-migration");
+        let (molecules_after, name_after): (i64, String) = conn
+            .query_row(
+                "SELECT COUNT(*), c.name
+                 FROM biomolecules m
+                 JOIN biomolecule_categories c
+                     ON c.slug = m.category_slug
+                 WHERE m.category_slug = 'specialni-aminokyseliny'
+                 GROUP BY c.name",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("recount");
+        assert_eq!(molecules_after, 2, "never re-seeded");
+        assert_eq!(name_after, "Exotic", "teacher edit wins");
     }
 
     /// A database that last saw v32 (the deployed state before this feature)
@@ -3167,6 +3705,64 @@ mod tests {
     }
 
     #[test]
+    fn v55_adds_a_non_null_fischer_flag_defaulting_to_true() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        // A database that already ran v54: projection AND haworth exist, but
+        // fischer does not.
+        conn.execute_batch(
+            "
+            CREATE TABLE biomolecules (
+                id BLOB PRIMARY KEY NOT NULL,
+                category_slug TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                name TEXT NOT NULL,
+                smiles TEXT NOT NULL,
+                projection TEXT,
+                haworth INTEGER NOT NULL DEFAULT 1,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                created_by BLOB,
+                updated_at TEXT NOT NULL,
+                updated_by BLOB,
+                UNIQUE (category_slug, slug)
+            );
+            INSERT INTO biomolecules
+                (id, category_slug, slug, name, smiles, projection, haworth, created_at, updated_at)
+            VALUES
+                (randomblob(16), 'sacharidy', 'glukoza-otevrena', 'D-glukóza (otevřená)',
+                 'O=CC(O)C(O)C(O)C(O)CO', NULL, 1,
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            ",
+        )
+        .expect("pre-v55 library");
+        conn.pragma_update(None, "user_version", "54")
+            .expect("set version");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (notnull, dflt): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT \"notnull\", dflt_value FROM pragma_table_info('biomolecules')
+                 WHERE name = 'fischer'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("fischer must exist after v54");
+        assert_eq!(notnull, 1, "fischer must be NOT NULL");
+        assert_eq!(dflt.as_deref(), Some("1"), "fischer must default to 1");
+
+        let fischer: i64 = conn
+            .query_row(
+                "SELECT fischer FROM biomolecules WHERE slug = 'glukoza-otevrena'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("old row readable after v54");
+        assert_eq!(fischer, 1, "existing molecules keep Fischer detection on");
+    }
+
+    #[test]
     fn v53_creates_biomolecule_question_reports() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");
@@ -3212,12 +3808,12 @@ mod tests {
                 row.get(0)
             })
             .expect("count categories");
-        assert_eq!(categories, 3);
+        assert_eq!(categories, 4, "aminokyseliny, bases, sacharidy, specialni");
 
         let molecules: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
             .expect("count molecules");
-        assert_eq!(molecules, 34);
+        assert_eq!(molecules, 36, "34 canonical + selenocystein + pyrrolysin");
 
         let traits: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecule_traits", [], |row| row.get(0))
@@ -3242,7 +3838,7 @@ mod tests {
         let molecules_after: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecules", [], |row| row.get(0))
             .expect("count again");
-        assert_eq!(molecules_after, 34);
+        assert_eq!(molecules_after, 36, "still exactly the seeded 36");
     }
 
     #[test]
@@ -3292,6 +3888,7 @@ mod tests {
                 ("aminokyseliny".into(), Some("aminokyseliny".into())),
                 ("dusikate-baze".into(), Some("nukleove-kyseliny".into())),
                 ("sacharidy".into(), Some("sacharidy".into())),
+                ("specialni-aminokyseliny".into(), Some("aminokyseliny".into())),
             ]
         );
 
@@ -3303,6 +3900,126 @@ mod tests {
         assert_eq!(topic_count, 3);
         assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
     }
+    /// Legacy upgrade simulation: a v58-era library status qua replayed via
+    /// the full chain, then trimmed back and v59 re-applied, must leave the
+    /// new special category correctly grouped and listed.
+    #[test]
+    fn upgrade_from_v58_keeps_special_amino_acids_grouped() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        conn.execute(
+            "DELETE FROM biomolecule_categories WHERE slug = 'specialni-aminokyseliny'",
+            [],
+        )
+        .expect("back to v58 shape");
+        conn.pragma_update(None, "user_version", "58").expect("58");
+        run_migrations(&conn).expect("v59 reapplied");
+
+        let topic: String = conn
+            .query_row(
+                "SELECT topic_slug FROM biomolecule_categories WHERE slug = 'specialni-aminokyseliny'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("category restored");
+        assert_eq!(topic, "aminokyseliny");
+
+        let data = crate::db::repos::BiomoleculeRepo::list_data(&conn).expect("list data");
+        assert_eq!(data.categories.len(), 4);
+        assert!(data.molecules.iter().any(|m| m.slug == "sec"));
+        assert!(data.molecules.iter().any(|m| m.slug == "pyl"));
+
+        // Traits must survive the whole poisoned-then-repaired chain (the
+        // Sec row in production appeared traitless while Pyl did not).
+        for slug in ["sec", "pyl"] {
+            let trait_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*)
+                     FROM biomolecule_traits t
+                     JOIN biomolecules m ON m.id = t.molecule_id
+                     WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = ?1",
+                    rusqlite::params![slug],
+                    |row| row.get(0),
+                )
+                .expect("trait count");
+            assert_eq!(trait_count, 6, "{slug}: all six traits present");
+        }
+    }
+
+    /// v61's additive-only backfill repairs a partially-traited Sec without
+    /// ever rewriting a slot the teacher already filled — including values the
+    /// teacher changed AFTER v61 once ran.
+    #[test]
+    fn v61_backfills_missing_special_traits_only() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        // Poison into the state the user's report witnessed: Sec exists,
+        // sits correctly-typed, but its key traits never landed.
+        for key in ["oneLetter", "abbreviation", "sideChain", "charge"] {
+            conn.execute(
+                "DELETE FROM biomolecule_traits
+                 WHERE trait = ?1
+                   AND molecule_id = (
+                       SELECT id FROM biomolecules
+                       WHERE category_slug = 'specialni-aminokyseliny' AND slug = 'sec'
+                   )",
+                rusqlite::params![key],
+            )
+            .expect("remove sec trait");
+        }
+        conn.execute(
+            "UPDATE biomolecule_traits SET value = 'ethereal'
+             WHERE trait = 'facts'
+               AND molecule_id = (
+                   SELECT id FROM biomolecules
+                   WHERE category_slug = 'specialni-aminokyseliny' AND slug = 'sec'
+               )",
+            [],
+        )
+        .expect("teacher-edited facts");
+
+        conn.pragma_update(None, "user_version", "60").expect("backlevel");
+        run_migrations(&conn).expect("v61");
+
+        // Backfilled only the holes; teacher-set facts survive untouched.
+        let (letter, side, charge, facts): (String, String, String, String) = conn
+            .query_row(
+                "SELECT t1.value, t2.value, t3.value, t4.value
+                 FROM biomolecules m
+                 JOIN biomolecule_traits t1
+                     ON t1.molecule_id = m.id AND t1.trait = 'oneLetter'
+                 JOIN biomolecule_traits t2
+                     ON t2.molecule_id = m.id AND t2.trait = 'sideChain'
+                 JOIN biomolecule_traits t3
+                     ON t3.molecule_id = m.id AND t3.trait = 'charge'
+                 JOIN biomolecule_traits t4
+                     ON t4.molecule_id = m.id AND t4.trait = 'facts'
+                 WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = 'sec'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("sec traits");
+        assert_eq!(letter, "U");
+        assert_eq!(side, "polar");
+        assert_eq!(charge, "neutral");
+        assert_eq!(facts, "ethereal", "teacher-edited facts kept");
+
+        // Reruns are quiet: re-version down and replay once more.
+        conn.pragma_update(None, "user_version", "60").expect("backlevel");
+        run_migrations(&conn).expect("v61 again");
+        let trait_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM biomolecule_traits t
+                 JOIN biomolecules m ON m.id = t.molecule_id
+                 WHERE m.category_slug = 'specialni-aminokyseliny' AND m.slug = 'sec'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("final count");
+        assert_eq!(trait_count, 6, "six rows once, never duplicated");
+    }
 
     #[test]
     fn v54_gives_existing_teachers_both_sections() {
@@ -3310,6 +4027,7 @@ mod tests {
         run_migrations(&conn).expect("migrations");
         conn.pragma_update(None, "user_version", "53")
             .expect("set version");
+
         conn.execute_batch(
             "
             INSERT INTO users (id, username, password_hash, role, created_at, sections)
@@ -3337,5 +4055,53 @@ mod tests {
             "calculations",
             "students keep their scope"
         );
+    }
+
+    /// The v59-era TEXT/BLOB id mistake poisoned live databases with rows
+    /// whose molecule ids are TEXT-shaped — unreadable to every list consumer.
+    /// The v60 repair must retype exactly those rows and nothing else, and it
+    /// pinpoints the repaired path via a fresh re-exercise of list_data.
+    #[test]
+    fn v60_repairs_text_typed_molecule_ids() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        // Simulate the exact corruption a pre-v60 rollout produced: TEXT id
+        // in the molecule row AND TEXT fks in its trait rows.
+        let text_id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO biomolecules
+                 (id, category_slug, slug, name, smiles, position, created_at, updated_at)
+             VALUES (?1, 'specialni-aminokyseliny', 'his-acid', 'Histidyldetyl', 'NCC(=O)O', 99, ?2, ?2)",
+            rusqlite::params![text_id, "2026-01-01T00:00:00Z"],
+        )
+        .expect("poison molecule");
+        conn.execute(
+            "INSERT INTO biomolecule_traits (molecule_id, trait, value) VALUES (?1, 'oneLetter', 'X')",
+            rusqlite::params![text_id],
+        )
+        .expect("poison trait");
+
+        conn.pragma_update(None, "user_version", "59").expect("backlevel");
+        run_migrations(&conn).expect("v60");
+
+        let text_ids: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecules WHERE typeof(id) = 'text'", [], |row| {
+                row.get(0)
+            })
+            .expect("text ids");
+        assert_eq!(text_ids, 0, "every molecule id is BLOB again");
+        let text_trait_fks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM biomolecule_traits WHERE typeof(molecule_id) = 'text'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("text trait fks");
+        assert_eq!(text_trait_fks, 0, "every trait foreign key is BLOB again");
+        // The deployment symptom — list_data dying on a TEXT id — is what
+        // this test exists to prevent from ever coming back.
+        let data = crate::db::repos::BiomoleculeRepo::list_data(&conn).expect("list data");
+        assert!(data.molecules.iter().any(|m| m.slug == "his-acid"));
     }
 }

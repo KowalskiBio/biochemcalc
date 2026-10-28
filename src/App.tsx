@@ -5,6 +5,7 @@ import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
 import { StudentShell } from "@/components/layout/student-shell"
 import { allowedSections } from "@/hooks/use-section"
+import { BiomoleculesHistoryPage } from "@/pages/biomolecules-history-page"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesProjectionPage } from "@/pages/biomolecules-projection-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
@@ -19,6 +20,8 @@ import { FormulasPage } from "@/pages/formulas-page"
 import { HelpPage } from "@/pages/help-page"
 import { HistoryPage } from "@/pages/history-page"
 import { LoginPage } from "@/pages/login-page"
+import { PeptidovkaPage, PeptidovkaRunPage } from "@/pages/peptidovka-page"
+import { PeptidovkaSettingsPage } from "@/pages/peptidovka-settings-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
 import { ReportsPage } from "@/pages/reports-page"
@@ -78,6 +81,8 @@ function TeacherRoutes() {
             <Route path="/biomolekuly" element={<BiomoleculesPage />} />
             <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
             <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
+            <Route path="/biomolekuly/historie" element={<BiomoleculesHistoryPage />} />
+            <Route path="/biomolekuly/peptidovka" element={<PeptidovkaSettingsPage />} />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"
@@ -147,6 +152,15 @@ function StudentRoutes() {
             <Route
               path="/biomolekuly/test/mistr"
               element={<BiomoleculesStreakPage kind="master" />}
+            />
+            <Route path="/biomolekuly/peptidovka" element={<PeptidovkaPage />} />
+            <Route
+              path="/biomolekuly/peptidovka/ucen"
+              element={<PeptidovkaRunPage mode="ucen" />}
+            />
+            <Route
+              path="/biomolekuly/peptidovka/mistr"
+              element={<PeptidovkaRunPage mode="mistr" />}
             />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route

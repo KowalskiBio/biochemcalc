@@ -27,6 +27,7 @@ import {
   type BiomoleculeStreakKind,
   type BiomoleculeStreakLeaderboardEntry,
   biomoleculesApi,
+  type PeptidovkaMode,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { studentApi } from "@/lib/student-api"
@@ -413,18 +414,24 @@ function CalculationsLeaderboard() {
 }
 
 /**
- * Biomolekuly's best-streak board for one run kind (Učeň/Mistr). Unlike the
- * calculations `StreakLeaderboardCard` there is nothing to scope by — every
- * biomolecules streak already draws from all categories — so the card is
- * just the table: fetch on mount, then loading/error/empty like the others.
+ * Biomolekuly's best-run board for one game variant. Unlike the calculations
+ * `StreakLeaderboardCard` there is nothing to scope by — every biomolecules
+ * game already draws from a fixed pool — so the card is just the table:
+ * fetch on mount, then loading/error/empty like the others. `source` selects
+ * the data contract (quiz streak vs. Peptidovka runs); both produce the same
+ * leaderboard row shape.
  */
-function BiomoleculeStreakLeaderboardCard({
-  kind,
+function BestRunLeaderboardCard({
+  source,
+  mode,
   title,
+  description,
   icon: Icon,
 }: {
-  kind: BiomoleculeStreakKind
+  source: "streak" | "peptidovka"
+  mode: BiomoleculeStreakKind | PeptidovkaMode
   title: string
+  description: string
   icon: typeof Swords
 }) {
   const currentUserId = useAuthStore((s) => s.user?.id)
@@ -434,8 +441,11 @@ function BiomoleculeStreakLeaderboardCard({
 
   useEffect(() => {
     let cancelled = false
-    biomoleculesApi
-      .streakLeaderboard(kind)
+    const load =
+      source === "streak"
+        ? () => biomoleculesApi.streakLeaderboard(mode as BiomoleculeStreakKind)
+        : () => biomoleculesApi.peptidovkaLeaderboard(mode as PeptidovkaMode)
+    load()
       .then((loaded) => {
         if (!cancelled) setEntries(loaded)
       })
@@ -448,7 +458,7 @@ function BiomoleculeStreakLeaderboardCard({
     return () => {
       cancelled = true
     }
-  }, [kind])
+  }, [source, mode])
 
   return (
     <Card>
@@ -457,7 +467,7 @@ function BiomoleculeStreakLeaderboardCard({
           <Icon className="size-5 inline mr-2" />
           {title}
         </CardTitle>
-        <CardDescription>{cs.student.leaderboardStreakDescription}</CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -665,14 +675,32 @@ function BiomoleculesLeaderboard() {
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <BiomoleculeStreakLeaderboardCard
-          kind="apprentice"
+        <BestRunLeaderboardCard
+          source="streak"
+          mode="apprentice"
           title={cs.student.leaderboardApprenticeTitle}
+          description={cs.student.leaderboardStreakDescription}
           icon={Swords}
         />
-        <BiomoleculeStreakLeaderboardCard
-          kind="master"
+        <BestRunLeaderboardCard
+          source="streak"
+          mode="master"
           title={cs.student.leaderboardMasterTitle}
+          description={cs.student.leaderboardStreakDescription}
+          icon={Crown}
+        />
+        <BestRunLeaderboardCard
+          source="peptidovka"
+          mode="ucen"
+          title={cs.student.leaderboardPeptidovkaUcenTitle}
+          description={cs.student.leaderboardPeptidovkaDescription}
+          icon={Swords}
+        />
+        <BestRunLeaderboardCard
+          source="peptidovka"
+          mode="mistr"
+          title={cs.student.leaderboardPeptidovkaMistrTitle}
+          description={cs.student.leaderboardPeptidovkaDescription}
           icon={Crown}
         />
       </div>

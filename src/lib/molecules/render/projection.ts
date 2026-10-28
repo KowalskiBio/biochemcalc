@@ -41,7 +41,17 @@ export type ProjectionSpec = HaworthSpec
 
 export type DrawingElement =
   | { kind: "line"; x1: number; y1: number; x2: number; y2: number; bold?: boolean }
-  | { kind: "text"; x: number; y: number; text: string; anchor?: "start" | "middle" | "end" }
+  | {
+      kind: "text"
+      x: number
+      y: number
+      text: string
+      anchor?: "start" | "middle" | "end"
+      /** Atom-palette fill (see atom-palette.ts); absent means neutral ink. */
+      fill?: string
+      /** Baseline font size in px (smaller values render as subscripts). */
+      fontSize?: number
+    }
 
 export interface ProjectionDrawing {
   elements: DrawingElement[]
@@ -75,15 +85,17 @@ function ringVertices(spec: HaworthSpec): RingVertex[] {
   const polygon = haworthPolygon(spec.ringSize)
   if (spec.ringSize === 6) {
     const atoms = ["C1", "C2", "C3", "C4", "C5"]
-    return atoms.map((atom, index) => ({
-      atom,
-      isOxygen: false,
-      pt: { x: polygon[index].x * BOND, y: polygon[index].y * BOND },
-    })).concat({
-      atom: "O",
-      isOxygen: true,
-      pt: { x: polygon[5].x * BOND, y: polygon[5].y * BOND },
-    })
+    return atoms
+      .map((atom, index) => ({
+        atom,
+        isOxygen: false,
+        pt: { x: polygon[index].x * BOND, y: polygon[index].y * BOND },
+      }))
+      .concat({
+        atom: "O",
+        isOxygen: true,
+        pt: { x: polygon[5].x * BOND, y: polygon[5].y * BOND },
+      })
   }
   // Furanose atom labels depend on whether the anomeric carbon is C1
   // (aldoses) or C2 (ketoses like fructose).
@@ -132,7 +144,7 @@ function shapeErrors(value: unknown): string[] {
     errors.push("ringSize.invalid")
   }
   const anomeric = spec.anomericCarbon
-  if (anomeric !== undefined && (anomeric !== 1 && anomeric !== 2)) {
+  if (anomeric !== undefined && anomeric !== 1 && anomeric !== 2) {
     errors.push("anomericCarbon.invalid")
   }
   if (spec.ringSize === 6 && anomeric !== undefined && anomeric !== 1) {
@@ -219,7 +231,11 @@ export function validateProjection(
     if (list.length > 2 && !errors.includes("substituent.tooMany")) {
       errors.push("substituent.tooMany")
     }
-    if (list.length === 2 && list[0].side === list[1].side && !errors.includes("substituent.sameSide")) {
+    if (
+      list.length === 2 &&
+      list[0].side === list[1].side &&
+      !errors.includes("substituent.sameSide")
+    ) {
       errors.push("substituent.sameSide")
     }
   }
@@ -319,10 +335,16 @@ function buildElements(spec: ProjectionSpec): DrawingElement[] {
     let to = next.pt
     // Shorten edges at the ring oxygen so the "O" label stays readable.
     if (current.isOxygen) {
-      from = { x: current.pt.x + (next.pt.x - current.pt.x) * 0.2, y: current.pt.y + (next.pt.y - current.pt.y) * 0.2 }
+      from = {
+        x: current.pt.x + (next.pt.x - current.pt.x) * 0.2,
+        y: current.pt.y + (next.pt.y - current.pt.y) * 0.2,
+      }
     }
     if (next.isOxygen) {
-      to = { x: next.pt.x + (current.pt.x - next.pt.x) * 0.2, y: next.pt.y + (current.pt.y - next.pt.y) * 0.2 }
+      to = {
+        x: next.pt.x + (current.pt.x - next.pt.x) * 0.2,
+        y: next.pt.y + (current.pt.y - next.pt.y) * 0.2,
+      }
     }
     const bold =
       Math.abs(current.pt.y - maxY) < 0.01 &&
@@ -354,27 +376,27 @@ function buildElements(spec: ProjectionSpec): DrawingElement[] {
     }
   }
 
-// Strictly vertical substituent bonds; upward bonds are slightly shortened
-// so their labels never reach into the ring interior.
-const UP_BOND_FACTOR = 0.9
+  // Strictly vertical substituent bonds; upward bonds are slightly shortened
+  // so their labels never reach into the ring interior.
+  const UP_BOND_FACTOR = 0.9
 
-/**
- * OH label direction convention: an OH on the LEFT half of the ring reads
- * "HO" anchored LEFT of its bond — the classic skeletal-formula idiom (so
- * hexose C4, being a left-half carbon, always gets "HO"), which also pulls
- * the label out of crowded ring areas. Right-half OHs keep a centred "OH".
- */
-interface LabelPlacement {
-  text: string
-  anchor: "start" | "middle" | "end"
-}
-
-function ohPlacement(group: string, anchorX: number, ringCentroidX: number): LabelPlacement {
-  if (group === "OH" && anchorX < ringCentroidX) {
-    return { text: "HO", anchor: "end" }
+  /**
+   * OH label direction convention: an OH on the LEFT half of the ring reads
+   * "HO" anchored LEFT of its bond — the classic skeletal-formula idiom (so
+   * hexose C4, being a left-half carbon, always gets "HO"), which also pulls
+   * the label out of crowded ring areas. Right-half OHs keep a centred "OH".
+   */
+  interface LabelPlacement {
+    text: string
+    anchor: "start" | "middle" | "end"
   }
-  return { text: group, anchor: "middle" }
-}
+
+  function ohPlacement(group: string, anchorX: number, ringCentroidX: number): LabelPlacement {
+    if (group === "OH" && anchorX < ringCentroidX) {
+      return { text: "HO", anchor: "end" }
+    }
+    return { text: group, anchor: "middle" }
+  }
 
   const ringCentroid = {
     x: vertices.reduce((sum, vertex) => sum + vertex.pt.x, 0) / vertices.length,
@@ -436,8 +458,24 @@ function rotate(elements: DrawingElement[], box: Box, degrees: number): DrawingE
   }
   return elements.map((element) =>
     element.kind === "line"
-      ? { ...element, ...{ x1: turn({ x: element.x1, y: element.y1 }).x, y1: turn({ x: element.x1, y: element.y1 }).y }, ...{ x2: turn({ x: element.x2, y: element.y2 }).x, y2: turn({ x: element.x2, y: element.y2 }).y } }
-      : { ...element, ...{ x: turn({ x: element.x, y: element.y }).x, y: turn({ x: element.x, y: element.y }).y } },
+      ? {
+          ...element,
+          ...{
+            x1: turn({ x: element.x1, y: element.y1 }).x,
+            y1: turn({ x: element.x1, y: element.y1 }).y,
+          },
+          ...{
+            x2: turn({ x: element.x2, y: element.y2 }).x,
+            y2: turn({ x: element.x2, y: element.y2 }).y,
+          },
+        }
+      : {
+          ...element,
+          ...{
+            x: turn({ x: element.x, y: element.y }).x,
+            y: turn({ x: element.x, y: element.y }).y,
+          },
+        },
   )
 }
 

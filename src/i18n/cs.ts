@@ -81,6 +81,7 @@ export const cs = {
     testy: "Testy",
     databaze: "Databáze",
     biomolekuly: "Biomolekuly",
+    peptidovka: "Peptidovka",
     projections: "Projekce",
     formulas: "Vzorce",
     bulkImport: "Hromadný import",
@@ -183,6 +184,9 @@ export const cs = {
 
     leaderboardApprenticeTitle: "Nejlepší série – Učeň",
     leaderboardMasterTitle: "Nejlepší série – Mistr",
+    leaderboardPeptidovkaUcenTitle: "Peptidovka – Učeň",
+    leaderboardPeptidovkaMistrTitle: "Peptidovka – Mistr",
+    leaderboardPeptidovkaDescription: "Nejdelší série správně určených peptidů v řadě.",
     leaderboardStreakDescription: "Nejdelší série správných odpovědí v řadě, bez chyby.",
     leaderboardStreakCount: "Nejlepší série",
     leaderboardStreakTime: "Celkový čas",
@@ -310,6 +314,72 @@ export const cs = {
     resultsTryAgain: "Zkusit znovu",
     resultsBackToModes: "Zpět na výběr režimu",
     noResults: "Žádné výsledky k zobrazení.",
+  },
+
+  // Peptidovka: the peptide-reading game. One generated peptide structure
+  // per round, answered as one-letter codes from the N-terminus; the run
+  // ends on the first mistake or when the round timer runs out. Mode titles
+  // are the shared `cs.test` ones, same convention as the streaks above.
+  peptidovka: {
+    title: "Peptidovka",
+    modePickDescription:
+      "Poznávejte složení peptidů z jejich strukturních vzorců. Vyberte režim hry.",
+    modeUcenDescription:
+      "Peptid má barevné atomy a vždy čte zleva od N-konce. Série končí první chybou nebo vypršením času.",
+    modeMistrDescription:
+      "Peptid je jednobarevný a natočený náhodným směrem. Série končí první chybou nebo vypršením času.",
+    backToModes: "Zpět na výběr režimu",
+    runTitle: {
+      ucen: "Peptidovka – Učeň",
+      mistr: "Peptidovka – Mistr",
+    },
+    pointsSoFar: "Body zatím: {points}",
+    roundLabel: "Peptid {index} · {count}",
+    aminoAcidCount: {
+      one: "{count} aminokyselina",
+      few: "{count} aminokyseliny",
+      many: "{count} aminokyselin",
+    },
+    structureLabel: "Struktura peptidu k rozpoznání",
+    answerLabel: "Složení peptidu",
+    answerPlaceholder: "např. MKY",
+    answerHint: "Pište jednopísmenné kódy v pořadí od N-konce k C-konci.",
+    checkAnswer: "Zkontrolovat",
+    failedWrong: "Špatně. Série skončila.",
+    failedTimeout: "Čas vypršel. Série skončila.",
+    failedInterrupted: "Série byla přerušena — další peptid se nepodařilo nalosovat.",
+    correctAnswerLabel: "Správné složení",
+    resultsPoints: "Získané body",
+    resultsPeptides: "Dokončené peptidy",
+    resultsTime: "Celkový čas",
+    playAgain: "Hrát znovu",
+    emptyTitle: "Peptidovku teď nelze spustit",
+    emptyDescription:
+      "Ve hře musí být alespoň dvě aminokyseliny s jednopísmenným kódem. Počkejte, až je vyučující vybere v nastavení.",
+    loadError: "Hru se nepodařilo načíst. Zkuste to prosím znovu.",
+
+    // Teacher settings (`/biomolekuly/peptidovka` under the teacher shell) —
+    // one save per mode, bounds mirrored from the server, which stays the
+    // authority.
+    settingsDescription:
+      "Délka peptidů, časový limit a aminokyseliny ve hře — pro každý režim zvlášť.",
+    minLenLabel: "Minimální délka",
+    maxLenLabel: "Maximální délka",
+    secondsPerAaLabel: "Sekund na aminokyselinu",
+    poolLabel: "Aminokyseliny ve hře",
+    poolSelected: "Vybráno {selected} z {total}",
+    saveSettings: "Uložit nastavení",
+    savingSettings: "Ukládám...",
+    settingsSaved: "Nastavení bylo uloženo.",
+    settingsSaveError: "Nastavení se nepodařilo uložit",
+    settingsLoadError: "Nastavení se nepodařilo načíst",
+    invalidLength: "Délka musí být 2–20 a maximum nesmí být menší než minimum.",
+    invalidSeconds: "Čas na aminokyselinu musí být 3–120 sekund.",
+    invalidPool: "Vyberte alespoň dvě aminokyseliny.",
+    poolEmptyTitle: "Žádné hratelné aminokyseliny",
+    poolEmptyDescription:
+      "V kategorii Aminokyseliny zatím nejsou alespoň dvě molekuly s jednopísmenným kódem. Doplňte je tam.",
+    poolEmptyAction: "Otevřít aminokyseliny",
   },
 
   // Question reports (teacher inbox)
@@ -455,6 +525,27 @@ export const cs = {
 
   // Biomolekuly page
   biomolekuly: {
+    history: {
+      title: "Historie",
+      description: "Poslední změny v knihovně biomolekul — kdo co změnil a kdy.",
+      pageTitle: "Poslední akce",
+      pageDescription: "Všechny akce učitelů nad obsahem modulu.",
+      loadError: "Historii se nepodařilo načíst",
+      clearAction: "Vymazat historii",
+      clearConfirm: "Opravdu vymazat celou historii? Tuto akci nelze vrátit zpět.",
+      cleared: "Historie byla vymazána.",
+      clearError: "Historii se nepodařilo vymazat",
+      empty: "Zatím tu není žádná akce k zobrazení.",
+      whoColumn: "Kdo",
+      whenColumn: "Kdy",
+      actionColumn: "Akce",
+      detailColumn: "Detail",
+      actionCreated: "Přidáno",
+      actionUpdated: "Upraveno",
+      actionDeleted: "Odstraněno",
+      actionReordered: "Pořadí pozměněno",
+      actionSettings: "Nastavení upraveno",
+    },
     title: "Biomolekuly",
     pageDescription: "Struktury, názvy a zkratky biomolekul.",
     essentialBadge: "Esenciální",
@@ -548,12 +639,12 @@ export const cs = {
       modeEasyHint: "Výběr ze 4 možností",
       modeHardHint: "Otevřené odpovědi — odpověď napíšete",
       types: {
-        nameToLetter: "Název → zkratka",
-        letterToName: "Zkratka → název",
-        nameToStructure: "Název → struktura",
-        structureToName: "Struktura → název",
-        letterToStructure: "Zkratka → struktura",
-        structureToLetter: "Struktura → zkratka",
+        nameToLetter: "Název → Zkratka",
+        letterToName: "Zkratka → Název",
+        nameToStructure: "Název → Struktura",
+        structureToName: "Struktura → Název",
+        letterToStructure: "Zkratka → Struktura",
+        structureToLetter: "Struktura → Zkratka",
         characteristic: "Vlastnosti",
       },
       characteristicPrompts: {
@@ -570,12 +661,10 @@ export const cs = {
         "charge:positive": "Která z těchto molekul je při pH 7 kladně nabitá?",
         "charge:neutral": "Která z těchto molekul je při pH 7 bez náboje?",
         "charge:negative": "Která z těchto molekul je při pH 7 záporně nabitá?",
-        "anomer:alpha": "Která z těchto molekul je α-anomer?",
-        "anomer:beta": "Která z těchto molekul je β-anomer?",
-        "ringForm:pyranose": "Která z těchto molekul je pyranóza?",
-        "ringForm:furanose": "Která z těchto molekul je furanóza?",
         "deoxy:true": "Která z těchto molekul je deoxysacharid?",
       } as Record<string, string>,
+      instructionLetter: "Odpovězte jednopísmennou zkratkou (např. A, G, Y).",
+      instructionName: "Odpovězte názvem (např. Alanin).",
       noTypesHint: "Vyberte alespoň jeden typ otázky.",
       noHardTypesHint: "Tato kategorie nemá žádné typy otázek pro těžkou obtížnost.",
       start: "Začít procvičovat",
@@ -663,6 +752,8 @@ export const cs = {
       occurrenceLabel: "Výskyt",
       factsLabel: "Zajímavosti",
       factsPlaceholder: "Jedna zajímavost na řádek (nepovinné)",
+      scriptHint:
+        "Dolní/horní indexy: _{…} resp. ^{…} (FADH_{2}, SO_{4}^{2-}). Bez složených závorek zůstane text obyčejný — např. Vitamin B12.",
       essentialLabel: "Esenciální",
       sulfurLabel: "Obsahuje síru",
       dnaLabel: "DNA",
@@ -671,6 +762,8 @@ export const cs = {
       haworthHint: "Detekovat sacharidy a kreslit je Haworthovou projekcí.",
       haworthDisabledProjectionHint:
         "Haworthova projekce je pro tuto molekulu vypnutá; uložená projekce zůstává zachována.",
+      fischerLabel: "Fischerova projekce",
+      fischerHint: "Detekovat otevřené řetězce sacharidů a kreslit je Fischerovou projekcí.",
       unsetOption: "Neuvedeno",
       requiredHint: "Název a struktura jsou povinné, vše ostatní je nepovinné.",
       saveMolecule: "Uložit molekulu",
@@ -695,6 +788,7 @@ export const cs = {
       reorderCategories: "Pořadí kategorií",
       reorderMolecules: "Pořadí molekul",
       reorderDescription: "Posuňte položky šipkami a pořadí uložte.",
+      sortAlphabetically: "Seřadit A–Z",
       moveUp: "Posunout nahoru",
       moveDown: "Posunout dolů",
       saveOrder: "Uložit pořadí",
@@ -748,17 +842,18 @@ export const cs = {
     },
     projection: {
       title: "Haworthovy projekce",
-      description: "Ověřte, jak aplikace nakládá s vašimi SMILES řetězci u cyklických sacharidů.",
+      description: "Ověřte, jak aplikace nakládá s vašimi SMILES řetězci u sacharidů.",
       cardTitle: "Náhled SMILES",
       cardDescription:
-        "Vložte SMILES molekuly. Rozpoznáme-li v ní sacharidový prstenec, přepneme její zobrazení do Haworthovy projekce.",
+        "Vložte SMILES molekuly. Sacharidový prstenec vykreslíme Haworthovou projekcí, otevřený řetězec Fischerovou.",
       smilesLabel: "SMILES molekuly",
       smilesPlaceholder: "např. OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O",
       verdictRecognized: "Rozpoznáno jako sacharid:",
-      verdictNone: "Sacharidový prstenec nerozpoznán — zobrazí se pouze skelet.",
+      verdictNone: "Sacharid nerozpoznán — zobrazí se pouze skelet.",
       verdictInvalid: "SMILES se nepodařilo přečíst.",
       ringPyranose: "pyranózový prstenec",
       ringFuranose: "furanózový prstenec",
+      chainOpen: "otevřený řetězec (Fischer)",
       howItWorksTitle: "Jak rozpoznání funguje",
       howItWorksP1:
         "Cyklus o 5–6 atomech s jedním kyslíkem v kruhu (pyranóza / furanóza) se sestrojí jako Haworthova projekce, když všechny jeho substituované atomy mají v záznamu stereochemické značky (@ / @@), ze kterých lze odvodit strany vazeb.",
@@ -766,9 +861,11 @@ export const cs = {
         "Chybí-li stereochemie (nebo cyklus není cukr), zůstává běžné skeletové zobrazení — nástroj nikdy neodhadne strany vazeb, raději nic nesestrojí.",
       howItWorksP3:
         "U disacharidů se přes glykosidický kyslík navzájem polohují obě cukrové jednotky; nerozpoznaný cyklus zůstává skeletový.",
+      howItWorksP4:
+        "Otevřený řetězec sacharidu (aldehyd nebo keton na konci, řada −CH(OH)− center, konec −CH2OH) se vykreslí Fischerovou projekcí: hlavní řetězec svisle s karbonylem co nejvýše a hydroxyl skupiny vlevo/vpravo podle stereochemie.",
       examplesTitle: "Příklady",
       examplesDescription: "Kliknutím na příklad vložíte jeho SMILES do vstupu výše.",
-      examplesRecognizedTitle: "Rozpoznáno (Haworth)",
+      examplesRecognizedTitle: "Rozpoznáno (Haworth / Fischer)",
       examplesSkeletalTitle: "Nerozpoznáno (skeletové)",
     },
   },
