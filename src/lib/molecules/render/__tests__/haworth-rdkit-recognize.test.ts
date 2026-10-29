@@ -705,6 +705,13 @@ describe("nucleotide placement", () => {
   // Second, differently-traversed kekulé write-up of 5'-GMP (guanine form of
   // the AMP_KEKULE sugar fragment keeps the natural β-D-ribose config).
   const GMP_KEKULE = "NC1=NC2=C(N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O)C(=O)N1"
+  // Pyrimidine nucleosides (β-D-ribose, kekulé forms): the regression cases
+  // for the trigonal base rule.
+  const CYTIDINE = "O=C1N=C(N)C=CN1[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
+  const URIDINE = "C1=CN(C(=O)NC1=O)[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
+  // Same uridine written from the other ring carbonyl — a different traversal
+  // the canonical parity rule must neutralize.
+  const URIDINE_REVERSED = "O=C1C=CN(C(=O)N1)[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
 
   interface NucleotideCase {
     pipeline: HaworthLayoutResult
@@ -808,6 +815,9 @@ describe("nucleotide placement", () => {
     ["FADH2 (adenine)", PUBCHEM_FADH2],
     ["acetyl-CoA", PUBCHEM_ACETYL_COA],
     ["cAMP", PUBCHEM_CAMP],
+    ["cytidine", CYTIDINE],
+    ["uridine", URIDINE],
+    ["uridine (reversed traversal)", URIDINE_REVERSED],
   ] as const
 
   it("places every glycosidic nucleobase to the right of the sugar ring", () => {
@@ -817,8 +827,11 @@ describe("nucleotide placement", () => {
       const dxs = [...analysis.glycosidicBase].map((id) => analysis.rel(id).dx)
       const center = dxs.reduce((sum, value) => sum + value, 0) / dxs.length
       expect(center, `${label}: base center right of the ring`).toBeGreaterThanOrEqual(0.5)
-      expect(Math.min(...dxs), `${label}: no base atom leans left of the ring`).toBeGreaterThan(
-        -0.1,
+      // Upright trigonal pose: the purine six-ring towers over the sugar
+      // (anti, textbook pose), so a far six-ring atom may reach ~0.75 bond
+      // left of the ring centroid — but never across the whole ring.
+      expect(Math.min(...dxs), `${label}: base does not cross left past the ring`).toBeGreaterThan(
+        -1.0,
       )
     }
   })
@@ -970,115 +983,195 @@ describe("nucleotide placement", () => {
     }
   })
 
-  // The textbook pose: the purine long axis is tilted to −30°, so its fused
-  // ring system reads essentially horizontal. Mirrored engine variants must
-  // be FLIPPED back — never free-rotated to an odd tilt. Proof: every
-  // purine's atom coordinates in its own glyco-N/axis frame are identical
-  // across all sources of adenine AND of guanine (same fused skeleton).
-  it("renders every purine nucleobase in the same canonical pose (flip, not tilt)", () => {
-    interface BasePose {
-      axisDeg: number
-      frame: { along: number; perp: number }[]
+  // The textbook N-glycosidic pose is TRIGONAL at the glycosidic nitrogen:
+  // its two ring bonds sit at ±120° around the N–C1′ bond, so the base's
+  // ring-bond bisector lies exactly on the bond line, pointing away from the
+  // sugar. Heading therefore depends only on the bond direction, never on
+  // the engine's initial layout; mirrored engine variants are flipped back
+  // across the bond line (canonical parity: the ring neighbour stepping
+  // directly into a ring nitrogen — purine C8 / pyrimidine C2 — on the −
+  // side for five-ring glyco N purines, on the + side for six-ring glyco N
+  // pyrimidines). Proof: collinearity for every write-up and identical
+  // bond-frame coordinates per base skeleton.
+  const N_GLYCO_CASES = [
+    ["ATP", PUBCHEM_ATP],
+    ["AMP (PubChem)", PUBCHEM_AMP],
+    ["AMP (kekulé)", AMP_KEKULE],
+    ["GMP (PubChem)", PUBCHEM_GMP],
+    ["GMP (kekulé)", GMP_KEKULE],
+    ["FADH2 (adenine)", PUBCHEM_FADH2],
+    ["acetyl-CoA (adenine)", PUBCHEM_ACETYL_COA],
+    ["cAMP", PUBCHEM_CAMP],
+    ["cytidine", CYTIDINE],
+    ["uridine", URIDINE],
+    ["uridine (reversed traversal)", URIDINE_REVERSED],
+  ] as const
+
+  const degDiff = (a: number, b: number) => Math.abs(((((a - b) % 360) + 540) % 360) - 180)
+
+  /** Bond-axis frame: glyco N position + unit direction away from the sugar. */
+  function bondFrame(
+    analysis: NucleotideCase,
+    label: string,
+  ): { nPos: { x: number; y: number }; unit: { x: number; y: number } } {
+    if (analysis.glycoRoot === undefined) {
+      throw new Error(`${label}: glycoRoot missing`)
     }
-    const poseOf = (label: string, smiles: string): BasePose => {
-      const analysis = analyzeNucleotide(smiles, label)
-      if (analysis.glycoRoot === undefined) {
-        throw new Error(`${label}: glycoRoot missing`)
-      }
-      const nPos = analysis.pipeline.positions.get(analysis.glycoRoot)
-      if (nPos === undefined) {
-        throw new Error(`${label}: glycoRoot position missing`)
-      }
-      let far = analysis.glycoRoot
-      let farDist = -1
-      for (const id of analysis.glycosidicBase) {
+    const anchorId = analysis.plan.cycle[0]
+    const nPos = analysis.pipeline.positions.get(analysis.glycoRoot)
+    const aPos = anchorId === undefined ? undefined : analysis.pipeline.positions.get(anchorId)
+    if (nPos === undefined || aPos === undefined) {
+      throw new Error(`${label}: bond endpoints missing`)
+    }
+    const dx = nPos.x - aPos.x
+    const dy = nPos.y - aPos.y
+    const length = Math.hypot(dx, dy)
+    return { nPos, unit: { x: dx / length, y: dy / length } }
+  }
+
+  /** Glycosidic-base atoms in bond-frame coordinates, sorted for comparison. */
+  function baseFrameOf(analysis: NucleotideCase, label: string): { along: number; perp: number }[] {
+    const { nPos, unit } = bondFrame(analysis, label)
+    return [...analysis.glycosidicBase]
+      .map((id) => {
         const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
-        const dist = Math.hypot(point.x - nPos.x, point.y - nPos.y)
-        if (dist > farDist) {
-          farDist = dist
-          far = id
+        const vx = point.x - nPos.x
+        const vy = point.y - nPos.y
+        return {
+          along: (vx * unit.x + vy * unit.y) / BOND,
+          perp: (unit.x * vy - unit.y * vx) / BOND,
         }
+      })
+      .sort((a, b) => a.along - b.along || a.perp - b.perp)
+  }
+
+  it("stands every N-glycosidic base on its bond (trigonal 120°), canonical parity", () => {
+    for (const [label, smiles] of N_GLYCO_CASES) {
+      const analysis = analyzeNucleotide(smiles, label)
+      const { nPos, unit } = bondFrame(analysis, label)
+      const ringNeighbours = (
+        analysis.pipeline.snapshot.adjacency.get(analysis.glycoRoot ?? -1) ?? []
+      ).filter(
+        (id) =>
+          id !== analysis.plan.cycle[0] &&
+          analysis.pipeline.snapshot.atoms.get(id)?.element !== "H",
+      )
+      expect(ringNeighbours.length, `${label}: two ring bonds at the glyco N`).toBe(2)
+      const unitFromN = (id: number | undefined): { x: number; y: number } => {
+        const point = id === undefined ? undefined : analysis.pipeline.positions.get(id)
+        const dx = (point?.x ?? nPos.x) - nPos.x
+        const dy = (point?.y ?? nPos.y) - nPos.y
+        const length = Math.hypot(dx, dy) || 1
+        return { x: dx / length, y: dy / length }
       }
-      const farPos = analysis.pipeline.positions.get(far) ?? { x: 0, y: 0 }
-      const axis = Math.atan2(farPos.y - nPos.y, farPos.x - nPos.x)
-      const unit = { x: Math.cos(axis), y: Math.sin(axis) }
-      const frame = [...analysis.glycosidicBase]
-        .map((id) => {
-          const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
-          const vx = point.x - nPos.x
-          const vy = point.y - nPos.y
-          return {
-            along: (vx * unit.x + vy * unit.y) / BOND,
-            perp: (unit.x * vy - unit.y * vx) / BOND,
+      const first = unitFromN(ringNeighbours[0])
+      const second = unitFromN(ringNeighbours[1])
+      const bisectorDeg = (Math.atan2(first.y + second.y, first.x + second.x) * 180) / Math.PI
+      const bondDeg = (Math.atan2(unit.y, unit.x) * 180) / Math.PI
+      expect(
+        degDiff(bisectorDeg, bondDeg),
+        `${label}: ring-bond bisector collinear with the C1′–N bond`,
+      ).toBeLessThan(2)
+
+      const marked = ringNeighbours.find((id) => {
+        const continuations = (analysis.pipeline.snapshot.adjacency.get(id) ?? []).filter(
+          (next) =>
+            next !== analysis.glycoRoot &&
+            analysis.pipeline.snapshot.atoms.get(next)?.element !== "H" &&
+            analysis.pipeline.snapshot.atoms.get(next)?.isAromatic === true,
+        )
+        return (
+          continuations.length === 1 &&
+          analysis.pipeline.snapshot.atoms.get(continuations[0] ?? -1)?.element === "N"
+        )
+      })
+      expect(marked, `${label}: marked ring neighbour (C8/C2) exists`).toBeDefined()
+      const markedPos = marked === undefined ? undefined : analysis.pipeline.positions.get(marked)
+      // Canonical side depends on the glyco ring size: purines (five-ring N)
+      // keep the marked C8 on the − side (fused six-ring right of the bond),
+      // pyrimidines (six-ring N) keep the marked C2 on the + side.
+      const glycoRingSize = analysis.pipeline.preprocessor.rings.find((ring) =>
+        ring.members.includes(analysis.glycoRoot ?? -1),
+      )?.members.length
+      const canonicalSide = glycoRingSize === 5 ? -1 : 1
+      if (markedPos !== undefined) {
+        expect(
+          (unit.x * (markedPos.y - nPos.y) - unit.y * (markedPos.x - nPos.x)) * canonicalSide,
+          `${label}: marked neighbour on the canonical side of the bond`,
+        ).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it("renders the same nucleobase in the same pose from every SMILES write-up", () => {
+    // Nearest-point matching: near-symmetric ring atoms (purine C4/C8) can
+    // tie within a tenth of a pixel on the axis coordinate, so an
+    // index-by-index pairing after sorting mispairs mirrored atoms even when
+    // the poses are identical. Greedy nearest-match is stable and strict.
+    const expectSameFrame = (
+      frame: { along: number; perp: number }[],
+      reference: { along: number; perp: number }[],
+      label: string,
+    ) => {
+      expect(frame.length, `${label}: atom count matches reference`).toBe(reference.length)
+      const matched = new Set<number>()
+      for (const atom of frame) {
+        let best = -1
+        let bestDistance = Number.POSITIVE_INFINITY
+        reference.forEach((candidate, index) => {
+          if (matched.has(index)) {
+            return
+          }
+          const distance = Math.hypot(atom.along - candidate.along, atom.perp - candidate.perp)
+          if (distance < bestDistance) {
+            bestDistance = distance
+            best = index
           }
         })
-        .sort((a, b) => a.along - b.along || a.perp - b.perp)
-      return { axisDeg: (axis * 180) / Math.PI, frame }
+        expect(
+          best >= 0 && bestDistance < 0.05,
+          `${label}: atom matched within reference pose (${bestDistance.toFixed(3)} off)`,
+        ).toBe(true)
+        matched.add(best)
+      }
     }
 
-    const cases = [
+    // Adenine core: identical to the ATP frame in every adenosine derivative.
+    const adenineReference = baseFrameOf(analyzeNucleotide(PUBCHEM_ATP, "ATP"), "ATP")
+    expect(adenineReference.length).toBe(9)
+    const adenineCases = [
       ["AMP (PubChem)", PUBCHEM_AMP],
       ["AMP (kekulé)", AMP_KEKULE],
-      ["GMP (PubChem)", PUBCHEM_GMP],
-      ["GMP (kekulé)", GMP_KEKULE],
       ["FADH2 (adenine)", PUBCHEM_FADH2],
       ["acetyl-CoA (adenine)", PUBCHEM_ACETYL_COA],
       ["cAMP", PUBCHEM_CAMP],
     ] as const
-
-    // Axis snapped to the anomer-side heading that reads horizontal (−30°).
-    for (const [label, smiles] of cases) {
-      expect(Math.abs(poseOf(label, smiles).axisDeg - -30), `${label}: axis −30°`).toBeLessThan(3)
+    for (const [label, smiles] of adenineCases) {
+      expectSameFrame(baseFrameOf(analyzeNucleotide(smiles, label), label), adenineReference, label)
     }
 
-    // The purine's fused-ring axis (ring5 center → ring6 center) sits
-    // essentially horizontal — the visible "tilt slightly so they are
-    // horizontal" reading of the −30° snap.
-    for (const [label, smiles] of cases) {
-      const analysis = analyzeNucleotide(smiles, label)
-      const baseRings = analysis.pipeline.preprocessor.rings.filter(
-        (ring) =>
-          ring.members.length <= 6 && ring.members.every((id) => analysis.glycosidicBase.has(id)),
-      )
-      const five = baseRings.find((ring) => ring.members.length === 5)
-      const six = baseRings.find((ring) => ring.members.length === 6)
-      expect(five, `${label}: imidazole ring`).toBeDefined()
-      expect(six, `${label}: pyrimidine ring`).toBeDefined()
-      if (five === undefined || six === undefined) {
-        continue
-      }
-      const centerOf = (members: number[]) => ({
-        x:
-          members.reduce((sum, id) => sum + (analysis.pipeline.positions.get(id)?.x ?? 0), 0) /
-          members.length,
-        y:
-          members.reduce((sum, id) => sum + (analysis.pipeline.positions.get(id)?.y ?? 0), 0) /
-          members.length,
-      })
-      const fiveCenter = centerOf(five.members)
-      const sixCenter = centerOf(six.members)
-      const fusedDeg =
-        (Math.atan2(sixCenter.y - fiveCenter.y, sixCenter.x - fiveCenter.x) * 180) / Math.PI
-      const deviation = Math.min(Math.abs(fusedDeg), Math.abs(Math.abs(fusedDeg) - 180))
-      expect(deviation, `${label}: fused rings horizontal`).toBeLessThan(8)
-    }
+    // Guanine: two independent write-ups, one pose.
+    const guanineReference = baseFrameOf(analyzeNucleotide(PUBCHEM_GMP, "GMP (PubChem)"), "GMP")
+    expect(guanineReference.length).toBe(9)
+    expectSameFrame(
+      baseFrameOf(analyzeNucleotide(GMP_KEKULE, "GMP (kekulé)"), "GMP (kekulé)"),
+      guanineReference,
+      "GMP (kekulé)",
+    )
 
-    // Pose equality with the ATP reference: identical frame coordinates.
-    const reference = poseOf("ATP", PUBCHEM_ATP)
-    expect(reference.frame.length).toBe(9)
-    for (const [label, smiles] of cases) {
-      const pose = poseOf(label, smiles)
-      expect(pose.frame.length, `${label}: purine atom count`).toBe(9)
-      for (let index = 0; index < reference.frame.length; index += 1) {
-        expect(
-          Math.abs(pose.frame[index].along - reference.frame[index].along),
-          `${label}: atom ${index} along-axis vs ATP`,
-        ).toBeLessThan(0.05)
-        expect(
-          Math.abs(pose.frame[index].perp - reference.frame[index].perp),
-          `${label}: atom ${index} off-axis vs ATP (mirror parity)`,
-        ).toBeLessThan(0.05)
-      }
-    }
+    // Pyrimidines: the reversed traversal draws the same pose, and the
+    // six-member skeleton is shared across bases.
+    const uridineReference = baseFrameOf(analyzeNucleotide(URIDINE, "uridine"), "uridine")
+    expect(uridineReference.length).toBe(6)
+    expectSameFrame(
+      baseFrameOf(analyzeNucleotide(URIDINE_REVERSED, "uridine (reversed)"), "uridine (reversed)"),
+      uridineReference,
+      "uridine (reversed traversal)",
+    )
+    expectSameFrame(
+      baseFrameOf(analyzeNucleotide(CYTIDINE, "cytidine"), "cytidine"),
+      uridineReference,
+      "cytidine skeleton",
+    )
   })
 })

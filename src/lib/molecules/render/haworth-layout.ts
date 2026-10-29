@@ -312,62 +312,115 @@ function applyPlan(
         }
 
         // Nucleobase on the anomeric carbon (purines, pyrimidines, pseudo-
-        // bases): the generic chain tilt aims only the glycosidic bond; the
-        // rigid aromatic subtree behind it keeps the source layout's heading
-        // AND handedness, so the same base can draw tilted-odd or mirrored
-        // (AMP/GMP) next to a canonical one (ATP). Snap the base's long axis
-        // (glyco N → farthest aromatic-ring atom) to the canonical anomer-
-        // side heading, then FLIP the whole subtree across that axis when its
-        // aromatic centroid sits on the mirrored side — the textbook mirror,
-        // never an in-between tilt. Pivoting on the glycosidic N leaves the
-        // just-placed glycosidic bond untouched.
+        // bases): the N-glycosidic nitrogen is sp2 — its two ring bonds sit
+        // at ±120° around the N–C1′ bond, so the base's ring-bond bisector
+        // lies exactly on the bond line, pointing away from the sugar
+        // (trigonal rule; base-agnostic, unlike the former long-axis snap
+        // that misread the pyrimidine N1→C4 symmetry chord). The chain pass
+        // above fixes the bond; rotate the rigid aromatic subtree around the
+        // N until its bisector matches the bond heading, whatever the source
+        // layout handed in. Handedness is canonical: identify the ring
+        // neighbour that steps directly into a ring nitrogen — purine C8,
+        // pyrimidine C2. Pyrimidines (six-ring N) keep it on the + side of
+        // the bond axis (second ring N to the right); purines (five-ring N)
+        // keep it on the − side, so the fused six-ring swings right of the
+        // bond line instead of towering over the sugar. A base arriving on
+        // the wrong side is a mirrored engine variant, flipped back rigidly
+        // across the bond axis. Bases without such a marked neighbour
+        // (nicotinamide) keep the rotated parity. Pivoting on the glycosidic
+        // N leaves the just-placed glycosidic bond untouched.
         if (
           atom.vertexId === plan.cycle[0] &&
           atomInfo.value.element === "N" &&
           atomInfo.value.isPartOfAromaticRing === true
         ) {
-          const aromaticIds = subtree.filter(
-            (id) =>
-              preprocessor.graph.vertices.find((candidate) => candidate.id === id)?.value
+          const anchorPosition = positionOf(preprocessor, atom.vertexId)
+          const glycoNPosition = positionOf(preprocessor, substituentId)
+          const ringNeighbours = heavyNeighboursOf(
+            preprocessor,
+            substituentId,
+            atom.vertexId,
+          ).filter(
+            (neighbour) =>
+              preprocessor.graph.vertices.find((candidate) => candidate.id === neighbour)?.value
                 .isPartOfAromaticRing === true,
           )
-          const glycoNPosition = positionOf(preprocessor, substituentId)
-          if (glycoNPosition !== undefined && aromaticIds.length >= 4) {
-            let farthest = substituentId
-            let farthestDistance = -1
-            for (const id of aromaticIds) {
-              const point = positionOf(preprocessor, id)
-              if (point === undefined) {
-                continue
-              }
-              const distance = Math.hypot(point.x - glycoNPosition.x, point.y - glycoNPosition.y)
-              if (distance > farthestDistance) {
-                farthestDistance = distance
-                farthest = id
-              }
+          if (
+            anchorPosition !== undefined &&
+            glycoNPosition !== undefined &&
+            ringNeighbours.length === 2
+          ) {
+            const outward = {
+              x: glycoNPosition.x - anchorPosition.x,
+              y: glycoNPosition.y - anchorPosition.y,
             }
-            const farthestPosition = positionOf(preprocessor, farthest)
-            if (farthestPosition !== undefined) {
-              const targetHeading = group.direction * (Math.PI / 6)
-              const headingNow = Math.atan2(
-                farthestPosition.y - glycoNPosition.y,
-                farthestPosition.x - glycoNPosition.x,
+            const outwardLength = Math.hypot(outward.x, outward.y)
+            const unitFromN = (neighbour: number | undefined): Point | undefined => {
+              if (neighbour === undefined) {
+                return undefined
+              }
+              const point = positionOf(preprocessor, neighbour)
+              if (point === undefined) {
+                return undefined
+              }
+              const dx = point.x - glycoNPosition.x
+              const dy = point.y - glycoNPosition.y
+              const length = Math.hypot(dx, dy)
+              return length < 1e-9 ? undefined : { x: dx / length, y: dy / length }
+            }
+            const firstBond = unitFromN(ringNeighbours[0])
+            const secondBond = unitFromN(ringNeighbours[1])
+            const bisector =
+              firstBond !== undefined && secondBond !== undefined
+                ? { x: firstBond.x + secondBond.x, y: firstBond.y + secondBond.y }
+                : undefined
+            if (
+              outwardLength > 1e-6 &&
+              bisector !== undefined &&
+              Math.hypot(bisector.x, bisector.y) > 1e-6
+            ) {
+              rotatePositions(
+                preprocessor,
+                subtree,
+                glycoNPosition,
+                Math.atan2(outward.y, outward.x) - Math.atan2(bisector.y, bisector.x),
               )
-              rotatePositions(preprocessor, subtree, glycoNPosition, targetHeading - headingNow)
-              const aromaticCenter = centroid(
-                aromaticIds
-                  .map((id) => positionOf(preprocessor, id))
-                  .filter((point): point is Point => point !== undefined),
-              )
-              const axisUnit = { x: Math.cos(targetHeading), y: Math.sin(targetHeading) }
-              const curlSide =
-                axisUnit.x * (aromaticCenter.y - glycoNPosition.y) -
-                axisUnit.y * (aromaticCenter.x - glycoNPosition.x)
-              // Canonical pose (ATP reference): the ring system's curl sits on
-              // the anomeric direction's side; the opposite sign is a mirrored
-              // base, flipped back across the snapped axis.
-              if (curlSide * group.direction < 0) {
-                mirrorAcrossAxis(preprocessor, subtree, glycoNPosition, axisUnit)
+              // Canonical parity (textbook pose): the marked ring neighbour
+              // — purine C8 / pyrimidine C2, recognised by its lone ring
+              // continuation being a nitrogen — belongs on the ring-size
+              // side of the bond axis: five-ring glyco N (purines) on the −
+              // side, six-ring glyco N (pyrimidines) on the + side. Mirror a
+              // source-mirrored variant back across that axis.
+              const marked = ringNeighbours.find((neighbour) => {
+                const continuations = heavyNeighboursOf(
+                  preprocessor,
+                  neighbour,
+                  substituentId,
+                ).filter((id) => ringMembers.has(id))
+                return (
+                  continuations.length === 1 &&
+                  preprocessor.graph.vertices.find((candidate) => candidate.id === continuations[0])
+                    ?.value.element === "N"
+                )
+              })
+              const outwardUnit = {
+                x: outward.x / outwardLength,
+                y: outward.y / outwardLength,
+              }
+              const markedPosition =
+                marked !== undefined ? positionOf(preprocessor, marked) : undefined
+              // The glyco N's own ring size picks the canonical side.
+              const glycoRingMembers = preprocessor.rings.find((ring) =>
+                ring.members.includes(substituentId),
+              )?.members.length
+              const canonicalSide = glycoRingMembers === 5 ? -1 : 1
+              if (markedPosition !== undefined) {
+                const side =
+                  outwardUnit.x * (markedPosition.y - glycoNPosition.y) -
+                  outwardUnit.y * (markedPosition.x - glycoNPosition.x)
+                if (side * canonicalSide < 0) {
+                  mirrorAcrossAxis(preprocessor, subtree, glycoNPosition, outwardUnit)
+                }
               }
             }
           }
