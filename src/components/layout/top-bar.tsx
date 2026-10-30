@@ -52,7 +52,7 @@ const breadcrumbVariants = cva("text-sm hover:text-foreground transition-colors 
   variants: {
     variant: {
       first: "font-medium text-foreground",
-      normal: "font-mono text-[11px] uppercase tracking-wider text-muted-foreground",
+      normal: "text-muted-foreground",
       current: "font-medium text-foreground cursor-default",
     },
   },

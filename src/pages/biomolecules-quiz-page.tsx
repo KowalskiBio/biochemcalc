@@ -127,6 +127,15 @@ function answerInstruction(type: QuizQuestionType): string {
     : quizStrings.instructionName
 }
 
+/**
+ * The question's task ("Struktura → Název") above the prompt. Full-size and
+ * in its own casing, so the student can tell at a glance whether to answer
+ * with the name or the abbreviation, which matters most when typing.
+ */
+function TaskLabel({ children }: { children: string }) {
+  return <div className="text-base font-semibold text-foreground">{children}</div>
+}
+
 function MicroLabel({ children }: { children: string }) {
   return (
     <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -353,38 +362,39 @@ function SetupScreen({
         </h1>
       </div>
 
-      {/* Topic */}
-      <div className="space-y-2">
-        <MicroLabel>{quizStrings.topicPickerLabel}</MicroLabel>
-        <Select value={selectedTopic} onValueChange={onSelectTopic}>
-          <SelectTrigger aria-label={quizStrings.topicPickerLabel} className="sm:w-80">
-            <SelectValue placeholder={quizStrings.topicPickerLabel} />
-          </SelectTrigger>
-          <SelectContent>
-            {topicOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Topic and category side by side; they stack on a phone */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="min-w-0 space-y-2">
+          <MicroLabel>{quizStrings.topicPickerLabel}</MicroLabel>
+          <Select value={selectedTopic} onValueChange={onSelectTopic}>
+            <SelectTrigger aria-label={quizStrings.topicPickerLabel}>
+              <SelectValue placeholder={quizStrings.topicPickerLabel} />
+            </SelectTrigger>
+            <SelectContent>
+              {topicOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-      {/* Category */}
-      <div className="space-y-2">
-        <MicroLabel>{quizStrings.categoryLabel}</MicroLabel>
-        <Select value={selectedCategory ?? ""} onValueChange={onSelectCategory}>
-          <SelectTrigger aria-label={quizStrings.categoryLabel} className="sm:w-80">
-            <SelectValue placeholder={quizStrings.categoryPlaceholder} />
-          </SelectTrigger>
-          <SelectContent>
-            {categoryOptions.map((option) => (
-              <SelectItem key={option.slug} value={option.slug}>
-                <RichText text={option.name} />
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="min-w-0 space-y-2">
+          <MicroLabel>{quizStrings.categoryLabel}</MicroLabel>
+          <Select value={selectedCategory ?? ""} onValueChange={onSelectCategory}>
+            <SelectTrigger aria-label={quizStrings.categoryLabel}>
+              <SelectValue placeholder={quizStrings.categoryPlaceholder} />
+            </SelectTrigger>
+            <SelectContent>
+              {categoryOptions.map((option) => (
+                <SelectItem key={option.slug} value={option.slug}>
+                  <RichText text={option.name} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Difficulty */}
@@ -556,7 +566,7 @@ function QuestionScreen({
         >
           <Flag className="size-4" />
         </Button>
-        <MicroLabel>{quizStrings.types[question.type]}</MicroLabel>
+        <TaskLabel>{quizStrings.types[question.type]}</TaskLabel>
         <PromptView prompt={question.prompt} />
       </div>
 

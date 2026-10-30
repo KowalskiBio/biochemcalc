@@ -102,12 +102,13 @@ function BackLink({ href, label }: { href: string; label: string }) {
   )
 }
 
-function MicroLabel({ children }: { children: string }) {
-  return (
-    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-      {children}
-    </div>
-  )
+/**
+ * The question's task ("Struktura → Název") above the prompt. Full-size and
+ * in its own casing, so the student can tell at a glance whether to answer
+ * with the name or the abbreviation, which matters most when typing.
+ */
+function TaskLabel({ children }: { children: string }) {
+  return <div className="text-base font-semibold text-foreground">{children}</div>
 }
 
 /** What the typed answer should look like — shared wording with procvičování. */
@@ -609,7 +610,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
         >
           <Flag className="size-4" />
         </Button>
-        <MicroLabel>{quizStrings.types[question.type]}</MicroLabel>
+        <TaskLabel>{quizStrings.types[question.type]}</TaskLabel>
         <PromptView prompt={question.prompt} monochrome={master} />
       </div>
 
