@@ -100,19 +100,32 @@ function detectSugarLinks(
 }
 
 /**
- * A pyrophosphate-bridged dinucleotide (NAD+ family): two ribose rings whose
- * 5′-tails join through a C–O–P–O–P–O–C path instead of a single-atom
- * glycosidic bridge. `planA` keeps the canonical orientation; `planB` is
- * drawn x-mirrored to its left — the textbook linear NAD+ layout
- * ([base B][ribose]–P–O–P–[ribose][base A]).
+ * A pyrophosphate-bridged dinucleotide: two sugar rings whose 5′-chains join
+ * through a C–O–P–O–P–O– path instead of a single-atom glycosidic bridge.
+ * Two topologies share the strict O–P–O–P–O middle:
+ *
+ * - **NAD+ family**: the chain ends at a SECOND free 5′-carbon tail
+ *   (`anomericB: false`). `planA` keeps the canonical orientation (the ring
+ *   with the richer nucleobase), `planB` flips to its left — the straight
+ *   linear layout with a horizontal P–O–P line.
+ * - **UDP-sugar family**: the chain ends AT the anomeric carbon of the
+ *   partner ring (`anomericB: true`). The free-tail ribose keeps canonical
+ *   on the right; the phospho-sugar flips to the left and anchors through
+ *   its (α) anomeric arm — the bridge runs diagonally down-left.
  */
 interface DinucleotideLink {
   planA: number
   planB: number
   anchorA: number
   anchorB: number
-  /** Ordered `anchorA → anchorB` internal path (exclusive): C5′, O, P, O, P, O, C5′. */
+  /**
+   * Ordered `anchorA → anchorB` chain. NAD+ form: C5′, O, P, O, P, O, C5′
+   * (both tails). UDP form: C5′, O, P, O, P, O (middles; `anchorB` is the
+   * partner ring's anomeric carbon and closes the chain).
+   */
   path: number[]
+  /** True when `anchorB` is a ring atom of `planB` (UDP-sugar family). */
+  anomericB: boolean
 }
 
 /**
@@ -208,11 +221,21 @@ export function detectDinucleotideLinks(
         const path = [tailB]
         let previous = anchorB
         let current = heavyOf(tailB, anchorB)[0] ?? -1
-        let anchorA = -1
-        let planAIndex = -1
+        let tailAnchor = -1 // partner ring anchor of a SECOND free tail (NAD+ form)
+        let tailPlanIndex = -1
+        let ringAtom = -1 // partner ring atom the chain ends AT (UDP form)
+        let ringPlanIndex = -1
         for (;;) {
-          if (ringPlanOf.has(current)) {
-            break // entered some ring directly: disaccharide territory
+          const currentPlan = ringPlanOf.get(current)
+          if (currentPlan !== undefined) {
+            // Entered a ring directly: only a DIFFERENT sugar's ring atom is
+            // a UDP-style anomeric bridge endpoint; same-plan entries and
+            // disaccharide glycosidic ends abort.
+            if (currentPlan !== planBIndex && !excludedPlans.has(currentPlan)) {
+              ringAtom = current
+              ringPlanIndex = currentPlan
+            }
+            break
           }
           path.push(current)
           const element = vertexOf(current)?.value.element
@@ -223,8 +246,8 @@ export function detectDinucleotideLinks(
               return candidate !== undefined && candidate !== planBIndex
             })
             if (partner !== undefined && continuations.length === 1) {
-              anchorA = partner
-              planAIndex = ringPlanOf.get(partner) ?? -1
+              tailAnchor = partner
+              tailPlanIndex = ringPlanOf.get(partner) ?? -1
             }
             break
           }
@@ -240,32 +263,66 @@ export function detectDinucleotideLinks(
             break
           }
         }
-        if (planAIndex === -1 || claimedPlans.has(planAIndex) || excludedPlans.has(planAIndex)) {
-          continue
-        }
-        // Strict pyrophosphate shape: C–O–P–O–P–O–C across the anchors
-        // (path holds both terminal 5′-carbons; middles excludes them).
-        const middles = path.slice(1, -1)
+        // Strict pyrophosphate middle in both topologies: O–P–O–P–O. The
+        // free-tail form also holds a terminal 5′-carbon at path[-1]; the
+        // ring-end form's last middle O is the anomeric arm itself.
+        const middles = tailPlanIndex !== -1 ? path.slice(1, -1) : path.slice(1)
         const expected = ["O", "P", "O", "P", "O"]
-        if (
-          path.length !== 7 ||
-          middles.length !== 5 ||
-          middles.some((id, index) => vertexOf(id)?.value.element !== expected[index])
-        ) {
+        const strictMiddles =
+          middles.length === 5 &&
+          middles.every((id, index) => vertexOf(id)?.value.element === expected[index])
+        if (!strictMiddles) {
           continue
         }
-        const countA = nucleobaseNitrogenCount(preprocessor, plans[planAIndex] ?? plan)
-        const countB = nucleobaseNitrogenCount(preprocessor, plan)
-        const canonicalIsA = countA !== countB ? countA > countB : planAIndex < planBIndex
-        // Keep `path` ordered anchorA → anchorB: the walk collected atoms
-        // starting at planBIndex's tail, so an end-anchored canonical side
-        // needs the reversed sequence, a start-anchored one keeps it.
-        found = canonicalIsA
-          ? { planA: planAIndex, planB: planBIndex, anchorA, anchorB, path: [...path].reverse() }
-          : { planA: planBIndex, planB: planAIndex, anchorA: anchorB, anchorB: anchorA, path }
-        claimedPlans.add(planAIndex)
-        claimedPlans.add(planBIndex)
-        break
+        if (tailPlanIndex !== -1 && path.length === 7) {
+          if (claimedPlans.has(tailPlanIndex) || excludedPlans.has(tailPlanIndex)) {
+            continue
+          }
+          const countA = nucleobaseNitrogenCount(preprocessor, plans[tailPlanIndex] ?? plan)
+          const countB = nucleobaseNitrogenCount(preprocessor, plan)
+          const canonicalIsA = countA !== countB ? countA > countB : tailPlanIndex < planBIndex
+          // Keep `path` ordered anchorA → anchorB: the walk collected atoms
+          // starting at planBIndex's tail, so an end-anchored canonical side
+          // needs the reversed sequence, a start-anchored one keeps it.
+          found = canonicalIsA
+            ? {
+                planA: tailPlanIndex,
+                planB: planBIndex,
+                anchorA: tailAnchor,
+                anchorB,
+                path: [...path].reverse(),
+                anomericB: false,
+              }
+            : {
+                planA: planBIndex,
+                planB: tailPlanIndex,
+                anchorA: anchorB,
+                anchorB: tailAnchor,
+                path,
+                anomericB: false,
+              }
+          claimedPlans.add(tailPlanIndex)
+          claimedPlans.add(planBIndex)
+          break
+        }
+        if (ringPlanIndex !== -1 && path.length === 6) {
+          if (claimedPlans.has(ringPlanIndex)) {
+            continue
+          }
+          // UDP form: the free-tail ribose is the canonical planA (it owns
+          // the nucleobase), the ring-terminated partner flips left.
+          found = {
+            planA: planBIndex,
+            planB: ringPlanIndex,
+            anchorA: anchorB,
+            anchorB: ringAtom,
+            path,
+            anomericB: true,
+          }
+          claimedPlans.add(ringPlanIndex)
+          claimedPlans.add(planBIndex)
+          break
+        }
       }
     }
     if (found !== null) {
@@ -374,46 +431,145 @@ function placeDinucleotidePair(
       place(preprocessor, id, target)
     }
   })
-  // Exocyclic P oxygens (P=O / P–O− or –OH): the chain is horizontal, so
-  // they point straight out of it — the double bond up, the single bond down.
-  const phosphateBondLength = preprocessor.opts?.bondLength ?? bondLength
-  const pathSet = new Set(link.path)
-  const edges = preprocessor.graph.edges ?? []
+  // Exocyclic P oxygens (P=O / P–O− or –OH): the double bond up, the single
+  // bond down.
   for (const middleIndex of [1, 3] as const) {
-    const phosphorus = middles[middleIndex]
-    const pPosition = positionOf(preprocessor, phosphorus ?? -1)
-    if (phosphorus === undefined || pPosition === undefined) {
-      continue
+    placeExoPhosphateOxygens(preprocessor, middles[middleIndex], link.path, bondLength)
+  }
+  return { positions, mirrored: false }
+}
+
+/**
+ * Exocyclic P oxygens of a pyrophosphate bridge: straight vertical out of
+ * the chain — the double-bonded oxygen (higher bond weight) up, the single
+ * down — with every oxygen's subtree dragged along rigidly.
+ */
+function placeExoPhosphateOxygens(
+  preprocessor: HaworthPreprocessor,
+  phosphorus: number | undefined,
+  blockedPath: readonly number[],
+  bondLength: number,
+): void {
+  const pPosition = positionOf(preprocessor, phosphorus ?? -1)
+  if (phosphorus === undefined || pPosition === undefined) {
+    return
+  }
+  const phosphateBondLength = preprocessor.opts?.bondLength ?? bondLength
+  const blocked = new Set(blockedPath)
+  const edges = preprocessor.graph.edges ?? []
+  const exoOxygens = heavyNeighboursOf(preprocessor, phosphorus)
+    .filter((id) => !blocked.has(id))
+    .sort((left, right) => {
+      const orderOf = (oxygen: number): number =>
+        edges.find(
+          (edge) =>
+            (edge.sourceId === phosphorus && edge.targetId === oxygen) ||
+            (edge.sourceId === oxygen && edge.targetId === phosphorus),
+        )?.weight ?? 1
+      return orderOf(right) - orderOf(left)
+    })
+  exoOxygens.forEach((oxygen, slot) => {
+    const target = {
+      x: pPosition.x,
+      y: pPosition.y + (slot === 0 ? -1 : 1) * phosphateBondLength,
     }
-    const exoOxygens = heavyNeighboursOf(preprocessor, phosphorus)
-      .filter((id) => !pathSet.has(id))
-      .sort((left, right) => {
-        const orderOf = (oxygen: number): number =>
-          edges.find(
-            (edge) =>
-              (edge.sourceId === phosphorus && edge.targetId === oxygen) ||
-              (edge.sourceId === oxygen && edge.targetId === phosphorus),
-          )?.weight ?? 1
-        return orderOf(right) - orderOf(left)
-      })
-    exoOxygens.forEach((oxygen, slot) => {
-      const target = {
-        x: pPosition.x,
-        y: pPosition.y + (slot === 0 ? -1 : 1) * phosphateBondLength,
-      }
-      const currentPosition = positionOf(preprocessor, oxygen)
-      if (currentPosition !== undefined) {
-        const shift = { x: target.x - currentPosition.x, y: target.y - currentPosition.y }
-        const dragged = collectSubtree(preprocessor, oxygen, new Set(pathSet))
-        for (const draggedId of dragged) {
-          const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === draggedId)
-          if (vertex !== undefined) {
-            vertex.position.x += shift.x
-            vertex.position.y += shift.y
-          }
+    const currentPosition = positionOf(preprocessor, oxygen)
+    if (currentPosition !== undefined) {
+      const shift = { x: target.x - currentPosition.x, y: target.y - currentPosition.y }
+      const dragged = collectSubtree(preprocessor, oxygen, new Set(blocked))
+      for (const draggedId of dragged) {
+        const vertex = preprocessor.graph.vertices.find((candidate) => candidate.id === draggedId)
+        if (vertex !== undefined) {
+          vertex.position.x += shift.x
+          vertex.position.y += shift.y
         }
       }
-    })
+    }
+  })
+}
+
+/**
+ * Place one UDP-sugar dinucleotide pair: the free-tail ribose (planA, the
+ * nucleobase carrier) keeps the canonical orientation on the right with its
+ * 5′-tail vertical; the phospho-sugar (planB) stays CANONICAL and anchors
+ * the chain through its (α) anomeric arm tilted down-right into the last
+ * oxygen like any ordinary chain first bond. From the tail the bridge
+ * leaves at −150°, then the O–P–O–P–O run goes strictly HORIZONTAL left —
+ * the last oxygen hooks up-left into the anomeric carbon, which sets the
+ * glucose ring ABOVE the ribose's level. No mirroring; the bridge line
+ * stays clear of both rings. Exocyclic P oxygens vertical (double bond up,
+ * single down). `null` leaves the plan for the generic fallback.
+ */
+function placeAnomericDinucleotidePair(
+  preprocessor: HaworthPreprocessor,
+  planB: SugarRingRecognition,
+  link: DinucleotideLink,
+  bondLength: number,
+): { positions: Map<number, Point>; mirrored: boolean } | null {
+  const anchorAPosition = positionOf(preprocessor, link.anchorA)
+  if (anchorAPosition === undefined) {
+    return null
+  }
+  const tailA = link.path[0]
+  const middles = link.path.slice(1)
+  if (tailA === undefined || middles.length !== 5) {
+    return null
+  }
+  const tailLength = bondLength * 0.9 // matches plain upward substituents (UP_BOND_FACTOR)
+  const c5a = { x: anchorAPosition.x, y: anchorAPosition.y - tailLength }
+  place(preprocessor, tailA, c5a)
+  // From the tail at −150° up-left, then the O–P–O–P–O run HORIZONTAL left;
+  // the anomeric oxygen hooks up-left into the anomeric carbon (the +72°
+  // tilted-α-arm reading), lifting the glucose ring above the ribose.
+  const outOfTail = { x: Math.cos((-5 * Math.PI) / 6), y: Math.sin((-5 * Math.PI) / 6) }
+  const intoAnomericArm = { x: Math.cos((-3 * Math.PI) / 5), y: Math.sin((-3 * Math.PI) / 5) }
+  const first = {
+    x: c5a.x + outOfTail.x * bondLength,
+    y: c5a.y + outOfTail.y * bondLength,
+  }
+  const middlePositions: Point[] = []
+  for (let index = 0; index < 5; index += 1) {
+    middlePositions.push({ x: first.x - index * bondLength, y: first.y })
+  }
+  const lastOxygen = middlePositions[4] ?? first
+  const anchorBTarget = {
+    x: lastOxygen.x + intoAnomericArm.x * bondLength,
+    y: lastOxygen.y + intoAnomericArm.y * bondLength,
+  }
+  const polygon = HAWORTH_POLYGON[planB.cycle.length as 5 | 6]
+  if (polygon === undefined) {
+    return null
+  }
+  const polygonCenter = centroid(polygon)
+  const role = planB.cycle.indexOf(link.anchorB)
+  const polygonAnchor = polygon[role]
+  if (role < 0 || polygonAnchor === undefined) {
+    return null
+  }
+  const offset = {
+    x: anchorBTarget.x - polygonAnchor.x * bondLength,
+    y: anchorBTarget.y - polygonAnchor.y * bondLength,
+  }
+  const positions = new Map<number, Point>()
+  planB.cycle.forEach((vertexId, index) => {
+    const local = polygon[index] ?? polygonCenter
+    const target = {
+      x: offset.x + local.x * bondLength,
+      y: offset.y + local.y * bondLength,
+    }
+    positions.set(vertexId, target)
+    place(preprocessor, vertexId, target)
+  })
+  middles.forEach((id, index) => {
+    const target = middlePositions[index]
+    if (target !== undefined) {
+      place(preprocessor, id, target)
+    }
+  })
+  // Exocyclic P oxygens (P=O / P–O− or –OH): the double bond up, the single
+  // bond down.
+  for (const middleIndex of [1, 3] as const) {
+    placeExoPhosphateOxygens(preprocessor, middles[middleIndex], link.path, bondLength)
   }
   return { positions, mirrored: false }
 }
@@ -1204,7 +1360,9 @@ export function applyHaworthLayout(preprocessor: HaworthPreprocessor): boolean {
       remember(placeCanonicalPlan(preprocessor, planA, bondLength))
       placed[link.planA] = true
     }
-    const pair = placeDinucleotidePair(preprocessor, planB, link, bondLength)
+    const pair = link.anomericB
+      ? placeAnomericDinucleotidePair(preprocessor, planB, link, bondLength)
+      : placeDinucleotidePair(preprocessor, planB, link, bondLength)
     if (pair !== null) {
       remember(pair.positions)
       mirrored[link.planB] = pair.mirrored

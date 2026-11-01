@@ -716,6 +716,10 @@ describe("nucleotide placement", () => {
   // between the 5′-oxygens. Kekulé adenine half copied from the FADH2 fixture.
   const NAD =
     "NC(=O)c1ccc[n+]([C@@H]2O[C@H](COP(=O)(O)OP(=O)(O)OC[C@@H]3[C@H]([C@H]([C@@H](O3)N4C=NC5=C(N=CN=C54)N)O)O)[C@@H](O)[C@H]2O)c1"
+  // UDP-glucose: uridine ribose joined by the same pyrophosphate to the
+  // ANOMERIC carbon of α-D-glucose (no free tail on the sugar end).
+  const UDP_GLUCOSE =
+    "O=c1ccn([C@@H]2O[C@H](COP(=O)(O)OP(=O)(O)O[C@H]3O[C@H](CO)[C@@H](O)[C@H](O)[C@H]3O)[C@@H](O)[C@H]2O)c(=O)[nH]1"
 
   interface NucleotideCase {
     pipeline: HaworthLayoutResult
@@ -1413,6 +1417,201 @@ describe("nucleotide placement", () => {
       const side =
         (dx / length) * (pos(amideId).y - glycoN.y) - (dy / length) * (pos(amideId).x - glycoN.x)
       expect(side, "NAD+: carboxamide on the canonical side of the bond").toBeGreaterThan(0)
+    }
+  })
+
+  // The UDP-sugar layout: same pyrophosphate bridge, but it ends AT the
+  // anomeric carbon of the phospho-sugar. The uridine ribose keeps the
+  // canonical orientation on the right with its 5′-tail vertical; the
+  // glucose stays CANONICAL too and connects through its α anomeric arm
+  // tilted down-right into the bridge's last oxygen. The bridge leaves the
+  // tail at −150°, then runs strictly HORIZONTAL left; hooking up-left into
+  // the anomeric vertex sets the glucose ring ABOVE the ribose's level.
+  it("lays out UDP-glucose: flipped phospho-sugar anchored through its anomeric arm", () => {
+    const pipeline = pipelineOf(UDP_GLUCOSE)
+    expect(pipeline.recognized, "UDP: sugar recognized").toBe(true)
+    expect(pipeline.plans.length, "UDP: ribose + glucose rings").toBe(2)
+
+    // Uridine ribose (has the base) vs glucose (no anomeric N substituent).
+    const hasBase = (plan: (typeof pipeline.plans)[number]) => {
+      const anomeric = plan.atoms.find((atom) => atom.vertexId === plan.cycle[0])
+      return [...(anomeric?.up ?? []), ...(anomeric?.down ?? [])].some((id) => {
+        const atom = pipeline.snapshot.atoms.get(id)
+        return atom !== undefined && atom.element === "N" && atom.isAromatic === true
+      })
+    }
+    const ribose = pipeline.plans.find((plan) => hasBase(plan))
+    const glucose = pipeline.plans.find((plan) => !hasBase(plan))
+    expect(ribose, "UDP: uridine ribose found").toBeDefined()
+    expect(glucose, "UDP: glucose found").toBeDefined()
+    if (ribose === undefined || glucose === undefined) {
+      return
+    }
+    const pos = (id: number) => pipeline.positions.get(id) ?? { x: 0, y: 0 }
+    const centroidOf = (ids: number[]) => ({
+      x: ids.reduce((sum, id) => sum + pos(id).x, 0) / ids.length,
+      y: ids.reduce((sum, id) => sum + pos(id).y, 0) / ids.length,
+    })
+
+    // The ribose C4′ carries the aliphatic 5′ tail; the glucose anomeric C1
+    // carries the phosphorylated O.
+    const riboseAnomeric = ribose.cycle[0] ?? -1
+    const adTail = ribose.cycle
+      .flatMap((ringAtom) =>
+        (pipeline.snapshot.adjacency.get(ringAtom) ?? []).map((id) => ({
+          anchor: ringAtom,
+          tail: id,
+          element: pipeline.snapshot.atoms.get(id)?.element,
+          aromatic: pipeline.snapshot.atoms.get(id)?.isAromatic === true,
+        })),
+      )
+      .find(
+        (entry) =>
+          entry.element === "C" && entry.aromatic !== true && !ribose.cycle.includes(entry.tail),
+      )
+    expect(adTail, "UDP: ribose 5′ tail found").toBeDefined()
+    if (adTail === undefined) {
+      return
+    }
+    const glucoseAnomeric = glucose.cycle[0] ?? -1
+
+    // Ring parity and layout: ribose canonical (4′ left of 1′), glucose
+    // canonical too (anomeric right of its ring centroid), sitting left
+    // BELOW the ribose tail level (the diagonal bridge).
+    expect(
+      pos(adTail.anchor).x - pos(riboseAnomeric).x,
+      "UDP: ribose canonical (4′ left of 1′)",
+    ).toBeLessThan(0)
+    expect(
+      pos(glucoseAnomeric).x - centroidOf(glucose.cycle).x,
+      "UDP: glucose canonical (anomeric right of the ring)",
+    ).toBeGreaterThan(0)
+    expect(pos(glucoseAnomeric).x, "UDP: glucose left of the ribose").toBeLessThan(
+      pos(riboseAnomeric).x,
+    )
+    expect(
+      Math.abs(pos(adTail.tail).x - pos(adTail.anchor).x),
+      "UDP: ribose 5′ tail vertical",
+    ).toBeLessThan(1)
+    expect(
+      pos(adTail.anchor).y - pos(adTail.tail).y,
+      "UDP: ribose 5′ tail rises up",
+    ).toBeGreaterThan(BOND * 0.8)
+
+    // Walk the bridge ribose tail → glucose: C–O–P–O–P–O straight into the
+    // anomeric carbon; monotonic leftward; the last arm bond leaves the
+    // anomeric O below the anomeric carbon (α).
+    const path = [adTail.tail]
+    let previous = adTail.anchor
+    let current =
+      (pipeline.snapshot.adjacency.get(adTail.tail) ?? []).find(
+        (id) => id !== adTail.anchor && pipeline.snapshot.atoms.get(id)?.element !== "H",
+      ) ?? -1
+    for (let step = 0; step < 6 && current !== -1; step += 1) {
+      path.push(current)
+      const onward = (pipeline.snapshot.adjacency.get(current) ?? [])
+        .filter((id) => id !== previous && pipeline.snapshot.atoms.get(id)?.element !== "H")
+        .map((id) => ({
+          id,
+          degree: (pipeline.snapshot.adjacency.get(id) ?? []).filter(
+            (next) => pipeline.snapshot.atoms.get(next)?.element !== "H",
+          ).length,
+        }))
+        .sort((left, right) => right.degree - left.degree)
+      previous = current
+      current = onward[0]?.id ?? -1
+    }
+    expect(path.length, "UDP: C–O–P–O–P–O–C(anomeric) bridge").toBe(7)
+    const armOxygen = path[5] ?? -1
+    const armCarbon = path[6] ?? -1
+    expect(armCarbon, "UDP: bridge ends at the glucose anomeric carbon").toBe(glucoseAnomeric)
+    for (let index = 1; index <= 5; index += 1) {
+      const before = pos(path[index - 1] ?? -1)
+      const after = pos(path[index] ?? -1)
+      expect(after.x - before.x, `UDP: bridge atom ${index} advances leftward`).toBeLessThan(-4)
+      const length = Math.hypot(after.x - before.x, after.y - before.y)
+      expect(length, `UDP: bridge bond ${index} ≈ one bond`).toBeGreaterThan(BOND * 0.75)
+      expect(length, `UDP: bridge bond ${index} ≈ one bond`).toBeLessThan(BOND * 1.25)
+    }
+    // The middle O–P–O–P–O run is horizontal (the P–O–P line of the NAD+
+    // bridge), pushing the glucose ring above the ribose.
+    for (let index = 1; index <= 5; index += 1) {
+      expect(
+        Math.abs(pos(path[index] ?? -1).y - pos(path[1] ?? -1).y),
+        `UDP: bridge atom ${index} on the horizontal line`,
+      ).toBeLessThan(1)
+    }
+    const pSpacing = pos(path[4] ?? -1).x - pos(path[2] ?? -1).x
+    expect(Math.abs(pSpacing), "UDP: P atoms two bonds apart").toBeGreaterThan(BOND * 1.8)
+    expect(Math.abs(pSpacing), "UDP: P atoms two bonds apart").toBeLessThan(BOND * 2.2)
+    expect(
+      centroidOf(ribose.cycle).y - centroidOf(glucose.cycle).y,
+      "UDP: glucose ring above the ribose",
+    ).toBeGreaterThan(BOND)
+    // The α arm: the oxygen below the anomeric carbon (down side).
+    expect(pos(armOxygen).y - pos(armCarbon).y, "UDP: anomeric arm down (α)").toBeGreaterThan(
+      BOND * 0.5,
+    )
+
+    // Exocyclic P oxygens: vertical, double-bond up / single down.
+    for (const phosphorus of [path[2] ?? -1, path[4] ?? -1]) {
+      const exoOxygens = (pipeline.snapshot.adjacency.get(phosphorus) ?? []).filter(
+        (id) => !path.includes(id) && pipeline.snapshot.atoms.get(id)?.element === "O",
+      )
+      expect(exoOxygens.length, "UDP: two exocyclic oxygens").toBe(2)
+      let above = 0
+      let below = 0
+      for (const oxygen of exoOxygens) {
+        expect(
+          Math.abs(pos(oxygen).x - pos(phosphorus).x),
+          "UDP: exo O directly above/below P",
+        ).toBeLessThan(2)
+        if (pos(oxygen).y - pos(phosphorus).y < -BOND * 0.5) {
+          above += 1
+        } else if (pos(oxygen).y - pos(phosphorus).y > BOND * 0.5) {
+          below += 1
+        }
+      }
+      expect([above, below], "UDP: one P=O up, one P–O down").toEqual([1, 1])
+    }
+
+    // Both rings draw their 2′/3′-OH below the ring (never into the interior).
+    for (const plan of [ribose, glucose]) {
+      for (const atom of plan.atoms) {
+        const role = plan.cycle.indexOf(atom.vertexId)
+        if (role < 1 || role > 2) {
+          continue
+        }
+        for (const hydroxyl of atom.down) {
+          if (pipeline.snapshot.atoms.get(hydroxyl)?.element !== "O") {
+            continue
+          }
+          expect(
+            pos(hydroxyl).y - pos(atom.vertexId).y,
+            `UDP: role${role} OH below the ring`,
+          ).toBeGreaterThan(BOND * 0.5)
+        }
+      }
+    }
+
+    // The bridge descends and hooks into the anomeric arm WITHOUT crossing
+    // either ring: every middle atom keeps clear of every ring vertex
+    // (bridge-adjacent anchors excluded — the arm bond itself is one bond).
+    const middles = path.slice(1, 6)
+    for (const middle of middles) {
+      for (const ringAtom of [...glucose.cycle, ...ribose.cycle]) {
+        if (ringAtom === glucoseAnomeric || ringAtom === adTail.anchor) {
+          continue
+        }
+        const distance = Math.hypot(
+          pos(middle).x - pos(ringAtom).x,
+          pos(middle).y - pos(ringAtom).y,
+        )
+        expect(
+          distance,
+          `UDP: bridge atom ${middle} clear of ring atom ${ringAtom}`,
+        ).toBeGreaterThan(BOND * 0.7)
+      }
     }
   })
 })
