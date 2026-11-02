@@ -91,7 +91,8 @@ export interface PeptidovkaSettings {
   minLen: number
   maxLen: number
   secondsPerAa: number
-  slugs: string[]
+  /** Amino-acid slug → weight (0-1); at least two entries must be positive. */
+  weights: Record<string, number>
 }
 
 /** The aggregate of one finished Peptidovka run, as recorded for the leaderboard. */

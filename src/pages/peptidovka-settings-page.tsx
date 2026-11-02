@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RichText } from "@/components/ui/rich-text"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Slider } from "@/components/ui/slider"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
+import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const peptidovkaStrings = cs.peptidovka
@@ -26,6 +28,20 @@ const LENGTH_MIN = 2
 const LENGTH_MAX = 20
 const SECONDS_MIN = 3
 const SECONDS_MAX = 120
+/**
+ * Weight slider range. 0.25 stops are exact dyadic values (0, 0.25, 0.5,
+ * 0.75, 1) — no float fuzz, every achievable readout is a "round" quarter,
+ * and a track click lands unambiguously. 1 = default odds, 0.5 = half as
+ * likely, 0 = off; the generator samples linearly in weight.
+ */
+const WEIGHT_MIN = 0
+const WEIGHT_MAX = 1
+const WEIGHT_STEP = 0.25
+
+/** Compact Czech readout of a weight: "1", "0,5", "0,25" — display only. */
+function formatWeight(weight: number): string {
+  return weight.toFixed(2).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",")
+}
 
 interface ModeCardCopy {
   title: string
@@ -63,7 +79,10 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
   const [minLenText, setMinLenText] = useState(String(settings.minLen))
   const [maxLenText, setMaxLenText] = useState(String(settings.maxLen))
   const [secondsText, setSecondsText] = useState(String(settings.secondsPerAa))
-  const [slugs, setSlugs] = useState<string[]>(settings.slugs)
+  // Draft weights as fetched. A pool molecule missing from the map (added
+  // after the save, or unchecked under the old checkbox pool) reads as 0 —
+  // off until the teacher opts it in.
+  const [weights, setWeights] = useState<Record<string, number>>(settings.weights)
   const [saving, setSaving] = useState(false)
 
   const minLen = parseBound(minLenText)
@@ -77,10 +96,11 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
     maxLen <= LENGTH_MAX &&
     maxLen >= minLen
   const secondsValid = seconds !== undefined && seconds >= SECONDS_MIN && seconds <= SECONDS_MAX
-  // Count only slugs that are still selectable (a molecule may have been
-  // deleted or stripped of oneLetter since the settings were saved).
-  const selectedInPool = pool.filter((molecule) => slugs.includes(molecule.slug)).length
-  const poolValid = selectedInPool >= 2
+  // Count only positive weights that are still selectable (a molecule may
+  // have been deleted or stripped of oneLetter since the settings were
+  // saved).
+  const activeInPool = pool.filter((molecule) => (weights[molecule.slug] ?? 0) > 0).length
+  const poolValid = activeInPool >= 2
   const invalidMessage = !lengthValid
     ? peptidovkaStrings.invalidLength
     : !secondsValid
@@ -89,25 +109,25 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
         ? peptidovkaStrings.invalidPool
         : null
 
-  const toggleSlug = (slug: string) => {
-    setSlugs((current) =>
-      current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug],
-    )
+  const setWeight = (slug: string, weight: number) => {
+    setWeights((current) => ({ ...current, [slug]: weight }))
   }
 
   const save = async () => {
     if (saving || invalidMessage !== null || minLen === undefined || maxLen === undefined) return
     setSaving(true)
     // A slug from an older save can outlive its molecule; posting it would
-    // be rejected server-side. Only current-pool slugs go out, so the
-    // teacher can always re-save over drifted settings.
-    const postedSlugs = slugs.filter((slug) => pool.some((molecule) => molecule.slug === slug))
+    // be rejected server-side. Only current-pool slugs go out — a complete
+    // snapshot including zeros — so the teacher can always re-save over
+    // drifted settings.
+    const postedWeights: Record<string, number> = {}
+    for (const molecule of pool) postedWeights[molecule.slug] = weights[molecule.slug] ?? 0
     try {
       await biomoleculesApi.updatePeptidovkaSettings(settings.mode, {
         minLen,
         maxLen,
         secondsPerAa: seconds ?? 0,
-        slugs: postedSlugs,
+        weights: postedWeights,
       })
       toast({ title: peptidovkaStrings.settingsSaved, variant: "default" })
     } catch (error) {
@@ -183,33 +203,52 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
             <p className="text-sm font-medium">{peptidovkaStrings.poolLabel}</p>
             <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               {peptidovkaStrings.poolSelected
-                .replace("{selected}", String(selectedInPool))
+                .replace("{selected}", String(activeInPool))
                 .replace("{total}", String(pool.length))}
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+          <p className="text-xs text-muted-foreground">{peptidovkaStrings.poolHint}</p>
+          <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2 xl:grid-cols-3">
             {pool.map((molecule) => {
-              const oneLetter = traitOf(molecule, TRAIT.oneLetter)
+              // The pool filter guarantees oneLetter; the badge column
+              // anchors each row so the sliders stay scannable.
+              const oneLetter = traitOf(molecule, TRAIT.oneLetter) ?? ""
+              const weight = weights[molecule.slug] ?? 0
+              const off = weight === 0
               return (
-                <label
+                <div
                   key={molecule.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-[4px] px-1 py-1 text-sm transition-colors duration-150 hover:bg-muted/50"
+                  className="flex items-center gap-3 rounded-[4px] px-1.5 py-1 transition-colors duration-150 hover:bg-muted/50"
                 >
-                  <input
-                    type="checkbox"
-                    checked={slugs.includes(molecule.slug)}
-                    onChange={() => toggleSlug(molecule.slug)}
-                    className="h-4 w-4 shrink-0 accent-primary"
-                  />
-                  <span className="min-w-0 truncate">
+                  <span className="w-4 shrink-0 text-center font-mono text-xs text-muted-foreground">
+                    {oneLetter}
+                  </span>
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-sm",
+                      off && "text-muted-foreground",
+                    )}
+                  >
                     <RichText text={molecule.name} />
                   </span>
-                  {oneLetter !== undefined && (
-                    <span className="ml-auto font-mono text-xs text-muted-foreground">
-                      {oneLetter}
-                    </span>
-                  )}
-                </label>
+                  <Slider
+                    value={[weight]}
+                    onValueChange={([value]) => setWeight(molecule.slug, value)}
+                    min={WEIGHT_MIN}
+                    max={WEIGHT_MAX}
+                    step={WEIGHT_STEP}
+                    aria-label={molecule.name}
+                    className="w-24 shrink-0 sm:w-28"
+                  />
+                  <span
+                    className={cn(
+                      "w-8 shrink-0 text-right font-mono text-xs tabular-nums",
+                      off ? "text-muted-foreground/70" : "text-foreground",
+                    )}
+                  >
+                    {formatWeight(weight)}
+                  </span>
+                </div>
               )
             })}
           </div>

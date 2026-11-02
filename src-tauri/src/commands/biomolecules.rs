@@ -15,7 +15,7 @@ use crate::db::repos::biomolecule_repo::{
 use crate::db::repos::{
     BiomoleculeHistoryRepo, BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
     BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaLeaderboardRow,
-    PeptidovkaRepo, PeptidovkaSettingsRecord,
+    PeptidovkaRepo,
 };
 use crate::db::DbError;
 use rusqlite::Connection;
@@ -1297,7 +1297,8 @@ pub struct PeptidovkaSettings {
     pub min_len: i64,
     pub max_len: i64,
     pub seconds_per_aa: i64,
-    pub slugs: Vec<String>,
+    /// Amino-acid slug → weight, as stored.
+    pub weights: HashMap<String, f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1308,7 +1309,11 @@ pub struct UpdatePeptidovkaSettingsPayload {
     pub min_len: i64,
     pub max_len: i64,
     pub seconds_per_aa: i64,
-    pub slugs: Vec<String>,
+    /// Raw JSON value: validated by `validate_peptidovka_weights` rather than
+    /// by serde, so a non-numeric weight or a non-object payload produces the
+    /// same `Validation` error as the other bounds instead of a deserialization
+    /// failure at the HTTP edge.
+    pub weights: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1333,19 +1338,80 @@ fn validate_peptidovka_mode(mode: &str) -> Result<&str, DbError> {
     }
 }
 
+/// Validate the weighted pool: a JSON object whose keys are non-empty slugs
+/// and whose values are finite numbers in `[0, 1]`. At least two entries must
+/// carry a positive weight, mirroring the frontend's ≥2 pool guard. Unknown
+/// (or since-deleted) slugs are tolerated: a saved setting may outlive the
+/// molecule it references, and the game simply skips what it cannot draw.
+fn validate_peptidovka_weights(
+    raw: serde_json::Value,
+) -> Result<std::collections::BTreeMap<String, f64>, DbError> {
+    let object = raw.as_object().ok_or_else(|| {
+        DbError::Validation(
+            "Weights must be a JSON object mapping amino-acid slugs to weights".into(),
+        )
+    })?;
+    let mut weights = std::collections::BTreeMap::new();
+    let mut positive = 0usize;
+    for (key, value) in object {
+        let slug = key.trim();
+        if slug.is_empty() {
+            return Err(DbError::Validation(
+                "Weight keys must be non-empty amino-acid slugs".into(),
+            ));
+        }
+        let weight = value.as_f64().ok_or_else(|| {
+            DbError::Validation(format!("Weight for {slug} must be a number"))
+        })?;
+        if !weight.is_finite() || !(0.0..=1.0).contains(&weight) {
+            return Err(DbError::Validation(format!(
+                "Weight for {slug} must be a number between 0 and 1"
+            )));
+        }
+        if weight > 0.0 {
+            positive += 1;
+        }
+        weights.insert(slug.to_string(), weight);
+    }
+    if positive < 2 {
+        return Err(DbError::Validation(
+            "Weights must include at least two amino acids with a weight above 0".into(),
+        ));
+    }
+    Ok(weights)
+}
+
 /// Both modes' settings, Učeň first.
 pub fn do_list_peptidovka_settings(conn: &Connection) -> Result<Vec<PeptidovkaSettings>, DbError> {
-    PeptidovkaRepo::list_settings(conn)?
-        .into_iter()
-        .map(|row: PeptidovkaSettingsRecord| {
-            Ok(PeptidovkaSettings {
-                mode: row.mode,
-                min_len: row.min_len,
-                max_len: row.max_len,
-                seconds_per_aa: row.seconds_per_aa,
-                slugs: serde_json::from_str(&row.slugs_json)?,
-            })
-        })
+    let rows: Vec<(String, i64, i64, i64, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT mode, min_len, max_len, seconds_per_aa, weights
+             FROM peptidovka_settings
+             ORDER BY CASE mode WHEN 'ucen' THEN 0 ELSE 1 END, mode",
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        mapped.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    rows.into_iter()
+        .map(
+            |(mode, min_len, max_len, seconds_per_aa, weights_json)| {
+                Ok(PeptidovkaSettings {
+                    mode,
+                    min_len,
+                    max_len,
+                    seconds_per_aa,
+                    weights: serde_json::from_str(&weights_json)?,
+                })
+            },
+        )
         .collect()
 }
 
@@ -1357,7 +1423,7 @@ pub fn do_update_peptidovka_settings(
     teacher_id: &Uuid,
     payload: UpdatePeptidovkaSettingsPayload,
 ) -> Result<(), DbError> {
-    let mode = validate_peptidovka_mode(&payload.mode)?;
+    let mode = validate_peptidovka_mode(&payload.mode)?.to_string();
     if payload.min_len < PEPTIDOVKA_MIN_LEN_FLOOR {
         return Err(DbError::Validation(format!(
             "Minimum length must be at least {PEPTIDOVKA_MIN_LEN_FLOOR}"
@@ -1380,51 +1446,40 @@ pub fn do_update_peptidovka_settings(
             "Seconds per amino acid must be {PEPTIDOVKA_SECONDS_PER_AA_MIN}-{PEPTIDOVKA_SECONDS_PER_AA_MAX}"
         )));
     }
-    let mut seen = std::collections::HashSet::new();
-    let slugs: Vec<String> = payload
-        .slugs
-        .iter()
-        .map(|slug| slug.trim().to_string())
-        .filter(|slug| !slug.is_empty())
-        .filter(|slug| seen.insert(slug.clone()))
-        .collect();
-    if slugs.is_empty() || slugs.iter().any(|slug| !is_valid_slug(slug)) {
-        return Err(DbError::Validation(
-            "Slugs must be a non-empty list of amino-acid slugs".into(),
-        ));
-    }
-    // Format alone lets a typo'd slug silently break the game pool later;
-    // demand every slug names a real molecule (any category — a teacher's
-    // custom amino-acid entry is just as valid as a seeded one).
-    for slug in &slugs {
-        if !BiomoleculeRepo::molecule_slug_exists(conn, slug)? {
-            return Err(DbError::Validation(format!(
-                "Unknown molecule slug: {slug}"
-            )));
-        }
-    }
-    let slugs_json = serde_json::to_string(&slugs)?;
-    PeptidovkaRepo::upsert_settings(
-        conn,
-        mode,
-        payload.min_len,
-        payload.max_len,
-        payload.seconds_per_aa,
-        &slugs_json,
+    // Validation happens before any write, so a rejected payload leaves the
+    // mode's stored settings untouched.
+    let weights = validate_peptidovka_weights(payload.weights)?;
+    let weights_json = serde_json::to_string(&weights)?;
+    conn.execute(
+        "INSERT INTO peptidovka_settings
+             (mode, min_len, max_len, seconds_per_aa, weights)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(mode) DO UPDATE SET
+             min_len = excluded.min_len,
+             max_len = excluded.max_len,
+             seconds_per_aa = excluded.seconds_per_aa,
+             weights = excluded.weights",
+        rusqlite::params![
+            mode,
+            payload.min_len,
+            payload.max_len,
+            payload.seconds_per_aa,
+            weights_json
+        ],
     )?;
     let detail = format!(
-        "{}–{} · {} s/aa · {} slugs",
+        "{}–{} · {} s/aa · {} amino acids",
         payload.min_len,
         payload.max_len,
         payload.seconds_per_aa,
-        slugs.len()
+        weights.len()
     );
     BiomoleculeHistoryRepo::record(
         conn,
         teacher_id,
         "peptidovka",
         "settings",
-        mode,
+        &mode,
         Some(detail.as_str()),
     )
 }
@@ -2813,10 +2868,12 @@ mod tests {
             (3, 10, 15)
         );
 
-        // Both modes default to the canonical 20 amino-acid slugs.
-        assert_eq!(settings[0].slugs.len(), 20);
-        assert!(settings[0].slugs.iter().any(|slug| slug == "ala"));
-        assert_eq!(settings[0].slugs, settings[1].slugs);
+        // Both modes default to an all-1 weight map over the canonical 20
+        // amino acids.
+        assert_eq!(settings[0].weights.len(), 20);
+        assert_eq!(settings[0].weights.get("ala"), Some(&1.0));
+        assert!(settings[0].weights.values().all(|weight| *weight == 1.0));
+        assert_eq!(settings[0].weights, settings[1].weights);
     }
 
     #[test]
@@ -2832,7 +2889,7 @@ mod tests {
                     min_len: 4,
                     max_len,
                     seconds_per_aa: 30,
-                    slugs: vec!["ala".into(), "gly".into()],
+                    weights: serde_json::json!({"ala": 1.0, "gly": 0.5}),
                 },
             )
             .expect("update");
@@ -2845,7 +2902,8 @@ mod tests {
             .expect("ucen settings");
         assert_eq!((ucen.min_len, ucen.max_len), (4, 5));
         assert_eq!(ucen.seconds_per_aa, 30);
-        assert_eq!(ucen.slugs, vec!["ala".to_string(), "gly".to_string()]);
+        assert_eq!(ucen.weights.get("ala"), Some(&1.0));
+        assert_eq!(ucen.weights.get("gly"), Some(&0.5));
 
         let mistr = settings
             .iter()
@@ -2853,28 +2911,31 @@ mod tests {
             .expect("mistr settings");
         assert_eq!((mistr.min_len, mistr.max_len), (4, 9));
         assert_eq!(mistr.seconds_per_aa, 30);
-        assert_eq!(mistr.slugs, vec!["ala".to_string(), "gly".to_string()]);
+        assert_eq!(mistr.weights, ucen.weights);
     }
 
     #[test]
     fn peptidovka_settings_validation_rejects_bad_input() {
         let conn = setup_conn();
         let teacher = teacher_id(&conn);
-        let update =
-            |mode: &str, min_len: i64, max_len: i64, seconds_per_aa: i64, slugs: Vec<String>| {
-                do_update_peptidovka_settings(
-                    &conn,
-                    &teacher,
-                    UpdatePeptidovkaSettingsPayload {
-                        mode: mode.into(),
-                        min_len,
-                        max_len,
-                        seconds_per_aa,
-                        slugs,
-                    },
-                )
-            };
-        let aa = || vec!["ala".to_string()];
+        let update = |mode: &str,
+                      min_len: i64,
+                      max_len: i64,
+                      seconds_per_aa: i64,
+                      weights: serde_json::Value| {
+            do_update_peptidovka_settings(
+                &conn,
+                &teacher,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: mode.into(),
+                    min_len,
+                    max_len,
+                    seconds_per_aa,
+                    weights,
+                },
+            )
+        };
+        let aa = || serde_json::json!({"ala": 1.0, "gly": 1.0});
 
         assert!(matches!(
             update("beginner", 3, 6, 15, aa()),
@@ -2900,13 +2961,84 @@ mod tests {
             matches!(update("ucen", 3, 6, 121, aa()), Err(DbError::Validation(_))),
             "seconds per amino acid above 120 must be rejected"
         );
-        assert!(
-            matches!(
-                update("ucen", 3, 6, 15, vec![]),
-                Err(DbError::Validation(_))
-            ),
-            "an empty slug set must be rejected"
-        );
+    }
+
+    /// Each of the weight-shape rejections must leave the *whole* stored row
+    /// alone — including the distinct valid numerics in the rejected payload.
+    /// Mirrors the G2 "distinct rejected numerics" precedent.
+    #[test]
+    fn peptidovka_weights_rejections_do_not_partially_write() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        // Baseline differs from every rejected payload's bounds/time.
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 4,
+                max_len: 8,
+                seconds_per_aa: 20,
+                weights: serde_json::json!({"ala": 1.0, "gly": 0.5}),
+            },
+        )
+        .expect("baseline");
+
+        let read = || -> (i64, i64, i64, HashMap<String, f64>) {
+            let (min_len, max_len, seconds_per_aa, weights_json): (i64, i64, i64, String) = conn
+                .query_row(
+                    "SELECT min_len, max_len, seconds_per_aa, weights
+                     FROM peptidovka_settings WHERE mode = 'ucen'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("stored settings");
+            (
+                min_len,
+                max_len,
+                seconds_per_aa,
+                serde_json::from_str(&weights_json).expect("stored weights"),
+            )
+        };
+
+        for bad in [
+            serde_json::json!({"ala": 1.5, "gly": 0.5}), // weight > 1
+            serde_json::json!({"ala": -0.1, "gly": 0.5}), // weight < 0
+            serde_json::json!({"ala": "1", "gly": 0.5}),  // non-number
+            serde_json::json!({}),                         // empty object
+            serde_json::json!({"ala": 1.0}),               // exactly one positive
+            serde_json::json!({"ala": 0.0, "gly": 0.0}),   // no positive weight
+            serde_json::json!({"": 1.0, "gly": 1.0}),      // empty key
+        ] {
+            let result = do_update_peptidovka_settings(
+                &conn,
+                &teacher,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: "ucen".into(),
+                    min_len: 3,
+                    max_len: 5,
+                    seconds_per_aa: 30,
+                    weights: bad.clone(),
+                },
+            );
+            assert!(
+                matches!(result, Err(DbError::Validation(_))),
+                "{bad} must be rejected"
+            );
+
+            let (min_len, max_len, seconds_per_aa, weights) = read();
+            assert_eq!(
+                (min_len, max_len, seconds_per_aa),
+                (4, 8, 20),
+                "a rejected update must not write its valid numerics: {bad}"
+            );
+            assert_eq!(
+                weights,
+                HashMap::from([("ala".to_string(), 1.0), ("gly".to_string(), 0.5)]),
+                "a rejected update must not touch the stored weights: {bad}"
+            );
+        }
     }
 
     #[test]
@@ -2968,7 +3100,7 @@ mod tests {
                             min_len: 3,
                             max_len: 6,
                             seconds_per_aa: 15,
-                            slugs: vec!["ala".into()],
+                            weights: serde_json::json!({"ala": 1.0, "gly": 1.0}),
                         },
                     ),
                     Err(DbError::Validation(_))
@@ -3099,38 +3231,13 @@ mod tests {
     }
 
     #[test]
-    fn peptidovka_update_rejects_unknown_slugs_and_dedupes() {
+    fn peptidovka_weights_tolerate_unknown_or_deleted_slugs() {
         let conn = setup_conn();
         let teacher = teacher_id(&conn);
 
-        // Well-formed but nonexistent slug — format checks alone used to let
-        // this through, silently breaking the game's pool. Distinct numerics,
-        // so the "stored untouched" assertion below actually discriminates
-        // (seed defaults are 3/6/15).
-        assert!(matches!(
-            do_update_peptidovka_settings(
-                &conn,
-                &teacher,
-                UpdatePeptidovkaSettingsPayload {
-                    mode: "ucen".into(),
-                    min_len: 4,
-                    max_len: 8,
-                    seconds_per_aa: 20,
-                    slugs: vec!["ala".into(), "gly".into(), "nesmysl-123".into()],
-                },
-            ),
-            Err(DbError::Validation(_))
-        ));
-        let stored_seconds: i64 = conn
-            .query_row(
-                "SELECT seconds_per_aa FROM peptidovka_settings WHERE mode = 'ucen'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("untouched settings");
-        assert_eq!(stored_seconds, 15, "a rejected update writes nothing");
-
-        // Duplicates collapse once, in first-seen order.
+        // A well-formed slug that no longer names a seeded molecule (a
+        // teacher's custom entry may have been deleted since) is tolerated,
+        // preserving the existing laxity rather than breaking re-saves.
         do_update_peptidovka_settings(
             &conn,
             &teacher,
@@ -3139,21 +3246,54 @@ mod tests {
                 min_len: 3,
                 max_len: 6,
                 seconds_per_aa: 15,
-                slugs: vec!["ala".into(), "ala".into(), "gly".into()],
+                weights: serde_json::json!({
+                    "ala": 1.0,
+                    "gly": 0.5,
+                    "nesmysl-123": 0.25
+                }),
             },
         )
-        .expect("deduped update");
-        let slugs_json: String = conn
-            .query_row(
-                "SELECT slugs FROM peptidovka_settings WHERE mode = 'ucen'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("slugs");
-        assert_eq!(
-            serde_json::from_str::<Vec<String>>(&slugs_json).expect("slugs json"),
-            vec!["ala".to_string(), "gly".to_string()]
-        );
+        .expect("unknown slug tolerated");
+
+        let weights: HashMap<String, f64> = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT weights FROM peptidovka_settings WHERE mode = 'ucen'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("weights"),
+        )
+        .expect("weights json");
+        assert_eq!(weights.get("ala"), Some(&1.0));
+        assert_eq!(weights.get("gly"), Some(&0.5));
+        assert_eq!(weights.get("nesmysl-123"), Some(&0.25));
+
+        // Keys are trimmed; two spellings of one slug collapse to one entry.
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 3,
+                max_len: 6,
+                seconds_per_aa: 15,
+                weights: serde_json::json!({" ala ": 0.5, "ala": 1.0, "gly": 1.0}),
+            },
+        )
+        .expect("trimmed keys");
+        let weights: HashMap<String, f64> = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT weights FROM peptidovka_settings WHERE mode = 'ucen'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("weights"),
+        )
+        .expect("weights json");
+        assert_eq!(weights.len(), 2);
+        assert_eq!(weights.get("ala"), Some(&1.0));
     }
 
     #[test]
@@ -3199,7 +3339,7 @@ mod tests {
                 min_len: 3,
                 max_len: 6,
                 seconds_per_aa: 15,
-                slugs: vec!["ala".into(), "gly".into()],
+                weights: serde_json::json!({"ala": 1.0, "gly": 0.5}),
             },
         )
         .expect("settings");

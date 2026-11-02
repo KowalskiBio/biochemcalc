@@ -367,7 +367,8 @@ export const cs = {
     maxLenLabel: "Maximální délka",
     secondsPerAaLabel: "Sekund na aminokyselinu",
     poolLabel: "Aminokyseliny ve hře",
-    poolSelected: "Vybráno {selected} z {total}",
+    poolSelected: "Ve hře {selected} z {total}",
+    poolHint: "Šance na vylosování: 1 = výchozí, 0,5 = poloviční, 0 = vypnuto.",
     saveSettings: "Uložit nastavení",
     savingSettings: "Ukládám...",
     settingsSaved: "Nastavení bylo uloženo.",
@@ -375,7 +376,7 @@ export const cs = {
     settingsLoadError: "Nastavení se nepodařilo načíst",
     invalidLength: "Délka musí být 2–20 a maximum nesmí být menší než minimum.",
     invalidSeconds: "Čas na aminokyselinu musí být 3–120 sekund.",
-    invalidPool: "Vyberte alespoň dvě aminokyseliny.",
+    invalidPool: "Alespoň dvě aminokyseliny musí mít šanci větší než 0.",
     poolEmptyTitle: "Žádné hratelné aminokyseliny",
     poolEmptyDescription:
       "V kategorii Aminokyseliny zatím nejsou alespoň dvě molekuly s jednopísmenným kódem. Doplňte je tam.",

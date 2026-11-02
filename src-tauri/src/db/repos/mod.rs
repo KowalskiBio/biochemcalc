@@ -40,7 +40,7 @@ pub use invite_code_repo::InviteCodeRepo;
 pub use output_file_repo::OutputFileRepo;
 pub use password_reset_repo::PasswordResetTokenRepo;
 #[allow(unused_imports)]
-pub use peptidovka_repo::{PeptidovkaLeaderboardRow, PeptidovkaRepo, PeptidovkaSettingsRecord};
+pub use peptidovka_repo::{PeptidovkaLeaderboardRow, PeptidovkaRepo};
 #[allow(unused_imports)]
 pub use practice_repo::{
     AnyPracticeTemplateRow, LeaderboardRow, PracticeAttemptRecord, PracticeRepo,

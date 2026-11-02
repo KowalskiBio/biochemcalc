@@ -1,25 +1,14 @@
-//! Storage for Peptidovka: the per-mode game settings a teacher edits and the
-//! finished-run aggregates a future leaderboard will rank. Exactly like the
-//! Biomolekuly streak, a run is graded client-side, so a row is only the
-//! client's reported aggregate for one finished run. Migration v56 owns both
-//! tables.
+//! Storage for finished Peptidovka runs and their leaderboard aggregates.
+//! Exactly like the Biomolekuly streak, a run is graded client-side, so a row
+//! is only the client's reported aggregate for one finished run. Migration v56
+//! owns the table. The per-mode settings row is read/written directly by
+//! `commands::biomolecules` against its weighted `weights` column (migration
+//! v62), so it deliberately has no repo here.
 
 use crate::db::DbError;
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
-
-/// One mode's editable Peptidovka settings. `slugs_json` is the raw JSON
-/// array of molecule slugs as stored; the command layer parses it into a
-/// `Vec<String>` for the API.
-#[derive(Debug, Clone)]
-pub struct PeptidovkaSettingsRecord {
-    pub mode: String,
-    pub min_len: i64,
-    pub max_len: i64,
-    pub seconds_per_aa: i64,
-    pub slugs_json: String,
-}
 
 /// One user's single best Peptidovka run of a given mode, for the future
 /// leaderboard.
@@ -32,54 +21,10 @@ pub struct PeptidovkaLeaderboardRow {
     pub total_seconds: f64,
 }
 
-/// Peptidovka settings and finished runs (migration v56).
+/// Finished Peptidovka runs and their leaderboard aggregates (migration v56).
 pub struct PeptidovkaRepo;
 
 impl PeptidovkaRepo {
-    /// Both modes' settings, Učeň first (the teacher-facing order).
-    pub fn list_settings(conn: &Connection) -> Result<Vec<PeptidovkaSettingsRecord>, DbError> {
-        let mut stmt = conn.prepare(
-            "SELECT mode, min_len, max_len, seconds_per_aa, slugs
-             FROM peptidovka_settings
-             ORDER BY CASE mode WHEN 'ucen' THEN 0 ELSE 1 END, mode",
-        )?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(PeptidovkaSettingsRecord {
-                    mode: row.get(0)?,
-                    min_len: row.get(1)?,
-                    max_len: row.get(2)?,
-                    seconds_per_aa: row.get(3)?,
-                    slugs_json: row.get(4)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    /// Replace one mode's settings; the mode is the primary key.
-    pub fn upsert_settings(
-        conn: &Connection,
-        mode: &str,
-        min_len: i64,
-        max_len: i64,
-        seconds_per_aa: i64,
-        slugs_json: &str,
-    ) -> Result<(), DbError> {
-        conn.execute(
-            "INSERT INTO peptidovka_settings
-                 (mode, min_len, max_len, seconds_per_aa, slugs)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(mode) DO UPDATE SET
-                 min_len = excluded.min_len,
-                 max_len = excluded.max_len,
-                 seconds_per_aa = excluded.seconds_per_aa,
-                 slugs = excluded.slugs",
-            params![mode, min_len, max_len, seconds_per_aa, slugs_json],
-        )?;
-        Ok(())
-    }
-
     pub fn insert_run(
         conn: &Connection,
         user_id: &Uuid,

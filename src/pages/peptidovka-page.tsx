@@ -284,16 +284,23 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
     return map
   }, [allMolecules])
 
-  const pool = useMemo(() => {
-    if (modeSettings === null) return []
-    const seen = new Set<string>()
+  // The effective pool: the mode's positive-weight slugs intersected with
+  // the molecules that can actually play. Weights pass straight through to
+  // the generator's weighted sampling (0.5 = half as likely as 1); this
+  // memo only keeps out entries that would break synthesis — deleted
+  // molecules, stripped one-letter codes, and out-of-range weights.
+  const { pool, poolWeights } = useMemo(() => {
     const slugs: string[] = []
-    for (const slug of modeSettings.slugs) {
-      if (!playableBySlug.has(slug) || seen.has(slug)) continue
-      seen.add(slug)
-      slugs.push(slug)
+    const weights: Record<string, number> = {}
+    if (modeSettings !== null) {
+      for (const [slug, weight] of Object.entries(modeSettings.weights)) {
+        if (!Number.isFinite(weight) || weight <= 0 || weight > 1) continue
+        if (!playableBySlug.has(slug)) continue
+        slugs.push(slug)
+        weights[slug] = weight
+      }
     }
-    return slugs
+    return { pool: slugs, poolWeights: weights }
   }, [modeSettings, playableBySlug])
 
   const [run, setRun] = useState<Run | null>(null)
@@ -322,7 +329,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
       for (let attempt = 0; attempt < 2; attempt++) {
         const random = crypto.getRandomValues(new Uint32Array(3))
         const length = minLen + (random[0] % (maxLen - minLen + 1))
-        const slugs = generatePeptide(pool, length, random[1])
+        const slugs = generatePeptide(poolWeights, length, random[1])
         const parts = peptideParts(slugs)
         if (parts === null) continue
         const letters = slugs.map((slug) => playableBySlug.get(slug))
@@ -343,7 +350,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
       }
       return null
     },
-    [modeSettings, pool, playableBySlug, master],
+    [modeSettings, pool.length, poolWeights, playableBySlug, master],
   )
 
   const startRun = useCallback(() => {

@@ -101,22 +101,66 @@ describe("peptideSmiles", () => {
 })
 
 describe("generatePeptide", () => {
-  it("repeats deterministically for a fixed seed", () => {
-    const pool = ["ala", "gly", "pro"]
+  it("repeats deterministically for a fixed seed and weights", () => {
+    const pool = { ala: 1, gly: 1, pro: 1 }
     expect(generatePeptide(pool, 8, 42)).toEqual(generatePeptide(pool, 8, 42))
   })
 
   it("draws only from the pool and at the requested length", () => {
-    const pool = ["ser", "thr"]
+    const pool = { ser: 1, thr: 1 }
     const chain = generatePeptide(pool, 17, 7)
     expect(chain).toHaveLength(17)
-    expect(chain.every((slug) => pool.includes(slug))).toBe(true)
+    expect(chain.every((slug) => slug in pool)).toBe(true)
   })
 
-  it("rejects empty pools and invalid lengths", () => {
-    expect(() => generatePeptide([], 3, 1)).toThrow()
-    expect(() => generatePeptide(["ala"], 0, 1)).toThrow()
-    expect(() => generatePeptide(["ala"], 1.5, 1)).toThrow()
+  it("ignores Record insertion order", () => {
+    const first = { ala: 1, gly: 0.5, pro: 0.25 }
+    const second = { pro: 0.25, ala: 1, gly: 0.5 }
+    expect(generatePeptide(first, 64, 123)).toEqual(generatePeptide(second, 64, 123))
+  })
+
+  it("never draws a weight-0 slug", () => {
+    const pool = { ala: 1, gly: 0, pro: 0.5 }
+    for (const seed of [1, 2, 3, 42, 999]) {
+      const chain = generatePeptide(pool, 64, seed)
+      expect(chain, `seed ${seed}`).not.toContain("gly")
+    }
+  })
+
+  it("honours weight ratios: a 1-weight acid is twice as likely as a 0.5", () => {
+    const chain = generatePeptide({ a: 1, b: 0.5 }, 4000, 2024)
+    const countA = chain.filter((slug) => slug === "a").length
+    const countB = chain.filter((slug) => slug === "b").length
+    expect(countA + countB).toBe(4000)
+    const ratio = countA / countB
+    // Expected 2:1; a generous ±20% band keeps this seeded check stable.
+    expect(ratio).toBeGreaterThan(1.6)
+    expect(ratio).toBeLessThan(2.4)
+  })
+
+  it("draws roughly uniformly when all weights are equal", () => {
+    const chain = generatePeptide({ ala: 1, gly: 1, ser: 1, thr: 1 }, 4000, 777)
+    const counts = new Map<string, number>()
+    for (const slug of chain) counts.set(slug, (counts.get(slug) ?? 0) + 1)
+    for (const slug of ["ala", "gly", "ser", "thr"]) {
+      const count = counts.get(slug) ?? 0
+      // 1000 expected each; ±15% broad band, seeded so it never flakes.
+      expect(count, `${slug} count`).toBeGreaterThan(850)
+      expect(count, `${slug} count`).toBeLessThan(1150)
+    }
+  })
+
+  it("rejects pools with no positive weight and invalid weights", () => {
+    expect(() => generatePeptide({}, 3, 1)).toThrow()
+    expect(() => generatePeptide({ ala: 0, gly: 0 }, 3, 1)).toThrow()
+    expect(() => generatePeptide({ ala: -0.1 }, 3, 1)).toThrow()
+    expect(() => generatePeptide({ ala: 1.1 }, 3, 1)).toThrow()
+    expect(() => generatePeptide({ ala: Number.NaN }, 3, 1)).toThrow()
+  })
+
+  it("rejects invalid lengths", () => {
+    expect(() => generatePeptide({ ala: 1 }, 0, 1)).toThrow()
+    expect(() => generatePeptide({ ala: 1 }, 1.5, 1)).toThrow()
   })
 })
 

@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 61;
+const CURRENT_USER_VERSION: u32 = 62;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -312,6 +312,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 61 {
         apply_migration_v61(conn)?;
         conn.pragma_update(None, "user_version", "61")?;
+    }
+
+    if user_version < 62 {
+        apply_migration_v62(conn)?;
+        conn.pragma_update(None, "user_version", "62")?;
     }
 
     Ok(())
@@ -2066,6 +2071,139 @@ fn apply_migration_v61(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Peptidovka's amino-acid pool becomes weighted: the old `slugs` JSON array
+/// (`["ala","gly"]`) is replaced by a `weights` JSON object mapping each slug
+/// to a per-slug weight (`{"ala":1,"gly":0.5}`). Every legacy entry gets
+/// weight 1, so an upgrade preserves the previous pool exactly.
+///
+/// The table is rebuilt (SQLite cannot rename a column in place). Idempotent
+/// by column inspection rather than by version alone: replaying against an
+/// already-rebuilt table is a no-op, and rows whose legacy JSON is unreadable
+/// fall back to the canonical all-1 default pool instead of dropping the
+/// mode's settings entirely.
+fn apply_migration_v62(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // Already rebuilt (either a normal replay or a fresh database that has
+    // come this far): nothing to convert.
+    if peptidovka_settings_has_column(conn, "weights")? {
+        return Ok(());
+    }
+
+    let legacy_rows: Vec<(String, i64, i64, i64, String)> =
+        if peptidovka_settings_has_column(conn, "slugs")? {
+            let mut stmt = conn.prepare(
+                "SELECT mode, min_len, max_len, seconds_per_aa, slugs
+                 FROM peptidovka_settings",
+            )?;
+            let mapped = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?;
+            mapped.collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+
+    conn.execute_batch(
+        "
+        DROP TABLE IF EXISTS peptidovka_settings_new;
+
+        CREATE TABLE peptidovka_settings_new (
+            mode TEXT PRIMARY KEY NOT NULL CHECK (mode IN ('ucen','mistr')),
+            min_len INTEGER NOT NULL,
+            max_len INTEGER NOT NULL,
+            seconds_per_aa INTEGER NOT NULL,
+            weights TEXT NOT NULL DEFAULT '{}'
+        );
+        ",
+    )?;
+
+    if legacy_rows.is_empty() {
+        // Fresh/absent/empty table: reproduce v56's defaults, now as weights.
+        let weights_json = peptidovka_default_weights_json()?;
+        for (mode, min_len, max_len, seconds_per_aa) in [
+            ("ucen", 3_i64, 6_i64, 15_i64),
+            ("mistr", 3_i64, 10_i64, 15_i64),
+        ] {
+            conn.execute(
+                "INSERT INTO peptidovka_settings_new
+                     (mode, min_len, max_len, seconds_per_aa, weights)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![mode, min_len, max_len, seconds_per_aa, weights_json],
+            )?;
+        }
+    } else {
+        for (mode, min_len, max_len, seconds_per_aa, slugs_json) in legacy_rows {
+            let weights_json = peptidovka_legacy_slugs_to_weights(&slugs_json)?;
+            conn.execute(
+                "INSERT INTO peptidovka_settings_new
+                     (mode, min_len, max_len, seconds_per_aa, weights)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![mode, min_len, max_len, seconds_per_aa, weights_json],
+            )?;
+        }
+    }
+
+    conn.execute_batch(
+        "
+        DROP TABLE peptidovka_settings;
+        ALTER TABLE peptidovka_settings_new RENAME TO peptidovka_settings;
+        ",
+    )?;
+    Ok(())
+}
+
+fn peptidovka_settings_has_column(
+    conn: &Connection,
+    column: &str,
+) -> Result<bool, rusqlite::Error> {
+    let mut stmt = conn.prepare("PRAGMA table_info(peptidovka_settings)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// All-1 weights over the canonical amino acids, mirroring v56's default pool.
+fn peptidovka_default_weights_map() -> serde_json::Map<String, serde_json::Value> {
+    crate::db::biomolecule_seed::AMINO_ACID_SLUGS
+        .iter()
+        .map(|slug| (slug.to_string(), serde_json::Value::from(1)))
+        .collect()
+}
+
+fn peptidovka_default_weights_json() -> Result<String, rusqlite::Error> {
+    serde_json::to_string(&peptidovka_default_weights_map())
+        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
+/// Legacy array → all-1 map. Unparseable content (or nothing usable) degrades
+/// to the canonical default pool rather than leaving the mode unplayable.
+fn peptidovka_legacy_slugs_to_weights(slugs_json: &str) -> Result<String, rusqlite::Error> {
+    let mut weights = serde_json::Map::new();
+    if let Ok(slugs) = serde_json::from_str::<Vec<String>>(slugs_json) {
+        for slug in slugs {
+            let slug = slug.trim();
+            if !slug.is_empty() {
+                weights.insert(slug.to_string(), serde_json::Value::from(1));
+            }
+        }
+    }
+    if weights.is_empty() {
+        weights = peptidovka_default_weights_map();
+    }
+    serde_json::to_string(&weights)
+        .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))
+}
+
 /// Adds the `polarity` trait (hydrophobic/hydrophilic) to the twenty
 /// canonical amino acids so the quiz can ask polarity on its own axis,
 /// independent of the side-chain family label (see aminoAcidsQuizConfig).
@@ -2605,23 +2743,23 @@ mod tests {
 
         conn.execute(
             "UPDATE peptidovka_settings
-             SET min_len = 4, max_len = 8, seconds_per_aa = 20, slugs = ?1
+             SET min_len = 4, max_len = 8, seconds_per_aa = 20, weights = ?1
              WHERE mode = 'ucen'",
-            rusqlite::params!["[\"ala\",\"gly\"]"],
+            rusqlite::params![r#"{"ala":1,"gly":0.5}"#],
         )
         .expect("teacher edit");
 
         // Replaying after the edit must hands-off the row — reset the version
-        // so v56 really re-runs (the house idiom: same pragma trick as the
-        // earlier upgrade tests) and its `count == 0` guard is the load
-        // being pinned, not the version gate.
+        // so v56 (and the v62 rebuild) really re-runs (the house idiom: same
+        // pragma trick as the earlier upgrade tests) and its `count == 0`
+        // guard is the load being pinned, not the version gate.
         conn.pragma_update(None, "user_version", "55")
             .expect("reset version");
         run_migrations(&conn).expect("re-migration");
 
-        let (min_len, max_len, seconds_per_aa, slugs): (i64, i64, i64, String) = conn
+        let (min_len, max_len, seconds_per_aa, weights): (i64, i64, i64, String) = conn
             .query_row(
-                "SELECT min_len, max_len, seconds_per_aa, slugs
+                "SELECT min_len, max_len, seconds_per_aa, weights
                  FROM peptidovka_settings WHERE mode = 'ucen'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -2629,7 +2767,73 @@ mod tests {
             .expect("read settings");
         assert_eq!((min_len, max_len), (4, 8));
         assert_eq!(seconds_per_aa, 20);
-        assert_eq!(slugs, "[\"ala\",\"gly\"]");
+        assert_eq!(weights, r#"{"ala":1,"gly":0.5}"#);
+    }
+
+    /// v62 rebuilds the settings table from the legacy `slugs` array to the
+    /// weighted `weights` map. Existing entries become weight 1 (behaviour
+    /// preserving); unreadable legacy JSON degrades to the canonical default
+    /// pool; and replaying the migration against the rebuilt table is a no-op.
+    #[test]
+    fn v62_converts_legacy_slug_arrays_to_weight_maps() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+
+        // Rebuild the pre-v62 table shape by hand with a real teacher config
+        // plus a mode whose stored slugs are corrupt.
+        conn.execute_batch(
+            "
+            DROP TABLE peptidovka_settings;
+            CREATE TABLE peptidovka_settings (
+                mode TEXT PRIMARY KEY NOT NULL CHECK (mode IN ('ucen','mistr')),
+                min_len INTEGER NOT NULL,
+                max_len INTEGER NOT NULL,
+                seconds_per_aa INTEGER NOT NULL,
+                slugs TEXT NOT NULL DEFAULT '[]'
+            );
+            INSERT INTO peptidovka_settings VALUES
+                ('ucen', 4, 8, 20, '[\"ala\",\"gly\"]'),
+                ('mistr', 3, 10, 15, 'not json');
+            ",
+        )
+        .expect("legacy settings");
+
+        conn.pragma_update(None, "user_version", "61")
+            .expect("backlevel");
+        run_migrations(&conn).expect("v62");
+
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let weights_of = |mode: &str| -> std::collections::HashMap<String, f64> {
+            let raw: String = conn
+                .query_row(
+                    "SELECT weights FROM peptidovka_settings WHERE mode = ?1",
+                    [mode],
+                    |row| row.get(0),
+                )
+                .expect("weights");
+            serde_json::from_str(&raw).expect("weights json")
+        };
+
+        let ucen = weights_of("ucen");
+        assert_eq!(ucen.len(), 2);
+        assert_eq!(ucen.get("ala"), Some(&1.0));
+        assert_eq!(ucen.get("gly"), Some(&1.0));
+
+        // Unparseable legacy content falls back to the canonical 20 all-1s.
+        let mistr = weights_of("mistr");
+        assert_eq!(
+            mistr.len(),
+            crate::db::biomolecule_seed::AMINO_ACID_SLUGS.len()
+        );
+        assert!(mistr.values().all(|weight| *weight == 1.0));
+
+        // A replay against the rebuilt table must not fail or alter it.
+        conn.pragma_update(None, "user_version", "61")
+            .expect("backlevel again");
+        run_migrations(&conn).expect("replay is idempotent");
+        assert_eq!(weights_of("ucen"), ucen);
+        assert_eq!(weights_of("mistr"), mistr);
     }
 
     /// v58 fills the amino acids' polarity trait but never second-guesses a
