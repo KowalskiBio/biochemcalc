@@ -756,8 +756,18 @@ function applyPlan(
         // tails stay exactly vertical), then normalize its length.
         const current = { x: atomInfo.position.x, y: atomInfo.position.y }
         const heading = Math.atan2(current.y - anchor.y, current.x - anchor.x)
+        // α bases (drawn down from the anomeric carbon) lean their glycosidic
+        // arm twice as far toward free space: below a furanose the α base and
+        // the 3′-chain both descend, and the extra swing is what keeps the
+        // base's fused rings clear of the chain and of the 2′ substituent
+        // (cobalamin's nucleotide loop). β bases keep the approved 18°.
+        const isAnomericBaseArm =
+          atom.vertexId === plan.cycle[0] &&
+          atomInfo.value.element === "N" &&
+          atomInfo.value.isPartOfAromaticRing === true
+        const chainBias = isAnomericBaseArm && group.direction > 0 ? 2 * CHAIN_BIAS : CHAIN_BIAS
         const desired = isTiltedChain
-          ? Math.atan2(group.direction, outwardX * Math.tan(CHAIN_BIAS))
+          ? Math.atan2(group.direction, outwardX * Math.tan(chainBias))
           : group.direction * (Math.PI / 2)
         const subtree = collectSubtree(preprocessor, substituentId, new Set(blocked))
         rotatePositions(preprocessor, subtree, anchor, desired - heading)
@@ -905,11 +915,16 @@ function applyPlan(
               }
               const markedPosition =
                 marked !== undefined ? positionOf(preprocessor, marked) : undefined
-              // The glyco N's own ring size picks the canonical side.
+              // The glyco N's own ring size picks the canonical side; α bases
+              // (drawn down) mirror the convention so the base's bulk falls
+              // on the opposite side of the bond axis from a descending
+              // phosphate chain — cobalamin's α-DMB base vs its 3′-loop
+              // otherwise stack on the same side and overlap.
               const glycoRingMembers = preprocessor.rings.find((ring) =>
                 ring.members.includes(substituentId),
               )?.members.length
-              const canonicalSide = glycoRingMembers === 5 ? -1 : 1
+              const canonicalSide =
+                (glycoRingMembers === 5 ? -1 : 1) * (group.direction < 0 ? 1 : -1)
               if (markedPosition !== undefined) {
                 const side =
                   outwardUnit.x * (markedPosition.y - glycoNPosition.y) -

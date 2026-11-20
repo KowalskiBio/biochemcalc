@@ -623,6 +623,109 @@ describe("sugar-ring recognition", () => {
   })
 })
 
+// Cobalamin regression: the nucleotide loop's α-riboside (base drawn DOWN —
+// the one natural α N-glycosidic bond) must render its DMB base clear of the
+// descending 3′-phosphate chain and of the ribose itself. The α base mirrors
+// the β parity convention and leans its glycosidic arm twice as far toward
+// free space; without both, the DMB stacks onto the phosphate chain (the
+// user-visible B12 overlap). The DB SMILES leaves C2′ unmarked, which the
+// strict recognizer refuses — the tagged variant is what a fully
+// stereo-tagged write-up produces.
+describe("cobalamin nucleotide loop", () => {
+  const BOND = 24
+  const B12_UNTAGGED =
+    "CC1=CC2=C(C=C1C)N(C=N2)[C@@H]3C([C@@H]([C@H](O3)CO)OP(=O)([O-])O[C@H](C)CNC(=O)CC[C@@]\\4([C@H]([C@@H]5[C@]6([C@@]([C@@H](C(=N6)/C(=C\\7/[C@@]([C@@H](C(=N7)/C=C\\8/C([C@@H](C(=N8)/C(=C4\\[N-]5)/C)CCC(=O)N)(C)C)CCC(=O)N)(C)CC(=O)N)/C)CCC(=O)N)(C)CC(=O)N)C)CC(=O)N)C)O.[C-]#N.[Co+3]"
+  const B12_TAGGED = B12_UNTAGGED.replace("[C@@H]3C(", "[C@@H]3[C@H](")
+
+  it("stays skeletal for the untagged DB SMILES (unmarked 2′ centre)", () => {
+    expect(recognizeSugarRings(snapshotOf(B12_UNTAGGED))).toEqual([])
+    expect(pipelineOf(B12_UNTAGGED).recognized).toBe(false)
+  })
+
+  it("renders the tagged loop with the α base clear of the chain and ribose", () => {
+    const pipeline = pipelineOf(B12_TAGGED)
+    expect(pipeline.recognized, "B12: loop ribose recognized").toBe(true)
+    expect(pipeline.plans.length, "B12: one recognized sugar").toBe(1)
+    const plan = pipeline.plans[0]
+    const pos = (id: number) => pipeline.positions.get(id) ?? { x: 0, y: 0 }
+
+    // α base: the glycosidic N sits BELOW the anomeric carbon (down = +y).
+    const anomeric = plan.cycle[0] ?? -1
+    const anomericAtom = plan.atoms.find((atom) => atom.vertexId === plan.cycle[0])
+    const glycoN =
+      [...(anomericAtom?.up ?? []), ...(anomericAtom?.down ?? [])].find((id) => {
+        const atom = pipeline.snapshot.atoms.get(id)
+        return atom !== undefined && atom.element === "N" && atom.isAromatic === true
+      }) ?? -1
+    expect(glycoN, "B12: glycosidic N found").not.toBe(-1)
+    expect(pos(glycoN).y - pos(anomeric).y, "B12: α base drawn down").toBeGreaterThan(BOND * 0.5)
+
+    // Trigonal rule still holds on the tilted arm: the DMB's ring-bond
+    // bisector lies along the glycosidic bond.
+    const ringNeighbours = (pipeline.snapshot.adjacency.get(glycoN) ?? []).filter(
+      (id) =>
+        id !== anomeric &&
+        pipeline.snapshot.atoms.get(id)?.element !== "H" &&
+        pipeline.snapshot.atoms.get(id)?.isAromatic === true,
+    )
+    expect(ringNeighbours.length, "B12: two ring bonds at the glyco N").toBe(2)
+    const unitFromN = (id: number) => {
+      const point = pos(id)
+      const dx = point.x - pos(glycoN).x
+      const dy = point.y - pos(glycoN).y
+      const length = Math.hypot(dx, dy) || 1
+      return { x: dx / length, y: dy / length }
+    }
+    const first = unitFromN(ringNeighbours[0] ?? -1)
+    const second = unitFromN(ringNeighbours[1] ?? -1)
+    const bisectorDeg = (Math.atan2(first.y + second.y, first.x + second.x) * 180) / Math.PI
+    const bondDeg =
+      (Math.atan2(pos(glycoN).y - pos(anomeric).y, pos(glycoN).x - pos(anomeric).x) * 180) / Math.PI
+    const degDiff = (a: number, b: number) => Math.abs(((((a - b) % 360) + 540) % 360) - 180)
+    expect(
+      degDiff(bisectorDeg, bondDeg),
+      "B12: base bisector collinear with the bond",
+    ).toBeLessThan(2)
+
+    // DMB subtree (aromatic BFS from the glycosidic N).
+    const dmb = new Set<number>([glycoN])
+    const stack = [glycoN]
+    while (stack.length > 0) {
+      const current = stack.pop() ?? -1
+      for (const next of pipeline.snapshot.adjacency.get(current) ?? []) {
+        if (!dmb.has(next) && pipeline.snapshot.atoms.get(next)?.isAromatic === true) {
+          dmb.add(next)
+          stack.push(next)
+        }
+      }
+    }
+
+    // Anti-overlap: every DMB atom keeps ≥ 0.9 bond from every other heavy
+    // atom (except the bonded glycosidic anchor) — the phosphate chain, the
+    // ribose, the 2′ hydroxyl, and the corrin alike.
+    const bondedToDmb = new Set<number>([anomeric])
+    for (const id of dmb) {
+      for (const next of pipeline.snapshot.adjacency.get(id) ?? []) {
+        if (!dmb.has(next)) {
+          bondedToDmb.add(next)
+        }
+      }
+    }
+    for (const a of dmb) {
+      for (const [id, atom] of pipeline.snapshot.atoms) {
+        if (dmb.has(id) || bondedToDmb.has(id) || atom.element === "H") {
+          continue
+        }
+        const distance = Math.hypot(pos(a).x - pos(id).x, pos(a).y - pos(id).y)
+        expect(
+          distance,
+          `B12: DMB atom ${a} clear of atom ${id} (${atom.element})`,
+        ).toBeGreaterThan(BOND * 0.9)
+      }
+    }
+  })
+})
+
 describe("round-trip chemistry", () => {
   it("keeps atom/bond counts and every CIP code after the coordinate patch", () => {
     for (const smiles of [TRUE_ALPHA_GLUCOSE, TRUE_BETA_GLUCOSE, AMP, SUCROSE]) {
