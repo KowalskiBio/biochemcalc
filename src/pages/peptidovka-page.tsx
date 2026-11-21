@@ -272,8 +272,8 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   )
 
   // The playable pool: the amino-acid category's molecules that carry a
-  // one-letter code (the answer alphabet) — the same dataset the streak
-  // draws its categories from — intersected with the mode's settings slugs.
+  // one-letter code (the answer alphabet) — the same playability rule the
+  // teacher settings grid uses.
   const playableBySlug = useMemo(() => {
     const map = new Map<string, string>()
     for (const molecule of allMolecules) {
@@ -284,18 +284,18 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
     return map
   }, [allMolecules])
 
-  // The effective pool: the mode's positive-weight slugs intersected with
-  // the molecules that can actually play. Weights pass straight through to
-  // the generator's weighted sampling (0.5 = half as likely as 1); this
-  // memo only keeps out entries that would break synthesis — deleted
-  // molecules, stripped one-letter codes, and out-of-range weights.
+  // The effective pool: every playable molecule not explicitly switched off.
+  // A missing saved weight means the default 1; explicit zero disables the
+  // molecule. Valid positive weights pass straight through to the generator's
+  // weighted sampling (0.5 = half as likely as 1). Iterating playable molecules
+  // also drops stale slugs, stripped one-letter codes, and deleted molecules.
   const { pool, poolWeights } = useMemo(() => {
     const slugs: string[] = []
     const weights: Record<string, number> = {}
     if (modeSettings !== null) {
-      for (const [slug, weight] of Object.entries(modeSettings.weights)) {
+      for (const slug of playableBySlug.keys()) {
+        const weight = modeSettings.weights[slug] ?? 1
         if (!Number.isFinite(weight) || weight <= 0 || weight > 1) continue
-        if (!playableBySlug.has(slug)) continue
         slugs.push(slug)
         weights[slug] = weight
       }

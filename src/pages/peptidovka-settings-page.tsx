@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RichText } from "@/components/ui/rich-text"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Slider } from "@/components/ui/slider"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import {
@@ -28,19 +27,30 @@ const LENGTH_MIN = 2
 const LENGTH_MAX = 20
 const SECONDS_MIN = 3
 const SECONDS_MAX = 120
-/**
- * Weight slider range. 0.25 stops are exact dyadic values (0, 0.25, 0.5,
- * 0.75, 1) — no float fuzz, every achievable readout is a "round" quarter,
- * and a track click lands unambiguously. 1 = default odds, 0.5 = half as
- * likely, 0 = off; the generator samples linearly in weight.
- */
+/** Weight input range. 1 = default odds, 0.5 = half as likely, 0 = off. */
 const WEIGHT_MIN = 0
 const WEIGHT_MAX = 1
-const WEIGHT_STEP = 0.25
+const DEFAULT_WEIGHT = 1
 
-/** Compact Czech readout of a weight: "1", "0,5", "0,25" — display only. */
+/** Czech two-decimal readout of a weight: "1,00", "0,50", "0,25", "0". */
 function formatWeight(weight: number): string {
-  return weight.toFixed(2).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",")
+  return weight === 0 ? "0" : weight.toFixed(2).replace(".", ",")
+}
+
+/** Decimal parse accepting either Czech comma or dot; blank/garbage is invalid. */
+function parseWeight(text: string): number | undefined {
+  const trimmed = text.trim()
+  if (!/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
+    return undefined
+  }
+  const weight = Number(trimmed.replace(",", "."))
+  return Number.isFinite(weight) ? weight : undefined
+}
+
+function isWeightValid(weight: number | undefined): weight is number {
+  return (
+    weight !== undefined && Number.isFinite(weight) && weight >= WEIGHT_MIN && weight <= WEIGHT_MAX
+  )
 }
 
 interface ModeCardCopy {
@@ -79,15 +89,28 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
   const [minLenText, setMinLenText] = useState(String(settings.minLen))
   const [maxLenText, setMaxLenText] = useState(String(settings.maxLen))
   const [secondsText, setSecondsText] = useState(String(settings.secondsPerAa))
-  // Draft weights as fetched. A pool molecule missing from the map (added
-  // after the save, or unchecked under the old checkbox pool) reads as 0 —
-  // off until the teacher opts it in.
-  const [weights, setWeights] = useState<Record<string, number>>(settings.weights)
+  // Text drafts keep blank and half-typed values visible. A pool molecule
+  // missing from the saved map starts at the default weight; only an
+  // explicit zero switches it off. Stale slugs are not carried into the draft.
+  const [weightTexts, setWeightTexts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      pool.map((molecule) => [
+        molecule.slug,
+        formatWeight(settings.weights[molecule.slug] ?? DEFAULT_WEIGHT),
+      ]),
+    ),
+  )
   const [saving, setSaving] = useState(false)
 
   const minLen = parseBound(minLenText)
   const maxLen = parseBound(maxLenText)
   const seconds = parseBound(secondsText)
+  const parsedWeights = new Map(
+    pool.map((molecule) => [
+      molecule.slug,
+      parseWeight(weightTexts[molecule.slug] ?? formatWeight(DEFAULT_WEIGHT)),
+    ]),
+  )
 
   const lengthValid =
     minLen !== undefined &&
@@ -96,32 +119,39 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
     maxLen <= LENGTH_MAX &&
     maxLen >= minLen
   const secondsValid = seconds !== undefined && seconds >= SECONDS_MIN && seconds <= SECONDS_MAX
-  // Count only positive weights that are still selectable (a molecule may
-  // have been deleted or stripped of oneLetter since the settings were
-  // saved).
-  const activeInPool = pool.filter((molecule) => (weights[molecule.slug] ?? 0) > 0).length
+  const weightsValid = pool.every((molecule) => isWeightValid(parsedWeights.get(molecule.slug)))
+  // Count only valid positive weights that are still selectable (a molecule
+  // may have been deleted or stripped of oneLetter since the settings save).
+  const activeInPool = pool.filter((molecule) => {
+    const weight = parsedWeights.get(molecule.slug)
+    return isWeightValid(weight) && weight > 0
+  }).length
   const poolValid = activeInPool >= 2
   const invalidMessage = !lengthValid
     ? peptidovkaStrings.invalidLength
     : !secondsValid
       ? peptidovkaStrings.invalidSeconds
-      : !poolValid
-        ? peptidovkaStrings.invalidPool
-        : null
+      : !weightsValid
+        ? peptidovkaStrings.invalidWeight
+        : !poolValid
+          ? peptidovkaStrings.invalidPool
+          : null
 
-  const setWeight = (slug: string, weight: number) => {
-    setWeights((current) => ({ ...current, [slug]: weight }))
+  const setWeightText = (slug: string, text: string) => {
+    setWeightTexts((current) => ({ ...current, [slug]: text }))
   }
 
   const save = async () => {
     if (saving || invalidMessage !== null || minLen === undefined || maxLen === undefined) return
-    setSaving(true)
-    // A slug from an older save can outlive its molecule; posting it would
-    // be rejected server-side. Only current-pool slugs go out — a complete
-    // snapshot including zeros — so the teacher can always re-save over
-    // drifted settings.
+    // Only current-pool slugs go out — a complete snapshot including zeros —
+    // so the teacher can always re-save over drifted settings.
     const postedWeights: Record<string, number> = {}
-    for (const molecule of pool) postedWeights[molecule.slug] = weights[molecule.slug] ?? 0
+    for (const molecule of pool) {
+      const weight = parsedWeights.get(molecule.slug)
+      if (!isWeightValid(weight)) return
+      postedWeights[molecule.slug] = weight
+    }
+    setSaving(true)
     try {
       await biomoleculesApi.updatePeptidovkaSettings(settings.mode, {
         minLen,
@@ -211,9 +241,11 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
           <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2 xl:grid-cols-3">
             {pool.map((molecule) => {
               // The pool filter guarantees oneLetter; the badge column
-              // anchors each row so the sliders stay scannable.
+              // anchors each row so the inputs stay scannable.
               const oneLetter = traitOf(molecule, TRAIT.oneLetter) ?? ""
-              const weight = weights[molecule.slug] ?? 0
+              const weightText = weightTexts[molecule.slug] ?? formatWeight(DEFAULT_WEIGHT)
+              const weight = parsedWeights.get(molecule.slug)
+              const weightValid = isWeightValid(weight)
               const off = weight === 0
               return (
                 <div
@@ -231,23 +263,24 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
                   >
                     <RichText text={molecule.name} />
                   </span>
-                  <Slider
-                    value={[weight]}
-                    onValueChange={([value]) => setWeight(molecule.slug, value)}
-                    min={WEIGHT_MIN}
-                    max={WEIGHT_MAX}
-                    step={WEIGHT_STEP}
+                  <Input
+                    id={`${settings.mode}-weight-${molecule.slug}`}
+                    type="text"
+                    inputMode="decimal"
+                    value={weightText}
+                    onChange={(event) => setWeightText(molecule.slug, event.target.value)}
+                    onBlur={() => {
+                      // Canonicalize only complete, in-range values. Invalid
+                      // text stays visible so it can be corrected, not coerced.
+                      if (weightValid && weight !== undefined) {
+                        setWeightText(molecule.slug, formatWeight(weight))
+                      }
+                    }}
                     aria-label={molecule.name}
-                    className="w-24 shrink-0 sm:w-28"
+                    aria-invalid={!weightValid}
+                    autoComplete="off"
+                    className="w-20 shrink-0 px-2 text-right font-mono tabular-nums"
                   />
-                  <span
-                    className={cn(
-                      "w-8 shrink-0 text-right font-mono text-xs tabular-nums",
-                      off ? "text-muted-foreground/70" : "text-foreground",
-                    )}
-                  >
-                    {formatWeight(weight)}
-                  </span>
                 </div>
               )
             })}
