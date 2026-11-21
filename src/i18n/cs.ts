@@ -82,7 +82,7 @@ export const cs = {
     databaze: "Databáze",
     biomolekuly: "Biomolekuly",
     peptidovka: "Peptidovka",
-    biomoleculeTests: "Zadané testy",
+    biomoleculeTests: "Testy",
     projections: "Projekce",
     formulas: "Vzorce",
     bulkImport: "Hromadný import",
@@ -427,7 +427,7 @@ export const cs = {
       resultGenerationUnavailable:
         "Materiál testu se změnil, proto nelze peptidy znovu zobrazit. Výsledek zůstává uložený.",
       nextPeptide: "Další peptid",
-      teacherTitle: "Zadané testy",
+      teacherTitle: "Testy",
       teacherDescription: "Vytvářejte peptidové testy a sledujte odevzdání studentů.",
       testsLink: "Zadané testy",
       createTitle: "Nový test",
@@ -494,6 +494,7 @@ export const cs = {
       audienceEmpty: "Vyberte alespoň jednoho zvací kód.",
       audienceAllBadge: "Všichni studenti",
       audienceCodesBadge: "Skupiny podle kódů: {count}",
+      backToTests: "Zpět na Testy",
     },
   },
 
@@ -865,7 +866,22 @@ export const cs = {
       audienceEmpty: "Vyberte alespoň jednoho zvací kód.",
       audienceAllBadge: "Všichni studenti",
       audienceCodesBadge: "Skupiny podle kódů: {count}",
-      teacherTitle: "Zadané testy",
+      backToTests: "Zpět na Testy",
+      hub: {
+        title: "Testy",
+        description: "Vytvářejte zadané testy a prohlížejte výsledky studentů.",
+        createPeptidovkaTitle: "Vytvořit peptidovku",
+        createPeptidovkaDescription:
+          "Peptidový test z aminokyselin s pevným odevzdáním.",
+        createClassicTitle: "Vytvořit klasický test",
+        createClassicDescription:
+          "Test z kategorií Biomolekul s výběrem typů otázek.",
+        resultsPeptidovkaTitle: "Výsledky — Peptidovka",
+        resultsPeptidovkaDescription: "Odevzdané peptidovky a výsledky studentů.",
+        resultsClassicTitle: "Výsledky — klasické testy",
+        resultsClassicDescription: "Odevzdané klasické testy a výsledky studentů.",
+      },
+      teacherTitle: "Testy",
       teacherDescription: "Vytvářejte testy pro studenty a sledujte jejich odevzdání.",
       createTitle: "Nový test",
       createDescription:

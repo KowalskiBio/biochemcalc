@@ -106,6 +106,7 @@ mod tests {
             email: Some(format!("{}@example.com", Uuid::new_v4())),
             sections: crate::models::SectionAccess::Calculations,
             preferred_section: None,
+            invite_code: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id
