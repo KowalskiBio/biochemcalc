@@ -70,6 +70,8 @@ interface DraftState {
   types: string[]
   countMode: "custom" | "all"
   countText: string
+  audienceMode: "all" | "codes"
+  assignedCodes: string[]
   questionSet: BiomoleculeTestQuestionSet
   monochrome: boolean
   fromLocal: string
@@ -83,6 +85,8 @@ function initialDraft(): DraftState {
     types: [],
     countMode: "custom",
     countText: "10",
+    audienceMode: "all",
+    assignedCodes: [],
     questionSet: "random",
     monochrome: false,
     fromLocal: "",
@@ -191,6 +195,7 @@ export function BiomoleculesTestsPage() {
     draft.types.length > 0 &&
     resolvedCount >= 1 &&
     resolvedCount <= QUESTION_COUNT_MAX &&
+    (draft.audienceMode === "all" || draft.assignedCodes.length > 0) &&
     fromIso !== null &&
     toIso !== null &&
     new Date(fromIso).getTime() < new Date(toIso).getTime()
@@ -214,7 +219,9 @@ export function BiomoleculesTestsPage() {
       ? testyStrings.scopeEmpty
       : resolvedCount < 1 || resolvedCount > QUESTION_COUNT_MAX
         ? testyStrings.countInvalid
-        : null
+        : draft.audienceMode === "codes" && draft.assignedCodes.length === 0
+          ? testyStrings.audienceEmpty
+          : null
     : null
 
   const create = async () => {
@@ -227,19 +234,22 @@ export function BiomoleculesTestsPage() {
         moleculeIds: scopedMolecules.map((molecule) => molecule.id),
         questionTypes: draft.types.filter((type) => (generatable as string[]).includes(type)),
         questionCount: resolvedCount,
+        assignedCodes: draft.audienceMode === "all" ? [] : draft.assignedCodes,
         questionSet: draft.questionSet,
         monochrome: draft.monochrome,
         availableFrom: fromIso ?? "",
         availableTo: toIso ?? "",
       })
       toast({ title: testyStrings.createSuccess })
-      // Keep the scope and the window — repeat tests usually share them, and
-      // the preserved fields keep the form valid so a success never reads
-      // like a failure.
+      // Keep the audience, scope and window — repeat tests usually share
+      // them, and the preserved fields keep the form valid so a success never
+      // reads like a failure.
       setDraft((current) => ({
         ...initialDraft(),
         categorySlugs: current.categorySlugs,
         types: current.types,
+        audienceMode: current.audienceMode,
+        assignedCodes: current.assignedCodes,
         fromLocal: current.fromLocal,
         toLocal: current.toLocal,
       }))
@@ -493,6 +503,67 @@ export function BiomoleculesTestsPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>{testyStrings.audienceLabel}</Label>
+                <div className="flex items-center gap-4">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="audience-mode"
+                      checked={draft.audienceMode === "all"}
+                      onChange={() => setDraft((current) => ({ ...current, audienceMode: "all" }))}
+                      className="size-4 accent-[var(--primary)]"
+                    />
+                    {testyStrings.audienceAll}
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="audience-mode"
+                      checked={draft.audienceMode === "codes"}
+                      onChange={() =>
+                        setDraft((current) => ({ ...current, audienceMode: "codes" }))
+                      }
+                      className="size-4 accent-[var(--primary)]"
+                    />
+                    {testyStrings.audienceCodes}
+                  </label>
+                </div>
+                {draft.audienceMode === "codes" && (
+                  <div className="max-h-40 space-y-1 overflow-y-auto rounded-[4px] border p-2">
+                    {(page?.codes ?? []).map((entry) => {
+                      const checked = draft.assignedCodes.includes(entry.code)
+                      return (
+                        <label
+                          key={entry.code}
+                          className="flex cursor-pointer items-center gap-2 rounded-[4px] px-1 py-0.5 text-sm hover:bg-muted/40"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setDraft((current) => {
+                                const assignedCodes = current.assignedCodes.includes(entry.code)
+                                  ? current.assignedCodes.filter(
+                                      (candidate) => candidate !== entry.code,
+                                    )
+                                  : [...current.assignedCodes, entry.code]
+                                return { ...current, assignedCodes }
+                              })
+                            }
+                            className="size-4 accent-[var(--primary)]"
+                          />
+                          <span className="font-mono text-xs">{entry.code}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {entry.studentCount}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
