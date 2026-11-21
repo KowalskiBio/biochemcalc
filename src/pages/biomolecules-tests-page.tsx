@@ -6,21 +6,31 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RichText } from "@/components/ui/rich-text"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StructureView } from "@/components/ui/structure-view"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import {
+  type Biomolecule,
+  type BiomoleculeTest,
   type BiomoleculeTestQuestionSet,
   type BiomoleculeTestTeacherView,
   biomoleculesApi,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
-import { generatableQuizTypes } from "@/lib/molecules/quiz/question-generator"
-import { testPairCount, testQuestionPool } from "@/lib/molecules/test"
+import {
+  generatableQuizTypes,
+  type QuizOption,
+  type QuizQuestion,
+} from "@/lib/molecules/quiz/question-generator"
+import { generateTestSession, testPairCount, testQuestionPool } from "@/lib/molecules/test"
 import { stripRichMarkup } from "@/lib/rich-text"
+import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const testyStrings = cs.biomolekuly.testy
+const quizStrings = cs.biomolekuly.quiz
 
 const TITLE_MAX = 120
 /** Server-side cap, mirrored client-side so the form never posts a reject. */
@@ -36,14 +46,12 @@ function formatWindowDate(value: string): string {
   })
 }
 
-/** Question-count text with the Czech plural forms, shared with the hub. */
 function questionCountText(count: number): string {
   const forms = testyStrings.questionCount
   const form = count === 1 ? forms.one : count >= 2 && count <= 4 ? forms.few : forms.many
   return form.replace("{count}", String(count))
 }
 
-/** The test's lifecycle phase, judged against the list payload's serverNow. */
 function windowPhase(
   availableFrom: string,
   availableTo: string,
@@ -83,9 +91,9 @@ function initialDraft(): DraftState {
 
 export function BiomoleculesTestsPage() {
   const loaded = useBiomoleculeDataLoaded()
+  const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const categories = useBiomoleculeDataStore((s) => s.categories)
   const topics = useBiomoleculeDataStore((s) => s.topics)
-  const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const { toast } = useToast()
 
   const [draft, setDraft] = useState<DraftState>(initialDraft)
@@ -93,21 +101,19 @@ export function BiomoleculesTestsPage() {
   const [listError, setListError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
-
-  const loadTests = useCallback(async () => {
-    setListError(null)
-    try {
-      setViews(await biomoleculesApi.biomoleculeTests())
-    } catch (error) {
-      setListError(extractErrorMessage(error, testyStrings.loadError))
-      setViews((current) => current ?? [])
+  const [detailAttempt, setDetailAttempt] = useState<{
+    testId: string
+    username: string
+    attempt: {
+      attemptId: string
+      seed: number
+      submittedAt: string | null
+      totalCount: number | null
+      correctCount: number | null
+      detailJson: string | null
     }
-  }, [])
-
-  useEffect(() => {
-    if (loaded) void loadTests()
-  }, [loaded, loadTests])
+  } | null>(null)
+  const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
 
   // Scope resolution: the checked categories, their molecules in store order.
   const scopedMolecules = useMemo(
@@ -188,6 +194,28 @@ export function BiomoleculesTestsPage() {
     toIso !== null &&
     new Date(fromIso).getTime() < new Date(toIso).getTime()
 
+  const loadTests = useCallback(async () => {
+    setListError(null)
+    try {
+      setViews(await biomoleculesApi.biomoleculeTests())
+    } catch (error) {
+      setListError(extractErrorMessage(error, testyStrings.loadError))
+      setViews((current) => current ?? [])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (loaded) void loadTests()
+  }, [loaded, loadTests])
+
+  const invalidMessage = !formValid
+    ? draft.categorySlugs.length === 0 || draft.types.length === 0
+      ? testyStrings.scopeEmpty
+      : resolvedCount < 1 || resolvedCount > QUESTION_COUNT_MAX
+        ? testyStrings.countInvalid
+        : null
+    : null
+
   const create = async () => {
     if (!formValid || creating) return
     setCreating(true)
@@ -204,7 +232,16 @@ export function BiomoleculesTestsPage() {
         availableTo: toIso ?? "",
       })
       toast({ title: testyStrings.createSuccess })
-      setDraft(initialDraft())
+      // Keep the scope and the window — repeat tests usually share them, and
+      // the preserved fields keep the form valid so a success never reads
+      // like a failure.
+      setDraft((current) => ({
+        ...initialDraft(),
+        categorySlugs: current.categorySlugs,
+        types: current.types,
+        fromLocal: current.fromLocal,
+        toLocal: current.toLocal,
+      }))
       await loadTests()
     } catch (error) {
       toast({
@@ -329,9 +366,7 @@ export function BiomoleculesTestsPage() {
                                 : "bg-card hover:border-primary/50"
                             }`}
                           >
-                            {cs.biomolekuly.quiz.types[
-                              type as keyof typeof cs.biomolekuly.quiz.types
-                            ] ?? type}
+                            {quizStrings.types[type as keyof typeof quizStrings.types] ?? type}
                           </button>
                         )
                       })}
@@ -486,6 +521,10 @@ export function BiomoleculesTestsPage() {
                 </div>
               </div>
 
+              {invalidMessage !== null && (
+                <p className="text-sm text-destructive">{invalidMessage}</p>
+              )}
+
               <Button onClick={() => void create()} disabled={!formValid || creating}>
                 {creating ? testyStrings.creating : testyStrings.createAction}
               </Button>
@@ -614,7 +653,26 @@ export function BiomoleculesTestsPage() {
                           </div>
                         </div>
 
-                        {expanded && <AttemptRows view={view} />}
+                        {expanded && (
+                          <AttemptRows
+                            view={view}
+                            onDetail={(attempt) =>
+                              setDetailAttempt({
+                                testId: view.test.id,
+                                username: attempt.username,
+                                attempt,
+                              })
+                            }
+                          />
+                        )}
+                        {detailAttempt !== null && detailAttempt.testId === view.test.id && (
+                          <BiomoleculeAttemptDetail
+                            test={view.test}
+                            username={detailAttempt.username}
+                            attempt={detailAttempt.attempt}
+                            allMolecules={allMolecules}
+                          />
+                        )}
                       </CardContent>
                     </Card>
                   )
@@ -632,10 +690,7 @@ export function BiomoleculesTestsPage() {
             if (!open) setDeleting(null)
           }}
           title={testyStrings.deleteTitle}
-          description={testyStrings.deleteConfirm.replace(
-            "{title}",
-            stripRichMarkup(deleting.title),
-          )}
+          description={testyStrings.deleteConfirm.replace("{title}", deleting.title)}
           confirmLabel={testyStrings.deleteAction}
           cancelLabel={testyStrings.cancel}
           onConfirm={() => {
@@ -649,7 +704,21 @@ export function BiomoleculesTestsPage() {
   )
 }
 
-function AttemptRows({ view }: { view: BiomoleculeTestTeacherView }) {
+interface AttemptRowsProps {
+  view: BiomoleculeTestTeacherView
+  onDetail: (attempt: {
+    attemptId: string
+    userId: string
+    username: string
+    seed: number
+    submittedAt: string | null
+    totalCount: number | null
+    correctCount: number | null
+    detailJson: string | null
+  }) => void
+}
+
+function AttemptRows({ view, onDetail }: AttemptRowsProps) {
   const byUser = new Map(view.attempts.map((attempt) => [attempt.userId, attempt]))
   // Roster first (never-submitted students visible), then stray attempts
   // whose user left the roster.
@@ -681,15 +750,17 @@ function AttemptRows({ view }: { view: BiomoleculeTestTeacherView }) {
             <th className="px-3 py-2 font-medium">{testyStrings.statusColumn}</th>
             <th className="px-3 py-2 font-medium">{testyStrings.submittedAtColumn}</th>
             <th className="px-3 py-2 text-right font-medium">{testyStrings.scoreColumn}</th>
+            <th className="px-3 py-2" aria-label={testyStrings.expandStudents} />
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => {
             const attempt = row.attempt
+            const submitted = attempt !== null && attempt.submittedAt !== null
             const status =
               attempt === null
                 ? testyStrings.notSubmitted
-                : attempt.submittedAt !== null
+                : submitted
                   ? testyStrings.statusSubmitted
                   : testyStrings.statusInProgress
             return (
@@ -697,20 +768,198 @@ function AttemptRows({ view }: { view: BiomoleculeTestTeacherView }) {
                 <td className="px-3 py-2">{row.username}</td>
                 <td className="px-3 py-2">{status}</td>
                 <td className="px-3 py-2 font-mono tabular text-xs text-muted-foreground">
-                  {attempt !== null && attempt.submittedAt !== null
-                    ? formatWindowDate(attempt.submittedAt)
-                    : "—"}
+                  {submitted ? formatWindowDate(attempt?.submittedAt ?? "") : "—"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular">
-                  {attempt !== null && attempt.submittedAt !== null
-                    ? `${attempt.correctCount ?? 0} / ${attempt.totalCount ?? 0}`
-                    : "—"}
+                  {submitted ? `${attempt.correctCount ?? 0} / ${attempt.totalCount ?? 0}` : "—"}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {submitted && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onDetail(attempt)}
+                      aria-label={`${testyStrings.expandStudents}: ${row.username}`}
+                    >
+                      {testyStrings.expandStudents}
+                    </Button>
+                  )}
                 </td>
               </tr>
             )
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+interface AttemptSummaryLike {
+  attemptId: string
+  seed: number
+  submittedAt: string | null
+  totalCount: number | null
+  correctCount: number | null
+  detailJson: string | null
+}
+
+/**
+ * One student's submitted test, reconstructed for the teacher: the batch
+ * regenerates from the attempt seed and the stored per-question answers
+ * (matched by uid) mark exactly what the student picked.
+ */
+function BiomoleculeAttemptDetail({
+  test,
+  username,
+  attempt,
+  allMolecules,
+}: {
+  test: BiomoleculeTest
+  username: string
+  attempt: AttemptSummaryLike
+  allMolecules: Biomolecule[]
+}) {
+  const molecules = useMemo(
+    () => testQuestionPool(test, allMolecules)?.molecules ?? [],
+    [test, allMolecules],
+  )
+  const rows = useMemo(() => {
+    const questions = generateTestSession(test, attempt.seed, allMolecules)
+    if (questions === null || questions.length === 0 || attempt.detailJson === null) {
+      return null
+    }
+    let answers: { uid: string; correct: boolean; selectedKey: string | null }[]
+    try {
+      const parsed = JSON.parse(attempt.detailJson) as {
+        answers?: { uid: string; correct: boolean; selectedKey: string | null }[]
+      }
+      answers = parsed.answers ?? []
+    } catch {
+      return null
+    }
+    if (answers.length !== questions.length) {
+      return null
+    }
+    const result: { question: QuizQuestion; selectedKey: string | null; correct: boolean }[] = []
+    for (let index = 0; index < questions.length; index += 1) {
+      const question = questions[index] as QuizQuestion
+      const answer = answers[index]
+      if (answer === undefined || answer.uid !== (question.uid ?? "")) {
+        return null // dataset drift: the stored answers no longer line up
+      }
+      result.push({ question, selectedKey: answer.selectedKey, correct: answer.correct })
+    }
+    return result
+  }, [test, attempt.seed, attempt.detailJson, allMolecules])
+
+  if (rows === null) {
+    return <p className="text-sm text-muted-foreground">{testyStrings.detailUnavailable}</p>
+  }
+
+  const optionLabel = (option: QuizOption): string => {
+    const molecule = molecules.find((m) => m.id === option.moleculeId)
+    if (!molecule) return option.key
+    return option.display === "letter" ? (molecule.oneLetter ?? option.key) : molecule.name
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium">{username}</p>
+      <ol className="space-y-3">
+        {rows.map((row, index) => {
+          const picked = row.selectedKey
+            ? (row.question.options.find((option) => option.key === row.selectedKey) ?? null)
+            : null
+          return (
+            <li key={row.question.uid ?? index} className="rounded-[4px] border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {testyStrings.questionNumber.replace("{number}", String(index + 1))} ·{" "}
+                  {quizStrings.types[row.question.type as keyof typeof quizStrings.types] ??
+                    row.question.type}
+                </p>
+                <span
+                  className={cn(
+                    "font-mono tabular text-xs font-semibold",
+                    row.correct ? "text-accent" : "text-destructive",
+                  )}
+                >
+                  {row.correct ? quizStrings.correct : quizStrings.incorrect}
+                </span>
+              </div>
+              {row.question.prompt.kind === "structure" && row.question.prompt.smiles ? (
+                <div className="mt-2 flex min-w-0 justify-center">
+                  <StructureView
+                    smiles={row.question.prompt.smiles}
+                    projection={row.question.prompt.projection}
+                    haworth={row.question.prompt.haworth ?? true}
+                    fischer={row.question.prompt.fischer ?? true}
+                    orientationDeg={row.question.prompt.orientationDeg}
+                    size={180}
+                    monochrome={test.monochrome}
+                    title={quizStrings.promptStructureLabel}
+                    className="max-w-full"
+                  />
+                </div>
+              ) : row.question.prompt.kind === "letter" ? (
+                <p className="mt-2 text-center font-mono tabular text-2xl font-semibold tracking-tight">
+                  {row.question.prompt.text}
+                </p>
+              ) : row.question.prompt.kind === "characteristic" ? (
+                <p className="mt-2 text-center text-lg font-semibold tracking-tight">
+                  {row.question.prompt.predicate
+                    ? quizStrings.characteristicPrompts[row.question.prompt.predicate]
+                    : row.question.prompt.text}
+                </p>
+              ) : (
+                <p className="mt-2 text-center text-xl font-semibold tracking-tight">
+                  <RichText text={row.question.prompt.text} />
+                </p>
+              )}
+              <ul className="mt-3 space-y-1.5">
+                {row.question.options.map((option) => {
+                  const isPicked = picked !== null && picked.key === option.key
+                  const label = option.display === "structure" ? "" : optionLabel(option)
+                  return (
+                    <li
+                      key={option.key}
+                      className={cn(
+                        "flex items-center gap-2 rounded-[4px] border px-3 py-1.5 text-sm",
+                        option.correct
+                          ? "border-accent/60 bg-accent/5 text-accent"
+                          : isPicked
+                            ? "border-destructive/60 bg-destructive/5 text-destructive"
+                            : "border-border text-muted-foreground",
+                      )}
+                    >
+                      {option.display === "structure" ? (
+                        <div aria-hidden="true">
+                          <StructureView
+                            smiles={option.smiles ?? ""}
+                            projection={option.projection}
+                            haworth={option.haworth ?? true}
+                            fischer={option.fischer ?? true}
+                            orientationDeg={option.orientationDeg}
+                            size={120}
+                            monochrome={test.monochrome}
+                          />
+                        </div>
+                      ) : (
+                        <RichText text={label} />
+                      )}
+                      {option.correct && (
+                        <span className="ml-auto text-xs font-medium">
+                          {testyStrings.correctOption}
+                        </span>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }

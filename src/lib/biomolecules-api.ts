@@ -137,6 +137,10 @@ export interface BiomoleculeTestAttemptSummary {
   submittedAt: string | null
   totalCount: number | null
   correctCount: number | null
+  /** The attempt's generation seed, used to regenerate its batch. */
+  seed: number
+  /** Stored per-item breakdown; null until the attempt is submitted. */
+  detailJson: string | null
 }
 
 /** A teacher's view: the test, its attempts, and who could still take it. */
@@ -202,6 +206,10 @@ export interface PeptidovkaTestAttemptSummary {
   submittedAt: string | null
   totalCount: number | null
   correctCount: number | null
+  /** The attempt's generation seed, used to regenerate its batch. */
+  seed: number
+  /** Stored per-item breakdown; null until the attempt is submitted. */
+  detailJson: string | null
 }
 
 /** A teacher's view: the test, its attempts, and who could still take it. */

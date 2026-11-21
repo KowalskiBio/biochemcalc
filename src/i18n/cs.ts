@@ -487,6 +487,7 @@ export const cs = {
       deleteError: "Test se nepodařilo smazat",
       deleteAction: "Smazat",
       cancel: "Zrušit",
+      detailUnavailable: "Podrobný přehled nelze zobrazit — materiál testu se změnil.",
     },
   },
 
@@ -851,6 +852,7 @@ export const cs = {
         "Materiál testu se změnil, proto nelze otázky znovu zobrazit. Výsledek zůstává uložený.",
       breakdownUnavailable: "Podrobný rozpis podle typů otázek není k dispozici.",
       correctOption: "Správná odpověď",
+      detailUnavailable: "Podrobný přehled nelze zobrazit — materiál testu se změnil.",
       teacherTitle: "Zadané testy",
       teacherDescription: "Vytvářejte testy pro studenty a sledujte jejich odevzdání.",
       createTitle: "Nový test",

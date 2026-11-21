@@ -91,6 +91,9 @@ const PEPTIDOVKA_TEST_MAX_LENGTH: i64 = 20;
 /// A late submission is accepted for a minute after the window closes — the
 /// client may finish its last answer right at the deadline.
 const SUBMIT_GRACE_SECONDS: i64 = 60;
+/// Upper bound on a client-supplied per-item result breakdown. Large enough for
+/// 200 questions (~18 KB worst case), still bounded against abuse.
+const MAX_TEST_DETAIL_JSON: usize = 65536;
 
 /// The validated trait vocabulary (values stored as text in
 /// `biomolecule_traits`; adding a kind needs no schema change).
@@ -1574,6 +1577,10 @@ pub struct BiomoleculeTestAttemptSummary {
     pub submitted_at: Option<String>,
     pub total_count: Option<i64>,
     pub correct_count: Option<i64>,
+    /// The attempt's generation seed, so the teacher can regenerate the batch.
+    pub seed: i64,
+    /// Stored per-item breakdown; `None` until the attempt is submitted.
+    pub detail_json: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1736,6 +1743,8 @@ fn attempt_summary_view(row: &BiomoleculeTestAttemptSummaryRow) -> BiomoleculeTe
         submitted_at: row.attempt.submitted_at.clone(),
         total_count: row.attempt.total_count,
         correct_count: row.attempt.correct_count,
+        seed: row.attempt.seed,
+        detail_json: row.attempt.detail_json.clone(),
     }
 }
 
@@ -2006,10 +2015,10 @@ pub fn do_submit_biomolecule_test_attempt(
     {
         return Err(DbError::Validation("Invalid test score".into()));
     }
-    // The breakdown is a small client-built JSON blob — bound its size so a
-    // hostile payload cannot bloat the row.
+    // The breakdown is a client-built JSON blob — bound its size so a hostile
+    // payload cannot bloat the row.
     if let Some(detail) = detail_json {
-        if detail.len() > 4096 {
+        if detail.len() > MAX_TEST_DETAIL_JSON {
             return Err(DbError::Validation("Invalid test detail".into()));
         }
     }
@@ -2061,6 +2070,10 @@ pub struct PeptidovkaTestAttemptSummary {
     pub submitted_at: Option<String>,
     pub total_count: Option<i64>,
     pub correct_count: Option<i64>,
+    /// The attempt's generation seed, so the teacher can regenerate the batch.
+    pub seed: i64,
+    /// Stored per-item breakdown; `None` until the attempt is submitted.
+    pub detail_json: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -2192,6 +2205,8 @@ fn peptidovka_attempt_summary_view(
         submitted_at: row.attempt.submitted_at.clone(),
         total_count: row.attempt.total_count,
         correct_count: row.attempt.correct_count,
+        seed: row.attempt.seed,
+        detail_json: row.attempt.detail_json.clone(),
     }
 }
 
@@ -2464,10 +2479,10 @@ pub fn do_submit_peptidovka_test_attempt(
     {
         return Err(DbError::Validation("Invalid test score".into()));
     }
-    // The breakdown is a small client-built JSON blob — bound its size so a
-    // hostile payload cannot bloat the row.
+    // The breakdown is a client-built JSON blob — bound its size so a hostile
+    // payload cannot bloat the row.
     if let Some(detail) = detail_json {
-        if detail.len() > 4096 {
+        if detail.len() > MAX_TEST_DETAIL_JSON {
             return Err(DbError::Validation("Invalid test detail".into()));
         }
     }
@@ -4691,6 +4706,13 @@ mod tests {
             );
         }
 
+        // An oversize breakdown is refused.
+        let oversize = "x".repeat(MAX_TEST_DETAIL_JSON + 1);
+        assert!(matches!(
+            do_submit_biomolecule_test_attempt(&conn, &student, &attempt_id, 10, 8, Some(&oversize)),
+            Err(DbError::Validation(_))
+        ));
+
         do_submit_biomolecule_test_attempt(
             &conn,
             &student,
@@ -4797,16 +4819,37 @@ mod tests {
         let test_id = Uuid::parse_str(&test.id).expect("uuid");
         let started = do_start_biomolecule_test_attempt(&conn, &both, &test_id).expect("start");
         let attempt_id = Uuid::parse_str(&started.attempt_id).expect("uuid");
-        do_submit_biomolecule_test_attempt(&conn, &both, &attempt_id, 7, 5, None).expect("submit");
+        let detail = format!(r#"{{"items":"{}"}}"#, "x".repeat(5000));
+        do_submit_biomolecule_test_attempt(&conn, &both, &attempt_id, 7, 5, Some(detail.as_str()))
+            .expect("submit");
+        // An eligible student who started but never submitted: seed present,
+        // detail still absent.
+        do_start_biomolecule_test_attempt(&conn, &biomolecules, &test_id).expect("start pending");
 
         let views = do_list_biomolecule_tests(&conn, &teacher).expect("list");
         assert_eq!(views.len(), 1);
         let view = &views[0];
-        assert_eq!(view.attempts.len(), 1);
-        assert_eq!(view.attempts[0].username, "both");
-        assert_eq!(view.attempts[0].user_id, both.to_string());
-        assert_eq!(view.attempts[0].total_count, Some(7));
-        assert_eq!(view.attempts[0].correct_count, Some(5));
+        assert_eq!(view.attempts.len(), 2);
+        let submitted = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "both")
+            .expect("submitted summary");
+        assert_eq!(submitted.user_id, both.to_string());
+        assert_eq!(submitted.total_count, Some(7));
+        assert_eq!(submitted.correct_count, Some(5));
+        assert_eq!(submitted.seed, 1234, "summary carries the attempt seed");
+        assert_eq!(submitted.detail_json.as_deref(), Some(detail.as_str()));
+        let pending = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "bio")
+            .expect("pending summary");
+        assert_eq!(pending.seed, 1234);
+        assert!(
+            pending.detail_json.is_none(),
+            "unsubmitted attempt has no detail"
+        );
 
         let roster: Vec<&str> = view
             .roster
@@ -5098,7 +5141,7 @@ mod tests {
         }
 
         // An oversize breakdown is refused.
-        let oversize = "x".repeat(4097);
+        let oversize = "x".repeat(MAX_TEST_DETAIL_JSON + 1);
         assert!(matches!(
             do_submit_peptidovka_test_attempt(&conn, &student, &attempt_id, 10, 8, Some(&oversize)),
             Err(DbError::Validation(_))
@@ -5212,16 +5255,37 @@ mod tests {
         let test_id = Uuid::parse_str(&test.id).expect("uuid");
         let started = do_start_peptidovka_test_attempt(&conn, &both, &test_id).expect("start");
         let attempt_id = Uuid::parse_str(&started.attempt_id).expect("uuid");
-        do_submit_peptidovka_test_attempt(&conn, &both, &attempt_id, 7, 5, None).expect("submit");
+        let detail = format!(r#"{{"items":"{}"}}"#, "x".repeat(5000));
+        do_submit_peptidovka_test_attempt(&conn, &both, &attempt_id, 7, 5, Some(detail.as_str()))
+            .expect("submit");
+        // An eligible student who started but never submitted: seed present,
+        // detail still absent.
+        do_start_peptidovka_test_attempt(&conn, &biomolecules, &test_id).expect("start pending");
 
         let views = do_list_peptidovka_tests(&conn, &teacher).expect("list");
         assert_eq!(views.len(), 1);
         let view = &views[0];
-        assert_eq!(view.attempts.len(), 1);
-        assert_eq!(view.attempts[0].username, "both");
-        assert_eq!(view.attempts[0].user_id, both.to_string());
-        assert_eq!(view.attempts[0].total_count, Some(7));
-        assert_eq!(view.attempts[0].correct_count, Some(5));
+        assert_eq!(view.attempts.len(), 2);
+        let submitted = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "both")
+            .expect("submitted summary");
+        assert_eq!(submitted.user_id, both.to_string());
+        assert_eq!(submitted.total_count, Some(7));
+        assert_eq!(submitted.correct_count, Some(5));
+        assert_eq!(submitted.seed, 1234, "summary carries the attempt seed");
+        assert_eq!(submitted.detail_json.as_deref(), Some(detail.as_str()));
+        let pending = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "bio")
+            .expect("pending summary");
+        assert_eq!(pending.seed, 1234);
+        assert!(
+            pending.detail_json.is_none(),
+            "unsubmitted attempt has no detail"
+        );
 
         let roster: Vec<&str> = view
             .roster

@@ -376,7 +376,17 @@ export function BiomoleculesTestRunPage() {
           attemptId: attempt.attemptId,
           totalCount: questionsNow.length,
           correctCount,
-          detailJson: JSON.stringify(breakdownByType(questionsNow, verdicts)),
+          detailJson: JSON.stringify({
+            byType: breakdownByType(questionsNow, verdicts),
+            // Per-question answers: the teacher's detail view regenerates the
+            // batch from the attempt seed and matches these by uid.
+            answers: questionsNow.map((question, index) => ({
+              uid: question.uid ?? `${attempt.seed}-${index}`,
+              type: question.type,
+              correct: verdicts[index] === true,
+              selectedKey: runStateRef.current?.selections[index] ?? null,
+            })),
+          }),
         })
         clearStoredProgress(attempt.attemptId)
         const submittedView: BiomoleculeTestStudentView = {
@@ -386,7 +396,15 @@ export function BiomoleculesTestRunPage() {
             submittedAt: new Date().toISOString(),
             totalCount: questionsNow.length,
             correctCount,
-            detailJson: JSON.stringify(breakdownByType(questionsNow, verdicts)),
+            detailJson: JSON.stringify({
+              byType: breakdownByType(questionsNow, verdicts),
+              answers: questionsNow.map((question, index) => ({
+                uid: question.uid ?? `${attempt.seed}-${index}`,
+                type: question.type,
+                correct: verdicts[index] === true,
+                selectedKey: runStateRef.current?.selections[index] ?? null,
+              })),
+            }),
           },
         }
         navigate(`/biomolekuly/test/zadane/${test.id}/vysledek`, {

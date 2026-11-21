@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StructureView } from "@/components/ui/structure-view"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import {
@@ -16,7 +17,10 @@ import {
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
+import { nLeftOrientationDeg } from "@/lib/peptides"
+import { generatePeptidovkaTestRun } from "@/lib/peptides/test"
 import { stripRichMarkup } from "@/lib/rich-text"
+import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const testyStrings = cs.peptidovka.testy
@@ -91,6 +95,18 @@ export function PeptidovkaTestsPage() {
   const [listError, setListError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [detailAttempt, setDetailAttempt] = useState<{
+    testId: string
+    username: string
+    attempt: {
+      attemptId: string
+      seed: number
+      submittedAt: string | null
+      totalCount: number | null
+      correctCount: number | null
+      detailJson: string | null
+    }
+  } | null>(null)
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
 
   // The peptidovka-playable amino acids: the same rule the game's run page
@@ -557,7 +573,26 @@ export function PeptidovkaTestsPage() {
                           </div>
                         </div>
 
-                        {expanded && <AttemptRows view={view} />}
+                        {expanded && (
+                          <AttemptRows
+                            view={view}
+                            onDetail={(attempt) =>
+                              setDetailAttempt({
+                                testId: view.test.id,
+                                username: attempt.username,
+                                attempt,
+                              })
+                            }
+                          />
+                        )}
+                        {detailAttempt !== null && detailAttempt.testId === view.test.id && (
+                          <PeptidovkaAttemptDetail
+                            test={view.test}
+                            username={detailAttempt.username}
+                            attempt={detailAttempt.attempt}
+                            allMolecules={allMolecules}
+                          />
+                        )}
                       </CardContent>
                     </Card>
                   )
@@ -589,7 +624,22 @@ export function PeptidovkaTestsPage() {
   )
 }
 
-function AttemptRows({ view }: { view: PeptidovkaTestTeacherView }) {
+function AttemptRows({
+  view,
+  onDetail,
+}: {
+  view: PeptidovkaTestTeacherView
+  onDetail: (attempt: {
+    attemptId: string
+    userId: string
+    username: string
+    seed: number
+    submittedAt: string | null
+    totalCount: number | null
+    correctCount: number | null
+    detailJson: string | null
+  }) => void
+}) {
   const byUser = new Map(view.attempts.map((attempt) => [attempt.userId, attempt]))
   const rows = [
     ...view.roster.map((student) => ({
@@ -619,6 +669,7 @@ function AttemptRows({ view }: { view: PeptidovkaTestTeacherView }) {
             <th className="px-3 py-2 font-medium">{testyStrings.statusColumn}</th>
             <th className="px-3 py-2 font-medium">{testyStrings.submittedAtColumn}</th>
             <th className="px-3 py-2 text-right font-medium">{testyStrings.scoreColumn}</th>
+            <th className="px-3 py-2" aria-label={testyStrings.expandStudents} />
           </tr>
         </thead>
         <tbody>
@@ -644,6 +695,18 @@ function AttemptRows({ view }: { view: PeptidovkaTestTeacherView }) {
                     ? `${attempt.correctCount ?? 0} / ${attempt.totalCount ?? 0}`
                     : "—"}
                 </td>
+                <td className="px-3 py-2 text-right">
+                  {attempt !== null && attempt.submittedAt !== null && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onDetail(attempt)}
+                      aria-label={`${testyStrings.expandStudents}: ${row.username}`}
+                    >
+                      {testyStrings.expandStudents}
+                    </Button>
+                  )}
+                </td>
               </tr>
             )
           })}
@@ -651,4 +714,129 @@ function AttemptRows({ view }: { view: PeptidovkaTestTeacherView }) {
       </table>
     </div>
   )
+}
+
+interface PeptidovkaAttemptSummaryLike {
+  attemptId: string
+  seed: number
+  submittedAt: string | null
+  totalCount: number | null
+  correctCount: number | null
+  detailJson: string | null
+}
+
+/**
+ * One student's submitted peptidovka test, reconstructed for the teacher: the
+ * peptides regenerate from the attempt seed and the stored per-peptide typed
+ * answers mark exactly what the student entered.
+ */
+function PeptidovkaAttemptDetail({
+  test,
+  username,
+  attempt,
+  allMolecules,
+}: {
+  test: import("@/lib/biomolecules-api").PeptidovkaTest
+  username: string
+  attempt: PeptidovkaAttemptSummaryLike
+  allMolecules: import("@/lib/biomolecules-api").Biomolecule[]
+}) {
+  const run = useMemo(
+    () => generatePeptidovkaTestRun(test, attempt.seed, allMolecules),
+    [test, attempt.seed, allMolecules],
+  )
+  let parsed: { typed: (string | null)[]; correct: boolean[] } | null = null
+  if (attempt.detailJson !== null) {
+    try {
+      parsed = JSON.parse(attempt.detailJson) as {
+        typed: (string | null)[]
+        correct: boolean[]
+      }
+    } catch {
+      parsed = null
+    }
+  }
+
+  if (run === null || parsed === null || parsed.typed.length !== run.chains.length) {
+    return <p className="text-sm text-muted-foreground">{testyStrings.detailUnavailable}</p>
+  }
+
+  const detailRows = run.chains.map((chain, index) => ({
+    id: `${attempt.attemptId}-${index}`,
+    chain,
+    structure: run.structures[index] ?? { smiles: "", nIndex: 0 },
+    typed: parsed.typed[index] ?? null,
+    verdict: parsed.correct[index] ?? false,
+  }))
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium">{username}</p>
+      <ol className="space-y-3">
+        {detailRows.map((row, index) => {
+          const structure = row.structure
+          const chain = row.chain
+          const typed = row.typed
+          const verdict = row.verdict
+          return (
+            <li key={row.id} className="rounded-[4px] border p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {testyStrings.peptideNumber.replace("{number}", String(index + 1))}
+                </p>
+                <span
+                  className={cn(
+                    "font-mono tabular text-xs font-semibold",
+                    verdict ? "text-accent" : "text-destructive",
+                  )}
+                >
+                  {verdict ? quizCorrect : quizIncorrect}
+                </span>
+              </div>
+              <div className="mt-2 flex min-w-0 justify-center">
+                <StructureView
+                  smiles={structure.smiles}
+                  orientationDeg={nLeftDeg(structure.smiles, structure.nIndex)}
+                  monochrome={test.monochrome}
+                  size={200}
+                  title={peptidovkaStrings.structureLabel}
+                  className="max-w-full"
+                />
+              </div>
+              <div className="mt-3 rounded-[4px] border bg-muted/50 px-4 py-2 text-center">
+                <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  {peptidovkaStrings.correctAnswerLabel}
+                </p>
+                <p className="break-all font-mono text-xl font-semibold tracking-[0.3em]">
+                  {chain}
+                </p>
+              </div>
+              <p className="mt-2 text-center text-sm">
+                <span className="text-muted-foreground">{peptidovkaStrings.answerLabel}: </span>
+                <span
+                  className={cn(
+                    "font-mono font-semibold",
+                    verdict ? "text-accent" : "text-destructive",
+                  )}
+                >
+                  {typed ?? "—"}
+                </span>
+              </p>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+const quizCorrect = cs.biomolekuly.quiz.correct
+const quizIncorrect = cs.biomolekuly.quiz.incorrect
+
+function nLeftDeg(smiles: string, nIndex: number): number {
+  try {
+    return nLeftOrientationDeg(smiles, nIndex) ?? 0
+  } catch {
+    return 0
+  }
 }

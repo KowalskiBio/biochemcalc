@@ -266,7 +266,12 @@ export function PeptidovkaTestRunPage() {
           attemptId: attempt.attemptId,
           totalCount: prepared.chains.length,
           correctCount,
-          detailJson: JSON.stringify(verdicts.map((verdict) => ({ correct: verdict }))),
+          // The student's typed chains ride along so the teacher's detail
+          // view can show exactly what was answered; verdicts mirror them.
+          detailJson: JSON.stringify({
+            typed: runStateRef.current?.typed ?? [],
+            correct: verdicts.map((verdict) => verdict === true),
+          }),
         })
         clearStoredProgress(attempt.attemptId)
         const submittedView: PeptidovkaTestStudentView = {
@@ -276,7 +281,10 @@ export function PeptidovkaTestRunPage() {
             submittedAt: new Date().toISOString(),
             totalCount: prepared.chains.length,
             correctCount,
-            detailJson: JSON.stringify(verdicts.map((verdict) => ({ correct: verdict }))),
+            detailJson: JSON.stringify({
+              typed: runStateRef.current?.typed ?? [],
+              correct: verdicts.map((verdict) => verdict === true),
+            }),
           },
         }
         navigate(`/biomolekuly/peptidovka/test/zadane/${test.id}/vysledek`, {
