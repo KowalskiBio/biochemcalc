@@ -388,9 +388,16 @@ export function PeptidovkaSettingsPage() {
           <CardTitle>{cs.peptidovka.testy.teacherTitle}</CardTitle>
           <CardDescription>{cs.peptidovka.testy.teacherDescription}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-wrap gap-3">
           <Button asChild>
-            <Link to="/biomolekuly/peptidovka/testy">{cs.peptidovka.testy.testsLink}</Link>
+            <Link to="/biomolekuly/peptidovka/testy/vytvorit">
+              {cs.peptidovka.testy.createAction}
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/biomolekuly/peptidovka/testy/vysledky">
+              {cs.biomolekuly.testy.listTitle}
+            </Link>
           </Button>
         </CardContent>
       </Card>
