@@ -173,6 +173,84 @@ export interface BiomoleculeTestStartResult {
   correctCount: number | null
 }
 
+/** How a teacher-created Peptidovka test picks its seed. */
+export type PeptidovkaTestQuestionSet = "fixed" | "random"
+
+/** A teacher-created Peptidovka test, as returned by the API. */
+export interface PeptidovkaTest {
+  id: string
+  title: string
+  /** Amino-acid molecule slugs; each carries weight 1. */
+  poolSlugs: string[]
+  peptideCount: number
+  peptideLength: number
+  questionSet: PeptidovkaTestQuestionSet
+  monochrome: boolean
+  availableFrom: string
+  availableTo: string
+  seed: number
+  createdAt: string
+}
+
+/** One student's attempt on a Peptidovka test, as seen by the teacher. */
+export interface PeptidovkaTestAttemptSummary {
+  attemptId: string
+  userId: string
+  username: string
+  startedAt: string
+  submittedAt: string | null
+  totalCount: number | null
+  correctCount: number | null
+}
+
+/** A teacher's view: the test, its attempts, and who could still take it. */
+export interface PeptidovkaTestTeacherView {
+  test: PeptidovkaTest
+  attempts: PeptidovkaTestAttemptSummary[]
+  roster: { userId: string; username: string }[]
+  /** One server timestamp so windows render without client clock skew. */
+  serverNow: string
+}
+
+/** A student's view: the test plus their own attempt (null = not started). */
+export interface PeptidovkaTestStudentView {
+  test: PeptidovkaTest
+  attempt: {
+    attemptId: string
+    seed: number
+    startedAt: string
+    submittedAt: string | null
+    totalCount: number | null
+    correctCount: number | null
+    detailJson: string | null
+  } | null
+}
+
+/** Result of starting/resuming: `"exists"` means resume or show the result. */
+export interface PeptidovkaTestStartResult {
+  status: "started" | "exists"
+  attemptId: string
+  seed: number
+  startedAt: string
+  submittedAt: string | null
+  totalCount: number | null
+  correctCount: number | null
+}
+
+/** Body accepted by `createPeptidovkaTest`; pool slugs resolved by the client. */
+export interface CreatePeptidovkaTestInput {
+  title: string
+  poolSlugs: string[]
+  peptideCount: number
+  peptideLength: number
+  questionSet: PeptidovkaTestQuestionSet
+  monochrome?: boolean
+  availableFrom: string
+  availableTo: string
+  /** Optional client-chosen seed; omitted means the server generates one. */
+  seed?: number
+}
+
 /** Body accepted by `createBiomoleculeTest`; ids are client-resolved. */
 export interface CreateBiomoleculeTestInput {
   title: string
@@ -408,6 +486,38 @@ export const biomoleculesApi = {
     detailJson?: string | null
   }): Promise<void> =>
     httpRequest<void>("/api/biomolecules/submit-biomolecule-test", {
+      ...args,
+      detailJson: args.detailJson ?? null,
+    }),
+
+  /** Teacher: create a Peptidovka test from a client-resolved amino-acid pool. */
+  createPeptidovkaTest: (payload: CreatePeptidovkaTestInput): Promise<PeptidovkaTest> =>
+    httpRequest<PeptidovkaTest>("/api/biomolecules/create-peptidovka-test", payload),
+
+  /** Teacher: delete a Peptidovka test that no student has attempted yet. */
+  deletePeptidovkaTest: (id: string): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/delete-peptidovka-test", { testId: id }),
+
+  /** Teacher: every Peptidovka test with its attempts, roster and server time. */
+  peptidovkaTests: (): Promise<PeptidovkaTestTeacherView[]> =>
+    httpRequest<PeptidovkaTestTeacherView[]>("/api/biomolecules/peptidovka-tests"),
+
+  /** Student: Peptidovka tests currently open, with this student's attempt status. */
+  availablePeptidovkaTests: (): Promise<PeptidovkaTestStudentView[]> =>
+    httpRequest<PeptidovkaTestStudentView[]>("/api/biomolecules/available-peptidovka-tests"),
+
+  /** Student: start a Peptidovka test or resume/show an existing attempt. */
+  startPeptidovkaTestAttempt: (testId: string): Promise<PeptidovkaTestStartResult> =>
+    httpRequest<PeptidovkaTestStartResult>("/api/biomolecules/start-peptidovka-test", { testId }),
+
+  /** Student: submit one Peptidovka attempt (idempotent; the server keeps the first result). */
+  submitPeptidovkaTestAttempt: (args: {
+    attemptId: string
+    totalCount: number
+    correctCount: number
+    detailJson?: string | null
+  }): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/submit-peptidovka-test", {
       ...args,
       detailJson: args.detailJson ?? null,
     }),

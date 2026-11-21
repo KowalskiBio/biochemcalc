@@ -375,11 +375,16 @@ export function PeptidovkaSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {peptidovkaStrings.title}
-        </h1>
-        <p className="text-sm text-muted-foreground">{peptidovkaStrings.settingsDescription}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {peptidovkaStrings.title}
+          </h1>
+          <p className="text-sm text-muted-foreground">{peptidovkaStrings.settingsDescription}</p>
+        </div>
+        <Button variant="outline" asChild>
+          <Link to="/biomolekuly/peptidovka/testy">{cs.peptidovka.testy.testsLink}</Link>
+        </Button>
       </div>
 
       {loadFailed ? (

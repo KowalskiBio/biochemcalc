@@ -1,0 +1,208 @@
+import { describe, expect, it } from "vitest"
+import { TRAIT } from "@/lib/molecules"
+import { expectedChainLetters, isChainCorrect } from "@/lib/peptides/answer"
+import { generatePeptide } from "@/lib/peptides/generate"
+import { peptideParts } from "@/lib/peptides/synthesize"
+import {
+  type BiomoleculeLike,
+  chainFingerprints,
+  generatePeptidovkaTestRun,
+  isPeptideAnswerCorrect,
+  type PeptidovkaTest,
+  type PeptidovkaTestRun,
+  peptidovkaTestPoolWeights,
+} from "@/lib/peptides/test"
+
+const MOLECULES: BiomoleculeLike[] = [
+  { slug: "ala", traits: { oneLetter: "A" } },
+  { slug: "gly", traits: { oneLetter: "G" } },
+  { slug: "ser", traits: { oneLetter: "S" } },
+  { slug: "pro", traits: { oneLetter: "P" } },
+  { slug: "lys", traits: { oneLetter: "K" } },
+  { slug: "phe", traits: { oneLetter: "F" } },
+]
+
+function makeTest(overrides: Partial<PeptidovkaTest> = {}): PeptidovkaTest {
+  return {
+    id: "peptidovka-test-1",
+    title: "Peptidovka",
+    poolSlugs: ["ala", "gly", "ser", "pro"],
+    peptideCount: 5,
+    peptideLength: 6,
+    questionSet: "fixed",
+    monochrome: false,
+    availableFrom: "2026-01-01T00:00:00Z",
+    availableTo: "2026-12-31T23:59:59Z",
+    seed: 1,
+    createdAt: "2026-01-01T00:00:00Z",
+    ...overrides,
+  }
+}
+
+function requireRun(
+  test: Pick<PeptidovkaTest, "poolSlugs" | "peptideCount" | "peptideLength">,
+  attemptSeed: number,
+  molecules: readonly BiomoleculeLike[] = MOLECULES,
+): PeptidovkaTestRun {
+  const run = generatePeptidovkaTestRun(test, attemptSeed, molecules)
+  if (run === null) {
+    throw new Error("expected a generatable test run")
+  }
+  return run
+}
+
+describe("peptidovkaTestPoolWeights", () => {
+  it("maps every slug to weight 1 and collapses duplicates", () => {
+    expect(peptidovkaTestPoolWeights(makeTest({ poolSlugs: ["ala", "gly", "ala"] }))).toEqual({
+      ala: 1,
+      gly: 1,
+    })
+  })
+
+  it("returns an empty record for an empty pool", () => {
+    expect(peptidovkaTestPoolWeights(makeTest({ poolSlugs: [] }))).toEqual({})
+  })
+})
+
+describe("generatePeptidovkaTestRun", () => {
+  it("is deterministic for the same test and attempt seed", () => {
+    const first = requireRun(makeTest(), 1234)
+    const second = requireRun(makeTest(), 1234)
+    expect(second).toEqual(first)
+  })
+
+  it("yields different peptides for a different attempt seed", () => {
+    const first = requireRun(makeTest(), 1)
+    const second = requireRun(makeTest(), 2)
+    expect(second.chains).not.toEqual(first.chains)
+  })
+
+  it("ignores pool-slug order", () => {
+    const forward = requireRun(makeTest({ poolSlugs: ["ala", "gly", "ser", "pro"] }), 99)
+    const reversed = requireRun(makeTest({ poolSlugs: ["pro", "ser", "gly", "ala"] }), 99)
+    expect(reversed).toEqual(forward)
+  })
+
+  it("honours peptideCount and peptideLength", () => {
+    const run = requireRun(makeTest({ peptideCount: 7, peptideLength: 3 }), 5)
+    expect(run.chains).toHaveLength(7)
+    expect(run.structures).toHaveLength(7)
+    for (const chain of run.chains) {
+      expect(chain).toHaveLength(3)
+      expect(chain).toMatch(/^[A-Z]+$/)
+    }
+  })
+
+  it("draws peptide i with seed attemptSeed + i and builds the game's parts", () => {
+    const test = makeTest()
+    const attemptSeed = 321
+    const run = requireRun(test, attemptSeed)
+    const weights = peptidovkaTestPoolWeights(test)
+
+    for (let index = 0; index < test.peptideCount; index++) {
+      const slugs = generatePeptide(weights, test.peptideLength, attemptSeed + index)
+      expect(run.structures[index]).toEqual(peptideParts(slugs))
+
+      const oneLetters = slugs.map((slug) => {
+        const molecule = MOLECULES.find((candidate) => candidate.slug === slug)
+        if (molecule === undefined) {
+          throw new Error(`fixture is missing slug ${slug}`)
+        }
+        const oneLetter = molecule.traits[TRAIT.oneLetter]
+        if (oneLetter === undefined) {
+          throw new Error(`fixture is missing oneLetter for ${slug}`)
+        }
+        return oneLetter
+      })
+      expect(run.chains[index]).toBe(expectedChainLetters(oneLetters))
+    }
+  })
+
+  it("returns null for an empty pool", () => {
+    expect(generatePeptidovkaTestRun(makeTest({ poolSlugs: [] }), 1, MOLECULES)).toBeNull()
+  })
+
+  it("returns null for an unresolvable slug", () => {
+    expect(
+      generatePeptidovkaTestRun(makeTest({ poolSlugs: ["ala", "zzz"] }), 1, MOLECULES),
+    ).toBeNull()
+  })
+
+  it("returns null when a slug loses its one-letter code", () => {
+    const molecules: BiomoleculeLike[] = [...MOLECULES, { slug: "orn", traits: {} }]
+    expect(
+      generatePeptidovkaTestRun(makeTest({ poolSlugs: ["ala", "orn"] }), 1, molecules),
+    ).toBeNull()
+  })
+
+  it("returns null on synthesis failure (no residue template)", () => {
+    // "orn" resolves to a molecule and letter, but the synthesizer has no
+    // template for it — the same "teacher-added acid" case the game redraws.
+    const molecules: BiomoleculeLike[] = [{ slug: "orn", traits: { oneLetter: "B" } }]
+    expect(
+      generatePeptidovkaTestRun(
+        makeTest({ poolSlugs: ["orn"], peptideCount: 1, peptideLength: 2 }),
+        7,
+        molecules,
+      ),
+    ).toBeNull()
+  })
+
+  it("returns null for a non-positive or non-integer count/length", () => {
+    for (const overrides of [
+      { peptideCount: 0 },
+      { peptideCount: -1 },
+      { peptideCount: 1.5 },
+      { peptideLength: 0 },
+      { peptideLength: 2.5 },
+    ]) {
+      expect(generatePeptidovkaTestRun(makeTest(overrides), 1, MOLECULES)).toBeNull()
+    }
+  })
+})
+
+describe("isPeptideAnswerCorrect", () => {
+  it("matches the game's isChainCorrect semantics", () => {
+    const expected = requireRun(makeTest({ peptideCount: 1, peptideLength: 4 }), 42).chains[0] ?? ""
+    const inputs = [
+      expected,
+      expected.toLowerCase(),
+      ` ${expected.split("").join(" ")} `,
+      `${expected}A`,
+      expected.slice(0, -1),
+      "",
+    ]
+    for (const input of inputs) {
+      expect(isPeptideAnswerCorrect(expected, input)).toBe(isChainCorrect(input, expected))
+    }
+  })
+
+  it("accepts case and whitespace variation, rejects a different chain", () => {
+    expect(isPeptideAnswerCorrect("MKY", "m k y")).toBe(true)
+    expect(isPeptideAnswerCorrect("MKY", "MKY")).toBe(true)
+    expect(isPeptideAnswerCorrect("MKY", "MKA")).toBe(false)
+  })
+})
+
+describe("chainFingerprints", () => {
+  it("is stable across calls and tracks the chain order", () => {
+    const chains = ["MKY", "AG", "W"]
+    const first = chainFingerprints(chains)
+    expect(first).toHaveLength(chains.length)
+    expect(chainFingerprints(chains)).toEqual(first)
+    expect(chainFingerprints(["W", "AG", "MKY"])).toEqual([first[2], first[1], first[0]])
+  })
+
+  it("differs for different chains and is 8-char hex", () => {
+    const fingerprints = chainFingerprints(["MKY", "MKA", "AG", "GA"])
+    for (const fingerprint of fingerprints) {
+      expect(fingerprint).toMatch(/^[0-9a-f]{8}$/)
+    }
+    expect(new Set(fingerprints).size).toBe(fingerprints.length)
+  })
+
+  it("is non-reversible: the chain text never appears in the fingerprint", () => {
+    const chain = "MKYPHE"
+    expect(chainFingerprints([chain])[0]).not.toContain(chain)
+  })
+})

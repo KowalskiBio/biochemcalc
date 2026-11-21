@@ -10,6 +10,7 @@ pub mod invite_code_repo;
 pub mod output_file_repo;
 pub mod password_reset_repo;
 pub mod peptidovka_repo;
+pub mod peptidovka_test_repo;
 pub mod practice_repo;
 pub mod projekt_repo;
 pub mod question_report_repo;
@@ -47,6 +48,11 @@ pub use output_file_repo::OutputFileRepo;
 pub use password_reset_repo::PasswordResetTokenRepo;
 #[allow(unused_imports)]
 pub use peptidovka_repo::{PeptidovkaLeaderboardRow, PeptidovkaRepo};
+#[allow(unused_imports)]
+pub use peptidovka_test_repo::{
+    NewPeptidovkaTest, PeptidovkaTestAttemptRecord, PeptidovkaTestAttemptSummaryRow,
+    PeptidovkaTestRecord, PeptidovkaTestRepo, PeptidovkaTestRosterRow,
+};
 #[allow(unused_imports)]
 pub use practice_repo::{
     AnyPracticeTemplateRow, LeaderboardRow, PracticeAttemptRecord, PracticeRepo,

@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 63;
+const CURRENT_USER_VERSION: u32 = 64;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -322,6 +322,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 63 {
         apply_migration_v63(conn)?;
         conn.pragma_update(None, "user_version", "63")?;
+    }
+
+    if user_version < 64 {
+        apply_migration_v64(conn)?;
+        conn.pragma_update(None, "user_version", "64")?;
     }
 
     Ok(())
@@ -2419,6 +2424,56 @@ fn apply_migration_v63(conn: &Connection) -> Result<(), rusqlite::Error> {
     )
 }
 
+/// Teacher-created Peptidovka tests and their per-student attempts — the
+/// peptidovka twin of v63's biomolecule_tests. A test freezes its amino-acid
+/// pool (`pool_slugs`, weight 1 each), the peptide count/length bounds and a
+/// server-owned seed, so `fixed` (one seed per test) and `random` (a fresh
+/// seed per attempt) both reproduce. Attempts are exactly one per
+/// (test, student): `UNIQUE(test_id, user_id)` is the resume/idempotency
+/// contract and the nullable result columns stay NULL until submission. Both
+/// child rows cascade with their test/user.
+///
+/// Idempotent by `IF NOT EXISTS`, like every additive migration; replaying it
+/// on a v64 database is a no-op and never rewrites existing tests/attempts.
+fn apply_migration_v64(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS peptidovka_tests (
+            id BLOB PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            created_by BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            pool_slugs TEXT NOT NULL DEFAULT '[]',
+            peptide_count INTEGER NOT NULL,
+            peptide_length INTEGER NOT NULL,
+            question_set TEXT NOT NULL DEFAULT 'random'
+                CHECK (question_set IN ('fixed','random')),
+            monochrome INTEGER NOT NULL DEFAULT 0,
+            available_from TEXT NOT NULL,
+            available_to TEXT NOT NULL,
+            seed INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS peptidovka_test_attempts (
+            id BLOB PRIMARY KEY NOT NULL,
+            test_id BLOB NOT NULL REFERENCES peptidovka_tests(id) ON DELETE CASCADE,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seed INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            submitted_at TEXT,
+            total_count INTEGER,
+            correct_count INTEGER,
+            detail_json TEXT,
+            UNIQUE (test_id, user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_peptidovka_test_attempts_user
+        ON peptidovka_test_attempts(user_id);
+        ",
+    )
+}
+
 /// Teacher-action log for the biomolecules module, mirroring the
 /// calculations history pattern: every mutation records who did what, so
 /// the "Historie" page can show a reviewable trail. `kind` scopes the entry
@@ -2986,6 +3041,101 @@ mod tests {
         .expect("attempt row");
         let duplicate = conn.execute(
             "INSERT INTO biomolecule_test_attempts
+                 (id, test_id, user_id, seed, started_at)
+             VALUES (?1, ?2, ?3, 7, '2026-01-01T00:00:00Z')",
+            rusqlite::params![Uuid::new_v4().as_bytes(), test_id, teacher],
+        );
+        assert!(duplicate.is_err(), "a student may attempt a test only once");
+    }
+
+    /// v64 adds the Peptidovka tests and attempts. A replay (the version gate
+    /// reset to 63) must be a no-op: `IF NOT EXISTS` keeps the tables, index
+    /// and every stored row exactly as they were.
+    #[test]
+    fn v64_creates_peptidovka_test_tables_and_replays_idempotently() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let table_exists = |name: &str| -> bool {
+            conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                                WHERE type = 'table' AND name = ?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .expect("table existence")
+        };
+        assert!(table_exists("peptidovka_tests"));
+        assert!(table_exists("peptidovka_test_attempts"));
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                                WHERE type = 'index'
+                                  AND name = 'idx_peptidovka_test_attempts_user')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index existence");
+        assert!(index_exists, "the user index backs attempt lookups");
+
+        // Store a real test + attempt, then replay the migration.
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at, sections)
+             VALUES (randomblob(16), 'ucitel', 'h', 'teacher', '2026-01-01T00:00:00Z', 'both')",
+            [],
+        )
+        .expect("teacher");
+        let teacher: Vec<u8> = conn
+            .query_row(
+                "SELECT id FROM users WHERE username = 'ucitel'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("teacher id");
+        conn.execute(
+            "INSERT INTO peptidovka_tests
+                 (id, title, created_by, created_at, updated_at, pool_slugs,
+                  peptide_count, peptide_length, question_set, monochrome,
+                  available_from, available_to, seed)
+             VALUES (?1, 'Test 1', ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                     '[\"ala\",\"gly\"]', 5, 6, 'fixed', 0,
+                     '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', 42)",
+            rusqlite::params![Uuid::new_v4().as_bytes(), teacher],
+        )
+        .expect("test row");
+
+        conn.pragma_update(None, "user_version", "63")
+            .expect("backlevel");
+        run_migrations(&conn).expect("replay is idempotent");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+        assert!(table_exists("peptidovka_tests"));
+        assert!(table_exists("peptidovka_test_attempts"));
+
+        let (title, seed): (String, i64) = conn
+            .query_row("SELECT title, seed FROM peptidovka_tests", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("stored test survives replay");
+        assert_eq!(title, "Test 1");
+        assert_eq!(seed, 42);
+
+        // The unique (test, student) pair is the resume/idempotency contract.
+        let test_id: Vec<u8> = conn
+            .query_row("SELECT id FROM peptidovka_tests", [], |row| row.get(0))
+            .expect("test id");
+        conn.execute(
+            "INSERT INTO peptidovka_test_attempts
+                 (id, test_id, user_id, seed, started_at)
+             VALUES (?1, ?2, ?3, 42, '2026-01-01T00:00:00Z')",
+            rusqlite::params![Uuid::new_v4().as_bytes(), test_id, teacher],
+        )
+        .expect("attempt row");
+        let duplicate = conn.execute(
+            "INSERT INTO peptidovka_test_attempts
                  (id, test_id, user_id, seed, started_at)
              VALUES (?1, ?2, ?3, 7, '2026-01-01T00:00:00Z')",
             rusqlite::params![Uuid::new_v4().as_bytes(), test_id, teacher],

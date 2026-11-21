@@ -26,6 +26,9 @@ import { HistoryPage } from "@/pages/history-page"
 import { LoginPage } from "@/pages/login-page"
 import { PeptidovkaPage, PeptidovkaRunPage } from "@/pages/peptidovka-page"
 import { PeptidovkaSettingsPage } from "@/pages/peptidovka-settings-page"
+import { PeptidovkaTestResultPage } from "@/pages/peptidovka-test-result-page"
+import { PeptidovkaTestRunPage } from "@/pages/peptidovka-test-run-page"
+import { PeptidovkaTestsPage } from "@/pages/peptidovka-tests-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
 import { ReportsPage } from "@/pages/reports-page"
@@ -88,6 +91,7 @@ function TeacherRoutes() {
             <Route path="/biomolekuly/historie" element={<BiomoleculesHistoryPage />} />
             <Route path="/biomolekuly/testy" element={<BiomoleculesTestsPage />} />
             <Route path="/biomolekuly/peptidovka" element={<PeptidovkaSettingsPage />} />
+            <Route path="/biomolekuly/peptidovka/testy" element={<PeptidovkaTestsPage />} />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"
@@ -174,6 +178,14 @@ function StudentRoutes() {
             <Route
               path="/biomolekuly/peptidovka/mistr"
               element={<PeptidovkaRunPage mode="mistr" />}
+            />
+            <Route
+              path="/biomolekuly/peptidovka/test/zadane/:testId/pisat"
+              element={<PeptidovkaTestRunPage />}
+            />
+            <Route
+              path="/biomolekuly/peptidovka/test/zadane/:testId/vysledek"
+              element={<PeptidovkaTestResultPage />}
             />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
