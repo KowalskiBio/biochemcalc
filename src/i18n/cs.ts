@@ -440,6 +440,7 @@ export const cs = {
       poolSummary: "{count} aminokyselin v sadě",
       peptideCountLabel: "Počet peptidů",
       peptideLengthLabel: "Délka peptidů",
+      lengthRange: "Délka peptidů: {min}–{max}",
       invalidCount: "Zadejte počet peptidů 1–20.",
       invalidLength: "Délka peptidů musí být 2–20 aminokyselin.",
       questionSetLabel: "Sada peptidů",

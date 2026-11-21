@@ -375,17 +375,25 @@ export function PeptidovkaSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {peptidovkaStrings.title}
-          </h1>
-          <p className="text-sm text-muted-foreground">{peptidovkaStrings.settingsDescription}</p>
-        </div>
-        <Button variant="outline" asChild>
-          <Link to="/biomolekuly/peptidovka/testy">{cs.peptidovka.testy.testsLink}</Link>
-        </Button>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {peptidovkaStrings.title}
+        </h1>
+        <p className="text-sm text-muted-foreground">{peptidovkaStrings.settingsDescription}</p>
       </div>
+
+      {/* Assigned tests: prominent at the top, above the per-mode settings. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{cs.peptidovka.testy.teacherTitle}</CardTitle>
+          <CardDescription>{cs.peptidovka.testy.teacherDescription}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild>
+            <Link to="/biomolekuly/peptidovka/testy">{cs.peptidovka.testy.testsLink}</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {loadFailed ? (
         <Card>

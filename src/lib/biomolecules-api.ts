@@ -183,7 +183,8 @@ export interface PeptidovkaTest {
   /** Amino-acid molecule slugs; each carries weight 1. */
   poolSlugs: string[]
   peptideCount: number
-  peptideLength: number
+  peptideMinLength: number
+  peptideMaxLength: number
   questionSet: PeptidovkaTestQuestionSet
   monochrome: boolean
   availableFrom: string
@@ -242,7 +243,8 @@ export interface CreatePeptidovkaTestInput {
   title: string
   poolSlugs: string[]
   peptideCount: number
-  peptideLength: number
+  peptideMinLength: number
+  peptideMaxLength: number
   questionSet: PeptidovkaTestQuestionSet
   monochrome?: boolean
   availableFrom: string

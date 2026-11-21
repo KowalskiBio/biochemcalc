@@ -15,9 +15,14 @@
 //   null and the page shows its "material changed" state instead of a run.
 
 import { TRAIT } from "@/lib/molecules"
+import { createSeededRandom } from "@/lib/molecules/quiz/random"
 import { expectedChainLetters, isChainCorrect } from "@/lib/peptides/answer"
 import { generatePeptide } from "@/lib/peptides/generate"
 import { type PeptideParts, peptideParts } from "@/lib/peptides/synthesize"
+
+/** The server's accepted peptide-length bounds (migration v65 / command layer). */
+const PEPTIDE_MIN_LENGTH = 2
+const PEPTIDE_MAX_LENGTH = 20
 
 /**
  * Structural copy of the server-lane `PeptidovkaTest` contract. Defined here
@@ -30,7 +35,8 @@ export interface PeptidovkaTest {
   title: string
   poolSlugs: string[]
   peptideCount: number
-  peptideLength: number
+  peptideMinLength: number
+  peptideMaxLength: number
   questionSet: "fixed" | "random"
   monochrome: boolean
   availableFrom: string
@@ -101,25 +107,43 @@ function resolvePoolLetters(
 /**
  * Generate the test's peptides for one attempt seed.
  *
- * Seed derivation (documented, deterministic): peptide `i` is drawn with
- * `attemptSeed + i`, so each peptide is independently reproducible — exactly
- * like a game round generating one peptide from one seed. The pool is drawn in
- * slug-sorted order by `generatePeptide`, so `poolSlugs` order never matters.
+ * Seed derivation (documented, deterministic). ONE mulberry32 generator is
+ * seeded with `attemptSeed`; per peptide, in a fixed order, it draws:
+ *   1. the peptide's length: `min + floor(rng() * (max - min + 1))`, and
+ *   2. the peptide's own 32-bit seed: `floor(rng() * 2^32)`.
+ * That per-peptide seed then drives `generatePeptide`. Deriving every peptide
+ * from successive *outputs* of one chain (rather than from `attemptSeed + i`)
+ * decorrelates the peptides: consecutive mulberry32 seeds shared a correlated
+ * first draw and could produce the same peptide five times over.
  *
- * Returns null when the pool is broken: empty pool, unresolvable slug (missing
- * molecule or missing one-letter code), or synthesis failure (a slug with no
- * residue template, e.g. a teacher-added amino acid the synthesizer doesn't
- * know). The run page shows "material changed" rather than a broken run.
+ * The pool is drawn in slug-sorted order by `generatePeptide`, so `poolSlugs`
+ * order never matters, and the same `attemptSeed` always reproduces the run.
+ *
+ * Returns null when the test is malformed: a non-positive/non-integer count or
+ * length bounds outside `2..=20` with min > max, an empty pool, an unresolvable
+ * slug (missing molecule or missing one-letter code), or synthesis failure (a
+ * slug with no residue template, e.g. a teacher-added amino acid the
+ * synthesizer doesn't know). The run page shows "material changed" rather than
+ * a broken run.
  */
 export function generatePeptidovkaTestRun(
-  test: Pick<PeptidovkaTest, "poolSlugs" | "peptideCount" | "peptideLength">,
+  test: Pick<
+    PeptidovkaTest,
+    "poolSlugs" | "peptideCount" | "peptideMinLength" | "peptideMaxLength"
+  >,
   attemptSeed: number,
   molecules: readonly BiomoleculeLike[],
 ): PeptidovkaTestRun | null {
   if (!Number.isInteger(test.peptideCount) || test.peptideCount < 1) {
     return null
   }
-  if (!Number.isInteger(test.peptideLength) || test.peptideLength < 1) {
+  if (
+    !Number.isInteger(test.peptideMinLength) ||
+    !Number.isInteger(test.peptideMaxLength) ||
+    test.peptideMinLength < PEPTIDE_MIN_LENGTH ||
+    test.peptideMaxLength > PEPTIDE_MAX_LENGTH ||
+    test.peptideMinLength > test.peptideMaxLength
+  ) {
     return null
   }
   if (test.poolSlugs.length === 0) {
@@ -132,11 +156,16 @@ export function generatePeptidovkaTestRun(
   }
 
   const poolWeights = peptidovkaTestPoolWeights(test)
+  const rng = createSeededRandom(attemptSeed)
+  const lengthSpan = test.peptideMaxLength - test.peptideMinLength + 1
   const chains: string[] = []
   const structures: PeptideParts[] = []
 
   for (let index = 0; index < test.peptideCount; index++) {
-    const slugs = generatePeptide(poolWeights, test.peptideLength, attemptSeed + index)
+    // Fixed per-peptide draw order: length first, then the peptide seed.
+    const length = test.peptideMinLength + Math.floor(rng() * lengthSpan)
+    const peptideSeed = Math.floor(rng() * 0x1_0000_0000)
+    const slugs = generatePeptide(poolWeights, length, peptideSeed)
     const parts = peptideParts(slugs)
     if (parts === null) {
       return null

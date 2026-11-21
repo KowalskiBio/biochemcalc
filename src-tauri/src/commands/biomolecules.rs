@@ -2041,7 +2041,8 @@ pub struct PeptidovkaTestView {
     pub title: String,
     pub pool_slugs: Vec<String>,
     pub peptide_count: i64,
-    pub peptide_length: i64,
+    pub peptide_min_length: i64,
+    pub peptide_max_length: i64,
     pub question_set: String,
     pub monochrome: bool,
     pub available_from: String,
@@ -2119,7 +2120,8 @@ pub struct CreatePeptidovkaTestPayload {
     #[serde(default)]
     pub pool_slugs: serde_json::Value,
     pub peptide_count: i64,
-    pub peptide_length: i64,
+    pub peptide_min_length: i64,
+    pub peptide_max_length: i64,
     pub question_set: String,
     #[serde(default)]
     pub monochrome: bool,
@@ -2168,7 +2170,8 @@ fn peptidovka_test_view(record: &PeptidovkaTestRecord) -> Result<PeptidovkaTestV
         title: record.title.clone(),
         pool_slugs: serde_json::from_str(&record.pool_slugs)?,
         peptide_count: record.peptide_count,
-        peptide_length: record.peptide_length,
+        peptide_min_length: record.peptide_min_length,
+        peptide_max_length: record.peptide_max_length,
         question_set: record.question_set.clone(),
         monochrome: record.monochrome,
         available_from: record.available_from.clone(),
@@ -2244,11 +2247,20 @@ pub fn do_create_peptidovka_test(
             "Peptide count must be 1-{PEPTIDOVKA_TEST_MAX_COUNT}"
         )));
     }
-    if !(PEPTIDOVKA_TEST_MIN_LENGTH..=PEPTIDOVKA_TEST_MAX_LENGTH).contains(&payload.peptide_length)
+    let length_in_range = |value: i64| {
+        (PEPTIDOVKA_TEST_MIN_LENGTH..=PEPTIDOVKA_TEST_MAX_LENGTH).contains(&value)
+    };
+    if !length_in_range(payload.peptide_min_length)
+        || !length_in_range(payload.peptide_max_length)
     {
         return Err(DbError::Validation(format!(
-            "Peptide length must be {PEPTIDOVKA_TEST_MIN_LENGTH}-{PEPTIDOVKA_TEST_MAX_LENGTH}"
+            "Peptide length bounds must be {PEPTIDOVKA_TEST_MIN_LENGTH}-{PEPTIDOVKA_TEST_MAX_LENGTH}"
         )));
+    }
+    if payload.peptide_min_length > payload.peptide_max_length {
+        return Err(DbError::Validation(
+            "peptideMinLength must not exceed peptideMaxLength".into(),
+        ));
     }
 
     let question_set = payload.question_set.trim();
@@ -2274,7 +2286,8 @@ pub fn do_create_peptidovka_test(
             created_by: *teacher_id,
             pool_slugs: serde_json::to_string(&pool_slugs)?,
             peptide_count: payload.peptide_count,
-            peptide_length: payload.peptide_length,
+            peptide_min_length: payload.peptide_min_length,
+            peptide_max_length: payload.peptide_max_length,
             question_set: question_set.to_string(),
             monochrome: payload.monochrome,
             available_from: available_from.to_rfc3339(),
@@ -2284,8 +2297,11 @@ pub fn do_create_peptidovka_test(
     )?;
 
     let detail = format!(
-        "{} peptides · length {} · {}",
-        payload.peptide_count, payload.peptide_length, question_set
+        "{} peptides · length {}-{} · {}",
+        payload.peptide_count,
+        payload.peptide_min_length,
+        payload.peptide_max_length,
+        question_set
     );
     BiomoleculeHistoryRepo::record(
         conn,
@@ -4834,7 +4850,8 @@ mod tests {
             title: "  Peptidovka test  ".into(),
             pool_slugs: serde_json::json!(["ala", "gly"]),
             peptide_count: 10,
-            peptide_length: 5,
+            peptide_min_length: 5,
+            peptide_max_length: 5,
             question_set: "fixed".into(),
             monochrome: false,
             available_from: (now - chrono::Duration::hours(1)).to_rfc3339(),
@@ -4886,12 +4903,17 @@ mod tests {
             );
         }
 
-        for length in [1_i64, PEPTIDOVKA_TEST_MAX_LENGTH + 1] {
+        for (min, max) in [
+            (1_i64, 5_i64),
+            (5, PEPTIDOVKA_TEST_MAX_LENGTH + 1),
+            (7, 5),
+        ] {
             let mut bad = peptidovka_test_payload();
-            bad.peptide_length = length;
+            bad.peptide_min_length = min;
+            bad.peptide_max_length = max;
             assert!(
                 matches!(create(bad), Err(DbError::Validation(_))),
-                "peptide_length {length} must be rejected"
+                "length bounds {min}..{max} must be rejected"
             );
         }
 
@@ -4930,7 +4952,8 @@ mod tests {
         assert_eq!(view.title, "Peptidovka test");
         assert_eq!(view.pool_slugs, vec!["ala".to_string(), "gly".to_string()]);
         assert_eq!(view.peptide_count, 10);
-        assert_eq!(view.peptide_length, 5);
+        assert_eq!(view.peptide_min_length, 5);
+        assert_eq!(view.peptide_max_length, 5);
         assert_eq!(view.question_set, "fixed");
         assert!(!view.monochrome);
         assert_eq!(view.seed, 1234);

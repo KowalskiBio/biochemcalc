@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, Row};
 use uuid::Uuid;
 
 const TEST_COLUMNS: &str = "id, title, created_by, created_at, updated_at,
-     pool_slugs, peptide_count, peptide_length, question_set,
+     pool_slugs, peptide_count, peptide_min_length, peptide_max_length, question_set,
      monochrome, available_from, available_to, seed";
 
 const ATTEMPT_COLUMNS: &str = "id, test_id, user_id, seed, started_at,
@@ -25,7 +25,8 @@ pub struct PeptidovkaTestRecord {
     pub updated_at: String,
     pub pool_slugs: String,
     pub peptide_count: i64,
-    pub peptide_length: i64,
+    pub peptide_min_length: i64,
+    pub peptide_max_length: i64,
     pub question_set: String,
     pub monochrome: bool,
     pub available_from: String,
@@ -39,7 +40,8 @@ pub struct NewPeptidovkaTest {
     pub created_by: Uuid,
     pub pool_slugs: String,
     pub peptide_count: i64,
-    pub peptide_length: i64,
+    pub peptide_min_length: i64,
+    pub peptide_max_length: i64,
     pub question_set: String,
     pub monochrome: bool,
     pub available_from: String,
@@ -85,9 +87,9 @@ impl PeptidovkaTestRepo {
         conn.execute(
             "INSERT INTO peptidovka_tests
                  (id, title, created_by, created_at, updated_at, pool_slugs,
-                  peptide_count, peptide_length, question_set, monochrome,
-                  available_from, available_to, seed)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                  peptide_count, peptide_min_length, peptide_max_length, question_set,
+                  monochrome, available_from, available_to, seed)
+             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 id,
                 test.title,
@@ -95,7 +97,8 @@ impl PeptidovkaTestRepo {
                 now,
                 test.pool_slugs,
                 test.peptide_count,
-                test.peptide_length,
+                test.peptide_min_length,
+                test.peptide_max_length,
                 test.question_set,
                 test.monochrome,
                 test.available_from,
@@ -285,12 +288,13 @@ fn map_test(row: &Row<'_>) -> rusqlite::Result<PeptidovkaTestRecord> {
         updated_at: row.get(4)?,
         pool_slugs: row.get(5)?,
         peptide_count: row.get(6)?,
-        peptide_length: row.get(7)?,
-        question_set: row.get(8)?,
-        monochrome: row.get(9)?,
-        available_from: row.get(10)?,
-        available_to: row.get(11)?,
-        seed: row.get(12)?,
+        peptide_min_length: row.get(7)?,
+        peptide_max_length: row.get(8)?,
+        question_set: row.get(9)?,
+        monochrome: row.get(10)?,
+        available_from: row.get(11)?,
+        available_to: row.get(12)?,
+        seed: row.get(13)?,
     })
 }
 

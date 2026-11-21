@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 64;
+const CURRENT_USER_VERSION: u32 = 65;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -327,6 +327,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 64 {
         apply_migration_v64(conn)?;
         conn.pragma_update(None, "user_version", "64")?;
+    }
+
+    if user_version < 65 {
+        apply_migration_v65(conn)?;
+        conn.pragma_update(None, "user_version", "65")?;
     }
 
     Ok(())
@@ -2474,6 +2479,78 @@ fn apply_migration_v64(conn: &Connection) -> Result<(), rusqlite::Error> {
     )
 }
 
+/// Peptidovka test peptides become a length *range*: the single
+/// `peptide_length` column is replaced by `peptide_min_length` and
+/// `peptide_max_length`, so one attempt can mix short and long peptides.
+///
+/// SQLite cannot rename a column away, so the table is rebuilt exactly like
+/// v62's settings migration. Both new bounds take the old `peptide_length`
+/// value, clamped into `2..=20` (the command layer's accepted range), so an
+/// upgraded test keeps generating the same-length peptides it did before.
+/// Child attempts are untouched — their FK resolves to the renamed table.
+///
+/// Idempotent by column inspection rather than version alone: replaying
+/// against an already-rebuilt table is a no-op and never rewrites test rows.
+fn apply_migration_v65(conn: &Connection) -> Result<(), rusqlite::Error> {
+    if peptidovka_tests_has_column(conn, "peptide_min_length")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        PRAGMA foreign_keys = OFF;
+
+        DROP TABLE IF EXISTS peptidovka_tests_new;
+
+        CREATE TABLE peptidovka_tests_new (
+            id BLOB PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            created_by BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            pool_slugs TEXT NOT NULL DEFAULT '[]',
+            peptide_count INTEGER NOT NULL,
+            peptide_min_length INTEGER NOT NULL,
+            peptide_max_length INTEGER NOT NULL,
+            question_set TEXT NOT NULL DEFAULT 'random'
+                CHECK (question_set IN ('fixed','random')),
+            monochrome INTEGER NOT NULL DEFAULT 0,
+            available_from TEXT NOT NULL,
+            available_to TEXT NOT NULL,
+            seed INTEGER NOT NULL
+        );
+
+        INSERT INTO peptidovka_tests_new
+            (id, title, created_by, created_at, updated_at, pool_slugs,
+             peptide_count, peptide_min_length, peptide_max_length, question_set,
+             monochrome, available_from, available_to, seed)
+        SELECT id, title, created_by, created_at, updated_at, pool_slugs,
+               peptide_count,
+               MIN(MAX(peptide_length, 2), 20),
+               MIN(MAX(peptide_length, 2), 20),
+               question_set, monochrome, available_from, available_to, seed
+        FROM peptidovka_tests;
+
+        DROP TABLE peptidovka_tests;
+        ALTER TABLE peptidovka_tests_new RENAME TO peptidovka_tests;
+
+        PRAGMA foreign_keys = ON;
+        ",
+    )
+}
+
+fn peptidovka_tests_has_column(conn: &Connection, column: &str) -> Result<bool, rusqlite::Error> {
+    let mut stmt = conn.prepare("PRAGMA table_info(peptidovka_tests)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Teacher-action log for the biomolecules module, mirroring the
 /// calculations history pattern: every mutation records who did what, so
 /// the "Historie" page can show a reviewable trail. `kind` scopes the entry
@@ -3099,10 +3176,10 @@ mod tests {
         conn.execute(
             "INSERT INTO peptidovka_tests
                  (id, title, created_by, created_at, updated_at, pool_slugs,
-                  peptide_count, peptide_length, question_set, monochrome,
-                  available_from, available_to, seed)
+                  peptide_count, peptide_min_length, peptide_max_length, question_set,
+                  monochrome, available_from, available_to, seed)
              VALUES (?1, 'Test 1', ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
-                     '[\"ala\",\"gly\"]', 5, 6, 'fixed', 0,
+                     '[\"ala\",\"gly\"]', 5, 5, 6, 'fixed', 0,
                      '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', 42)",
             rusqlite::params![Uuid::new_v4().as_bytes(), teacher],
         )
@@ -3141,6 +3218,138 @@ mod tests {
             rusqlite::params![Uuid::new_v4().as_bytes(), test_id, teacher],
         );
         assert!(duplicate.is_err(), "a student may attempt a test only once");
+    }
+
+    /// v65 rebuilds `peptidovka_tests` from a single `peptide_length` to the
+    /// `peptide_min_length`/`peptide_max_length` range. Every old length is
+    /// copied into both bounds, clamped into 2..=20, attempts survive the
+    /// rebuild, and replaying the migration against the rebuilt table is a
+    /// no-op that leaves the stored rows untouched.
+    #[test]
+    fn v65_rebuilds_peptidovka_length_range_and_replays_idempotently() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        // Rebuild the pre-v65 table shape by hand so the migration has real
+        // legacy rows (including out-of-range lengths) to convert.
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at, sections)
+             VALUES (randomblob(16), 'ucitel', 'h', 'teacher', '2026-01-01T00:00:00Z', 'both')",
+            [],
+        )
+        .expect("teacher");
+        let teacher: Vec<u8> = conn
+            .query_row(
+                "SELECT id FROM users WHERE username = 'ucitel'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("teacher id");
+
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE peptidovka_tests;
+            CREATE TABLE peptidovka_tests (
+                id BLOB PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                created_by BLOB NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                pool_slugs TEXT NOT NULL DEFAULT '[]',
+                peptide_count INTEGER NOT NULL,
+                peptide_length INTEGER NOT NULL,
+                question_set TEXT NOT NULL DEFAULT 'random'
+                    CHECK (question_set IN ('fixed','random')),
+                monochrome INTEGER NOT NULL DEFAULT 0,
+                available_from TEXT NOT NULL,
+                available_to TEXT NOT NULL,
+                seed INTEGER NOT NULL
+            );
+            PRAGMA foreign_keys = ON;
+            ",
+        )
+        .expect("legacy table");
+
+        for (title, length, seed) in [("short", 1_i64, 11_i64), ("plain", 6, 22), ("long", 25, 33)] {
+            conn.execute(
+                "INSERT INTO peptidovka_tests
+                     (id, title, created_by, created_at, updated_at, pool_slugs,
+                      peptide_count, peptide_length, question_set, monochrome,
+                      available_from, available_to, seed)
+                 VALUES (?1, ?2, ?3, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                         '[\"ala\",\"gly\"]', 5, ?4, 'fixed', 0,
+                         '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', ?5)",
+                rusqlite::params![Uuid::new_v4().as_bytes(), title, teacher, length, seed],
+            )
+            .expect("legacy test row");
+        }
+        let plain_id: Vec<u8> = conn
+            .query_row(
+                "SELECT id FROM peptidovka_tests WHERE title = 'plain'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("plain id");
+        conn.execute(
+            "INSERT INTO peptidovka_test_attempts
+                 (id, test_id, user_id, seed, started_at)
+             VALUES (?1, ?2, ?3, 22, '2026-01-01T00:00:00Z')",
+            rusqlite::params![Uuid::new_v4().as_bytes(), plain_id, teacher],
+        )
+        .expect("attempt row");
+
+        conn.pragma_update(None, "user_version", "64")
+            .expect("backlevel");
+        run_migrations(&conn).expect("v65");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let column_exists = |name: &str| -> bool {
+            conn.prepare("PRAGMA table_info(peptidovka_tests)")
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| row.get::<_, String>(1))?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .map(|columns| columns.iter().any(|column| column == name))
+                .expect("table info")
+        };
+        assert!(column_exists("peptide_min_length"));
+        assert!(column_exists("peptide_max_length"));
+        assert!(!column_exists("peptide_length"), "the old column is gone");
+
+        let bound_of = |title: &str| -> (i64, i64) {
+            conn.query_row(
+                "SELECT peptide_min_length, peptide_max_length
+                 FROM peptidovka_tests WHERE title = ?1",
+                [title],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("bounds")
+        };
+        assert_eq!(bound_of("short"), (2, 2), "below-range lengths clamp up");
+        assert_eq!(bound_of("plain"), (6, 6), "in-range lengths are preserved");
+        assert_eq!(bound_of("long"), (20, 20), "above-range lengths clamp down");
+
+        // Attempts are untouched and still resolve to their rebuilt test.
+        let attempts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM peptidovka_test_attempts WHERE test_id = ?1",
+                rusqlite::params![plain_id],
+                |row| row.get(0),
+            )
+            .expect("attempt count");
+        assert_eq!(attempts, 1, "attempt survives the table rebuild");
+
+        // A replay against the rebuilt table must not fail or alter it.
+        conn.pragma_update(None, "user_version", "64")
+            .expect("backlevel again");
+        run_migrations(&conn).expect("replay is idempotent");
+        assert_eq!(bound_of("short"), (2, 2));
+        assert_eq!(bound_of("plain"), (6, 6));
+        assert_eq!(bound_of("long"), (20, 20));
     }
 
     /// v58 fills the amino acids' polarity trait but never second-guesses a

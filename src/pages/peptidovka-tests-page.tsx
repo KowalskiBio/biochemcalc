@@ -20,6 +20,7 @@ import { stripRichMarkup } from "@/lib/rich-text"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const testyStrings = cs.peptidovka.testy
+const peptidovkaStrings = cs.peptidovka
 
 const TITLE_MAX = 120
 /** Server-side bounds, mirrored client-side so the form never posts a reject. */
@@ -58,7 +59,8 @@ interface DraftState {
   title: string
   poolSlugs: string[]
   countText: string
-  lengthText: string
+  minLengthText: string
+  maxLengthText: string
   questionSet: PeptidovkaTestQuestionSet
   monochrome: boolean
   fromLocal: string
@@ -70,7 +72,8 @@ function initialDraft(): DraftState {
     title: "",
     poolSlugs: [],
     countText: "5",
-    lengthText: "4",
+    minLengthText: "3",
+    maxLengthText: "6",
     questionSet: "random",
     monochrome: false,
     fromLocal: "",
@@ -102,6 +105,14 @@ export function PeptidovkaTestsPage() {
     [allMolecules],
   )
 
+  // All playable acids start selected (the teacher trims the pool from here).
+  const [poolInitialized, setPoolInitialized] = useState(false)
+  useEffect(() => {
+    if (!loaded || poolInitialized || pool.length === 0) return
+    setDraft((current) => ({ ...current, poolSlugs: pool.map((molecule) => molecule.slug) }))
+    setPoolInitialized(true)
+  }, [loaded, poolInitialized, pool])
+
   const loadTests = useCallback(async () => {
     setListError(null)
     try {
@@ -126,19 +137,22 @@ export function PeptidovkaTestsPage() {
   }
 
   const count = Number.parseInt(draft.countText, 10)
-  const length = Number.parseInt(draft.lengthText, 10)
+  const minLength = Number.parseInt(draft.minLengthText, 10)
+  const maxLength = Number.parseInt(draft.maxLengthText, 10)
   const fromIso = draft.fromLocal === "" ? null : new Date(draft.fromLocal).toISOString()
   const toIso = draft.toLocal === "" ? null : new Date(draft.toLocal).toISOString()
   const formValid =
     draft.title.trim().length > 0 &&
-    draft.title.trim().length <= 120 &&
+    draft.title.trim().length <= TITLE_MAX &&
     draft.poolSlugs.length >= 2 &&
     Number.isInteger(count) &&
     count >= 1 &&
     count <= PEPTIDE_COUNT_MAX &&
-    Number.isInteger(length) &&
-    length >= PEPTIDE_LENGTH_MIN &&
-    length <= PEPTIDE_LENGTH_MAX &&
+    Number.isInteger(minLength) &&
+    Number.isInteger(maxLength) &&
+    minLength >= PEPTIDE_LENGTH_MIN &&
+    maxLength <= PEPTIDE_LENGTH_MAX &&
+    minLength <= maxLength &&
     fromIso !== null &&
     toIso !== null &&
     new Date(fromIso).getTime() < new Date(toIso).getTime()
@@ -148,7 +162,11 @@ export function PeptidovkaTestsPage() {
       ? testyStrings.poolEmpty
       : !Number.isInteger(count) || count < 1 || count > PEPTIDE_COUNT_MAX
         ? testyStrings.invalidCount
-        : !Number.isInteger(length) || length < PEPTIDE_LENGTH_MIN || length > PEPTIDE_LENGTH_MAX
+        : !Number.isInteger(minLength) ||
+            !Number.isInteger(maxLength) ||
+            minLength < PEPTIDE_LENGTH_MIN ||
+            maxLength > PEPTIDE_LENGTH_MAX ||
+            minLength > maxLength
           ? testyStrings.invalidLength
           : fromIso === null ||
               toIso === null ||
@@ -165,14 +183,23 @@ export function PeptidovkaTestsPage() {
         title: draft.title.trim(),
         poolSlugs: draft.poolSlugs,
         peptideCount: count,
-        peptideLength: length,
+        peptideMinLength: minLength,
+        peptideMaxLength: maxLength,
         questionSet: draft.questionSet,
         monochrome: draft.monochrome,
         availableFrom: fromIso ?? "",
         availableTo: toIso ?? "",
       })
       toast({ title: testyStrings.createSuccess })
-      setDraft((current) => ({ ...initialDraft(), poolSlugs: current.poolSlugs }))
+      // Keep the pool and the window — repeat tests usually share them, and
+      // the preserved fields keep the form valid so a success never reads
+      // like a failure.
+      setDraft((current) => ({
+        ...initialDraft(),
+        poolSlugs: current.poolSlugs,
+        fromLocal: current.fromLocal,
+        toLocal: current.toLocal,
+      }))
       await loadTests()
     } catch (error) {
       toast({
@@ -269,29 +296,29 @@ export function PeptidovkaTestsPage() {
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="peptide-count">{testyStrings.peptideCountLabel}</Label>
+                  <Label htmlFor="peptide-min-length">{peptidovkaStrings.minLenLabel}</Label>
                   <Input
-                    id="peptide-count"
+                    id="peptide-min-length"
                     type="number"
-                    min={1}
-                    max={PEPTIDE_COUNT_MAX}
-                    value={draft.countText}
+                    min={PEPTIDE_LENGTH_MIN}
+                    max={PEPTIDE_LENGTH_MAX}
+                    value={draft.minLengthText}
                     onChange={(event) =>
-                      setDraft((current) => ({ ...current, countText: event.target.value }))
+                      setDraft((current) => ({ ...current, minLengthText: event.target.value }))
                     }
                     className="w-28"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="peptide-length">{testyStrings.peptideLengthLabel}</Label>
+                  <Label htmlFor="peptide-max-length">{peptidovkaStrings.maxLenLabel}</Label>
                   <Input
-                    id="peptide-length"
+                    id="peptide-max-length"
                     type="number"
                     min={PEPTIDE_LENGTH_MIN}
                     max={PEPTIDE_LENGTH_MAX}
-                    value={draft.lengthText}
+                    value={draft.maxLengthText}
                     onChange={(event) =>
-                      setDraft((current) => ({ ...current, lengthText: event.target.value }))
+                      setDraft((current) => ({ ...current, maxLengthText: event.target.value }))
                     }
                     className="w-28"
                   />
@@ -468,6 +495,11 @@ export function PeptidovkaTestsPage() {
                             – {formatWindowDate(view.test.availableTo)}
                           </span>
                           <span className="block">{questionCountText(view.test.peptideCount)}</span>
+                          <span className="block">
+                            {testyStrings.lengthRange
+                              .replace("{min}", String(view.test.peptideMinLength))
+                              .replace("{max}", String(view.test.peptideMaxLength))}
+                          </span>
                         </CardDescription>
                         <div className="flex flex-wrap gap-1.5">
                           <Badge variant="secondary">

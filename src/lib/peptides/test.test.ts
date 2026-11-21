@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { TRAIT } from "@/lib/molecules"
+import { createSeededRandom } from "@/lib/molecules/quiz/random"
 import { expectedChainLetters, isChainCorrect } from "@/lib/peptides/answer"
 import { generatePeptide } from "@/lib/peptides/generate"
 import { peptideParts } from "@/lib/peptides/synthesize"
@@ -28,7 +29,8 @@ function makeTest(overrides: Partial<PeptidovkaTest> = {}): PeptidovkaTest {
     title: "Peptidovka",
     poolSlugs: ["ala", "gly", "ser", "pro"],
     peptideCount: 5,
-    peptideLength: 6,
+    peptideMinLength: 4,
+    peptideMaxLength: 6,
     questionSet: "fixed",
     monochrome: false,
     availableFrom: "2026-01-01T00:00:00Z",
@@ -40,7 +42,10 @@ function makeTest(overrides: Partial<PeptidovkaTest> = {}): PeptidovkaTest {
 }
 
 function requireRun(
-  test: Pick<PeptidovkaTest, "poolSlugs" | "peptideCount" | "peptideLength">,
+  test: Pick<
+    PeptidovkaTest,
+    "poolSlugs" | "peptideCount" | "peptideMinLength" | "peptideMaxLength"
+  >,
   attemptSeed: number,
   molecules: readonly BiomoleculeLike[] = MOLECULES,
 ): PeptidovkaTestRun {
@@ -83,24 +88,41 @@ describe("generatePeptidovkaTestRun", () => {
     expect(reversed).toEqual(forward)
   })
 
-  it("honours peptideCount and peptideLength", () => {
-    const run = requireRun(makeTest({ peptideCount: 7, peptideLength: 3 }), 5)
+  it("honours peptideCount and the length range", () => {
+    const run = requireRun(
+      makeTest({ peptideCount: 7, peptideMinLength: 3, peptideMaxLength: 5 }),
+      5,
+    )
     expect(run.chains).toHaveLength(7)
     expect(run.structures).toHaveLength(7)
     for (const chain of run.chains) {
-      expect(chain).toHaveLength(3)
+      expect(chain.length).toBeGreaterThanOrEqual(3)
+      expect(chain.length).toBeLessThanOrEqual(5)
       expect(chain).toMatch(/^[A-Z]+$/)
+    }
+
+    // A single-value range pins the length exactly.
+    const fixed = requireRun(
+      makeTest({ peptideCount: 4, peptideMinLength: 3, peptideMaxLength: 3 }),
+      5,
+    )
+    for (const chain of fixed.chains) {
+      expect(chain).toHaveLength(3)
     }
   })
 
-  it("draws peptide i with seed attemptSeed + i and builds the game's parts", () => {
-    const test = makeTest()
+  it("matches the documented per-peptide derivation (length, then seed)", () => {
+    const test = makeTest({ peptideMinLength: 3, peptideMaxLength: 6 })
     const attemptSeed = 321
     const run = requireRun(test, attemptSeed)
     const weights = peptidovkaTestPoolWeights(test)
+    const rng = createSeededRandom(attemptSeed)
+    const span = test.peptideMaxLength - test.peptideMinLength + 1
 
     for (let index = 0; index < test.peptideCount; index++) {
-      const slugs = generatePeptide(weights, test.peptideLength, attemptSeed + index)
+      const length = test.peptideMinLength + Math.floor(rng() * span)
+      const peptideSeed = Math.floor(rng() * 0x1_0000_0000)
+      const slugs = generatePeptide(weights, length, peptideSeed)
       expect(run.structures[index]).toEqual(peptideParts(slugs))
 
       const oneLetters = slugs.map((slug) => {
@@ -116,6 +138,17 @@ describe("generatePeptidovkaTestRun", () => {
       })
       expect(run.chains[index]).toBe(expectedChainLetters(oneLetters))
     }
+  })
+
+  it("decorrelates peptides for a timestamp-like seed (regression)", () => {
+    // The old `attemptSeed + i` derivation produced the SAME chain five times
+    // for this wrapped timestamp seed. Drawing both the length and the
+    // per-peptide seed from one rng chain must yield visibly distinct chains.
+    const run = requireRun(
+      makeTest({ peptideCount: 5, peptideMinLength: 4, peptideMaxLength: 4 }),
+      1_737_000_000_000,
+    )
+    expect(new Set(run.chains).size).toBeGreaterThanOrEqual(2)
   })
 
   it("returns null for an empty pool", () => {
@@ -141,20 +174,28 @@ describe("generatePeptidovkaTestRun", () => {
     const molecules: BiomoleculeLike[] = [{ slug: "orn", traits: { oneLetter: "B" } }]
     expect(
       generatePeptidovkaTestRun(
-        makeTest({ poolSlugs: ["orn"], peptideCount: 1, peptideLength: 2 }),
+        makeTest({
+          poolSlugs: ["orn"],
+          peptideCount: 1,
+          peptideMinLength: 2,
+          peptideMaxLength: 2,
+        }),
         7,
         molecules,
       ),
     ).toBeNull()
   })
 
-  it("returns null for a non-positive or non-integer count/length", () => {
+  it("returns null for a non-positive/invalid count or length range", () => {
     for (const overrides of [
       { peptideCount: 0 },
       { peptideCount: -1 },
       { peptideCount: 1.5 },
-      { peptideLength: 0 },
-      { peptideLength: 2.5 },
+      { peptideMinLength: 1, peptideMaxLength: 5 },
+      { peptideMinLength: 2, peptideMaxLength: 21 },
+      { peptideMinLength: 5, peptideMaxLength: 4 },
+      { peptideMinLength: 2.5, peptideMaxLength: 5 },
+      { peptideMinLength: 2, peptideMaxLength: 3.5 },
     ]) {
       expect(generatePeptidovkaTestRun(makeTest(overrides), 1, MOLECULES)).toBeNull()
     }
@@ -163,7 +204,9 @@ describe("generatePeptidovkaTestRun", () => {
 
 describe("isPeptideAnswerCorrect", () => {
   it("matches the game's isChainCorrect semantics", () => {
-    const expected = requireRun(makeTest({ peptideCount: 1, peptideLength: 4 }), 42).chains[0] ?? ""
+    const expected =
+      requireRun(makeTest({ peptideCount: 1, peptideMinLength: 4, peptideMaxLength: 4 }), 42)
+        .chains[0] ?? ""
     const inputs = [
       expected,
       expected.toLowerCase(),
