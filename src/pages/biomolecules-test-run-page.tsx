@@ -617,9 +617,14 @@ export function BiomoleculesTestRunPage() {
           >
             {currentVerdict ? quizStrings.correct : quizStrings.incorrect}
           </p>
-          <Button onClick={advance} disabled={runState.index >= total - 1}>
-            {quizStrings.nextQuestion}
-          </Button>
+          {runState.index < total - 1 ? (
+            <Button onClick={advance}>{quizStrings.nextQuestion}</Button>
+          ) : (
+            // Last question answered: the flow's next action IS the submission.
+            <Button onClick={() => void submitRef.current(false)} disabled={submitting}>
+              {submitting ? testyStrings.submitting : testyStrings.submit}
+            </Button>
+          )}
         </div>
       )}
 

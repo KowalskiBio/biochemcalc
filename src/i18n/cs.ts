@@ -754,8 +754,6 @@ export const cs = {
       titleLabel: "Název testu",
       titlePlaceholder: "např. Aminokyseliny — opakování",
       scopeLabel: "Rozsah testu",
-      scopeHint:
-        "Vyberte celá témata nebo jednotlivé kategorie. Test si uloží aktuální molekuly a jejich pořadí.",
       scopeEmpty: "Vyberte alespoň jedno téma nebo kategorii s molekulami.",
       scopeOtherTopic: "Ostatní",
       scopeSummary: "Kategorie: {categories}; molekul: {molecules}",

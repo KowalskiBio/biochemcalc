@@ -15,7 +15,8 @@ import {
   biomoleculesApi,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
-import { generatableTestTypes, testPairCount, testQuestionPool } from "@/lib/molecules/test"
+import { generatableQuizTypes } from "@/lib/molecules/quiz/question-generator"
+import { testPairCount, testQuestionPool } from "@/lib/molecules/test"
 import { stripRichMarkup } from "@/lib/rich-text"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
@@ -126,9 +127,8 @@ export function BiomoleculesTestsPage() {
   }, [scopedMolecules, draft.categorySlugs, allMolecules])
 
   const generatable = useMemo(
-    () =>
-      pool === null ? [] : generatableTestTypes(pool.molecules, pool.characteristics, draft.types),
-    [pool, draft.types],
+    () => (pool === null ? [] : generatableQuizTypes(pool.molecules, pool.characteristics)),
+    [pool],
   )
 
   const pairCount = useMemo(
@@ -196,7 +196,7 @@ export function BiomoleculesTestsPage() {
         title: draft.title.trim(),
         categorySlugs: [...draft.categorySlugs],
         moleculeIds: scopedMolecules.map((molecule) => molecule.id),
-        questionTypes: draft.types,
+        questionTypes: draft.types.filter((type) => (generatable as string[]).includes(type)),
         questionCount: resolvedCount,
         questionSet: draft.questionSet,
         monochrome: draft.monochrome,
@@ -267,7 +267,6 @@ export function BiomoleculesTestsPage() {
 
               <div className="space-y-2">
                 <Label>{testyStrings.scopeLabel}</Label>
-                <p className="text-xs text-muted-foreground">{testyStrings.scopeHint}</p>
                 <div className="max-h-64 space-y-3 overflow-y-auto rounded-[4px] border p-3">
                   {[...categoriesByTopic.entries()].map(([topicSlug, bucket]) => (
                     <div key={topicSlug} className="space-y-1">
@@ -466,6 +465,7 @@ export function BiomoleculesTestsPage() {
                   <Input
                     id="test-from"
                     type="datetime-local"
+                    lang="cs-CZ"
                     value={draft.fromLocal}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, fromLocal: event.target.value }))
@@ -477,6 +477,7 @@ export function BiomoleculesTestsPage() {
                   <Input
                     id="test-to"
                     type="datetime-local"
+                    lang="cs-CZ"
                     value={draft.toLocal}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, toLocal: event.target.value }))
