@@ -13,6 +13,7 @@ import { cs } from "@/i18n/cs"
 import {
   biomoleculesApi,
   type PeptidovkaTestQuestionSet,
+  type PeptidovkaTestsTeacherPage,
   type PeptidovkaTestTeacherView,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
@@ -63,6 +64,8 @@ interface DraftState {
   title: string
   poolSlugs: string[]
   countText: string
+  audienceMode: "all" | "codes"
+  assignedCodes: string[]
   minLengthText: string
   maxLengthText: string
   questionSet: PeptidovkaTestQuestionSet
@@ -76,6 +79,8 @@ function initialDraft(): DraftState {
     title: "",
     poolSlugs: [],
     countText: "5",
+    audienceMode: "all",
+    assignedCodes: [],
     minLengthText: "3",
     maxLengthText: "6",
     questionSet: "random",
@@ -91,7 +96,7 @@ export function PeptidovkaTestsPage() {
   const { toast } = useToast()
 
   const [draft, setDraft] = useState<DraftState>(initialDraft)
-  const [views, setViews] = useState<PeptidovkaTestTeacherView[] | null>(null)
+  const [page, setPage] = useState<PeptidovkaTestsTeacherPage | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -132,10 +137,10 @@ export function PeptidovkaTestsPage() {
   const loadTests = useCallback(async () => {
     setListError(null)
     try {
-      setViews(await biomoleculesApi.peptidovkaTests())
+      setPage(await biomoleculesApi.peptidovkaTests())
     } catch (error) {
       setListError(extractErrorMessage(error, testyStrings.loadError))
-      setViews((current) => current ?? [])
+      setPage((current) => current ?? { tests: [], codes: [], serverNow: new Date().toISOString() })
     }
   }, [])
 
@@ -169,6 +174,7 @@ export function PeptidovkaTestsPage() {
     minLength >= PEPTIDE_LENGTH_MIN &&
     maxLength <= PEPTIDE_LENGTH_MAX &&
     minLength <= maxLength &&
+    (draft.audienceMode === "all" || draft.assignedCodes.length > 0) &&
     fromIso !== null &&
     toIso !== null &&
     new Date(fromIso).getTime() < new Date(toIso).getTime()
@@ -184,11 +190,13 @@ export function PeptidovkaTestsPage() {
             maxLength > PEPTIDE_LENGTH_MAX ||
             minLength > maxLength
           ? testyStrings.invalidLength
-          : fromIso === null ||
-              toIso === null ||
-              new Date(fromIso).getTime() >= new Date(toIso).getTime()
-            ? testyStrings.windowInvalid
-            : null
+          : draft.audienceMode === "codes" && draft.assignedCodes.length === 0
+            ? testyStrings.audienceEmpty
+            : fromIso === null ||
+                toIso === null ||
+                new Date(fromIso).getTime() >= new Date(toIso).getTime()
+              ? testyStrings.windowInvalid
+              : null
     : null
 
   const create = async () => {
@@ -201,6 +209,7 @@ export function PeptidovkaTestsPage() {
         peptideCount: count,
         peptideMinLength: minLength,
         peptideMaxLength: maxLength,
+        assignedCodes: draft.audienceMode === "all" ? [] : draft.assignedCodes,
         questionSet: draft.questionSet,
         monochrome: draft.monochrome,
         availableFrom: fromIso ?? "",
@@ -213,6 +222,8 @@ export function PeptidovkaTestsPage() {
       setDraft((current) => ({
         ...initialDraft(),
         poolSlugs: current.poolSlugs,
+        audienceMode: current.audienceMode,
+        assignedCodes: current.assignedCodes,
         fromLocal: current.fromLocal,
         toLocal: current.toLocal,
       }))
@@ -411,6 +422,67 @@ export function PeptidovkaTestsPage() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label>{testyStrings.audienceLabel}</Label>
+                <div className="flex items-center gap-4">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="peptidovka-audience-mode"
+                      checked={draft.audienceMode === "all"}
+                      onChange={() => setDraft((current) => ({ ...current, audienceMode: "all" }))}
+                      className="size-4 accent-[var(--primary)]"
+                    />
+                    {testyStrings.audienceAll}
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="peptidovka-audience-mode"
+                      checked={draft.audienceMode === "codes"}
+                      onChange={() =>
+                        setDraft((current) => ({ ...current, audienceMode: "codes" }))
+                      }
+                      className="size-4 accent-[var(--primary)]"
+                    />
+                    {testyStrings.audienceCodes}
+                  </label>
+                </div>
+                {draft.audienceMode === "codes" && (
+                  <div className="max-h-40 space-y-1 overflow-y-auto rounded-[4px] border p-2">
+                    {(page?.codes ?? []).map((entry) => {
+                      const checked = draft.assignedCodes.includes(entry.code)
+                      return (
+                        <label
+                          key={entry.code}
+                          className="flex cursor-pointer items-center gap-2 rounded-[4px] px-1 py-0.5 text-sm hover:bg-muted/40"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setDraft((current) => {
+                                const assignedCodes = current.assignedCodes.includes(entry.code)
+                                  ? current.assignedCodes.filter(
+                                      (candidate) => candidate !== entry.code,
+                                    )
+                                  : [...current.assignedCodes, entry.code]
+                                return { ...current, assignedCodes }
+                              })
+                            }
+                            className="size-4 accent-[var(--primary)]"
+                          />
+                          <span className="font-mono text-xs">{entry.code}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {entry.studentCount}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="peptide-test-from">{testyStrings.availableFromLabel}</Label>
@@ -459,12 +531,12 @@ export function PeptidovkaTestsPage() {
 
             {listError !== null && <p className="text-sm text-destructive">{listError}</p>}
 
-            {views === null ? (
+            {page === null ? (
               <div className="space-y-3">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />
               </div>
-            ) : views.length === 0 ? (
+            ) : page.tests.length === 0 ? (
               <Card>
                 <CardContent className="py-8 text-center">
                   <p className="font-medium">{testyStrings.listEmptyTitle}</p>
@@ -475,11 +547,11 @@ export function PeptidovkaTestsPage() {
               </Card>
             ) : (
               <div className="space-y-4">
-                {views.map((view) => {
+                {page.tests.map((view) => {
                   const phase = windowPhase(
                     view.test.availableFrom,
                     view.test.availableTo,
-                    view.serverNow,
+                    page.serverNow,
                   )
                   const phaseLabel =
                     phase === "upcoming"
@@ -511,6 +583,14 @@ export function PeptidovkaTestsPage() {
                             – {formatWindowDate(view.test.availableTo)}
                           </span>
                           <span className="block">{questionCountText(view.test.peptideCount)}</span>
+                          <span className="block">
+                            {view.test.assignedCodes.length === 0
+                              ? testyStrings.audienceAllBadge
+                              : testyStrings.audienceCodesBadge.replace(
+                                  "{count}",
+                                  String(view.test.assignedCodes.length),
+                                )}
+                          </span>
                           <span className="block">
                             {testyStrings.lengthRange
                               .replace("{min}", String(view.test.peptideMinLength))

@@ -22,11 +22,11 @@ use crate::commands::biomolecules::{
     do_update_molecule, do_update_peptidovka_settings, do_update_topic_meta,
     BiomoleculeHistoryPayload, BiomoleculeLeaderboardEntry, BiomoleculeStreakLeaderboardEntry,
     BiomoleculeTestIdPayload, BiomoleculeTestStartResult, BiomoleculeTestStudentView,
-    BiomoleculeTestTeacherView, BiomoleculeTestView, CreateBiomoleculeTestPayload,
+    BiomoleculeTestView, BiomoleculeTestsTeacherPage, CreateBiomoleculeTestPayload,
     CreateCategoryPayload, CreateMoleculePayload, CreatePeptidovkaTestPayload, CreateTopicPayload,
     DeleteCategoryPayload, DeleteMoleculePayload, DeleteTopicPayload, PeptidovkaLeaderboardPayload,
     PeptidovkaSettings, PeptidovkaTestIdPayload, PeptidovkaTestStartResult,
-    PeptidovkaTestStudentView, PeptidovkaTestTeacherView, PeptidovkaTestView,
+    PeptidovkaTestStudentView, PeptidovkaTestView, PeptidovkaTestsTeacherPage,
     QuizLeaderboardPayload, RecordPeptidovkaRunPayload, RecordQuizResultPayload,
     RecordStreakResultPayload, ReorderCategoriesPayload, ReorderMoleculesPayload,
     ReorderTopicsPayload, StreakLeaderboardPayload, SubmitBiomoleculeTestAttemptPayload,
@@ -312,7 +312,7 @@ async fn delete_biomolecule_test(
 async fn list_biomolecule_tests(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
-) -> Result<Json<Vec<BiomoleculeTestTeacherView>>, HttpError> {
+) -> Result<Json<BiomoleculeTestsTeacherPage>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
     Ok(Json(do_list_biomolecule_tests(&conn, &user.id)?))
 }
@@ -377,7 +377,7 @@ async fn delete_peptidovka_test(
 async fn list_peptidovka_tests(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
-) -> Result<Json<Vec<PeptidovkaTestTeacherView>>, HttpError> {
+) -> Result<Json<PeptidovkaTestsTeacherPage>, HttpError> {
     let conn = crate::util::lock_db(&state.db);
     Ok(Json(do_list_peptidovka_tests(&conn, &user.id)?))
 }

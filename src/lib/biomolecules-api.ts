@@ -126,6 +126,11 @@ export interface BiomoleculeTest {
   availableTo: string
   seed: number
   createdAt: string
+  /**
+   * Student invite codes this test targets. An empty array means ALL students
+   * (the default for tests created before audiences existed).
+   */
+  assignedCodes: string[]
 }
 
 /** One student's attempt on a test, as seen by the teacher. */
@@ -143,11 +148,18 @@ export interface BiomoleculeTestAttemptSummary {
   detailJson: string | null
 }
 
-/** A teacher's view: the test, its attempts, and who could still take it. */
+/** A teacher's per-test view: the test, its attempts, and who could still take it. */
 export interface BiomoleculeTestTeacherView {
   test: BiomoleculeTest
   attempts: BiomoleculeTestAttemptSummary[]
   roster: { userId: string; username: string }[]
+}
+
+/** Teacher page: every test plus the page-level audience picker and server time. */
+export interface BiomoleculeTestsTeacherPage {
+  tests: BiomoleculeTestTeacherView[]
+  /** All student invite codes with their registered-user counts (audience picker). */
+  codes: { code: string; studentCount: number }[]
   /** One server timestamp so windows render without client clock skew. */
   serverNow: string
 }
@@ -195,6 +207,11 @@ export interface PeptidovkaTest {
   availableTo: string
   seed: number
   createdAt: string
+  /**
+   * Student invite codes this test targets. An empty array means ALL students
+   * (the default for tests created before audiences existed).
+   */
+  assignedCodes: string[]
 }
 
 /** One student's attempt on a Peptidovka test, as seen by the teacher. */
@@ -212,11 +229,18 @@ export interface PeptidovkaTestAttemptSummary {
   detailJson: string | null
 }
 
-/** A teacher's view: the test, its attempts, and who could still take it. */
+/** A teacher's per-test view: the test, its attempts, and who could still take it. */
 export interface PeptidovkaTestTeacherView {
   test: PeptidovkaTest
   attempts: PeptidovkaTestAttemptSummary[]
   roster: { userId: string; username: string }[]
+}
+
+/** Teacher page: every test plus the page-level audience picker and server time. */
+export interface PeptidovkaTestsTeacherPage {
+  tests: PeptidovkaTestTeacherView[]
+  /** All student invite codes with their registered-user counts (audience picker). */
+  codes: { code: string; studentCount: number }[]
   /** One server timestamp so windows render without client clock skew. */
   serverNow: string
 }
@@ -259,6 +283,10 @@ export interface CreatePeptidovkaTestInput {
   availableTo: string
   /** Optional client-chosen seed; omitted means the server generates one. */
   seed?: number
+  /**
+   * Student invite codes to target. Omitted or `[]` means ALL students.
+   */
+  assignedCodes?: string[]
 }
 
 /** Body accepted by `createBiomoleculeTest`; ids are client-resolved. */
@@ -274,6 +302,10 @@ export interface CreateBiomoleculeTestInput {
   availableTo: string
   /** Optional client-chosen seed; omitted means the server generates one. */
   seed?: number
+  /**
+   * Student invite codes to target. Omitted or `[]` means ALL students.
+   */
+  assignedCodes?: string[]
 }
 
 /** One user's best finished Biomolekuly streak of a given kind. */
@@ -474,9 +506,9 @@ export const biomoleculesApi = {
   deleteBiomoleculeTest: (id: string): Promise<void> =>
     httpRequest<void>("/api/biomolecules/delete-biomolecule-test", { testId: id }),
 
-  /** Teacher: every test with its attempts, roster and the server time. */
-  biomoleculeTests: (): Promise<BiomoleculeTestTeacherView[]> =>
-    httpRequest<BiomoleculeTestTeacherView[]>("/api/biomolecules/biomolecule-tests"),
+  /** Teacher: the page of tests with attempts, audience picker codes and server time. */
+  biomoleculeTests: (): Promise<BiomoleculeTestsTeacherPage> =>
+    httpRequest<BiomoleculeTestsTeacherPage>("/api/biomolecules/biomolecule-tests"),
 
   /** Student: tests currently open, each with this student's attempt status. */
   availableBiomoleculeTests: (): Promise<BiomoleculeTestStudentView[]> =>
@@ -508,9 +540,9 @@ export const biomoleculesApi = {
   deletePeptidovkaTest: (id: string): Promise<void> =>
     httpRequest<void>("/api/biomolecules/delete-peptidovka-test", { testId: id }),
 
-  /** Teacher: every Peptidovka test with its attempts, roster and server time. */
-  peptidovkaTests: (): Promise<PeptidovkaTestTeacherView[]> =>
-    httpRequest<PeptidovkaTestTeacherView[]>("/api/biomolecules/peptidovka-tests"),
+  /** Teacher: the page of Peptidovka tests with attempts, codes and server time. */
+  peptidovkaTests: (): Promise<PeptidovkaTestsTeacherPage> =>
+    httpRequest<PeptidovkaTestsTeacherPage>("/api/biomolecules/peptidovka-tests"),
 
   /** Student: Peptidovka tests currently open, with this student's attempt status. */
   availablePeptidovkaTests: (): Promise<PeptidovkaTestStudentView[]> =>

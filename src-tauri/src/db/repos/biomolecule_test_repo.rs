@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 const TEST_COLUMNS: &str = "id, title, created_by, created_at, updated_at,
      category_slugs, molecule_ids, question_types, question_count, question_set,
-     monochrome, available_from, available_to, seed";
+     monochrome, available_from, available_to, seed, assigned_codes";
 
 const ATTEMPT_COLUMNS: &str = "id, test_id, user_id, seed, started_at,
      submitted_at, total_count, correct_count, detail_json";
@@ -31,6 +31,8 @@ pub struct BiomoleculeTestRecord {
     pub available_from: String,
     pub available_to: String,
     pub seed: i64,
+    /// JSON array of student invite codes; `[]` means ALL students.
+    pub assigned_codes: String,
 }
 
 /// The fully-validated fields of a new test (ids/JSON already normalized).
@@ -46,6 +48,8 @@ pub struct NewBiomoleculeTest {
     pub available_from: String,
     pub available_to: String,
     pub seed: i64,
+    /// JSON array of student invite codes; `[]` means ALL students.
+    pub assigned_codes: String,
 }
 
 /// One `biomolecule_test_attempts` row.
@@ -76,6 +80,14 @@ pub struct BiomoleculeTestRosterRow {
     pub username: String,
 }
 
+/// One student invite code plus how many accounts registered with it, for the
+/// teacher's audience picker.
+#[derive(Debug, Clone)]
+pub struct BiomoleculeTestCodeRow {
+    pub code: String,
+    pub student_count: i64,
+}
+
 pub struct BiomoleculeTestRepo;
 
 impl BiomoleculeTestRepo {
@@ -86,8 +98,8 @@ impl BiomoleculeTestRepo {
             "INSERT INTO biomolecule_tests
                  (id, title, created_by, created_at, updated_at, category_slugs,
                   molecule_ids, question_types, question_count, question_set,
-                  monochrome, available_from, available_to, seed)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                  monochrome, available_from, available_to, seed, assigned_codes)
+             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id,
                 test.title,
@@ -102,6 +114,7 @@ impl BiomoleculeTestRepo {
                 test.available_from,
                 test.available_to,
                 test.seed,
+                test.assigned_codes,
             ],
         )?;
         Ok(id)
@@ -167,18 +180,63 @@ impl BiomoleculeTestRepo {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Students whose section access includes Biomolekuly, so the teacher page
-    /// can show "not submitted" names next to the attempts.
-    pub fn eligible_roster(conn: &Connection) -> Result<Vec<BiomoleculeTestRosterRow>, DbError> {
-        let mut stmt = conn.prepare(
+    /// Students whose section access includes Biomolekuly, narrowed to the
+    /// test's audience. An empty `assigned_codes` means ALL eligible students;
+    /// otherwise only accounts whose `users.invite_code` is in the audience.
+    pub fn eligible_roster(
+        conn: &Connection,
+        assigned_codes: &[String],
+    ) -> Result<Vec<BiomoleculeTestRosterRow>, DbError> {
+        if assigned_codes.is_empty() {
+            let mut stmt = conn.prepare(
+                "SELECT id, username FROM users
+                 WHERE role = 'student' AND sections IN ('biomolecules', 'both')
+                 ORDER BY username COLLATE NOCASE ASC, id ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(BiomoleculeTestRosterRow {
+                    user_id: row.get(0)?,
+                    username: row.get(1)?,
+                })
+            })?;
+            return Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+
+        let placeholders = std::iter::repeat("?")
+            .take(assigned_codes.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn.prepare(&format!(
             "SELECT id, username FROM users
              WHERE role = 'student' AND sections IN ('biomolecules', 'both')
-             ORDER BY username COLLATE NOCASE ASC, id ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
+               AND invite_code IN ({placeholders})
+             ORDER BY username COLLATE NOCASE ASC, id ASC"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(assigned_codes.iter()), |row| {
             Ok(BiomoleculeTestRosterRow {
                 user_id: row.get(0)?,
                 username: row.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Every student-role invite code (active or retired) with the number of
+    /// accounts registered through it, so the teacher UI can pick a group and
+    /// show its size. Codes with zero registrations still appear.
+    pub fn list_student_codes(conn: &Connection) -> Result<Vec<BiomoleculeTestCodeRow>, DbError> {
+        let mut stmt = conn.prepare(
+            "SELECT c.code, COUNT(u.id)
+             FROM invite_codes c
+             LEFT JOIN users u ON u.invite_code = c.code AND u.role = 'student'
+             WHERE c.role = 'student'
+             GROUP BY c.code
+             ORDER BY c.created_at DESC, c.code ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(BiomoleculeTestCodeRow {
+                code: row.get(0)?,
+                student_count: row.get(1)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -293,6 +351,7 @@ fn map_test(row: &Row<'_>) -> rusqlite::Result<BiomoleculeTestRecord> {
         available_from: row.get(11)?,
         available_to: row.get(12)?,
         seed: row.get(13)?,
+        assigned_codes: row.get(14)?,
     })
 }
 

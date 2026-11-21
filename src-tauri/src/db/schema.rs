@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 65;
+const CURRENT_USER_VERSION: u32 = 66;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -332,6 +332,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 65 {
         apply_migration_v65(conn)?;
         conn.pragma_update(None, "user_version", "65")?;
+    }
+
+    if user_version < 66 {
+        apply_migration_v66(conn)?;
+        conn.pragma_update(None, "user_version", "66")?;
     }
 
     Ok(())
@@ -2540,7 +2545,14 @@ fn apply_migration_v65(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 fn peptidovka_tests_has_column(conn: &Connection, column: &str) -> Result<bool, rusqlite::Error> {
-    let mut stmt = conn.prepare("PRAGMA table_info(peptidovka_tests)")?;
+    table_has_column(conn, "peptidovka_tests", column)
+}
+
+/// Column-existence probe shared by the additive migrations that must be
+/// replay-safe (`ALTER TABLE ... ADD COLUMN` is not idempotent by itself).
+/// `table` is always an internal constant, never user input.
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let name: String = row.get(1)?;
@@ -2549,6 +2561,52 @@ fn peptidovka_tests_has_column(conn: &Connection, column: &str) -> Result<bool, 
         }
     }
     Ok(false)
+}
+
+/// Table-existence probe so an additive migration can no-op on the synthetic
+/// partial replays the house tests build by hand (those databases deliberately
+/// stop short of the full schema ladder).
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, rusqlite::Error> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        rusqlite::params![table],
+        |row| row.get(0),
+    )
+}
+
+/// Test audiences by invite code ("zvací kód"). Registration previously
+/// consumed a code without recording which one, so grouping students by class
+/// was impossible; `users.invite_code` now stores the validated student code
+/// the account registered with (NULL for pre-v66 accounts — they simply match
+/// no targeted audience, while still seeing every ALL-students test).
+///
+/// Each teacher-created test carries `assigned_codes`: a JSON array of student
+/// invite codes. An empty array means ALL students; otherwise only students
+/// whose `users.invite_code` is in the array are targeted. Both the storage
+/// column and the audience semantics are mirrored on the Peptidovka twin.
+///
+/// Purely additive: every existing test row defaults to `'[]'` (ALL), which
+/// is exactly today's behavior. Idempotent by column inspection so replaying
+/// against an already-migrated database is a no-op.
+fn apply_migration_v66(conn: &Connection) -> Result<(), rusqlite::Error> {
+    if table_exists(conn, "users")? && !table_has_column(conn, "users", "invite_code")? {
+        conn.execute_batch("ALTER TABLE users ADD COLUMN invite_code TEXT;")?;
+    }
+    if table_exists(conn, "biomolecule_tests")?
+        && !table_has_column(conn, "biomolecule_tests", "assigned_codes")?
+    {
+        conn.execute_batch(
+            "ALTER TABLE biomolecule_tests ADD COLUMN assigned_codes TEXT NOT NULL DEFAULT '[]';",
+        )?;
+    }
+    if table_exists(conn, "peptidovka_tests")?
+        && !table_has_column(conn, "peptidovka_tests", "assigned_codes")?
+    {
+        conn.execute_batch(
+            "ALTER TABLE peptidovka_tests ADD COLUMN assigned_codes TEXT NOT NULL DEFAULT '[]';",
+        )?;
+    }
+    Ok(())
 }
 
 /// Teacher-action log for the biomolecules module, mirroring the
@@ -3274,7 +3332,8 @@ mod tests {
         )
         .expect("legacy table");
 
-        for (title, length, seed) in [("short", 1_i64, 11_i64), ("plain", 6, 22), ("long", 25, 33)] {
+        for (title, length, seed) in [("short", 1_i64, 11_i64), ("plain", 6, 22), ("long", 25, 33)]
+        {
             conn.execute(
                 "INSERT INTO peptidovka_tests
                      (id, title, created_by, created_at, updated_at, pool_slugs,
@@ -4838,5 +4897,105 @@ mod tests {
         // this test exists to prevent from ever coming back.
         let data = crate::db::repos::BiomoleculeRepo::list_data(&conn).expect("list data");
         assert!(data.molecules.iter().any(|m| m.slug == "his-acid"));
+    }
+
+    /// v66 records the invite code a student registered with and gives each
+    /// test an audience column. Existing (pre-v66) rows must come through as
+    /// "ALL students" (`invite_code` NULL, `assigned_codes` `'[]'`), and the
+    /// column-existence guards make a replay a no-op.
+    #[test]
+    fn v66_adds_invite_code_and_test_audiences_idempotently() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        apply_migration_v15(&conn).expect("v15");
+        apply_migration_v63(&conn).expect("v63");
+        apply_migration_v64(&conn).expect("v64");
+        apply_migration_v65(&conn).expect("v65");
+        conn.pragma_update(None, "user_version", "65")
+            .expect("set version");
+
+        // Pre-v66 rows: no invite_code and no assigned_codes columns yet.
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at)
+             VALUES (randomblob(16), 'pre-v66-student', 'h', 'student', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed pre-v66 user");
+        conn.execute(
+            "INSERT INTO biomolecule_tests
+                 (id, title, created_by, created_at, updated_at, question_count,
+                  available_from, available_to, seed)
+             VALUES (randomblob(16), 'Bio', randomblob(16), '2026-01-01T00:00:00Z',
+                     '2026-01-01T00:00:00Z', 5, '2026-01-01T00:00:00Z',
+                     '2026-01-02T00:00:00Z', 1)",
+            [],
+        )
+        .expect("seed pre-v66 biomolecule test");
+        conn.execute(
+            "INSERT INTO peptidovka_tests
+                 (id, title, created_by, created_at, updated_at, peptide_count,
+                  peptide_min_length, peptide_max_length, available_from, available_to, seed)
+             VALUES (randomblob(16), 'Pep', randomblob(16), '2026-01-01T00:00:00Z',
+                     '2026-01-01T00:00:00Z', 5, 3, 5, '2026-01-01T00:00:00Z',
+                     '2026-01-02T00:00:00Z', 1)",
+            [],
+        )
+        .expect("seed pre-v66 peptidovka test");
+
+        run_migrations(&conn).expect("v66");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let (notnull, dflt): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT \"notnull\", dflt_value FROM pragma_table_info('users')
+                 WHERE name = 'invite_code'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("users.invite_code must exist after v66");
+        assert_eq!(notnull, 0, "invite_code must be nullable");
+        assert_eq!(dflt, None, "invite_code must have no default");
+
+        for table in ["biomolecule_tests", "peptidovka_tests"] {
+            let (notnull, dflt): (i64, Option<String>) = conn
+                .query_row(
+                    &format!(
+                        "SELECT \"notnull\", dflt_value FROM pragma_table_info('{table}')
+                         WHERE name = 'assigned_codes'"
+                    ),
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap_or_else(|e| panic!("{table}.assigned_codes must exist after v66: {e}"));
+            assert_eq!(notnull, 1, "{table}.assigned_codes must be NOT NULL");
+            assert_eq!(dflt.as_deref(), Some("'[]'"));
+        }
+
+        let existing_code: Option<String> = conn
+            .query_row(
+                "SELECT invite_code FROM users WHERE username = 'pre-v66-student'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("pre-v66 user readable");
+        assert_eq!(existing_code, None, "pre-v66 accounts join no audience");
+        let bio_codes: String = conn
+            .query_row("SELECT assigned_codes FROM biomolecule_tests", [], |row| {
+                row.get(0)
+            })
+            .expect("existing biomolecule test readable");
+        let pep_codes: String = conn
+            .query_row("SELECT assigned_codes FROM peptidovka_tests", [], |row| {
+                row.get(0)
+            })
+            .expect("existing peptidovka test readable");
+        assert_eq!(bio_codes, "[]", "existing tests stay open to ALL students");
+        assert_eq!(pep_codes, "[]", "existing tests stay open to ALL students");
+
+        // Replay: the guards make a second application a no-op.
+        apply_migration_v66(&conn).expect("v66 replay");
+        run_migrations(&conn).expect("migrations replay");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
     }
 }

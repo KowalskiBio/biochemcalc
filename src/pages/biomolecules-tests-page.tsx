@@ -15,6 +15,7 @@ import {
   type Biomolecule,
   type BiomoleculeTest,
   type BiomoleculeTestQuestionSet,
+  type BiomoleculeTestsTeacherPage,
   type BiomoleculeTestTeacherView,
   biomoleculesApi,
 } from "@/lib/biomolecules-api"
@@ -97,7 +98,7 @@ export function BiomoleculesTestsPage() {
   const { toast } = useToast()
 
   const [draft, setDraft] = useState<DraftState>(initialDraft)
-  const [views, setViews] = useState<BiomoleculeTestTeacherView[] | null>(null)
+  const [page, setPage] = useState<BiomoleculeTestsTeacherPage | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -197,10 +198,10 @@ export function BiomoleculesTestsPage() {
   const loadTests = useCallback(async () => {
     setListError(null)
     try {
-      setViews(await biomoleculesApi.biomoleculeTests())
+      setPage(await biomoleculesApi.biomoleculeTests())
     } catch (error) {
       setListError(extractErrorMessage(error, testyStrings.loadError))
-      setViews((current) => current ?? [])
+      setPage((current) => current ?? { tests: [], codes: [], serverNow: new Date().toISOString() })
     }
   }, [])
 
@@ -542,12 +543,12 @@ export function BiomoleculesTestsPage() {
 
             {listError !== null && <p className="text-sm text-destructive">{listError}</p>}
 
-            {views === null ? (
+            {page === null ? (
               <div className="space-y-3">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />
               </div>
-            ) : views.length === 0 ? (
+            ) : page.tests.length === 0 ? (
               <Card>
                 <CardContent className="py-8 text-center">
                   <p className="font-medium">{testyStrings.listEmptyTitle}</p>
@@ -558,11 +559,11 @@ export function BiomoleculesTestsPage() {
               </Card>
             ) : (
               <div className="space-y-4">
-                {views.map((view) => {
+                {page.tests.map((view) => {
                   const phase = windowPhase(
                     view.test.availableFrom,
                     view.test.availableTo,
-                    view.serverNow,
+                    page.serverNow,
                   )
                   const phaseLabel =
                     phase === "upcoming"
@@ -595,6 +596,14 @@ export function BiomoleculesTestsPage() {
                           </span>
                           <span className="block">
                             {questionCountText(view.test.questionCount)}
+                          </span>
+                          <span className="block">
+                            {view.test.assignedCodes.length === 0
+                              ? testyStrings.audienceAllBadge
+                              : testyStrings.audienceCodesBadge.replace(
+                                  "{count}",
+                                  String(view.test.assignedCodes.length),
+                                )}
                           </span>
                         </CardDescription>
                         <div className="flex flex-wrap gap-1.5">
