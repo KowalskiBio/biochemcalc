@@ -604,9 +604,15 @@ function PeptidovkaAttemptDetail({
   let parsed: { typed: (string | null)[]; correct: boolean[] } | null = null
   if (attempt.detailJson !== null) {
     try {
-      parsed = JSON.parse(attempt.detailJson) as {
-        typed: (string | null)[]
-        correct: boolean[]
+      const raw = JSON.parse(attempt.detailJson) as {
+        typed?: (string | null)[]
+        correct?: boolean[]
+      }
+      // Old attempts stored the detail as a bare array of {correct} objects —
+      // the typed answers were added later. Treat anything without the typed
+      // array as detail-unavailable rather than crashing on undefined.
+      if (Array.isArray(raw.typed) && Array.isArray(raw.correct)) {
+        parsed = { typed: raw.typed, correct: raw.correct }
       }
     } catch {
       parsed = null
