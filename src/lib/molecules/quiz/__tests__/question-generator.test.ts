@@ -129,6 +129,94 @@ describe("generateQuizSession determinism", () => {
   })
 })
 
+describe("explicit pairs mode", () => {
+  /** Every (molecule, type) combination, in a stable order. */
+  function enumerate(
+    molecules: QuizMolecule[],
+    types: QuizQuestionType[],
+  ): { molecule: QuizMolecule; type: QuizQuestionType }[] {
+    const pairs: { molecule: QuizMolecule; type: QuizQuestionType }[] = []
+    for (const molecule of molecules) {
+      for (const type of types) {
+        pairs.push({ molecule, type })
+      }
+    }
+    return pairs
+  }
+
+  const pairIdentity = (question: { type: QuizQuestionType; targetId: string }): string =>
+    `${question.type}:${question.targetId}`
+
+  it("asks every pair exactly once when count equals the pair count", () => {
+    const pairs = enumerate(AMINO_ACIDS_QUIZ.molecules, BASE_TYPES)
+    const questions = generateQuizSession(AMINO_ACIDS_QUIZ.molecules, {
+      types: BASE_TYPES,
+      questionCount: pairs.length,
+      seed: 4242,
+      pairs,
+    })
+
+    expect(questions).toHaveLength(pairs.length)
+    const expected = pairs.map((pair) => `${pair.type}:${pair.molecule.id}`)
+    const produced = questions.map(pairIdentity)
+    // Exhaustive: every pair appears, none repeats.
+    expect(new Set(produced).size).toBe(pairs.length)
+    expect([...produced].sort()).toEqual([...expected].sort())
+  })
+
+  it("is deterministic for the same seed and pairs", () => {
+    const pairs = enumerate(AMINO_ACIDS_QUIZ.molecules, BASE_TYPES)
+    const config = { types: BASE_TYPES, questionCount: 17, seed: 77, pairs }
+    const first = generateQuizSession(AMINO_ACIDS_QUIZ.molecules, config)
+    const second = generateQuizSession(AMINO_ACIDS_QUIZ.molecules, config)
+    expect(JSON.stringify(first)).toBe(JSON.stringify(second))
+  })
+
+  it("does not mutate the caller's pairs array", () => {
+    const pairs = enumerate(AMINO_ACIDS_QUIZ.molecules, BASE_TYPES)
+    const before = pairs.map((pair) => `${pair.type}:${pair.molecule.id}`)
+    generateQuizSession(AMINO_ACIDS_QUIZ.molecules, {
+      types: BASE_TYPES,
+      questionCount: 5,
+      seed: 3,
+      pairs,
+    })
+    expect(pairs.map((pair) => `${pair.type}:${pair.molecule.id}`)).toEqual(before)
+  })
+
+  it("reshuffles and continues when count exceeds the pair count", () => {
+    const molecules = AMINO_ACIDS_QUIZ.molecules.slice(0, 3)
+    const pairs = enumerate(molecules, BASE_TYPES)
+    const questions = generateQuizSession(molecules, {
+      types: BASE_TYPES,
+      questionCount: 14,
+      seed: 9,
+      pairs,
+    })
+
+    expect(questions).toHaveLength(14)
+    const allowed = new Set(pairs.map((pair) => `${pair.type}:${pair.molecule.id}`))
+    for (const question of questions) {
+      expect(allowed.has(pairIdentity(question))).toBe(true)
+    }
+    // Same back-to-back-repeat avoidance as the queues, across reshuffles.
+    for (let i = 1; i < questions.length; i++) {
+      expect(pairIdentity(questions[i])).not.toBe(pairIdentity(questions[i - 1]))
+    }
+  })
+
+  it("yields an empty session for an empty pair list", () => {
+    expect(
+      generateQuizSession(AMINO_ACIDS_QUIZ.molecules, {
+        types: BASE_TYPES,
+        questionCount: 5,
+        seed: 1,
+        pairs: [],
+      }),
+    ).toEqual([])
+  })
+})
+
 describe("question invariants", () => {
   it("holds across 200 seeds and all seven types", () => {
     for (let seed = 0; seed < 200; seed++) {

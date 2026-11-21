@@ -10,19 +10,23 @@ use crate::commands::biomolecule_reports::{
     BiomoleculeReportQuestionPayload,
 };
 use crate::commands::biomolecules::{
-    do_create_category, do_create_molecule, do_create_topic, do_delete_category,
-    do_delete_molecule, do_delete_topic, do_list_data, do_list_peptidovka_settings,
-    do_peptidovka_leaderboard, do_quiz_leaderboard, do_record_peptidovka_run,
-    do_record_quiz_result, do_record_streak_result, do_reorder_categories,
-    do_reorder_molecules, do_reorder_topics, do_streak_leaderboard,
+    do_create_biomolecule_test, do_create_category, do_create_molecule, do_create_topic,
+    do_delete_biomolecule_test, do_delete_category, do_delete_molecule, do_delete_topic,
+    do_list_available_biomolecule_tests, do_list_biomolecule_tests, do_list_data,
+    do_list_peptidovka_settings, do_peptidovka_leaderboard, do_quiz_leaderboard,
+    do_record_peptidovka_run, do_record_quiz_result, do_record_streak_result,
+    do_reorder_categories, do_reorder_molecules, do_reorder_topics,
+    do_start_biomolecule_test_attempt, do_streak_leaderboard, do_submit_biomolecule_test_attempt,
     do_update_category_meta, do_update_molecule, do_update_peptidovka_settings,
     do_update_topic_meta, BiomoleculeHistoryPayload, BiomoleculeLeaderboardEntry,
-    BiomoleculeStreakLeaderboardEntry, CreateCategoryPayload, CreateMoleculePayload,
-    CreateTopicPayload, DeleteCategoryPayload, DeleteMoleculePayload, DeleteTopicPayload,
-    PeptidovkaLeaderboardPayload, PeptidovkaSettings, QuizLeaderboardPayload,
-    RecordPeptidovkaRunPayload, RecordQuizResultPayload, RecordStreakResultPayload,
-    ReorderCategoriesPayload, ReorderMoleculesPayload, ReorderTopicsPayload,
-    StreakLeaderboardPayload, UpdateCategoryMetaPayload, UpdateMoleculePayload,
+    BiomoleculeStreakLeaderboardEntry, BiomoleculeTestIdPayload, BiomoleculeTestStartResult,
+    BiomoleculeTestStudentView, BiomoleculeTestTeacherView, BiomoleculeTestView,
+    CreateBiomoleculeTestPayload, CreateCategoryPayload, CreateMoleculePayload, CreateTopicPayload,
+    DeleteCategoryPayload, DeleteMoleculePayload, DeleteTopicPayload, PeptidovkaLeaderboardPayload,
+    PeptidovkaSettings, QuizLeaderboardPayload, RecordPeptidovkaRunPayload,
+    RecordQuizResultPayload, RecordStreakResultPayload, ReorderCategoriesPayload,
+    ReorderMoleculesPayload, ReorderTopicsPayload, StreakLeaderboardPayload,
+    SubmitBiomoleculeTestAttemptPayload, UpdateCategoryMetaPayload, UpdateMoleculePayload,
     UpdatePeptidovkaSettingsPayload, UpdateTopicMetaPayload,
 };
 use crate::db::repos::biomolecule_repo::BiomoleculeData;
@@ -282,6 +286,71 @@ async fn delete_question_report(
     Ok(())
 }
 
+async fn create_biomolecule_test(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<CreateBiomoleculeTestPayload>,
+) -> Result<Json<BiomoleculeTestView>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_create_biomolecule_test(&conn, &user.id, payload)?))
+}
+
+async fn delete_biomolecule_test(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<BiomoleculeTestIdPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_delete_biomolecule_test(&conn, &user.id, &payload.test_id)?;
+    Ok(())
+}
+
+async fn list_biomolecule_tests(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+) -> Result<Json<Vec<BiomoleculeTestTeacherView>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_list_biomolecule_tests(&conn, &user.id)?))
+}
+
+async fn available_biomolecule_tests(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+) -> Result<Json<Vec<BiomoleculeTestStudentView>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_list_available_biomolecule_tests(&conn, &user.id)?))
+}
+
+async fn start_biomolecule_test(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<BiomoleculeTestIdPayload>,
+) -> Result<Json<BiomoleculeTestStartResult>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_start_biomolecule_test_attempt(
+        &conn,
+        &user.id,
+        &payload.test_id,
+    )?))
+}
+
+async fn submit_biomolecule_test(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<SubmitBiomoleculeTestAttemptPayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_submit_biomolecule_test_attempt(
+        &conn,
+        &user.id,
+        &payload.attempt_id,
+        payload.total_count,
+        payload.correct_count,
+        payload.detail_json.as_deref(),
+    )?;
+    Ok(())
+}
+
 /// Any authenticated user.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -299,6 +368,12 @@ pub fn quiz_router() -> Router<Arc<AppState>> {
         .route("/record-quiz-result", post(record_quiz_result))
         .route("/record-streak-result", post(record_streak_result))
         .route("/report-question", post(report_question))
+        .route(
+            "/available-biomolecule-tests",
+            post(available_biomolecule_tests),
+        )
+        .route("/start-biomolecule-test", post(start_biomolecule_test))
+        .route("/submit-biomolecule-test", post(submit_biomolecule_test))
 }
 
 /// Teacher only.
@@ -321,8 +396,14 @@ pub fn teacher_router() -> Router<Arc<AppState>> {
             post(update_peptidovka_settings),
         )
         .route("/biomolecule-history", post(biomolecule_history))
-        .route("/clear-biomolecule-history", post(clear_biomolecule_history))
+        .route(
+            "/clear-biomolecule-history",
+            post(clear_biomolecule_history),
+        )
         .route("/list-question-reports", post(list_question_reports))
         .route("/get-question-report", post(get_question_report))
         .route("/delete-question-report", post(delete_question_report))
+        .route("/create-biomolecule-test", post(create_biomolecule_test))
+        .route("/delete-biomolecule-test", post(delete_biomolecule_test))
+        .route("/biomolecule-tests", post(list_biomolecule_tests))
 }

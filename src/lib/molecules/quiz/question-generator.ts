@@ -122,11 +122,26 @@ export interface QuizQuestion {
   uid?: string
 }
 
+/** One explicit (molecule, type) draw for an exhaustive "all questions" quiz. */
+export interface QuizPair {
+  molecule: QuizMolecule
+  type: QuizQuestionType
+}
+
 export interface GenerateQuizConfig {
   /** One is chosen per question (round-robin through a shuffled pool). */
   types: QuizQuestionType[]
   questionCount: number
   seed: number
+  /**
+   * Explicit (molecule, type) pairs to draw from, e.g. an exhaustive "all
+   * questions" enumeration. When set, it replaces the independent type/target
+   * queues: pairs are shuffled once and consumed in order; exhausted pairs
+   * reshuffle (same back-to-back-repeat avoidance as the queues). The pairs are
+   * authoritative — `types` and the per-type generatability checks are skipped,
+   * so callers must only pass pairs they can actually generate.
+   */
+  pairs?: readonly QuizPair[]
   /** Same-class grouping for distractor preference; default reads `m.classKey`. */
   classKeyOf?: (molecule: QuizMolecule) => string | undefined
   /** A non-empty list enables the "characteristic" question type. */
@@ -465,12 +480,78 @@ export function isOpenAnswerCorrect(question: QuizQuestion, input: string): bool
     .some((answer) => answer === normalized)
 }
 
+/** Stable identity of a pair for the reshuffle boundary check. */
+function pairKey(pair: QuizPair): string {
+  return `${pair.type}:${pair.molecule.id}`
+}
+
+/**
+ * Draw from an explicit pair list instead of the independent type/target
+ * queues. The pairs are shuffled once and consumed in order; an exhausted list
+ * reshuffles, avoiding the same pair twice across the boundary. `questionCount`
+ * still drives the length, so a count above `pairs.length` cycles through them.
+ */
+function generatePairSession(
+  molecules: QuizMolecule[],
+  config: GenerateQuizConfig,
+  rng: () => number,
+  classKeyOf: ClassKeyOf,
+  mode: QuizMode,
+): QuizQuestion[] {
+  const pairs = config.pairs ?? []
+  if (pairs.length === 0) {
+    return []
+  }
+
+  const questions: QuizQuestion[] = []
+  let pairPool: QuizPair[] = []
+  let lastPairKey: string | null = null
+
+  const nextPair = (): QuizPair => {
+    if (pairPool.length === 0) {
+      pairPool = shuffle(rng, pairs)
+      // Avoid a back-to-back repeat across the reshuffle boundary.
+      if (lastPairKey !== null && pairPool.length > 1 && pairKey(pairPool[0]) === lastPairKey) {
+        const j = randomInt(rng, 1, pairPool.length)
+        const first = pairPool[0]
+        pairPool[0] = pairPool[j]
+        pairPool[j] = first
+      }
+    }
+    const pair = pairPool[0]
+    pairPool = pairPool.slice(1)
+    return pair
+  }
+
+  for (let i = 0; i < config.questionCount; i++) {
+    const pair = nextPair()
+    const question = buildQuestion(
+      molecules,
+      pair.molecule,
+      pair.type,
+      rng,
+      classKeyOf,
+      config.characteristics,
+    )
+    if (mode === "hard") {
+      question.openAnswer = buildOpenAnswer(question, pair.molecule)
+    }
+    lastPairKey = pairKey(pair)
+    questions.push(question)
+  }
+
+  return questions
+}
+
 /**
  * Generate a deterministic quiz session for `molecules`.
  *
  * The same `seed` and config always produce byte-identical questions. Targets
  * are drawn from a shuffled queue that reshuffles when exhausted and never
  * repeats back-to-back; question types cycle through a freshly shuffled pool.
+ *
+ * When `config.pairs` is set, those explicit pairs replace both queues (see
+ * `GenerateQuizConfig.pairs`).
  *
  * When `"characteristic"` is requested but no characteristic definitions are
  * injected (or none qualifies), those slots are safely skipped: the type is
@@ -481,13 +562,24 @@ export function generateQuizSession(
   molecules: QuizMolecule[],
   config: GenerateQuizConfig,
 ): QuizQuestion[] {
-  if (molecules.length === 0 || config.questionCount <= 0) {
+  if (config.questionCount <= 0) {
     return []
   }
 
   const rng = createSeededRandom(config.seed)
   const classKeyOf = config.classKeyOf ?? defaultClassKeyOf
   const mode = config.mode ?? "easy"
+
+  // Explicit pairs are authoritative and bypass the queue validation below;
+  // callers pass only pairs they can generate (see `enumerateTestPairs`).
+  if (config.pairs !== undefined) {
+    return generatePairSession(molecules, config, rng, classKeyOf, mode)
+  }
+
+  if (molecules.length === 0) {
+    return []
+  }
+
   const available = availableQuizTypes(molecules, config.characteristics)
   const requested = [...new Set(config.types)].filter(
     (type) => available.includes(type) && isGeneratable(type, molecules, config.characteristics),

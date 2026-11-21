@@ -13,6 +13,9 @@ import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
 import { BiomoleculesReportsPage } from "@/pages/biomolecules-reports-page"
 import { BiomoleculesStreakPage } from "@/pages/biomolecules-streak-page"
 import { BiomoleculesTestPage } from "@/pages/biomolecules-test-page"
+import { BiomoleculesTestResultPage } from "@/pages/biomolecules-test-result-page"
+import { BiomoleculesTestRunPage } from "@/pages/biomolecules-test-run-page"
+import { BiomoleculesTestsPage } from "@/pages/biomolecules-tests-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
 import { ConstantsPage } from "@/pages/constants-page"
 import { DatabazePage } from "@/pages/databaze-page"
@@ -83,6 +86,7 @@ function TeacherRoutes() {
             <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
             <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
             <Route path="/biomolekuly/historie" element={<BiomoleculesHistoryPage />} />
+            <Route path="/biomolekuly/testy" element={<BiomoleculesTestsPage />} />
             <Route path="/biomolekuly/peptidovka" element={<PeptidovkaSettingsPage />} />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
@@ -146,6 +150,14 @@ function StudentRoutes() {
             <Route path="/biomolekuly" element={<BiomoleculesPage />} />
             <Route path="/biomolekuly/procvicovani" element={<BiomoleculesQuizPage />} />
             <Route path="/biomolekuly/test" element={<BiomoleculesTestPage />} />
+            <Route
+              path="/biomolekuly/test/zadane/:testId/pisat"
+              element={<BiomoleculesTestRunPage />}
+            />
+            <Route
+              path="/biomolekuly/test/zadane/:testId/vysledek"
+              element={<BiomoleculesTestResultPage />}
+            />
             <Route
               path="/biomolekuly/test/ucen"
               element={<BiomoleculesStreakPage kind="apprentice" />}

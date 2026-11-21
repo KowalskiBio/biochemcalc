@@ -54,3 +54,4 @@ skills-lock.json
 
 # Local backups
 *.backup
+.slim/

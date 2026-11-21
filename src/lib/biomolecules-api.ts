@@ -107,6 +107,87 @@ export interface PeptidovkaRunResult {
   totalSeconds: number
 }
 
+/** How a teacher-created test picks its seed: one shared seed, or per attempt. */
+export type BiomoleculeTestQuestionSet = "fixed" | "random"
+
+/** A teacher-created Biomolekuly test, as returned by the API. */
+export interface BiomoleculeTest {
+  id: string
+  title: string
+  categorySlugs: string[]
+  /** Creation-time molecule pool snapshot (client-resolved). */
+  moleculeIds: string[]
+  /** Canonical quiz type ids: nameToLetter, letterToName, … */
+  questionTypes: string[]
+  questionCount: number
+  questionSet: BiomoleculeTestQuestionSet
+  monochrome: boolean
+  availableFrom: string
+  availableTo: string
+  seed: number
+  createdAt: string
+}
+
+/** One student's attempt on a test, as seen by the teacher. */
+export interface BiomoleculeTestAttemptSummary {
+  attemptId: string
+  userId: string
+  username: string
+  startedAt: string
+  submittedAt: string | null
+  totalCount: number | null
+  correctCount: number | null
+}
+
+/** A teacher's view: the test, its attempts, and who could still take it. */
+export interface BiomoleculeTestTeacherView {
+  test: BiomoleculeTest
+  attempts: BiomoleculeTestAttemptSummary[]
+  roster: { userId: string; username: string }[]
+  /** One server timestamp so windows render without client clock skew. */
+  serverNow: string
+}
+
+/** A student's view: the test plus their own attempt (null = not started). */
+export interface BiomoleculeTestStudentView {
+  test: BiomoleculeTest
+  attempt: {
+    attemptId: string
+    seed: number
+    startedAt: string
+    submittedAt: string | null
+    totalCount: number | null
+    correctCount: number | null
+    detailJson: string | null
+  } | null
+}
+
+/** Result of starting/resuming: `"exists"` means resume or show the result. */
+export interface BiomoleculeTestStartResult {
+  status: "started" | "exists"
+  attemptId: string
+  seed: number
+  startedAt: string
+  submittedAt: string | null
+  totalCount: number | null
+  correctCount: number | null
+}
+
+/** Body accepted by `createBiomoleculeTest`; ids are client-resolved. */
+export interface CreateBiomoleculeTestInput {
+  title: string
+  categorySlugs: string[]
+  moleculeIds: string[]
+  questionTypes: string[]
+  questionCount: number
+  questionSet: BiomoleculeTestQuestionSet
+  monochrome?: boolean
+  availableFrom: string
+  availableTo: string
+  /** Optional client-chosen seed; omitted means the server generates one. */
+  seed?: number
+}
+
 /** One user's best finished Biomolekuly streak of a given kind. */
 export interface BiomoleculeStreakLeaderboardEntry {
   userId: string
@@ -296,6 +377,40 @@ export const biomoleculesApi = {
   /** Teacher: wipe the module's history (confirm dialog collects consent first). */
   clearBiomoleculeHistory: (): Promise<void> =>
     httpRequest<void>("/api/biomolecules/clear-biomolecule-history"),
+
+  /** Teacher: create a test from a client-resolved molecule pool snapshot. */
+  createBiomoleculeTest: (payload: CreateBiomoleculeTestInput): Promise<BiomoleculeTest> =>
+    httpRequest<BiomoleculeTest>("/api/biomolecules/create-biomolecule-test", payload),
+
+  /** Teacher: delete a test that no student has attempted yet. */
+  deleteBiomoleculeTest: (id: string): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/delete-biomolecule-test", { testId: id }),
+
+  /** Teacher: every test with its attempts, roster and the server time. */
+  biomoleculeTests: (): Promise<BiomoleculeTestTeacherView[]> =>
+    httpRequest<BiomoleculeTestTeacherView[]>("/api/biomolecules/biomolecule-tests"),
+
+  /** Student: tests currently open, each with this student's attempt status. */
+  availableBiomoleculeTests: (): Promise<BiomoleculeTestStudentView[]> =>
+    httpRequest<BiomoleculeTestStudentView[]>("/api/biomolecules/available-biomolecule-tests"),
+
+  /** Student: start a test or resume/show an existing attempt. */
+  startBiomoleculeTestAttempt: (testId: string): Promise<BiomoleculeTestStartResult> =>
+    httpRequest<BiomoleculeTestStartResult>("/api/biomolecules/start-biomolecule-test", {
+      testId,
+    }),
+
+  /** Student: submit one attempt (idempotent; the server keeps the first result). */
+  submitBiomoleculeTestAttempt: (args: {
+    attemptId: string
+    totalCount: number
+    correctCount: number
+    detailJson?: string | null
+  }): Promise<void> =>
+    httpRequest<void>("/api/biomolecules/submit-biomolecule-test", {
+      ...args,
+      detailJson: args.detailJson ?? null,
+    }),
 }
 
 /** One teacher action in the biomolecules module, as logged for the Historie page. */

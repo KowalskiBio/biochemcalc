@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 62;
+const CURRENT_USER_VERSION: u32 = 63;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -317,6 +317,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 62 {
         apply_migration_v62(conn)?;
         conn.pragma_update(None, "user_version", "62")?;
+    }
+
+    if user_version < 63 {
+        apply_migration_v63(conn)?;
+        conn.pragma_update(None, "user_version", "63")?;
     }
 
     Ok(())
@@ -2298,7 +2303,12 @@ fn apply_migration_v59(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     const MOLECULES: [(&str, &str, &str, i64); 2] = [
         ("sec", "Selenocystein", "N[C@@H](C[SeH])C(=O)O", 0),
-        ("pyl", "Pyrrolysin", "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O", 1),
+        (
+            "pyl",
+            "Pyrrolysin",
+            "N[C@@H](CCCCNC(=O)C1N=CCC(C)1)C(=O)O",
+            1,
+        ),
     ];
     const TRAITS: [(&str, &[(&str, &str)]); 2] = [
         (
@@ -2357,10 +2367,62 @@ fn apply_migration_v59(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Teacher-created Biomolekuly tests and their per-student attempts.
+///
+/// A test freezes its pool (`molecule_ids`, client-resolved at creation time)
+/// plus the quiz question types and count, and carries a server-owned seed so
+/// both `fixed` (one seed for everyone) and `random` (a fresh seed per attempt)
+/// modes are reproducible. Attempts are exactly one per (test, student):
+/// `UNIQUE(test_id, user_id)` is the resume/idempotency contract, and the
+/// nullable result columns stay NULL until submission. Both child rows cascade
+/// with their test/user.
+///
+/// Idempotent by `IF NOT EXISTS`, like every additive migration; replaying it
+/// on a v63 database is a no-op and never rewrites existing tests/attempts.
+fn apply_migration_v63(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS biomolecule_tests (
+            id BLOB PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            created_by BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            category_slugs TEXT NOT NULL DEFAULT '[]',
+            molecule_ids TEXT NOT NULL DEFAULT '[]',
+            question_types TEXT NOT NULL DEFAULT '[]',
+            question_count INTEGER NOT NULL,
+            question_set TEXT NOT NULL DEFAULT 'random'
+                CHECK (question_set IN ('fixed','random')),
+            monochrome INTEGER NOT NULL DEFAULT 0,
+            available_from TEXT NOT NULL,
+            available_to TEXT NOT NULL,
+            seed INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS biomolecule_test_attempts (
+            id BLOB PRIMARY KEY NOT NULL,
+            test_id BLOB NOT NULL REFERENCES biomolecule_tests(id) ON DELETE CASCADE,
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            seed INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            submitted_at TEXT,
+            total_count INTEGER,
+            correct_count INTEGER,
+            detail_json TEXT,
+            UNIQUE (test_id, user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_biomolecule_test_attempts_user
+        ON biomolecule_test_attempts(user_id);
+        ",
+    )
+}
+
 /// Teacher-action log for the biomolecules module, mirroring the
 /// calculations history pattern: every mutation records who did what, so
 /// the "Historie" page can show a reviewable trail. `kind` scopes the entry
-/// (molecule | category | topic | peptidovka), `action` says what
+/// (molecule | category | topic | peptidovka | test), `action` says what
 /// (create | update | delete | reorder | settings), `label` names the
 /// entity, and `detail` is an optional compact diff summary.
 fn apply_migration_v57(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -2834,6 +2896,101 @@ mod tests {
         run_migrations(&conn).expect("replay is idempotent");
         assert_eq!(weights_of("ucen"), ucen);
         assert_eq!(weights_of("mistr"), mistr);
+    }
+
+    /// v63 adds the teacher-created tests and their attempts. A replay (the
+    /// version gate reset to 62) must be a no-op: `IF NOT EXISTS` keeps the
+    /// tables, index, and every stored row exactly as they were.
+    #[test]
+    fn v63_creates_biomolecule_test_tables_and_replays_idempotently() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let table_exists = |name: &str| -> bool {
+            conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                                WHERE type = 'table' AND name = ?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .expect("table existence")
+        };
+        assert!(table_exists("biomolecule_tests"));
+        assert!(table_exists("biomolecule_test_attempts"));
+
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master
+                                WHERE type = 'index'
+                                  AND name = 'idx_biomolecule_test_attempts_user')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index existence");
+        assert!(index_exists, "the user index backs attempt lookups");
+
+        // Store a real test + attempt, then replay the migration.
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at, sections)
+             VALUES (randomblob(16), 'ucitel', 'h', 'teacher', '2026-01-01T00:00:00Z', 'both')",
+            [],
+        )
+        .expect("teacher");
+        let teacher: Vec<u8> = conn
+            .query_row(
+                "SELECT id FROM users WHERE username = 'ucitel'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("teacher id");
+        conn.execute(
+            "INSERT INTO biomolecule_tests
+                 (id, title, created_by, created_at, updated_at, category_slugs,
+                  molecule_ids, question_types, question_count, question_set,
+                  monochrome, available_from, available_to, seed)
+             VALUES (?1, 'Test 1', ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z',
+                     '[\"aminokyseliny\"]', '[]', '[\"nameToLetter\"]', 10, 'fixed',
+                     0, '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', 42)",
+            rusqlite::params![Uuid::new_v4().as_bytes(), teacher],
+        )
+        .expect("test row");
+
+        conn.pragma_update(None, "user_version", "62")
+            .expect("backlevel");
+        run_migrations(&conn).expect("replay is idempotent");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+        assert!(table_exists("biomolecule_tests"));
+        assert!(table_exists("biomolecule_test_attempts"));
+
+        let (title, seed): (String, i64) = conn
+            .query_row("SELECT title, seed FROM biomolecule_tests", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("stored test survives replay");
+        assert_eq!(title, "Test 1");
+        assert_eq!(seed, 42);
+
+        // The unique (test, student) pair is the resume/idempotency contract.
+        let test_id: Vec<u8> = conn
+            .query_row("SELECT id FROM biomolecule_tests", [], |row| row.get(0))
+            .expect("test id");
+        conn.execute(
+            "INSERT INTO biomolecule_test_attempts
+                 (id, test_id, user_id, seed, started_at)
+             VALUES (?1, ?2, ?3, 42, '2026-01-01T00:00:00Z')",
+            rusqlite::params![Uuid::new_v4().as_bytes(), test_id, teacher],
+        )
+        .expect("attempt row");
+        let duplicate = conn.execute(
+            "INSERT INTO biomolecule_test_attempts
+                 (id, test_id, user_id, seed, started_at)
+             VALUES (?1, ?2, ?3, 7, '2026-01-01T00:00:00Z')",
+            rusqlite::params![Uuid::new_v4().as_bytes(), test_id, teacher],
+        );
+        assert!(duplicate.is_err(), "a student may attempt a test only once");
     }
 
     /// v58 fills the amino acids' polarity trait but never second-guesses a
@@ -3786,7 +3943,10 @@ mod tests {
             "the seeded description survives a name-only override"
         );
 
-        for legacy in ["biomolecule_category_names", "biomolecule_category_overrides"] {
+        for legacy in [
+            "biomolecule_category_names",
+            "biomolecule_category_overrides",
+        ] {
             let left: bool = conn
                 .query_row(
                     "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = ?1)",
@@ -4020,7 +4180,9 @@ mod tests {
         assert_eq!(molecules, 36, "34 canonical + selenocystein + pyrrolysin");
 
         let traits: i64 = conn
-            .query_row("SELECT COUNT(*) FROM biomolecule_traits", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM biomolecule_traits", [], |row| {
+                row.get(0)
+            })
             .expect("count traits");
         assert!(traits > 100, "every seeded molecule carries traits");
 
@@ -4092,14 +4254,19 @@ mod tests {
                 ("aminokyseliny".into(), Some("aminokyseliny".into())),
                 ("dusikate-baze".into(), Some("nukleove-kyseliny".into())),
                 ("sacharidy".into(), Some("sacharidy".into())),
-                ("specialni-aminokyseliny".into(), Some("aminokyseliny".into())),
+                (
+                    "specialni-aminokyseliny".into(),
+                    Some("aminokyseliny".into())
+                ),
             ]
         );
 
         // A rerun neither duplicates topics nor moves categories.
         run_migrations(&conn).expect("migrations again");
         let topic_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM biomolecule_topics", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM biomolecule_topics", [], |row| {
+                row.get(0)
+            })
             .expect("count topics again");
         assert_eq!(topic_count, 3);
         assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
@@ -4183,7 +4350,8 @@ mod tests {
         )
         .expect("teacher-edited facts");
 
-        conn.pragma_update(None, "user_version", "60").expect("backlevel");
+        conn.pragma_update(None, "user_version", "60")
+            .expect("backlevel");
         run_migrations(&conn).expect("v61");
 
         // Backfilled only the holes; teacher-set facts survive untouched.
@@ -4210,7 +4378,8 @@ mod tests {
         assert_eq!(facts, "ethereal", "teacher-edited facts kept");
 
         // Reruns are quiet: re-version down and replay once more.
-        conn.pragma_update(None, "user_version", "60").expect("backlevel");
+        conn.pragma_update(None, "user_version", "60")
+            .expect("backlevel");
         run_migrations(&conn).expect("v61 again");
         let trait_count: i64 = conn
             .query_row(
@@ -4286,13 +4455,16 @@ mod tests {
         )
         .expect("poison trait");
 
-        conn.pragma_update(None, "user_version", "59").expect("backlevel");
+        conn.pragma_update(None, "user_version", "59")
+            .expect("backlevel");
         run_migrations(&conn).expect("v60");
 
         let text_ids: i64 = conn
-            .query_row("SELECT COUNT(*) FROM biomolecules WHERE typeof(id) = 'text'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM biomolecules WHERE typeof(id) = 'text'",
+                [],
+                |row| row.get(0),
+            )
             .expect("text ids");
         assert_eq!(text_ids, 0, "every molecule id is BLOB again");
         let text_trait_fks: i64 = conn
