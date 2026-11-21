@@ -249,6 +249,14 @@ export function BiomoleculesTestCreatePage() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-8">
       <div>
+        <Link
+          to="/biomolekuly/testy"
+          className="inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
+        >
+          {testyStrings.backToTests}
+        </Link>
+      </div>
+      <div>
         <h1 className="text-2xl font-semibold tracking-tight">{testyStrings.createTitle}</h1>
         <p className="text-sm text-muted-foreground">{testyStrings.createDescription}</p>
       </div>

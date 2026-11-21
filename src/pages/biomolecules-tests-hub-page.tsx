@@ -8,7 +8,7 @@ const hubStrings = cs.biomolekuly.testy.hub
 
 const CARDS = [
   {
-    to: "/biomolekuly/testy/vytvorit/peptidovka",
+    to: "/biomolekuly/peptidovka/testy/vytvorit",
     icon: Pencil,
     title: hubStrings.createPeptidovkaTitle,
     description: hubStrings.createPeptidovkaDescription,
