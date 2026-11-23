@@ -32,6 +32,8 @@ interface RunState {
 
 interface StoredAttemptProgress {
   uids: string[]
+  /** Content hashes of the generated questions — detect prompt/option edits. */
+  fingerprints: string[]
   index: number
   selections: (string | null)[]
 }
@@ -40,12 +42,42 @@ function attemptStorageKey(attemptId: string): string {
   return `biomolecule-test-attempt-${attemptId}`
 }
 
+/** FNV-1a (32-bit) as an 8-char lowercase hex string. */
+function fnv1a(value: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+/**
+ * Content hashes of the generated questions — prompt text, option keys, and
+ * correct flags. Catches material edits that the seed-index uid check misses.
+ */
+function questionFingerprints(questions: QuizQuestion[]): string[] {
+  return questions.map((question) => {
+    const parts = [
+      question.prompt.kind,
+      question.prompt.kind === "structure" ? (question.prompt.smiles ?? "") : question.prompt.text,
+      ...question.options.map((option) => `${option.key}:${option.correct}:${option.moleculeId}`),
+    ]
+    return fnv1a(parts.join("\u0000"))
+  })
+}
+
 function loadStoredProgress(attemptId: string): StoredAttemptProgress | null {
   try {
     const raw = window.localStorage.getItem(attemptStorageKey(attemptId))
     if (raw === null) return null
     const parsed = JSON.parse(raw) as StoredAttemptProgress
-    if (!Array.isArray(parsed.uids) || !Array.isArray(parsed.selections)) return null
+    if (
+      !Array.isArray(parsed.uids) ||
+      !Array.isArray(parsed.selections) ||
+      !Array.isArray(parsed.fingerprints)
+    )
+      return null
     return parsed
   } catch {
     return null
@@ -56,6 +88,7 @@ function saveStoredProgress(attemptId: string, questions: QuizQuestion[], state:
   try {
     const payload: StoredAttemptProgress = {
       uids: questions.map((question) => question.uid ?? ""),
+      fingerprints: questionFingerprints(questions),
       index: state.index,
       selections: state.selections,
     }
@@ -283,9 +316,12 @@ export function BiomoleculesTestRunPage() {
     }))
     const stored = loadStoredProgress(attempt.attemptId)
     if (stored !== null) {
+      const fingerprints = questionFingerprints(tagged)
       const sameMaterial =
         stored.uids.length === tagged.length &&
-        stored.uids.every((uid, index) => uid === tagged[index]?.uid)
+        stored.fingerprints.length === fingerprints.length &&
+        stored.uids.every((uid, index) => uid === tagged[index]?.uid) &&
+        stored.fingerprints.every((fingerprint, index) => fingerprint === fingerprints[index])
       if (!sameMaterial) {
         setPrepared({
           questions: tagged,
