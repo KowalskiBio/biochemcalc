@@ -138,11 +138,9 @@ function OptionButton({
   onSelect: () => void
 }) {
   const stateClass = decided
-    ? option.correct
-      ? "border-accent bg-accent/5 text-accent"
-      : isSelected
-        ? "border-destructive bg-destructive/10 text-destructive"
-        : "opacity-60"
+    ? isSelected
+      ? "border-primary bg-primary/5"
+      : "opacity-60"
     : "cursor-pointer hover:border-primary/50"
 
   return (
@@ -359,6 +357,8 @@ export function BiomoleculesTestRunPage() {
     saveStoredProgress(attempt?.attemptId ?? "", questions, next)
   }, [runState, questions, attempt])
 
+  const serverNowRef = useRef("")
+  serverNowRef.current = view?.serverNow ?? ""
   const submit = useCallback(
     async (auto: boolean) => {
       if (attempt === null || test === null || submittedRef.current) return
@@ -391,6 +391,7 @@ export function BiomoleculesTestRunPage() {
         clearStoredProgress(attempt.attemptId)
         const submittedView: BiomoleculeTestStudentView = {
           test,
+          serverNow: serverNowRef.current,
           attempt: {
             ...attempt,
             submittedAt: new Date().toISOString(),
@@ -439,6 +440,15 @@ export function BiomoleculesTestRunPage() {
   const submitRef = useRef(submit)
   submitRef.current = submit
   const autoFailedRef = useRef(false)
+
+  // Server-time offset: the difference between the server's clock and ours,
+  // used to keep the deadline accurate even on a skewed device.
+  const serverOffsetRef = useRef(0)
+  useEffect(() => {
+    if (view === null || view.serverNow === "") return
+    const serverTime = new Date(view.serverNow).getTime()
+    serverOffsetRef.current = serverTime - Date.now()
+  }, [view])
 
   // Deadline clock: auto-submit fires 30 s before the server's cutoff so a
   // slow network still lands inside the 60 s server-side grace. The interval
@@ -633,7 +643,7 @@ export function BiomoleculesTestRunPage() {
               currentVerdict ? "text-accent" : "text-destructive",
             )}
           >
-            {currentVerdict ? quizStrings.correct : quizStrings.incorrect}
+            {testyStrings.submitting.replace("…", "…")}
           </p>
           {runState.index < total - 1 ? (
             <Button onClick={advance}>{quizStrings.nextQuestion}</Button>

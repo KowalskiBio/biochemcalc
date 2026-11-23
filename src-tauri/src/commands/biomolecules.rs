@@ -69,6 +69,12 @@ const PEPTIDOVKA_SECONDS_PER_AA_MAX: i64 = 120;
 /// The question-type ids mirror the frontend quiz config's canonical list.
 const MAX_TEST_TITLE_CHARS: usize = 120;
 const MAX_TEST_QUESTIONS: i64 = 200;
+
+/// Accepted dataset drift between a test's configured size and the batch a
+/// student can actually produce. Generation can *shrink* a batch (a molecule
+/// was deleted, a pool shrank) but it can never grow it, so a submit whose
+/// `total_count` exceeds the configured count by more than this is bogus.
+const TEST_COUNT_DRIFT_TOLERANCE: i64 = 5;
 const BIOMOLECULE_QUESTION_TYPES: [&str; 7] = [
     "nameToLetter",
     "letterToName",
@@ -1573,7 +1579,10 @@ pub struct BiomoleculeTestView {
     pub seed: i64,
     pub created_at: String,
     /// Student invite codes this test targets; `[]` means ALL students.
-    pub assigned_codes: Vec<String>,
+    /// Omitted from student responses — the audience is the teacher's business
+    /// (students only need to know whether the test is available to them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_codes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1636,6 +1645,10 @@ pub struct BiomoleculeTestAttemptView {
 pub struct BiomoleculeTestStudentView {
     pub test: BiomoleculeTestView,
     pub attempt: Option<BiomoleculeTestAttemptView>,
+    /// Server clock at listing time, so the client can offset its own clock
+    /// when rendering the window/deadline (same purpose as the teacher page's
+    /// `serverNow`).
+    pub server_now: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1812,8 +1825,18 @@ fn test_view(record: &BiomoleculeTestRecord) -> Result<BiomoleculeTestView, DbEr
         available_to: record.available_to.clone(),
         seed: record.seed,
         created_at: record.created_at.clone(),
-        assigned_codes: serde_json::from_str(&record.assigned_codes)?,
+        assigned_codes: Some(serde_json::from_str(&record.assigned_codes)?),
     })
+}
+
+/// Student copy of `test_view`: strips the teacher-only audience list. The
+/// generation seed stays in — the client needs it to build the batch, and the
+/// correct answers are embedded in those client-generated questions anyway,
+/// so withholding the seed would not protect the answers (accepted exposure).
+fn student_test_view(record: &BiomoleculeTestRecord) -> Result<BiomoleculeTestView, DbError> {
+    let mut view = test_view(record)?;
+    view.assigned_codes = None;
+    Ok(view)
 }
 
 fn attempt_summary_view(row: &BiomoleculeTestAttemptSummaryRow) -> BiomoleculeTestAttemptSummary {
@@ -2034,6 +2057,7 @@ pub fn do_list_available_biomolecule_tests(
     student_id: &Uuid,
 ) -> Result<Vec<BiomoleculeTestStudentView>, DbError> {
     let now = Utc::now();
+    let server_now = now.to_rfc3339();
     let student_code = student_invite_code(conn, student_id)?;
     let mut views = Vec::new();
     for record in BiomoleculeTestRepo::list(conn)? {
@@ -2047,8 +2071,9 @@ pub fn do_list_available_biomolecule_tests(
             continue;
         }
         views.push(BiomoleculeTestStudentView {
-            test: test_view(&record)?,
+            test: student_test_view(&record)?,
             attempt: attempt.as_ref().map(attempt_view),
+            server_now: server_now.clone(),
         });
     }
     Ok(views)
@@ -2128,6 +2153,19 @@ pub fn do_submit_biomolecule_test_attempt(
     {
         return Err(DbError::Validation("Invalid test score".into()));
     }
+    // `correct_count` cannot be verified server-side: grading happens in the
+    // client over client-generated questions that embed their answers, so a
+    // student can always claim any score. Accepted limitation, not an
+    // oversight; the bounds above only keep obviously bogus values out.
+    //
+    // `total_count`, unlike the score, is constrained by generation: dataset
+    // drift can shrink a batch but never grow it, so more than the configured
+    // count (plus a small tolerance) is a bogus submission.
+    let test = BiomoleculeTestRepo::find(conn, &attempt.test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {} not found", attempt.test_id)))?;
+    if total_count > test.question_count + TEST_COUNT_DRIFT_TOLERANCE {
+        return Err(DbError::Validation("Invalid test score".into()));
+    }
     // The breakdown is a client-built JSON blob — bound its size so a hostile
     // payload cannot bloat the row.
     if let Some(detail) = detail_json {
@@ -2172,7 +2210,10 @@ pub struct PeptidovkaTestView {
     pub seed: i64,
     pub created_at: String,
     /// Student invite codes this test targets; `[]` means ALL students.
-    pub assigned_codes: Vec<String>,
+    /// Omitted from student responses — the audience is the teacher's business
+    /// (students only need to know whether the test is available to them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_codes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -2235,6 +2276,10 @@ pub struct PeptidovkaTestAttemptView {
 pub struct PeptidovkaTestStudentView {
     pub test: PeptidovkaTestView,
     pub attempt: Option<PeptidovkaTestAttemptView>,
+    /// Server clock at listing time, so the client can offset its own clock
+    /// when rendering the window/deadline (same purpose as the teacher page's
+    /// `serverNow`).
+    pub server_now: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -2320,8 +2365,21 @@ fn peptidovka_test_view(record: &PeptidovkaTestRecord) -> Result<PeptidovkaTestV
         available_to: record.available_to.clone(),
         seed: record.seed,
         created_at: record.created_at.clone(),
-        assigned_codes: serde_json::from_str(&record.assigned_codes)?,
+        assigned_codes: Some(serde_json::from_str(&record.assigned_codes)?),
     })
+}
+
+/// Student copy of `peptidovka_test_view`: strips the teacher-only audience
+/// list. The generation seed stays in — the client needs it to build the batch,
+/// and the correct answers are embedded in those client-generated questions
+/// anyway, so withholding the seed would not protect the answers (accepted
+/// exposure).
+fn student_peptidovka_test_view(
+    record: &PeptidovkaTestRecord,
+) -> Result<PeptidovkaTestView, DbError> {
+    let mut view = peptidovka_test_view(record)?;
+    view.assigned_codes = None;
+    Ok(view)
 }
 
 fn peptidovka_attempt_summary_view(
@@ -2542,6 +2600,7 @@ pub fn do_list_available_peptidovka_tests(
     student_id: &Uuid,
 ) -> Result<Vec<PeptidovkaTestStudentView>, DbError> {
     let now = Utc::now();
+    let server_now = now.to_rfc3339();
     let student_code = student_invite_code(conn, student_id)?;
     let mut views = Vec::new();
     for record in PeptidovkaTestRepo::list(conn)? {
@@ -2555,8 +2614,9 @@ pub fn do_list_available_peptidovka_tests(
             continue;
         }
         views.push(PeptidovkaTestStudentView {
-            test: peptidovka_test_view(&record)?,
+            test: student_peptidovka_test_view(&record)?,
             attempt: attempt.as_ref().map(peptidovka_attempt_view),
+            server_now: server_now.clone(),
         });
     }
     Ok(views)
@@ -2633,6 +2693,19 @@ pub fn do_submit_peptidovka_test_attempt(
     if !(1..=PEPTIDOVKA_TEST_MAX_COUNT).contains(&total_count)
         || !(0..=total_count).contains(&correct_count)
     {
+        return Err(DbError::Validation("Invalid test score".into()));
+    }
+    // `correct_count` cannot be verified server-side: grading happens in the
+    // client over client-generated questions that embed their answers, so a
+    // student can always claim any score. Accepted limitation, not an
+    // oversight; the bounds above only keep obviously bogus values out.
+    //
+    // `total_count`, unlike the score, is constrained by generation: dataset
+    // drift can shrink a batch but never grow it, so more than the configured
+    // count (plus a small tolerance) is a bogus submission.
+    let test = PeptidovkaTestRepo::find(conn, &attempt.test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {} not found", attempt.test_id)))?;
+    if total_count > test.peptide_count + TEST_COUNT_DRIFT_TOLERANCE {
         return Err(DbError::Validation("Invalid test score".into()));
     }
     // The breakdown is a client-built JSON blob — bound its size so a hostile
@@ -5570,14 +5643,14 @@ mod tests {
         payload.assigned_codes = serde_json::json!(["ALPHA", "ALPHA"]);
         let targeted = do_create_biomolecule_test(&conn, &teacher, payload).expect("create");
         assert_eq!(
-            targeted.assigned_codes,
-            vec!["ALPHA".to_string()],
+            targeted.assigned_codes.as_deref(),
+            Some(&["ALPHA".to_string()][..]),
             "duplicates collapse to one audience entry"
         );
 
         // Empty audience is explicitly ALL students.
         let all = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create all");
-        assert!(all.assigned_codes.is_empty());
+        assert!(all.assigned_codes.as_deref().unwrap().is_empty());
 
         let tests: i64 = conn
             .query_row("SELECT COUNT(*) FROM biomolecule_tests", [], |row| {
@@ -5745,11 +5818,14 @@ mod tests {
         let mut payload = peptidovka_test_payload();
         payload.assigned_codes = serde_json::json!(["ALPHA"]);
         let targeted = do_create_peptidovka_test(&conn, &teacher, payload).expect("create");
-        assert_eq!(targeted.assigned_codes, vec!["ALPHA".to_string()]);
+        assert_eq!(
+            targeted.assigned_codes.as_deref(),
+            Some(&["ALPHA".to_string()][..])
+        );
 
         let all =
             do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("all");
-        assert!(all.assigned_codes.is_empty());
+        assert!(all.assigned_codes.as_deref().unwrap().is_empty());
     }
 
     #[test]
@@ -5885,5 +5961,71 @@ mod tests {
         assert_eq!(pep.codes[0].code, "ALPHA");
         assert_eq!(pep.codes[0].student_count, 1);
         assert!(chrono::DateTime::parse_from_rfc3339(&pep.server_now).is_ok());
+    }
+
+    /// Dataset drift can shrink a generated batch but never grow it, so a
+    /// submit claiming more items than the test was configured for (beyond the
+    /// tolerance) must be rejected — on both test systems.
+    #[test]
+    fn submit_rejects_batches_larger_than_the_configured_count() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        // Biomolekuly: configured 10 + tolerance 5 → 16 is rejected, 15 lands.
+        let bio = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create bio");
+        let bio_id = Uuid::parse_str(&bio.id).expect("uuid");
+        let bio_start =
+            do_start_biomolecule_test_attempt(&conn, &student, &bio_id).expect("start bio");
+        let bio_attempt = Uuid::parse_str(&bio_start.attempt_id).expect("uuid");
+        assert!(matches!(
+            do_submit_biomolecule_test_attempt(&conn, &student, &bio_attempt, 16, 1, None),
+            Err(DbError::Validation(_))
+        ));
+        do_submit_biomolecule_test_attempt(&conn, &student, &bio_attempt, 15, 1, None)
+            .expect("configured count plus tolerance is still accepted");
+
+        // Peptidovka: configured 10 + tolerance 5 → 16 is rejected, 15 lands.
+        let pep = do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload())
+            .expect("create pep");
+        let pep_id = Uuid::parse_str(&pep.id).expect("uuid");
+        let pep_start =
+            do_start_peptidovka_test_attempt(&conn, &student, &pep_id).expect("start pep");
+        let pep_attempt = Uuid::parse_str(&pep_start.attempt_id).expect("uuid");
+        assert!(matches!(
+            do_submit_peptidovka_test_attempt(&conn, &student, &pep_attempt, 16, 1, None),
+            Err(DbError::Validation(_))
+        ));
+        do_submit_peptidovka_test_attempt(&conn, &student, &pep_attempt, 15, 1, None)
+            .expect("configured count plus tolerance is still accepted");
+    }
+
+    /// Students get a server timestamp for deadline offset but never the
+    /// teacher's audience list. The seed stays (accepted exposure).
+    #[test]
+    fn student_available_lists_carry_server_now_and_hide_the_audience() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create bio");
+        do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create pep");
+
+        let bio = do_list_available_biomolecule_tests(&conn, &student).expect("bio list");
+        assert_eq!(bio.len(), 1);
+        assert!(chrono::DateTime::parse_from_rfc3339(&bio[0].server_now).is_ok());
+        assert!(
+            bio[0].test.assigned_codes.is_none(),
+            "the audience is teacher-only"
+        );
+        assert_eq!(bio[0].test.seed, 1234, "the seed stays for generation");
+
+        let pep = do_list_available_peptidovka_tests(&conn, &student).expect("pep list");
+        assert_eq!(pep.len(), 1);
+        assert!(chrono::DateTime::parse_from_rfc3339(&pep[0].server_now).is_ok());
+        assert!(
+            pep[0].test.assigned_codes.is_none(),
+            "the audience is teacher-only"
+        );
+        assert_eq!(pep[0].test.seed, 1234, "the seed stays for generation");
     }
 }

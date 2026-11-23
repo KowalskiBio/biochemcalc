@@ -2091,6 +2091,35 @@ fn apply_migration_v61(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// Runs a table rebuild as one atomic step: the caller's DROP/CREATE/RENAME
+/// batch executes inside `BEGIN IMMEDIATE`, and any error rolls the whole
+/// thing back, so a crash can never leave the new table created but the old
+/// one still in place (which would break every later startup).
+///
+/// `PRAGMA foreign_keys` is toggled *outside* the transaction because SQLite
+/// ignores changes made while a transaction is open, and it is always restored
+/// afterwards — including on failure — so later migrations see the connection
+/// in the same FK mode they expect.
+fn rebuild_table_in_transaction<F>(conn: &Connection, rebuild: F) -> Result<(), rusqlite::Error>
+where
+    F: FnOnce() -> Result<(), rusqlite::Error>,
+{
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let outcome = (|| -> Result<(), rusqlite::Error> {
+        conn.execute_batch("BEGIN IMMEDIATE;")?;
+        rebuild()?;
+        conn.execute_batch("COMMIT;")?;
+        Ok(())
+    })();
+    if outcome.is_err() {
+        // Best-effort: never leave an open transaction behind for the next
+        // migration/startup on this connection.
+        let _ = conn.execute_batch("ROLLBACK;");
+    }
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    outcome
+}
+
 /// Peptidovka's amino-acid pool becomes weighted: the old `slugs` JSON array
 /// (`["ala","gly"]`) is replaced by a `weights` JSON object mapping each slug
 /// to a per-slug weight (`{"ala":1,"gly":0.5}`). Every legacy entry gets
@@ -2128,53 +2157,55 @@ fn apply_migration_v62(conn: &Connection) -> Result<(), rusqlite::Error> {
             Vec::new()
         };
 
-    conn.execute_batch(
-        "
-        DROP TABLE IF EXISTS peptidovka_settings_new;
+    rebuild_table_in_transaction(conn, || {
+        conn.execute_batch(
+            "
+            DROP TABLE IF EXISTS peptidovka_settings_new;
 
-        CREATE TABLE peptidovka_settings_new (
-            mode TEXT PRIMARY KEY NOT NULL CHECK (mode IN ('ucen','mistr')),
-            min_len INTEGER NOT NULL,
-            max_len INTEGER NOT NULL,
-            seconds_per_aa INTEGER NOT NULL,
-            weights TEXT NOT NULL DEFAULT '{}'
-        );
-        ",
-    )?;
+            CREATE TABLE peptidovka_settings_new (
+                mode TEXT PRIMARY KEY NOT NULL CHECK (mode IN ('ucen','mistr')),
+                min_len INTEGER NOT NULL,
+                max_len INTEGER NOT NULL,
+                seconds_per_aa INTEGER NOT NULL,
+                weights TEXT NOT NULL DEFAULT '{}'
+            );
+            ",
+        )?;
 
-    if legacy_rows.is_empty() {
-        // Fresh/absent/empty table: reproduce v56's defaults, now as weights.
-        let weights_json = peptidovka_default_weights_json()?;
-        for (mode, min_len, max_len, seconds_per_aa) in [
-            ("ucen", 3_i64, 6_i64, 15_i64),
-            ("mistr", 3_i64, 10_i64, 15_i64),
-        ] {
-            conn.execute(
-                "INSERT INTO peptidovka_settings_new
-                     (mode, min_len, max_len, seconds_per_aa, weights)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![mode, min_len, max_len, seconds_per_aa, weights_json],
-            )?;
+        if legacy_rows.is_empty() {
+            // Fresh/absent/empty table: reproduce v56's defaults, now as weights.
+            let weights_json = peptidovka_default_weights_json()?;
+            for (mode, min_len, max_len, seconds_per_aa) in [
+                ("ucen", 3_i64, 6_i64, 15_i64),
+                ("mistr", 3_i64, 10_i64, 15_i64),
+            ] {
+                conn.execute(
+                    "INSERT INTO peptidovka_settings_new
+                         (mode, min_len, max_len, seconds_per_aa, weights)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![mode, min_len, max_len, seconds_per_aa, weights_json],
+                )?;
+            }
+        } else {
+            for (mode, min_len, max_len, seconds_per_aa, slugs_json) in legacy_rows {
+                let weights_json = peptidovka_legacy_slugs_to_weights(&slugs_json)?;
+                conn.execute(
+                    "INSERT INTO peptidovka_settings_new
+                         (mode, min_len, max_len, seconds_per_aa, weights)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![mode, min_len, max_len, seconds_per_aa, weights_json],
+                )?;
+            }
         }
-    } else {
-        for (mode, min_len, max_len, seconds_per_aa, slugs_json) in legacy_rows {
-            let weights_json = peptidovka_legacy_slugs_to_weights(&slugs_json)?;
-            conn.execute(
-                "INSERT INTO peptidovka_settings_new
-                     (mode, min_len, max_len, seconds_per_aa, weights)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![mode, min_len, max_len, seconds_per_aa, weights_json],
-            )?;
-        }
-    }
 
-    conn.execute_batch(
-        "
-        DROP TABLE peptidovka_settings;
-        ALTER TABLE peptidovka_settings_new RENAME TO peptidovka_settings;
-        ",
-    )?;
-    Ok(())
+        conn.execute_batch(
+            "
+            DROP TABLE peptidovka_settings;
+            ALTER TABLE peptidovka_settings_new RENAME TO peptidovka_settings;
+            ",
+        )?;
+        Ok(())
+    })
 }
 
 fn peptidovka_settings_has_column(
@@ -2501,47 +2532,45 @@ fn apply_migration_v65(conn: &Connection) -> Result<(), rusqlite::Error> {
         return Ok(());
     }
 
-    conn.execute_batch(
-        "
-        PRAGMA foreign_keys = OFF;
+    rebuild_table_in_transaction(conn, || {
+        conn.execute_batch(
+            "
+            DROP TABLE IF EXISTS peptidovka_tests_new;
 
-        DROP TABLE IF EXISTS peptidovka_tests_new;
+            CREATE TABLE peptidovka_tests_new (
+                id BLOB PRIMARY KEY NOT NULL,
+                title TEXT NOT NULL,
+                created_by BLOB NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                pool_slugs TEXT NOT NULL DEFAULT '[]',
+                peptide_count INTEGER NOT NULL,
+                peptide_min_length INTEGER NOT NULL,
+                peptide_max_length INTEGER NOT NULL,
+                question_set TEXT NOT NULL DEFAULT 'random'
+                    CHECK (question_set IN ('fixed','random')),
+                monochrome INTEGER NOT NULL DEFAULT 0,
+                available_from TEXT NOT NULL,
+                available_to TEXT NOT NULL,
+                seed INTEGER NOT NULL
+            );
 
-        CREATE TABLE peptidovka_tests_new (
-            id BLOB PRIMARY KEY NOT NULL,
-            title TEXT NOT NULL,
-            created_by BLOB NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            pool_slugs TEXT NOT NULL DEFAULT '[]',
-            peptide_count INTEGER NOT NULL,
-            peptide_min_length INTEGER NOT NULL,
-            peptide_max_length INTEGER NOT NULL,
-            question_set TEXT NOT NULL DEFAULT 'random'
-                CHECK (question_set IN ('fixed','random')),
-            monochrome INTEGER NOT NULL DEFAULT 0,
-            available_from TEXT NOT NULL,
-            available_to TEXT NOT NULL,
-            seed INTEGER NOT NULL
-        );
+            INSERT INTO peptidovka_tests_new
+                (id, title, created_by, created_at, updated_at, pool_slugs,
+                 peptide_count, peptide_min_length, peptide_max_length, question_set,
+                 monochrome, available_from, available_to, seed)
+            SELECT id, title, created_by, created_at, updated_at, pool_slugs,
+                   peptide_count,
+                   MIN(MAX(peptide_length, 2), 20),
+                   MIN(MAX(peptide_length, 2), 20),
+                   question_set, monochrome, available_from, available_to, seed
+            FROM peptidovka_tests;
 
-        INSERT INTO peptidovka_tests_new
-            (id, title, created_by, created_at, updated_at, pool_slugs,
-             peptide_count, peptide_min_length, peptide_max_length, question_set,
-             monochrome, available_from, available_to, seed)
-        SELECT id, title, created_by, created_at, updated_at, pool_slugs,
-               peptide_count,
-               MIN(MAX(peptide_length, 2), 20),
-               MIN(MAX(peptide_length, 2), 20),
-               question_set, monochrome, available_from, available_to, seed
-        FROM peptidovka_tests;
-
-        DROP TABLE peptidovka_tests;
-        ALTER TABLE peptidovka_tests_new RENAME TO peptidovka_tests;
-
-        PRAGMA foreign_keys = ON;
-        ",
-    )
+            DROP TABLE peptidovka_tests;
+            ALTER TABLE peptidovka_tests_new RENAME TO peptidovka_tests;
+            ",
+        )
+    })
 }
 
 fn peptidovka_tests_has_column(conn: &Connection, column: &str) -> Result<bool, rusqlite::Error> {

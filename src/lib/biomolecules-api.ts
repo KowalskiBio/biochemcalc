@@ -164,9 +164,12 @@ export interface BiomoleculeTestsTeacherPage {
   serverNow: string
 }
 
+/** The test fields a student sees: everything except the teacher-only audience. */
+export type BiomoleculeTestStudentTest = Omit<BiomoleculeTest, "assignedCodes">
+
 /** A student's view: the test plus their own attempt (null = not started). */
 export interface BiomoleculeTestStudentView {
-  test: BiomoleculeTest
+  test: BiomoleculeTestStudentTest
   attempt: {
     attemptId: string
     seed: number
@@ -176,6 +179,8 @@ export interface BiomoleculeTestStudentView {
     correctCount: number | null
     detailJson: string | null
   } | null
+  /** One server timestamp so deadlines render without client clock skew. */
+  serverNow: string
 }
 
 /** Result of starting/resuming: `"exists"` means resume or show the result. */
@@ -245,9 +250,12 @@ export interface PeptidovkaTestsTeacherPage {
   serverNow: string
 }
 
+/** The test fields a student sees: everything except the teacher-only audience. */
+export type PeptidovkaTestStudentTest = Omit<PeptidovkaTest, "assignedCodes">
+
 /** A student's view: the test plus their own attempt (null = not started). */
 export interface PeptidovkaTestStudentView {
-  test: PeptidovkaTest
+  test: PeptidovkaTestStudentTest
   attempt: {
     attemptId: string
     seed: number
@@ -257,6 +265,8 @@ export interface PeptidovkaTestStudentView {
     correctCount: number | null
     detailJson: string | null
   } | null
+  /** One server timestamp so deadlines render without client clock skew. */
+  serverNow: string
 }
 
 /** Result of starting/resuming: `"exists"` means resume or show the result. */

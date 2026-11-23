@@ -250,6 +250,8 @@ export function PeptidovkaTestRunPage() {
       saveStoredProgress(attempt.attemptId, { chains: prepared?.chains ?? [] }, next)
   }, [runState, prepared, attempt])
 
+  const serverNowRef = useRef("")
+  serverNowRef.current = view?.serverNow ?? ""
   const submit = useCallback(
     async (auto: boolean) => {
       if (attempt === null || test === null || submittedRef.current) return
@@ -276,6 +278,7 @@ export function PeptidovkaTestRunPage() {
         clearStoredProgress(attempt.attemptId)
         const submittedView: PeptidovkaTestStudentView = {
           test,
+          serverNow: serverNowRef.current,
           attempt: {
             ...attempt,
             submittedAt: new Date().toISOString(),
@@ -513,14 +516,7 @@ export function PeptidovkaTestRunPage() {
               {verdict ? quizCorrectText() : quizIncorrectText()}
             </p>
           </div>
-          {!verdict && (
-            <div className="rounded-[4px] border bg-muted/50 px-4 py-3 text-center">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                {peptidovkaStrings.correctAnswerLabel}
-              </p>
-              <p className="break-all font-mono text-2xl font-semibold tracking-[0.3em]">{chain}</p>
-            </div>
-          )}
+
           <div className="flex justify-center">
             {index < total - 1 ? (
               <Button onClick={advance}>{testyStrings.nextPeptide}</Button>
