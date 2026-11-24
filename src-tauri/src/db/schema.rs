@@ -3056,6 +3056,26 @@ mod tests {
     /// preserving); unreadable legacy JSON degrades to the canonical default
     /// pool; and replaying the migration against the rebuilt table is a no-op.
     #[test]
+    fn failed_table_rebuild_rolls_back_and_restores_foreign_keys() {
+        let conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch("CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (7);")
+            .expect("seed");
+        let result = rebuild_table_in_transaction(&conn, || {
+            conn.execute_batch("CREATE TABLE t_new (v INTEGER); DROP TABLE t; SELECT * FROM nope;")
+        });
+        assert!(result.is_err());
+        let value: i64 = conn
+            .query_row("SELECT v FROM t", [], |row| row.get(0))
+            .expect("old table survives");
+        assert_eq!(value, 7);
+        assert!(conn.is_autocommit(), "no transaction left open");
+        let fk: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .expect("pragma");
+        assert_eq!(fk, 1);
+    }
+
+    #[test]
     fn v62_converts_legacy_slug_arrays_to_weight_maps() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         run_migrations(&conn).expect("migrations");

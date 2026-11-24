@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 
+import { VerifiedScore } from "@/components/biomolecules/verified-score"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,17 +17,13 @@ import {
   type Biomolecule,
   type BiomoleculeTest,
   type BiomoleculeTestQuestionSet,
-  type BiomoleculeTestTeacherView,
   type BiomoleculeTestsTeacherPage,
+  type BiomoleculeTestTeacherView,
   biomoleculesApi,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
-import {
-  type QuizOption,
-  type QuizQuestion,
-  generatableQuizTypes,
-} from "@/lib/molecules/quiz/question-generator"
-import { generateTestSession, testPairCount, testQuestionPool } from "@/lib/molecules/test"
+import { generatableQuizTypes, type QuizOption } from "@/lib/molecules/quiz/question-generator"
+import { regradeTestAttempt, testPairCount, testQuestionPool } from "@/lib/molecules/test"
 import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
@@ -122,7 +119,6 @@ export function BiomoleculesTestCreatePage() {
       cancelled = true
     }
   }, [])
-
 
   // Scope resolution: the checked categories, their molecules in store order.
   const scopedMolecules = useMemo(
@@ -222,9 +218,7 @@ export function BiomoleculesTestCreatePage() {
         title: draft.title.trim(),
         categorySlugs: [...draft.categorySlugs],
         moleculeIds: scopedMolecules.map((molecule) => molecule.id),
-        questionTypes: draft.types.filter((type) =>
-          (generatable as string[]).includes(type),
-        ),
+        questionTypes: draft.types.filter((type) => (generatable as string[]).includes(type)),
         questionCount: resolvedCount,
         assignedCodes: draft.audienceMode === "all" ? [] : draft.assignedCodes,
         questionSet: draft.questionSet,
@@ -276,7 +270,9 @@ export function BiomoleculesTestCreatePage() {
                 value={draft.title}
                 maxLength={TITLE_MAX}
                 placeholder={testyStrings.titlePlaceholder}
-                onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, title: event.target.value }))
+                }
               />
             </div>
 
@@ -288,7 +284,7 @@ export function BiomoleculesTestCreatePage() {
                     <p className="text-xs font-semibold text-muted-foreground">
                       {topicSlug === "__no_topic__"
                         ? testyStrings.scopeOtherTopic
-                        : topics.find((topic) => topic.slug === topicSlug)?.name ?? topicSlug}
+                        : (topics.find((topic) => topic.slug === topicSlug)?.name ?? topicSlug)}
                     </p>
                     {bucket.map((category) => {
                       const checked = draft.categorySlugs.includes(category.slug)
@@ -494,7 +490,7 @@ export function BiomoleculesTestCreatePage() {
               </div>
               {draft.audienceMode === "codes" && (
                 <div className="max-h-40 space-y-1 overflow-y-auto rounded-[4px] border p-2">
-                    {codes.map((entry) => {
+                  {codes.map((entry) => {
                     const checked = draft.assignedCodes.includes(entry.code)
                     return (
                       <label
@@ -554,7 +550,9 @@ export function BiomoleculesTestCreatePage() {
               </div>
             </div>
 
-            {invalidMessage !== null && <p className="text-sm text-destructive">{invalidMessage}</p>}
+            {invalidMessage !== null && (
+              <p className="text-sm text-destructive">{invalidMessage}</p>
+            )}
 
             <Button onClick={() => void create()} disabled={!formValid || creating}>
               {creating ? testyStrings.creating : testyStrings.createAction}
@@ -588,16 +586,13 @@ export function BiomoleculesTestResultsPage() {
   } | null>(null)
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(null)
 
-
   const loadTests = useCallback(async () => {
     setListError(null)
     try {
       setPage(await biomoleculesApi.biomoleculeTests())
     } catch (error) {
       setListError(extractErrorMessage(error, testyStrings.loadError))
-      setPage((current) =>
-        current ?? { tests: [], codes: [], serverNow: new Date().toISOString() },
-      )
+      setPage((current) => current ?? { tests: [], codes: [], serverNow: new Date().toISOString() })
     }
   }, [])
 
@@ -721,9 +716,9 @@ export function BiomoleculesTestResultsPage() {
                                       !view.roster.some(
                                         (student) => student.userId === attempt.userId,
                                       ),
-                                    ).length,
-                                ),
-                              )}
+                                  ).length,
+                              ),
+                            )}
                         </p>
                         <div className="flex items-center gap-2">
                           <Button
@@ -751,19 +746,21 @@ export function BiomoleculesTestResultsPage() {
                       {expanded && (
                         <AttemptRows
                           view={view}
-                          onDetail={(attempt) =>
-                            setDetail({ username: attempt.username, attempt })
-                          }
-                        />
-                      )}
-                      {detail !== null && (
-                        <BiomoleculeAttemptDetail
-                          test={view.test}
-                          username={detail.username}
-                          attempt={detail.attempt}
                           allMolecules={allMolecules}
+                          onDetail={(attempt) => setDetail({ username: attempt.username, attempt })}
                         />
                       )}
+                      {detail !== null &&
+                        view.attempts.some(
+                          (attempt) => attempt.attemptId === detail.attempt.attemptId,
+                        ) && (
+                          <BiomoleculeAttemptDetail
+                            test={view.test}
+                            username={detail.username}
+                            attempt={detail.attempt}
+                            allMolecules={allMolecules}
+                          />
+                        )}
                     </CardContent>
                   </Card>
                 )
@@ -779,9 +776,9 @@ export function BiomoleculesTestResultsPage() {
               }}
               title={testyStrings.deleteTitle}
               description={testyStrings.deleteConfirm.replace(
-            "{title}",
-            stripRichMarkup(deleting?.title ?? ""),
-          )}
+                "{title}",
+                stripRichMarkup(deleting?.title ?? ""),
+              )}
               confirmLabel={testyStrings.deleteAction}
               cancelLabel={testyStrings.cancel}
               onConfirm={() => {
@@ -799,10 +796,23 @@ export function BiomoleculesTestResultsPage() {
 
 interface AttemptRowsProps {
   view: BiomoleculeTestTeacherView
+  allMolecules: Biomolecule[]
   onDetail: (attempt: AttemptSummaryLike & { userId: string; username: string }) => void
 }
 
-function AttemptRows({ view, onDetail }: AttemptRowsProps) {
+function AttemptRows({ view, allMolecules, onDetail }: AttemptRowsProps) {
+  const regraded = useMemo(
+    () =>
+      new Map(
+        view.attempts
+          .filter((attempt) => attempt.submittedAt !== null)
+          .map((attempt) => [
+            attempt.attemptId,
+            regradeTestAttempt(view.test, attempt.seed, attempt.detailJson, allMolecules),
+          ]),
+      ),
+    [view, allMolecules],
+  )
   const byUser = new Map(view.attempts.map((attempt) => [attempt.userId, attempt]))
   // Roster first (never-submitted students visible), then stray attempts
   // whose user left the roster.
@@ -857,9 +867,15 @@ function AttemptRows({ view, onDetail }: AttemptRowsProps) {
                     : "—"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular">
-                  {attempt !== null && attempt.submittedAt !== null
-                    ? `${attempt.correctCount ?? 0} / ${attempt.totalCount ?? 0}`
-                    : "—"}
+                  {attempt !== null && submitted ? (
+                    <VerifiedScore
+                      claimed={attempt}
+                      regraded={regraded.get(attempt.attemptId) ?? null}
+                      strings={testyStrings}
+                    />
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right">
                   {submitted && attempt !== null && (
@@ -904,8 +920,8 @@ interface AttemptSummaryLike {
 
 /**
  * One student's submitted test, reconstructed for the teacher: the batch
- * regenerates from the attempt seed and the stored per-question answers
- * (matched by uid) mark exactly what the student picked.
+ * regenerates from the attempt seed and the stored picks are graded again here,
+ * never trusting the verdicts the student's browser sent.
  */
 function BiomoleculeAttemptDetail({
   test,
@@ -922,34 +938,10 @@ function BiomoleculeAttemptDetail({
     () => testQuestionPool(test, allMolecules)?.molecules ?? [],
     [test, allMolecules],
   )
-  const rows = useMemo(() => {
-    const questions = generateTestSession(test, attempt.seed, allMolecules)
-    if (questions === null || questions.length === 0 || attempt.detailJson === null) {
-      return null
-    }
-    let answers: { uid: string; correct: boolean; selectedKey: string | null }[]
-    try {
-      const parsed = JSON.parse(attempt.detailJson) as {
-        answers?: { uid: string; correct: boolean; selectedKey: string | null }[]
-      }
-      answers = parsed.answers ?? []
-    } catch {
-      return null
-    }
-    if (answers.length !== questions.length) {
-      return null
-    }
-    const result: { question: QuizQuestion; selectedKey: string | null; correct: boolean }[] = []
-    for (let index = 0; index < questions.length; index += 1) {
-      const question = questions[index] as QuizQuestion
-      const answer = answers[index]
-      if (answer === undefined || answer.uid !== (question.uid ?? "")) {
-        return null // dataset drift: the stored answers no longer line up
-      }
-      result.push({ question, selectedKey: answer.selectedKey, correct: answer.correct })
-    }
-    return result
-  }, [test, attempt.seed, attempt.detailJson, allMolecules])
+  const rows = useMemo(
+    () => regradeTestAttempt(test, attempt.seed, attempt.detailJson, allMolecules)?.rows ?? null,
+    [test, attempt.seed, attempt.detailJson, allMolecules],
+  )
 
   if (rows === null) {
     return <p className="text-sm text-muted-foreground">{testyStrings.detailUnavailable}</p>
@@ -971,10 +963,7 @@ function BiomoleculeAttemptDetail({
               ? (row.question.options.find((option) => option.key === row.selectedKey) ?? null)
               : null
           return (
-            <li
-              key={row.question.uid ?? `q-${index}`}
-              className="rounded-[4px] border p-3"
-            >
+            <li key={row.question.uid ?? `q-${index}`} className="rounded-[4px] border p-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   {testyStrings.questionNumber.replace("{number}", String(index + 1))} ·{" "}

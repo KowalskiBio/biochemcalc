@@ -14,6 +14,7 @@
 // - When the pool can no longer be resolved/synthesized, generation returns
 //   null and the page shows its "material changed" state instead of a run.
 
+import { fnv1a } from "@/lib/fnv1a"
 import { TRAIT } from "@/lib/molecules"
 import { createSeededRandom } from "@/lib/molecules/quiz/random"
 import { expectedChainLetters, isChainCorrect } from "@/lib/peptides/answer"
@@ -199,16 +200,6 @@ export function isPeptideAnswerCorrect(chain: string, input: string): boolean {
   return isChainCorrect(input, chain)
 }
 
-/** FNV-1a (32-bit) as an 8-char lowercase hex string. */
-function fnv1a(value: string): string {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0")
-}
-
 /**
  * Non-reversible fingerprints of the answer chains, for resume-time pool-drift
  * detection. Persist these INSTEAD of the chains (the chains are the answers):
@@ -216,5 +207,48 @@ function fnv1a(value: string): string {
  * changed and the attempt should restart.
  */
 export function chainFingerprints(chains: readonly string[]): string[] {
-  return chains.map(fnv1a)
+  return chains.map((chain) => fnv1a(chain))
+}
+
+export interface RegradedPeptidovkaTest {
+  run: PeptidovkaTestRun
+  rows: { typed: string | null; correct: boolean }[]
+  correct: number
+  total: number
+}
+
+/**
+ * Re-grade a submitted attempt from its server-issued seed and typed answers,
+ * ignoring the score the student's browser claimed. Null when it cannot be
+ * verified: malformed detail, or a pool edited since submission.
+ */
+export function regradePeptidovkaAttempt(
+  test: Parameters<typeof generatePeptidovkaTestRun>[0],
+  attemptSeed: number,
+  detailJson: string | null,
+  molecules: readonly BiomoleculeLike[],
+): RegradedPeptidovkaTest | null {
+  if (detailJson === null) return null
+  let typed: unknown
+  let stored: unknown
+  try {
+    const parsed = JSON.parse(detailJson) as { typed?: unknown; fingerprints?: unknown } | null
+    typed = parsed?.typed
+    stored = parsed?.fingerprints
+  } catch {
+    return null
+  }
+  if (!Array.isArray(typed) || !Array.isArray(stored)) return null
+  const run = generatePeptidovkaTestRun(test, attemptSeed, molecules)
+  if (run === null || typed.length !== run.chains.length) return null
+  const fingerprints = chainFingerprints(run.chains)
+  if (stored.length !== fingerprints.length) return null
+  if (fingerprints.some((fingerprint, index) => fingerprint !== stored[index])) return null
+
+  const rows = run.chains.map((chain, index) => {
+    const value: unknown = typed[index]
+    const answer = typeof value === "string" ? value : null
+    return { typed: answer, correct: answer !== null && isPeptideAnswerCorrect(chain, answer) }
+  })
+  return { run, rows, correct: rows.filter((row) => row.correct).length, total: rows.length }
 }

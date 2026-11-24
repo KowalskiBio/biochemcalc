@@ -16,8 +16,11 @@ function segmentsCross(
   c: { x: number; y: number },
   d: { x: number; y: number },
 ): boolean {
-  const cross = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }): number =>
-    (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+  const cross = (
+    p: { x: number; y: number },
+    q: { x: number; y: number },
+    r: { x: number; y: number },
+  ): number => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
   const d1 = cross(c, d, a)
   const d2 = cross(c, d, b)
   const d3 = cross(a, b, c)
@@ -161,7 +164,10 @@ describe("drawProjection skeletons", () => {
     for (const [name, spec] of GOLDEN) {
       const { lines, texts } = split(drawProjection(spec).elements)
       const centroidX = ringCentroidXOf(spec)
-      expect(texts.some((element) => element.text === "O"), name).toBe(true)
+      expect(
+        texts.some((element) => element.text === "O"),
+        name,
+      ).toBe(true)
       expect(lines, name).toHaveLength(spec.ringSize + spec.substituents.length)
       expect(texts, name).toHaveLength(spec.substituents.length + 1)
       for (const substituent of spec.substituents) {
@@ -177,7 +183,10 @@ describe("drawProjection skeletons", () => {
   it("marks exactly one bold front edge", () => {
     for (const [name, spec] of GOLDEN) {
       const { lines } = split(drawProjection(spec).elements)
-      expect(lines.filter((line) => line.bold === true), name).toHaveLength(1)
+      expect(
+        lines.filter((line) => line.bold === true),
+        name,
+      ).toHaveLength(1)
     }
   })
 
@@ -231,7 +240,9 @@ describe("drawProjection skeletons", () => {
           }))
           .sort((a, b) => a.distance - b.distance)[0]
         if (label === undefined || label.distance > 40) {
-          throw new Error(`${name}: cannot match label ${expectedText} for ${substituent.group}@${substituent.atom}`)
+          throw new Error(
+            `${name}: cannot match label ${expectedText} for ${substituent.group}@${substituent.atom}`,
+          )
         }
         const labelAngle = Math.atan2(label.element.y - startY, label.element.x - startX)
         const bondAngle = direction * (Math.PI / 2) // strictly vertical bonds now
@@ -249,10 +260,8 @@ describe("drawProjection skeletons", () => {
 
   it("nudges fructose substituents instead of crossing ring edges (universal overlap)", () => {
     const { lines } = split(drawProjection(BETA_FRUCTOSE).elements)
-    const shareEndpoint = (
-      a: { x: number; y: number },
-      b: { x: number; y: number },
-    ): boolean => Math.hypot(a.x - b.x, a.y - b.y) < 0.5
+    const shareEndpoint = (a: { x: number; y: number }, b: { x: number; y: number }): boolean =>
+      Math.hypot(a.x - b.x, a.y - b.y) < 0.5
     const shareAnyEndpoint = (
       bond: { x1: number; y1: number; x2: number; y2: number },
       other: { x1: number; y1: number; x2: number; y2: number },
@@ -321,9 +330,12 @@ describe("drawProjection transforms", () => {
 
       const base = drawProjection(spec)
       const once = drawProjection(spec, { mirror: true })
-      const twiceMirrored = drawProjection({ ...spec, showHydrogens: spec.showHydrogens }, {
-        mirror: true,
-      })
+      const twiceMirrored = drawProjection(
+        { ...spec, showHydrogens: spec.showHydrogens },
+        {
+          mirror: true,
+        },
+      )
       // Mirror of a mirrored *drawing* is not expressible through the spec
       // alone (it keeps side data), so assert the involution at the element
       // level by mirroring the elements with the same helper via a spec whose
@@ -394,9 +406,7 @@ describe("drawProjection transforms", () => {
 
 describe("parseProjection", () => {
   it("round-trips a valid spec and defaults anomericCarbon to 1", () => {
-    const parsed = parseProjection(
-      JSON.stringify({ ...ALPHA_GLUCOSE, anomericCarbon: undefined }),
-    )
+    const parsed = parseProjection(JSON.stringify({ ...ALPHA_GLUCOSE, anomericCarbon: undefined }))
     expect(parsed?.type).toBe("haworth")
     expect(parsed?.anomericCarbon).toBe(1)
     expect(parsed?.substituents).toHaveLength(5)
@@ -445,9 +455,7 @@ describe("validateProjection", () => {
     expect(validateProjection(ALPHA_GLUCOSE, { ringForm: "furanose" })).toContain(
       "ringForm.mismatch",
     )
-    expect(validateProjection(BETA_RIBOSE, { ringForm: "pyranose" })).toContain(
-      "ringForm.mismatch",
-    )
+    expect(validateProjection(BETA_RIBOSE, { ringForm: "pyranose" })).toContain("ringForm.mismatch")
   })
 
   it("flags same-side pairs and unknown atoms", () => {

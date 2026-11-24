@@ -13,7 +13,13 @@ import type {
   QuizOption,
   QuizQuestion,
 } from "@/lib/molecules/quiz/question-generator"
-import { generateTestSession, testQuestionPool } from "@/lib/molecules/test"
+import {
+  generateTestSession,
+  questionFingerprints,
+  tagTestQuestions,
+  testQuestionPool,
+} from "@/lib/molecules/test"
+import { autoSubmitMarginMs, remainingTimeMs } from "@/lib/test-clock"
 import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
@@ -42,31 +48,6 @@ function attemptStorageKey(attemptId: string): string {
   return `biomolecule-test-attempt-${attemptId}`
 }
 
-/** FNV-1a (32-bit) as an 8-char lowercase hex string. */
-function fnv1a(value: string): string {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0")
-}
-
-/**
- * Content hashes of the generated questions — prompt text, option keys, and
- * correct flags. Catches material edits that the seed-index uid check misses.
- */
-function questionFingerprints(questions: QuizQuestion[]): string[] {
-  return questions.map((question) => {
-    const parts = [
-      question.prompt.kind,
-      question.prompt.kind === "structure" ? (question.prompt.smiles ?? "") : question.prompt.text,
-      ...question.options.map((option) => `${option.key}:${option.correct}:${option.moleculeId}`),
-    ]
-    return fnv1a(parts.join("\u0000"))
-  })
-}
-
 function loadStoredProgress(attemptId: string): StoredAttemptProgress | null {
   try {
     const raw = window.localStorage.getItem(attemptStorageKey(attemptId))
@@ -84,11 +65,16 @@ function loadStoredProgress(attemptId: string): StoredAttemptProgress | null {
   }
 }
 
-function saveStoredProgress(attemptId: string, questions: QuizQuestion[], state: RunState): void {
+function saveStoredProgress(
+  attemptId: string,
+  questions: QuizQuestion[],
+  fingerprints: string[],
+  state: RunState,
+): void {
   try {
     const payload: StoredAttemptProgress = {
       uids: questions.map((question) => question.uid ?? ""),
-      fingerprints: questionFingerprints(questions),
+      fingerprints,
       index: state.index,
       selections: state.selections,
     }
@@ -285,6 +271,7 @@ export function BiomoleculesTestRunPage() {
   const view = routedView ?? fetchedView
   const test = view?.test ?? null
   const attempt = view?.attempt ?? null
+  const offsetMs = view?.clockOffsetMs ?? 0
 
   // Submitted attempts belong to the result route.
   useEffect(() => {
@@ -299,6 +286,8 @@ export function BiomoleculesTestRunPage() {
   // Generation + resume, decided once per (test, attempt, dataset).
   const [prepared, setPrepared] = useState<{
     questions: QuizQuestion[]
+    /** Hashes of the questions as served, so later edits cannot restamp them. */
+    fingerprints: string[]
     initial: RunState
     materialChanged: boolean
   } | null>(null)
@@ -307,16 +296,21 @@ export function BiomoleculesTestRunPage() {
     if (attempt.submittedAt !== null) return // the redirect effect handles it
     const questions = generateTestSession(test, attempt.seed, allMolecules)
     if (questions === null || questions.length === 0) {
-      setPrepared({ questions: [], initial: { index: 0, selections: [] }, materialChanged: true })
+      setPrepared({
+        questions: [],
+        fingerprints: [],
+        initial: { index: 0, selections: [] },
+        materialChanged: true,
+      })
       return
     }
-    const tagged = questions.map((question, index) => ({
-      ...question,
-      uid: `${attempt.seed}-${index}`,
-    }))
+    const tagged = tagTestQuestions(questions, attempt.seed)
+    const fingerprints = questionFingerprints(
+      tagged,
+      testQuestionPool(test, allMolecules)?.molecules ?? [],
+    )
     const stored = loadStoredProgress(attempt.attemptId)
     if (stored !== null) {
-      const fingerprints = questionFingerprints(tagged)
       const sameMaterial =
         stored.uids.length === tagged.length &&
         stored.fingerprints.length === fingerprints.length &&
@@ -325,6 +319,7 @@ export function BiomoleculesTestRunPage() {
       if (!sameMaterial) {
         setPrepared({
           questions: tagged,
+          fingerprints,
           initial: { index: 0, selections: [] },
           materialChanged: true,
         })
@@ -334,6 +329,7 @@ export function BiomoleculesTestRunPage() {
       const index = Math.min(Math.max(stored.index, 0), tagged.length - 1)
       setPrepared({
         questions: tagged,
+        fingerprints,
         initial: { index, selections: stored.selections.slice(0, tagged.length) },
         materialChanged: false,
       })
@@ -342,6 +338,7 @@ export function BiomoleculesTestRunPage() {
     const freshSelections: (string | null)[] = tagged.map(() => null)
     setPrepared({
       questions: tagged,
+      fingerprints,
       initial: { index: 0, selections: freshSelections },
       materialChanged: false,
     })
@@ -356,6 +353,7 @@ export function BiomoleculesTestRunPage() {
   const runState = state ?? prepared?.initial ?? null
 
   const questions = prepared?.questions ?? []
+  const fingerprints = prepared?.fingerprints ?? []
   const decided = (index: number): boolean | undefined => {
     const key = runState?.selections[index]
     if (key === undefined || key === null) return undefined
@@ -381,23 +379,21 @@ export function BiomoleculesTestRunPage() {
         ),
       }
       setState(next)
-      saveStoredProgress(attempt?.attemptId ?? "", questions, next)
+      saveStoredProgress(attempt?.attemptId ?? "", questions, fingerprints, next)
     },
-    [runState, questions, attempt],
+    [runState, questions, fingerprints, attempt],
   )
 
   const advance = useCallback(() => {
     if (runState === null || submittedRef.current) return
     const next: RunState = { ...runState, index: runState.index + 1 }
     setState(next)
-    saveStoredProgress(attempt?.attemptId ?? "", questions, next)
-  }, [runState, questions, attempt])
+    saveStoredProgress(attempt?.attemptId ?? "", questions, fingerprints, next)
+  }, [runState, questions, fingerprints, attempt])
 
-  const serverNowRef = useRef("")
-  serverNowRef.current = view?.serverNow ?? ""
   const submit = useCallback(
     async (auto: boolean) => {
-      if (attempt === null || test === null || submittedRef.current) return
+      if (view === null || attempt === null || test === null || submittedRef.current) return
       // The auto-submit clock can tick before generation lands; an empty
       // batch has nothing to submit and would only earn a server rejection.
       const questionsNow = prepared?.questions ?? []
@@ -414,6 +410,7 @@ export function BiomoleculesTestRunPage() {
           correctCount,
           detailJson: JSON.stringify({
             byType: breakdownByType(questionsNow, verdicts),
+            fingerprints: prepared.fingerprints,
             // Per-question answers: the teacher's detail view regenerates the
             // batch from the attempt seed and matches these by uid.
             answers: questionsNow.map((question, index) => ({
@@ -426,8 +423,7 @@ export function BiomoleculesTestRunPage() {
         })
         clearStoredProgress(attempt.attemptId)
         const submittedView: BiomoleculeTestStudentView = {
-          test,
-          serverNow: serverNowRef.current,
+          ...view,
           attempt: {
             ...attempt,
             submittedAt: new Date().toISOString(),
@@ -467,7 +463,7 @@ export function BiomoleculesTestRunPage() {
         setSubmitError(extractErrorMessage(error, testyStrings.submitError))
       }
     },
-    [attempt, test, prepared, navigate],
+    [view, attempt, test, prepared, navigate],
   )
   const decidedRef = useRef(decided)
   decidedRef.current = decided
@@ -477,15 +473,6 @@ export function BiomoleculesTestRunPage() {
   submitRef.current = submit
   const autoFailedRef = useRef(false)
 
-  // Server-time offset: the difference between the server's clock and ours,
-  // used to keep the deadline accurate even on a skewed device.
-  const serverOffsetRef = useRef(0)
-  useEffect(() => {
-    if (view === null || view.serverNow === "") return
-    const serverTime = new Date(view.serverNow).getTime()
-    serverOffsetRef.current = serverTime - Date.now()
-  }, [view])
-
   // Deadline clock: auto-submit fires 30 s before the server's cutoff so a
   // slow network still lands inside the 60 s server-side grace. The interval
   // stops once the window is far enough past its end for even the grace to
@@ -494,11 +481,12 @@ export function BiomoleculesTestRunPage() {
   useEffect(() => {
     if (test === null || attempt === null) return
     if (attempt.submittedAt !== null) return
-    const deadline = new Date(test.availableTo).getTime()
+    const timeLeft = () => remainingTimeMs(test.availableTo, offsetMs, Date.now())
+    const margin = autoSubmitMarginMs(timeLeft())
     const tick = () => {
-      const left = deadline - Date.now()
+      const left = timeLeft()
       setRemainingMs(left)
-      if (left <= 30_000 && !autoFailedRef.current) {
+      if (left <= margin && !autoFailedRef.current) {
         void submitRef.current(true)
       }
     }
@@ -514,7 +502,7 @@ export function BiomoleculesTestRunPage() {
       window.clearInterval(interval)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [test, attempt])
+  }, [test, attempt, offsetMs])
 
   const question = questions[runState?.index ?? 0]
   const total = questions.length
@@ -673,14 +661,7 @@ export function BiomoleculesTestRunPage() {
 
       {currentVerdict !== undefined && (
         <div className="flex items-center justify-between gap-4" aria-live="polite">
-          <p
-            className={cn(
-              "text-sm font-medium",
-              currentVerdict ? "text-accent" : "text-destructive",
-            )}
-          >
-            {testyStrings.submitting.replace("…", "…")}
-          </p>
+          <p className="text-sm font-medium text-muted-foreground">{testyStrings.answerSaved}</p>
           {runState.index < total - 1 ? (
             <Button onClick={advance}>{quizStrings.nextQuestion}</Button>
           ) : (

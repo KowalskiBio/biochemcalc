@@ -18,6 +18,7 @@ import {
   generatePeptidovkaTestRun,
   isPeptideAnswerCorrect,
 } from "@/lib/peptides/test"
+import { autoSubmitMarginMs, remainingTimeMs } from "@/lib/test-clock"
 import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
@@ -133,6 +134,7 @@ export function PeptidovkaTestRunPage() {
   const view = routedView ?? fetchedView
   const test = view?.test ?? null
   const attempt = view?.attempt ?? null
+  const offsetMs = view?.clockOffsetMs ?? 0
 
   // Submitted attempts belong to the result route.
   useEffect(() => {
@@ -250,11 +252,9 @@ export function PeptidovkaTestRunPage() {
       saveStoredProgress(attempt.attemptId, { chains: prepared?.chains ?? [] }, next)
   }, [runState, prepared, attempt])
 
-  const serverNowRef = useRef("")
-  serverNowRef.current = view?.serverNow ?? ""
   const submit = useCallback(
     async (auto: boolean) => {
-      if (attempt === null || test === null || submittedRef.current) return
+      if (view === null || attempt === null || test === null || submittedRef.current) return
       if (prepared === null || prepared.chains.length === 0) return
       const verdicts = prepared.chains.map(
         (_, index) => runStateRef.current?.verdicts[index] === true,
@@ -271,14 +271,14 @@ export function PeptidovkaTestRunPage() {
           // The student's typed chains ride along so the teacher's detail
           // view can show exactly what was answered; verdicts mirror them.
           detailJson: JSON.stringify({
+            fingerprints: chainFingerprints(prepared.chains),
             typed: runStateRef.current?.typed ?? [],
             correct: verdicts.map((verdict) => verdict === true),
           }),
         })
         clearStoredProgress(attempt.attemptId)
         const submittedView: PeptidovkaTestStudentView = {
-          test,
-          serverNow: serverNowRef.current,
+          ...view,
           attempt: {
             ...attempt,
             submittedAt: new Date().toISOString(),
@@ -311,7 +311,7 @@ export function PeptidovkaTestRunPage() {
         setSubmitError(extractErrorMessage(error, testyStrings.submitError))
       }
     },
-    [attempt, test, prepared, navigate],
+    [view, attempt, test, prepared, navigate],
   )
   const runStateRef = useRef(runState)
   runStateRef.current = runState
@@ -324,11 +324,12 @@ export function PeptidovkaTestRunPage() {
   useEffect(() => {
     if (test === null || attempt === null) return
     if (attempt.submittedAt !== null) return
-    const deadline = new Date(test.availableTo).getTime()
+    const timeLeft = () => remainingTimeMs(test.availableTo, offsetMs, Date.now())
+    const margin = autoSubmitMarginMs(timeLeft())
     const tick = () => {
-      const left = deadline - Date.now()
+      const left = timeLeft()
       setRemainingMs(left)
-      if (left <= 30_000 && !autoFailedRef.current) {
+      if (left <= margin && !autoFailedRef.current) {
         void submitRef.current(true)
       }
     }
@@ -342,7 +343,7 @@ export function PeptidovkaTestRunPage() {
       window.clearInterval(interval)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [test, attempt])
+  }, [test, attempt, offsetMs])
 
   if (!loaded || view === null) {
     if (fetchFailed) {
@@ -503,18 +504,10 @@ export function PeptidovkaTestRunPage() {
               value={typed ?? ""}
               readOnly
               aria-label={peptidovkaStrings.answerLabel}
-              className={cn(
-                "max-w-xs text-center font-mono uppercase tracking-[0.2em]",
-                "font-medium disabled:opacity-100",
-                verdict
-                  ? "border-accent bg-accent/5 text-accent"
-                  : "border-destructive bg-destructive/10 text-destructive",
-              )}
+              className="max-w-xs text-center font-mono font-medium uppercase tracking-[0.2em] disabled:opacity-100"
               disabled
             />
-            <p className={cn("text-sm font-medium", verdict ? "text-accent" : "text-destructive")}>
-              {verdict ? quizCorrectText() : quizIncorrectText()}
-            </p>
+            <p className="text-sm font-medium text-muted-foreground">{testyStrings.answerSaved}</p>
           </div>
 
           <div className="flex justify-center">
@@ -530,14 +523,6 @@ export function PeptidovkaTestRunPage() {
       )}
     </div>
   )
-}
-
-function quizCorrectText(): string {
-  return cs.biomolekuly.quiz.correct
-}
-
-function quizIncorrectText(): string {
-  return cs.biomolekuly.quiz.incorrect
 }
 
 function PeptideAnswerForm({ onSubmit }: { onSubmit: (value: string) => void }) {

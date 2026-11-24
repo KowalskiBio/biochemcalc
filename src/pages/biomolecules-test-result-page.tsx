@@ -112,7 +112,8 @@ export function BiomoleculesTestResultPage() {
   let byType: Record<string, { correct: number; total: number }> = {}
   if (attempt.detailJson !== null) {
     try {
-      byType = JSON.parse(attempt.detailJson) as Record<string, { correct: number; total: number }>
+      const parsed = JSON.parse(attempt.detailJson) as { byType?: typeof byType }
+      byType = parsed.byType ?? {}
     } catch {
       byType = {}
     }

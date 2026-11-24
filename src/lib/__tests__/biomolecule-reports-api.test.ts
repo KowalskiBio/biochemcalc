@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/http", () => ({ httpRequest: vi.fn() }))
 
-import { httpRequest } from "@/lib/http"
 import {
-  biomoleculeReportsApi,
   type BiomoleculeQuestionReportSnapshot,
   type BiomoleculeReportQuestionInput,
+  biomoleculeReportsApi,
   snapshotOfQuestion,
 } from "@/lib/biomolecule-reports-api"
+import { httpRequest } from "@/lib/http"
 import type { QuizMolecule, QuizQuestion } from "@/lib/molecules/quiz"
 import type { ProjectionSpec } from "@/lib/molecules/render/projection"
 

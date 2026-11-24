@@ -7,7 +7,7 @@ import { cs } from "@/i18n/cs"
 import type { PeptidovkaTestStudentView } from "@/lib/biomolecules-api"
 import { nLeftOrientationDeg } from "@/lib/peptides"
 import { generatePeptidovkaTestRun, type PeptidovkaTestRun } from "@/lib/peptides/test"
-import { useBiomoleculeDataLoaded } from "@/stores/biomolecule-data-store"
+import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const testyStrings = cs.peptidovka.testy
 const peptidovkaStrings = cs.peptidovka
@@ -31,6 +31,7 @@ function nLeftDeg(smiles: string, nIndex: number): number {
 export function PeptidovkaTestResultPage() {
   const location = useLocation()
   const loaded = useBiomoleculeDataLoaded()
+  const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
 
   const state = location.state as {
     view?: PeptidovkaTestStudentView
@@ -47,7 +48,7 @@ export function PeptidovkaTestResultPage() {
   // shows the correct chains only.
   let regenerated: PeptidovkaTestRun | null = null
   if (loaded && test !== null && review === null && attempt !== null) {
-    regenerated = generatePeptidovkaTestRun(test, attempt.seed, [])
+    regenerated = generatePeptidovkaTestRun(test, attempt.seed, allMolecules)
   }
 
   if (!loaded || view === null || test === null || attempt === null) {

@@ -1576,7 +1576,9 @@ pub struct BiomoleculeTestView {
     pub monochrome: bool,
     pub available_from: String,
     pub available_to: String,
-    pub seed: i64,
+    /// Teacher-only: students get the seed of their own attempt instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
     pub created_at: String,
     /// Student invite codes this test targets; `[]` means ALL students.
     /// Omitted from student responses — the audience is the teacher's business
@@ -1823,19 +1825,19 @@ fn test_view(record: &BiomoleculeTestRecord) -> Result<BiomoleculeTestView, DbEr
         monochrome: record.monochrome,
         available_from: record.available_from.clone(),
         available_to: record.available_to.clone(),
-        seed: record.seed,
+        seed: Some(record.seed),
         created_at: record.created_at.clone(),
         assigned_codes: Some(serde_json::from_str(&record.assigned_codes)?),
     })
 }
 
-/// Student copy of `test_view`: strips the teacher-only audience list. The
-/// generation seed stays in — the client needs it to build the batch, and the
-/// correct answers are embedded in those client-generated questions anyway,
-/// so withholding the seed would not protect the answers (accepted exposure).
+/// Student copy of `test_view`: strips the teacher-only audience list and
+/// the generation seed. Attempts carry the seed they generate from, so a fixed
+/// test cannot be previewed before it is started.
 fn student_test_view(record: &BiomoleculeTestRecord) -> Result<BiomoleculeTestView, DbError> {
     let mut view = test_view(record)?;
     view.assigned_codes = None;
+    view.seed = None;
     Ok(view)
 }
 
@@ -2154,9 +2156,9 @@ pub fn do_submit_biomolecule_test_attempt(
         return Err(DbError::Validation("Invalid test score".into()));
     }
     // `correct_count` cannot be verified server-side: grading happens in the
-    // client over client-generated questions that embed their answers, so a
-    // student can always claim any score. Accepted limitation, not an
-    // oversight; the bounds above only keep obviously bogus values out.
+    // client over client-generated questions that embed their answers, so this
+    // is only the student's claim. The teacher's results re-grade the stored
+    // answers from the server-issued seed and flag any difference.
     //
     // `total_count`, unlike the score, is constrained by generation: dataset
     // drift can shrink a batch but never grow it, so more than the configured
@@ -2207,7 +2209,9 @@ pub struct PeptidovkaTestView {
     pub monochrome: bool,
     pub available_from: String,
     pub available_to: String,
-    pub seed: i64,
+    /// Teacher-only: students get the seed of their own attempt instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
     pub created_at: String,
     /// Student invite codes this test targets; `[]` means ALL students.
     /// Omitted from student responses — the audience is the teacher's business
@@ -2363,22 +2367,20 @@ fn peptidovka_test_view(record: &PeptidovkaTestRecord) -> Result<PeptidovkaTestV
         monochrome: record.monochrome,
         available_from: record.available_from.clone(),
         available_to: record.available_to.clone(),
-        seed: record.seed,
+        seed: Some(record.seed),
         created_at: record.created_at.clone(),
         assigned_codes: Some(serde_json::from_str(&record.assigned_codes)?),
     })
 }
 
 /// Student copy of `peptidovka_test_view`: strips the teacher-only audience
-/// list. The generation seed stays in — the client needs it to build the batch,
-/// and the correct answers are embedded in those client-generated questions
-/// anyway, so withholding the seed would not protect the answers (accepted
-/// exposure).
+/// list and the generation seed (see `student_test_view`).
 fn student_peptidovka_test_view(
     record: &PeptidovkaTestRecord,
 ) -> Result<PeptidovkaTestView, DbError> {
     let mut view = peptidovka_test_view(record)?;
     view.assigned_codes = None;
+    view.seed = None;
     Ok(view)
 }
 
@@ -2696,9 +2698,9 @@ pub fn do_submit_peptidovka_test_attempt(
         return Err(DbError::Validation("Invalid test score".into()));
     }
     // `correct_count` cannot be verified server-side: grading happens in the
-    // client over client-generated questions that embed their answers, so a
-    // student can always claim any score. Accepted limitation, not an
-    // oversight; the bounds above only keep obviously bogus values out.
+    // client over client-generated questions that embed their answers, so this
+    // is only the student's claim. The teacher's results re-grade the stored
+    // answers from the server-issued seed and flag any difference.
     //
     // `total_count`, unlike the score, is constrained by generation: dataset
     // drift can shrink a batch but never grow it, so more than the configured
@@ -4800,7 +4802,7 @@ mod tests {
         assert_eq!(view.question_count, 10);
         assert_eq!(view.question_set, "fixed");
         assert!(!view.monochrome);
-        assert_eq!(view.seed, 1234);
+        assert_eq!(view.seed, Some(1234));
 
         let entries = BiomoleculeHistoryRepo::list_all(&conn, 10, 0).expect("history");
         assert_eq!(entries.len(), 1);
@@ -5235,7 +5237,7 @@ mod tests {
         assert_eq!(view.peptide_max_length, 5);
         assert_eq!(view.question_set, "fixed");
         assert!(!view.monochrome);
-        assert_eq!(view.seed, 1234);
+        assert_eq!(view.seed, Some(1234));
         // Window instants are stored normalized to UTC.
         assert!(view.available_from.ends_with("+00:00"));
 
@@ -6001,7 +6003,7 @@ mod tests {
     }
 
     /// Students get a server timestamp for deadline offset but never the
-    /// teacher's audience list. The seed stays (accepted exposure).
+    /// teacher's audience list or the test seed.
     #[test]
     fn student_available_lists_carry_server_now_and_hide_the_audience() {
         let conn = setup_conn();
@@ -6017,7 +6019,7 @@ mod tests {
             bio[0].test.assigned_codes.is_none(),
             "the audience is teacher-only"
         );
-        assert_eq!(bio[0].test.seed, 1234, "the seed stays for generation");
+        assert!(bio[0].test.seed.is_none(), "students only get an attempt seed");
 
         let pep = do_list_available_peptidovka_tests(&conn, &student).expect("pep list");
         assert_eq!(pep.len(), 1);
@@ -6026,6 +6028,6 @@ mod tests {
             pep[0].test.assigned_codes.is_none(),
             "the audience is teacher-only"
         );
-        assert_eq!(pep[0].test.seed, 1234, "the seed stays for generation");
+        assert!(pep[0].test.seed.is_none(), "students only get an attempt seed");
     }
 }

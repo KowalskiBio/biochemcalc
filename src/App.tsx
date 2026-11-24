@@ -15,9 +15,11 @@ import { BiomoleculesStreakPage } from "@/pages/biomolecules-streak-page"
 import { BiomoleculesTestPage } from "@/pages/biomolecules-test-page"
 import { BiomoleculesTestResultPage } from "@/pages/biomolecules-test-result-page"
 import { BiomoleculesTestRunPage } from "@/pages/biomolecules-test-run-page"
-import { BiomoleculesTestCreatePage } from "@/pages/biomolecules-tests-page"
-import { BiomoleculesTestResultsPage } from "@/pages/biomolecules-tests-page"
 import { BiomoleculesTestsHubPage } from "@/pages/biomolecules-tests-hub-page"
+import {
+  BiomoleculesTestCreatePage,
+  BiomoleculesTestResultsPage,
+} from "@/pages/biomolecules-tests-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
 import { ConstantsPage } from "@/pages/constants-page"
 import { DatabazePage } from "@/pages/databaze-page"
@@ -30,8 +32,7 @@ import { PeptidovkaPage, PeptidovkaRunPage } from "@/pages/peptidovka-page"
 import { PeptidovkaSettingsPage } from "@/pages/peptidovka-settings-page"
 import { PeptidovkaTestResultPage } from "@/pages/peptidovka-test-result-page"
 import { PeptidovkaTestRunPage } from "@/pages/peptidovka-test-run-page"
-import { PeptidovkaTestCreatePage } from "@/pages/peptidovka-tests-page"
-import { PeptidovkaTestResultsPage } from "@/pages/peptidovka-tests-page"
+import { PeptidovkaTestCreatePage, PeptidovkaTestResultsPage } from "@/pages/peptidovka-tests-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
 import { ReportsPage } from "@/pages/reports-page"
@@ -97,10 +98,7 @@ function TeacherRoutes() {
               path="/biomolekuly/testy/vytvorit/klasicky"
               element={<BiomoleculesTestCreatePage />}
             />
-            <Route
-              path="/biomolekuly/testy/vysledky"
-              element={<BiomoleculesTestResultsPage />}
-            />
+            <Route path="/biomolekuly/testy/vysledky" element={<BiomoleculesTestResultsPage />} />
             <Route path="/biomolekuly/peptidovka" element={<PeptidovkaSettingsPage />} />
             <Route
               path="/biomolekuly/peptidovka/testy/vytvorit"

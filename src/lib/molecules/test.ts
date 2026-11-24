@@ -13,6 +13,7 @@
 //   helpers return null / empty so the run page can show "material changed".
 
 import type { Biomolecule } from "@/lib/biomolecules-api"
+import { fnv1a } from "@/lib/fnv1a"
 import { getMergedQuizConfig } from "@/lib/molecules/quiz/category-quiz"
 import {
   ALL_QUIZ_TYPES,
@@ -219,4 +220,86 @@ export function generateTestSession(
   }
 
   return generateQuizSession(pool.molecules, config)
+}
+
+/** Tag a generated batch with the ids submitted answers are matched by. */
+export function tagTestQuestions(questions: QuizQuestion[], attemptSeed: number): QuizQuestion[] {
+  return questions.map((question, index) => ({ ...question, uid: `${attemptSeed}-${index}` }))
+}
+
+/**
+ * Content hashes of a batch: everything the student reads (prompt, option
+ * names, letters and structures) plus what counts as correct. `pool` is the
+ * quiz pool (`testQuestionPool`), whose ids the options refer to.
+ */
+export function questionFingerprints(
+  questions: readonly QuizQuestion[],
+  pool: readonly QuizMolecule[],
+): string[] {
+  const byId = new Map(pool.map((molecule) => [molecule.id, molecule]))
+  return questions.map((question) =>
+    fnv1a(
+      JSON.stringify([
+        question.type,
+        question.prompt.kind,
+        question.prompt.text,
+        question.prompt.smiles ?? "",
+        question.prompt.predicate ?? "",
+        question.options.map((option) => [
+          option.key,
+          option.correct,
+          option.display,
+          option.smiles ?? "",
+          byId.get(option.moleculeId)?.name ?? "",
+          byId.get(option.moleculeId)?.oneLetter ?? "",
+        ]),
+      ]),
+    ),
+  )
+}
+
+export interface RegradedTest {
+  rows: { question: QuizQuestion; selectedKey: string | null; correct: boolean }[]
+  correct: number
+  total: number
+}
+
+/**
+ * Re-grade a submitted attempt from its server-issued seed and stored picks,
+ * ignoring the score and verdicts the student's browser claimed. Null when it
+ * cannot be verified: malformed detail, or material edited since submission.
+ */
+export function regradeTestAttempt(
+  test: Parameters<typeof generateTestSession>[0],
+  attemptSeed: number,
+  detailJson: string | null,
+  molecules: Biomolecule[],
+): RegradedTest | null {
+  if (detailJson === null) return null
+  let answers: unknown
+  let stored: unknown
+  try {
+    const parsed = JSON.parse(detailJson) as { answers?: unknown; fingerprints?: unknown } | null
+    answers = parsed?.answers
+    stored = parsed?.fingerprints
+  } catch {
+    return null
+  }
+  if (!Array.isArray(answers) || !Array.isArray(stored)) return null
+  const generated = generateTestSession(test, attemptSeed, molecules)
+  if (generated === null || generated.length === 0) return null
+  const questions = tagTestQuestions(generated, attemptSeed)
+  const pool = testQuestionPool(test, molecules)?.molecules ?? []
+  const fingerprints = questionFingerprints(questions, pool)
+  if (answers.length !== questions.length || stored.length !== questions.length) return null
+
+  const rows: RegradedTest["rows"] = []
+  for (const [index, question] of questions.entries()) {
+    const answer = answers[index] as { uid?: unknown; selectedKey?: unknown } | null
+    if (answer?.uid !== question.uid || stored[index] !== fingerprints[index]) return null
+    const selectedKey = typeof answer?.selectedKey === "string" ? answer.selectedKey : null
+    const correct = question.options.some((option) => option.key === selectedKey && option.correct)
+    rows.push({ question, selectedKey, correct })
+  }
+  return { rows, correct: rows.filter((row) => row.correct).length, total: rows.length }
 }

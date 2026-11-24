@@ -1,3 +1,4 @@
+import { withClockOffset } from "@/lib/test-clock"
 import { httpRequest } from "./http"
 
 /**
@@ -164,8 +165,8 @@ export interface BiomoleculeTestsTeacherPage {
   serverNow: string
 }
 
-/** The test fields a student sees: everything except the teacher-only audience. */
-export type BiomoleculeTestStudentTest = Omit<BiomoleculeTest, "assignedCodes">
+/** The test fields a student sees: no teacher-only audience, no generation seed. */
+export type BiomoleculeTestStudentTest = Omit<BiomoleculeTest, "assignedCodes" | "seed">
 
 /** A student's view: the test plus their own attempt (null = not started). */
 export interface BiomoleculeTestStudentView {
@@ -179,8 +180,10 @@ export interface BiomoleculeTestStudentView {
     correctCount: number | null
     detailJson: string | null
   } | null
-  /** One server timestamp so deadlines render without client clock skew. */
+  /** Server clock at listing time. */
   serverNow: string
+  /** Server minus device clock, attached by the API client on arrival. */
+  clockOffsetMs: number
 }
 
 /** Result of starting/resuming: `"exists"` means resume or show the result. */
@@ -250,8 +253,8 @@ export interface PeptidovkaTestsTeacherPage {
   serverNow: string
 }
 
-/** The test fields a student sees: everything except the teacher-only audience. */
-export type PeptidovkaTestStudentTest = Omit<PeptidovkaTest, "assignedCodes">
+/** The test fields a student sees: no teacher-only audience, no generation seed. */
+export type PeptidovkaTestStudentTest = Omit<PeptidovkaTest, "assignedCodes" | "seed">
 
 /** A student's view: the test plus their own attempt (null = not started). */
 export interface PeptidovkaTestStudentView {
@@ -265,8 +268,10 @@ export interface PeptidovkaTestStudentView {
     correctCount: number | null
     detailJson: string | null
   } | null
-  /** One server timestamp so deadlines render without client clock skew. */
+  /** Server clock at listing time. */
   serverNow: string
+  /** Server minus device clock, attached by the API client on arrival. */
+  clockOffsetMs: number
 }
 
 /** Result of starting/resuming: `"exists"` means resume or show the result. */
@@ -522,7 +527,9 @@ export const biomoleculesApi = {
 
   /** Student: tests currently open, each with this student's attempt status. */
   availableBiomoleculeTests: (): Promise<BiomoleculeTestStudentView[]> =>
-    httpRequest<BiomoleculeTestStudentView[]>("/api/biomolecules/available-biomolecule-tests"),
+    httpRequest<Omit<BiomoleculeTestStudentView, "clockOffsetMs">[]>(
+      "/api/biomolecules/available-biomolecule-tests",
+    ).then((views) => withClockOffset(views)),
 
   /** Student: start a test or resume/show an existing attempt. */
   startBiomoleculeTestAttempt: (testId: string): Promise<BiomoleculeTestStartResult> =>
@@ -556,7 +563,9 @@ export const biomoleculesApi = {
 
   /** Student: Peptidovka tests currently open, with this student's attempt status. */
   availablePeptidovkaTests: (): Promise<PeptidovkaTestStudentView[]> =>
-    httpRequest<PeptidovkaTestStudentView[]>("/api/biomolecules/available-peptidovka-tests"),
+    httpRequest<Omit<PeptidovkaTestStudentView, "clockOffsetMs">[]>(
+      "/api/biomolecules/available-peptidovka-tests",
+    ).then((views) => withClockOffset(views)),
 
   /** Student: start a Peptidovka test or resume/show an existing attempt. */
   startPeptidovkaTestAttempt: (testId: string): Promise<PeptidovkaTestStartResult> =>

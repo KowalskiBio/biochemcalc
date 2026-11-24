@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 
+import { VerifiedScore } from "@/components/biomolecules/verified-score"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,13 +15,13 @@ import { cs } from "@/i18n/cs"
 import {
   biomoleculesApi,
   type PeptidovkaTestQuestionSet,
-  type PeptidovkaTestTeacherView,
   type PeptidovkaTestsTeacherPage,
+  type PeptidovkaTestTeacherView,
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
 import { nLeftOrientationDeg } from "@/lib/peptides"
-import { generatePeptidovkaTestRun } from "@/lib/peptides/test"
+import { regradePeptidovkaAttempt } from "@/lib/peptides/test"
 import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
@@ -243,7 +244,9 @@ export function PeptidovkaTestCreatePage() {
               value={draft.title}
               maxLength={120}
               placeholder={testyStrings.titlePlaceholder}
-              onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, title: event.target.value }))
+              }
             />
           </div>
 
@@ -482,9 +485,7 @@ export function PeptidovkaTestCreatePage() {
             </div>
           </div>
 
-          {invalidMessage !== null && (
-            <p className="text-sm text-destructive">{invalidMessage}</p>
-          )}
+          {invalidMessage !== null && <p className="text-sm text-destructive">{invalidMessage}</p>}
 
           <Button onClick={() => void create()} disabled={!formValid || creating}>
             {creating ? testyStrings.creating : testyStrings.createAction}
@@ -506,11 +507,25 @@ interface PeptidovkaAttemptSummaryLike {
 
 function AttemptRows({
   view,
+  allMolecules,
   onDetail,
 }: {
   view: PeptidovkaTestTeacherView
+  allMolecules: import("@/lib/biomolecules-api").Biomolecule[]
   onDetail: (attempt: PeptidovkaAttemptSummaryLike & { userId: string; username: string }) => void
 }) {
+  const regraded = useMemo(
+    () =>
+      new Map(
+        view.attempts
+          .filter((attempt) => attempt.submittedAt !== null)
+          .map((attempt) => [
+            attempt.attemptId,
+            regradePeptidovkaAttempt(view.test, attempt.seed, attempt.detailJson, allMolecules),
+          ]),
+      ),
+    [view, allMolecules],
+  )
   const byUser = new Map(view.attempts.map((attempt) => [attempt.userId, attempt]))
   const rows = [
     ...view.roster.map((student) => ({
@@ -563,7 +578,15 @@ function AttemptRows({
                     : "—"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular">
-                  {submitted ? `${attempt.correctCount ?? 0} / ${attempt.totalCount ?? 0}` : "—"}
+                  {attempt !== null && submitted ? (
+                    <VerifiedScore
+                      claimed={attempt}
+                      regraded={regraded.get(attempt.attemptId) ?? null}
+                      strings={testyStrings}
+                    />
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right">
                   {submitted && (
@@ -597,31 +620,15 @@ function PeptidovkaAttemptDetail({
   attempt: PeptidovkaAttemptSummaryLike
   allMolecules: import("@/lib/biomolecules-api").Biomolecule[]
 }) {
-  const run = useMemo(
-    () => generatePeptidovkaTestRun(test, attempt.seed, allMolecules),
-    [test, attempt.seed, allMolecules],
+  const regraded = useMemo(
+    () => regradePeptidovkaAttempt(test, attempt.seed, attempt.detailJson, allMolecules),
+    [test, attempt.seed, attempt.detailJson, allMolecules],
   )
-  let parsed: { typed: (string | null)[]; correct: boolean[] } | null = null
-  if (attempt.detailJson !== null) {
-    try {
-      const raw = JSON.parse(attempt.detailJson) as {
-        typed?: (string | null)[]
-        correct?: boolean[]
-      }
-      // Old attempts stored the detail as a bare array of {correct} objects —
-      // the typed answers were added later. Treat anything without the typed
-      // array as detail-unavailable rather than crashing on undefined.
-      if (Array.isArray(raw.typed) && Array.isArray(raw.correct)) {
-        parsed = { typed: raw.typed, correct: raw.correct }
-      }
-    } catch {
-      parsed = null
-    }
-  }
 
-  if (run === null || parsed === null || parsed.typed.length !== run.chains.length) {
+  if (regraded === null) {
     return <p className="text-sm text-muted-foreground">{testyStrings.detailUnavailable}</p>
   }
+  const { run, rows } = regraded
 
   return (
     <div className="space-y-3">
@@ -629,13 +636,14 @@ function PeptidovkaAttemptDetail({
       <ol className="space-y-3">
         {run.chains.map((chain, index) => {
           const structure = run.structures[index] ?? { smiles: "", nIndex: 0 }
-          const typed = parsed.typed[index] ?? null
-          const verdict = parsed.correct[index] ?? false
+          const typed = rows[index]?.typed ?? null
+          const verdict = rows[index]?.correct ?? false
           return (
-                <li
-                  key={`${attempt.attemptId}-${chain}-${typed ?? ""}`}
-                  className="rounded-[4px] border p-3"
-                >
+            <li
+              // biome-ignore lint/suspicious/noArrayIndexKey: fixed list, and two rows may be identical
+              key={`${attempt.attemptId}-${index}`}
+              className="rounded-[4px] border p-3"
+            >
               <div className="flex items-center justify-between gap-3">
                 <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   {testyStrings.peptideNumber.replace("{number}", String(index + 1))}
@@ -663,7 +671,9 @@ function PeptidovkaAttemptDetail({
                 <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                   {peptidovkaStrings.correctAnswerLabel}
                 </p>
-                <p className="break-all font-mono text-xl font-semibold tracking-[0.3em]">{chain}</p>
+                <p className="break-all font-mono text-xl font-semibold tracking-[0.3em]">
+                  {chain}
+                </p>
               </div>
               <p className="mt-2 text-center text-sm">
                 <span className="text-muted-foreground">{peptidovkaStrings.answerLabel}: </span>
@@ -704,9 +714,7 @@ export function PeptidovkaTestResultsPage() {
       setPage(await biomoleculesApi.peptidovkaTests())
     } catch (error) {
       setListError(extractErrorMessage(error, testyStrings.loadError))
-      setPage((current) =>
-        current ?? { tests: [], codes: [], serverNow: new Date().toISOString() },
-      )
+      setPage((current) => current ?? { tests: [], codes: [], serverNow: new Date().toISOString() })
     }
   }, [])
 
@@ -772,9 +780,7 @@ export function PeptidovkaTestResultsPage() {
                 : phase === "open"
                   ? testyStrings.stateOpen
                   : testyStrings.stateClosed
-            const submitted = view.attempts.filter(
-              (attempt) => attempt.submittedAt !== null,
-            ).length
+            const submitted = view.attempts.filter((attempt) => attempt.submittedAt !== null).length
             const expanded = expandedId === view.test.id
             return (
               <Card key={view.test.id}>
@@ -822,12 +828,10 @@ export function PeptidovkaTestResultsPage() {
                             view.roster.length +
                               view.attempts.filter(
                                 (attempt) =>
-                                  !view.roster.some(
-                                    (student) => student.userId === attempt.userId,
-                                  ),
-                                ).length,
-                              ),
-                          )}
+                                  !view.roster.some((student) => student.userId === attempt.userId),
+                              ).length,
+                          ),
+                        )}
                     </p>
                     <div className="flex items-center gap-2">
                       <Button
@@ -855,6 +859,7 @@ export function PeptidovkaTestResultsPage() {
                   {expanded && (
                     <AttemptRows
                       view={view}
+                      allMolecules={allMolecules}
                       onDetail={(attempt) =>
                         setDetailAttempt({
                           testId: view.test.id,

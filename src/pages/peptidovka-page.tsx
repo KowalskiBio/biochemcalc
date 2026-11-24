@@ -255,8 +255,7 @@ function AssignedTests() {
     try {
       const started = await biomoleculesApi.startPeptidovkaTestAttempt(test.id)
       const nextView: PeptidovkaTestStudentView = {
-        test,
-        serverNow: view.serverNow,
+        ...view,
         attempt: {
           ...started,
           detailJson: attempt?.detailJson ?? null,

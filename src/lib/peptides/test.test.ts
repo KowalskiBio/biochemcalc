@@ -12,6 +12,7 @@ import {
   type PeptidovkaTest,
   type PeptidovkaTestRun,
   peptidovkaTestPoolWeights,
+  regradePeptidovkaAttempt,
 } from "@/lib/peptides/test"
 
 const MOLECULES: BiomoleculeLike[] = [
@@ -247,5 +248,32 @@ describe("chainFingerprints", () => {
   it("is non-reversible: the chain text never appears in the fingerprint", () => {
     const chain = "MKYPHE"
     expect(chainFingerprints([chain])[0]).not.toContain(chain)
+  })
+})
+
+describe("regradePeptidovkaAttempt", () => {
+  const run = requireRun(makeTest(), 99)
+  const detail = (typed: (string | null)[]) =>
+    JSON.stringify({
+      fingerprints: chainFingerprints(run.chains),
+      typed,
+      correct: run.chains.map(() => true), // always claimed; must be ignored
+    })
+
+  it("grades the typed answers and ignores claimed verdicts", () => {
+    const grade = (typed: (string | null)[]) =>
+      regradePeptidovkaAttempt(makeTest(), 99, detail(typed), MOLECULES)
+    expect(grade(run.chains)).toMatchObject({ correct: 5, total: 5 })
+    expect(grade(run.chains.map(() => "XX"))).toMatchObject({ correct: 0, total: 5 })
+    expect(grade(run.chains.map(() => null))).toMatchObject({ correct: 0, total: 5 })
+  })
+
+  it("refuses a changed run, truncated answers and malformed detail", () => {
+    expect(regradePeptidovkaAttempt(makeTest(), 100, detail(run.chains), MOLECULES)).toBeNull()
+    const short = detail(run.chains.slice(0, 1))
+    expect(regradePeptidovkaAttempt(makeTest(), 99, short, MOLECULES)).toBeNull()
+    for (const bad of [null, "null", "{}", "nope"]) {
+      expect(regradePeptidovkaAttempt(makeTest(), 99, bad, MOLECULES)).toBeNull()
+    }
   })
 })

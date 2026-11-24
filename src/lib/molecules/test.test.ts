@@ -5,7 +5,10 @@ import {
   enumerateTestPairs,
   generatableTestTypes,
   generateTestSession,
+  questionFingerprints,
+  regradeTestAttempt,
   resolveTestScope,
+  tagTestQuestions,
   testPairCount,
   testQuestionPool,
 } from "@/lib/molecules/test"
@@ -226,6 +229,47 @@ describe("generateTestSession", () => {
     )
     for (const question of questions) {
       expect(allowed.has(pairIdentity(question))).toBe(true)
+    }
+  })
+})
+
+describe("regradeTestAttempt", () => {
+  const test = makeTest({ questionTypes: ["structureToName"] })
+  const seed = 99
+  const molecules = TEST_AMINO_ACIDS
+
+  function detail(pick: "right" | "wrong" | "none") {
+    const questions = tagTestQuestions(generateTestSession(test, seed, molecules) ?? [], seed)
+    return {
+      fingerprints: questionFingerprints(questions, requirePool(test, molecules).molecules),
+      answers: questions.map((question) => ({
+        uid: question.uid,
+        correct: true, // always claimed; must be ignored
+        selectedKey:
+          pick === "none"
+            ? null
+            : (question.options.find((option) => option.correct === (pick === "right"))?.key ??
+              null),
+      })),
+    }
+  }
+
+  it("grades the stored picks and ignores claimed verdicts", () => {
+    const grade = (pick: "right" | "wrong" | "none") =>
+      regradeTestAttempt(test, seed, JSON.stringify(detail(pick)), molecules)
+    expect(grade("right")).toMatchObject({ correct: 10, total: 10 })
+    expect(grade("wrong")).toMatchObject({ correct: 0, total: 10 })
+    expect(grade("none")).toMatchObject({ correct: 0, total: 10 })
+  })
+
+  it("refuses edited material, truncated answers and malformed detail", () => {
+    const full = detail("right")
+    const renamed = molecules.map((molecule) => ({ ...molecule, name: `${molecule.name} X` }))
+    expect(regradeTestAttempt(test, seed, JSON.stringify(full), renamed)).toBeNull()
+    const short = { ...full, answers: full.answers.slice(0, 1) }
+    expect(regradeTestAttempt(test, seed, JSON.stringify(short), molecules)).toBeNull()
+    for (const bad of [null, "null", "{}", "nope"]) {
+      expect(regradeTestAttempt(test, seed, bad, molecules)).toBeNull()
     }
   })
 })
