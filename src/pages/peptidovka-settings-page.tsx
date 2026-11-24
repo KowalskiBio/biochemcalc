@@ -17,6 +17,7 @@ import {
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
+import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const peptidovkaStrings = cs.peptidovka
@@ -26,6 +27,31 @@ const LENGTH_MIN = 2
 const LENGTH_MAX = 20
 const SECONDS_MIN = 3
 const SECONDS_MAX = 120
+/** Weight input range. 1 = default odds, 0.5 = half as likely, 0 = off. */
+const WEIGHT_MIN = 0
+const WEIGHT_MAX = 1
+const DEFAULT_WEIGHT = 1
+
+/** Czech two-decimal readout of a weight: "1,00", "0,50", "0,25", "0". */
+function formatWeight(weight: number): string {
+  return weight === 0 ? "0" : weight.toFixed(2).replace(".", ",")
+}
+
+/** Decimal parse accepting either Czech comma or dot; blank/garbage is invalid. */
+function parseWeight(text: string): number | undefined {
+  const trimmed = text.trim()
+  if (!/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) {
+    return undefined
+  }
+  const weight = Number(trimmed.replace(",", "."))
+  return Number.isFinite(weight) ? weight : undefined
+}
+
+function isWeightValid(weight: number | undefined): weight is number {
+  return (
+    weight !== undefined && Number.isFinite(weight) && weight >= WEIGHT_MIN && weight <= WEIGHT_MAX
+  )
+}
 
 interface ModeCardCopy {
   title: string
@@ -63,12 +89,28 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
   const [minLenText, setMinLenText] = useState(String(settings.minLen))
   const [maxLenText, setMaxLenText] = useState(String(settings.maxLen))
   const [secondsText, setSecondsText] = useState(String(settings.secondsPerAa))
-  const [slugs, setSlugs] = useState<string[]>(settings.slugs)
+  // Text drafts keep blank and half-typed values visible. A pool molecule
+  // missing from the saved map starts at the default weight; only an
+  // explicit zero switches it off. Stale slugs are not carried into the draft.
+  const [weightTexts, setWeightTexts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      pool.map((molecule) => [
+        molecule.slug,
+        formatWeight(settings.weights[molecule.slug] ?? DEFAULT_WEIGHT),
+      ]),
+    ),
+  )
   const [saving, setSaving] = useState(false)
 
   const minLen = parseBound(minLenText)
   const maxLen = parseBound(maxLenText)
   const seconds = parseBound(secondsText)
+  const parsedWeights = new Map(
+    pool.map((molecule) => [
+      molecule.slug,
+      parseWeight(weightTexts[molecule.slug] ?? formatWeight(DEFAULT_WEIGHT)),
+    ]),
+  )
 
   const lengthValid =
     minLen !== undefined &&
@@ -77,37 +119,45 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
     maxLen <= LENGTH_MAX &&
     maxLen >= minLen
   const secondsValid = seconds !== undefined && seconds >= SECONDS_MIN && seconds <= SECONDS_MAX
-  // Count only slugs that are still selectable (a molecule may have been
-  // deleted or stripped of oneLetter since the settings were saved).
-  const selectedInPool = pool.filter((molecule) => slugs.includes(molecule.slug)).length
-  const poolValid = selectedInPool >= 2
+  const weightsValid = pool.every((molecule) => isWeightValid(parsedWeights.get(molecule.slug)))
+  // Count only valid positive weights that are still selectable (a molecule
+  // may have been deleted or stripped of oneLetter since the settings save).
+  const activeInPool = pool.filter((molecule) => {
+    const weight = parsedWeights.get(molecule.slug)
+    return isWeightValid(weight) && weight > 0
+  }).length
+  const poolValid = activeInPool >= 2
   const invalidMessage = !lengthValid
     ? peptidovkaStrings.invalidLength
     : !secondsValid
       ? peptidovkaStrings.invalidSeconds
-      : !poolValid
-        ? peptidovkaStrings.invalidPool
-        : null
+      : !weightsValid
+        ? peptidovkaStrings.invalidWeight
+        : !poolValid
+          ? peptidovkaStrings.invalidPool
+          : null
 
-  const toggleSlug = (slug: string) => {
-    setSlugs((current) =>
-      current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug],
-    )
+  const setWeightText = (slug: string, text: string) => {
+    setWeightTexts((current) => ({ ...current, [slug]: text }))
   }
 
   const save = async () => {
     if (saving || invalidMessage !== null || minLen === undefined || maxLen === undefined) return
+    // Only current-pool slugs go out — a complete snapshot including zeros —
+    // so the teacher can always re-save over drifted settings.
+    const postedWeights: Record<string, number> = {}
+    for (const molecule of pool) {
+      const weight = parsedWeights.get(molecule.slug)
+      if (!isWeightValid(weight)) return
+      postedWeights[molecule.slug] = weight
+    }
     setSaving(true)
-    // A slug from an older save can outlive its molecule; posting it would
-    // be rejected server-side. Only current-pool slugs go out, so the
-    // teacher can always re-save over drifted settings.
-    const postedSlugs = slugs.filter((slug) => pool.some((molecule) => molecule.slug === slug))
     try {
       await biomoleculesApi.updatePeptidovkaSettings(settings.mode, {
         minLen,
         maxLen,
         secondsPerAa: seconds ?? 0,
-        slugs: postedSlugs,
+        weights: postedWeights,
       })
       toast({ title: peptidovkaStrings.settingsSaved, variant: "default" })
     } catch (error) {
@@ -183,33 +233,55 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
             <p className="text-sm font-medium">{peptidovkaStrings.poolLabel}</p>
             <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               {peptidovkaStrings.poolSelected
-                .replace("{selected}", String(selectedInPool))
+                .replace("{selected}", String(activeInPool))
                 .replace("{total}", String(pool.length))}
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
+          <p className="text-xs text-muted-foreground">{peptidovkaStrings.poolHint}</p>
+          <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2 xl:grid-cols-3">
             {pool.map((molecule) => {
-              const oneLetter = traitOf(molecule, TRAIT.oneLetter)
+              // The pool filter guarantees oneLetter; the badge column
+              // anchors each row so the inputs stay scannable.
+              const oneLetter = traitOf(molecule, TRAIT.oneLetter) ?? ""
+              const weightText = weightTexts[molecule.slug] ?? formatWeight(DEFAULT_WEIGHT)
+              const weight = parsedWeights.get(molecule.slug)
+              const weightValid = isWeightValid(weight)
+              const off = weight === 0
               return (
-                <label
+                <div
                   key={molecule.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-[4px] px-1 py-1 text-sm transition-colors duration-150 hover:bg-muted/50"
+                  className="flex items-center gap-3 rounded-[4px] px-1.5 py-1 transition-colors duration-150 hover:bg-muted/50"
                 >
-                  <input
-                    type="checkbox"
-                    checked={slugs.includes(molecule.slug)}
-                    onChange={() => toggleSlug(molecule.slug)}
-                    className="h-4 w-4 shrink-0 accent-primary"
-                  />
-                  <span className="min-w-0 truncate">
+                  <span className="w-4 shrink-0 text-center font-mono text-xs text-muted-foreground">
+                    {oneLetter}
+                  </span>
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 truncate text-sm",
+                      off && "text-muted-foreground",
+                    )}
+                  >
                     <RichText text={molecule.name} />
                   </span>
-                  {oneLetter !== undefined && (
-                    <span className="ml-auto font-mono text-xs text-muted-foreground">
-                      {oneLetter}
-                    </span>
-                  )}
-                </label>
+                  <Input
+                    id={`${settings.mode}-weight-${molecule.slug}`}
+                    type="text"
+                    inputMode="decimal"
+                    value={weightText}
+                    onChange={(event) => setWeightText(molecule.slug, event.target.value)}
+                    onBlur={() => {
+                      // Canonicalize only complete, in-range values. Invalid
+                      // text stays visible so it can be corrected, not coerced.
+                      if (weightValid && weight !== undefined) {
+                        setWeightText(molecule.slug, formatWeight(weight))
+                      }
+                    }}
+                    aria-label={molecule.name}
+                    aria-invalid={!weightValid}
+                    autoComplete="off"
+                    className="w-20 shrink-0 px-2 text-right font-mono tabular-nums"
+                  />
+                </div>
               )
             })}
           </div>
@@ -309,6 +381,26 @@ export function PeptidovkaSettingsPage() {
         </h1>
         <p className="text-sm text-muted-foreground">{peptidovkaStrings.settingsDescription}</p>
       </div>
+
+      {/* Assigned tests: prominent at the top, above the per-mode settings. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{cs.peptidovka.testy.teacherTitle}</CardTitle>
+          <CardDescription>{cs.peptidovka.testy.teacherDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Button asChild>
+            <Link to="/biomolekuly/peptidovka/testy/vytvorit">
+              {cs.peptidovka.testy.createAction}
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/biomolekuly/peptidovka/testy/vysledky">
+              {cs.biomolekuly.testy.listTitle}
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {loadFailed ? (
         <Card>

@@ -14,13 +14,17 @@ use crate::db::repos::biomolecule_repo::{
 };
 use crate::db::repos::{
     BiomoleculeHistoryRepo, BiomoleculeLeaderboardRow, BiomoleculeQuizRepo, BiomoleculeRepo,
-    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, PeptidovkaLeaderboardRow,
-    PeptidovkaRepo, PeptidovkaSettingsRecord,
+    BiomoleculeStreakLeaderboardRow, BiomoleculeStreakRepo, BiomoleculeTestAttemptRecord,
+    BiomoleculeTestAttemptSummaryRow, BiomoleculeTestRecord, BiomoleculeTestRepo,
+    BiomoleculeTestRosterRow, NewBiomoleculeTest, NewPeptidovkaTest, PeptidovkaLeaderboardRow,
+    PeptidovkaRepo, PeptidovkaTestAttemptRecord, PeptidovkaTestAttemptSummaryRow,
+    PeptidovkaTestRecord, PeptidovkaTestRepo, PeptidovkaTestRosterRow, UserRepo,
 };
 use crate::db::DbError;
-use rusqlite::Connection;
+use chrono::{DateTime, Utc};
+use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 const MAX_CATEGORY_NAME_CHARS: usize = 80;
@@ -60,6 +64,42 @@ const PEPTIDOVKA_MIN_LEN_FLOOR: i64 = 2;
 const PEPTIDOVKA_MAX_LEN_CEILING: i64 = 20;
 const PEPTIDOVKA_SECONDS_PER_AA_MIN: i64 = 3;
 const PEPTIDOVKA_SECONDS_PER_AA_MAX: i64 = 120;
+
+/// Teacher-created Biomolekuly tests: title cap and the quiz-length bounds.
+/// The question-type ids mirror the frontend quiz config's canonical list.
+const MAX_TEST_TITLE_CHARS: usize = 120;
+const MAX_TEST_QUESTIONS: i64 = 200;
+
+/// Accepted dataset drift between a test's configured size and the batch a
+/// student can actually produce. Generation can *shrink* a batch (a molecule
+/// was deleted, a pool shrank) but it can never grow it, so a submit whose
+/// `total_count` exceeds the configured count by more than this is bogus.
+const TEST_COUNT_DRIFT_TOLERANCE: i64 = 5;
+const BIOMOLECULE_QUESTION_TYPES: [&str; 7] = [
+    "nameToLetter",
+    "letterToName",
+    "nameToStructure",
+    "structureToName",
+    "letterToStructure",
+    "structureToLetter",
+    "characteristic",
+];
+const BIOMOLECULE_QUESTION_SETS: [&str; 2] = ["fixed", "random"];
+
+/// Teacher-created Peptidovka tests: the amino-acid pool has to be big enough
+/// to build distinct peptides, and the per-test peptide count/length mirror
+/// the game's own bounds (1-20 peptides, each 2-20 residues).
+const PEPTIDOVKA_TEST_MIN_POOL: usize = 2;
+const PEPTIDOVKA_TEST_MAX_COUNT: i64 = 20;
+const PEPTIDOVKA_TEST_MIN_LENGTH: i64 = 2;
+const PEPTIDOVKA_TEST_MAX_LENGTH: i64 = 20;
+
+/// A late submission is accepted for a minute after the window closes — the
+/// client may finish its last answer right at the deadline.
+const SUBMIT_GRACE_SECONDS: i64 = 60;
+/// Upper bound on a client-supplied per-item result breakdown. Large enough for
+/// 200 questions (~18 KB worst case), still bounded against abuse.
+const MAX_TEST_DETAIL_JSON: usize = 65536;
 
 /// The validated trait vocabulary (values stored as text in
 /// `biomolecule_traits`; adding a kind needs no schema change).
@@ -194,9 +234,7 @@ pub mod traits {
         if allowed.contains(&value) {
             Ok(value.to_string())
         } else {
-            Err(DbError::Validation(format!(
-                "Invalid {key} value: {value}"
-            )))
+            Err(DbError::Validation(format!("Invalid {key} value: {value}")))
         }
     }
 
@@ -323,9 +361,9 @@ fn validate_topic_name(name: &str) -> Result<&str, DbError> {
 fn validate_description(description: Option<&str>) -> Result<Option<String>, DbError> {
     match description.map(str::trim) {
         None | Some("") => Ok(None),
-        Some(v) if v.chars().count() > MAX_DESCRIPTION_CHARS => Err(DbError::Validation(
-            format!("Description must be at most {MAX_DESCRIPTION_CHARS} characters"),
-        )),
+        Some(v) if v.chars().count() > MAX_DESCRIPTION_CHARS => Err(DbError::Validation(format!(
+            "Description must be at most {MAX_DESCRIPTION_CHARS} characters"
+        ))),
         Some(v) => Ok(Some(v.to_string())),
     }
 }
@@ -388,10 +426,7 @@ fn validate_projection(projection: Option<&str>) -> Result<Option<String>, DbErr
             "Projection type must be \"haworth\"".into(),
         ));
     }
-    if !matches!(
-        object.get("ringSize").and_then(|v| v.as_i64()),
-        Some(5 | 6)
-    ) {
+    if !matches!(object.get("ringSize").and_then(|v| v.as_i64()), Some(5 | 6)) {
         return Err(DbError::Validation(
             "Projection ringSize must be 5 or 6".into(),
         ));
@@ -508,7 +543,9 @@ pub fn do_update_category_meta(
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim();
     if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
-        return Err(DbError::NotFound(format!("Category {category_id} not found")));
+        return Err(DbError::NotFound(format!(
+            "Category {category_id} not found"
+        )));
     }
     check_version(
         &format!("Category {category_id}"),
@@ -530,7 +567,13 @@ pub fn do_update_category_meta(
     } else {
         None
     };
-    BiomoleculeRepo::update_category_field(conn, category_id, payload.field, value.as_deref(), teacher_id)?;
+    BiomoleculeRepo::update_category_field(
+        conn,
+        category_id,
+        payload.field,
+        value.as_deref(),
+        teacher_id,
+    )?;
     let new_name = BiomoleculeRepo::category_name(conn, category_id)?
         .unwrap_or_else(|| category_id.to_string());
     let detail = match payload.field {
@@ -579,7 +622,9 @@ pub fn do_delete_category(
 ) -> Result<BiomoleculeData, DbError> {
     let category_id = payload.category_id.trim();
     if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
-        return Err(DbError::NotFound(format!("Category {category_id} not found")));
+        return Err(DbError::NotFound(format!(
+            "Category {category_id} not found"
+        )));
     }
     check_version(
         &format!("Category {category_id}"),
@@ -616,7 +661,9 @@ pub fn do_create_topic(
 ) -> Result<BiomoleculeData, DbError> {
     let name = validate_topic_name(&payload.name)?;
     let description = validate_description(payload.description.as_deref())?;
-    let slug = unique_slug(name, "tema", |slug| BiomoleculeRepo::topic_exists(conn, slug))?;
+    let slug = unique_slug(name, "tema", |slug| {
+        BiomoleculeRepo::topic_exists(conn, slug)
+    })?;
     let position = BiomoleculeRepo::next_topic_position(conn)?;
     BiomoleculeRepo::insert_topic(
         conn,
@@ -670,8 +717,8 @@ pub fn do_update_topic_meta(
         value.as_deref(),
         teacher_id,
     )?;
-    let new_name = BiomoleculeRepo::topic_name(conn, topic_id)?
-        .unwrap_or_else(|| topic_id.to_string());
+    let new_name =
+        BiomoleculeRepo::topic_name(conn, topic_id)?.unwrap_or_else(|| topic_id.to_string());
     let detail = match payload.field {
         TopicField::Name => format!(
             "name: {} → {}",
@@ -715,7 +762,8 @@ pub fn do_delete_topic(
         BiomoleculeRepo::topic_version(conn, topic_id)?,
         payload.expected_updated_at.as_deref(),
     )?;
-    let label = BiomoleculeRepo::topic_name(conn, topic_id)?.unwrap_or_else(|| topic_id.to_string());
+    let label =
+        BiomoleculeRepo::topic_name(conn, topic_id)?.unwrap_or_else(|| topic_id.to_string());
     BiomoleculeRepo::delete_topic(conn, topic_id)?;
     BiomoleculeHistoryRepo::record(conn, teacher_id, "topic", "delete", &label, None)?;
     BiomoleculeRepo::list_data(conn)
@@ -756,7 +804,9 @@ fn validate_molecule_input(
     exclude_id: Option<Uuid>,
 ) -> Result<(String, String, Option<String>, Vec<(String, String)>), DbError> {
     if !is_valid_slug(category_id) || !BiomoleculeRepo::category_exists(conn, category_id)? {
-        return Err(DbError::NotFound(format!("Category {category_id} not found")));
+        return Err(DbError::NotFound(format!(
+            "Category {category_id} not found"
+        )));
     }
     let name = validate_molecule_name(name)?;
     let smiles = validate_smiles(smiles)?;
@@ -1297,7 +1347,8 @@ pub struct PeptidovkaSettings {
     pub min_len: i64,
     pub max_len: i64,
     pub seconds_per_aa: i64,
-    pub slugs: Vec<String>,
+    /// Amino-acid slug → weight, as stored.
+    pub weights: HashMap<String, f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1308,7 +1359,11 @@ pub struct UpdatePeptidovkaSettingsPayload {
     pub min_len: i64,
     pub max_len: i64,
     pub seconds_per_aa: i64,
-    pub slugs: Vec<String>,
+    /// Raw JSON value: validated by `validate_peptidovka_weights` rather than
+    /// by serde, so a non-numeric weight or a non-object payload produces the
+    /// same `Validation` error as the other bounds instead of a deserialization
+    /// failure at the HTTP edge.
+    pub weights: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1333,17 +1388,76 @@ fn validate_peptidovka_mode(mode: &str) -> Result<&str, DbError> {
     }
 }
 
+/// Validate the weighted pool: a JSON object whose keys are non-empty slugs
+/// and whose values are finite numbers in `[0, 1]`. At least two entries must
+/// carry a positive weight, mirroring the frontend's ≥2 pool guard. Unknown
+/// (or since-deleted) slugs are tolerated: a saved setting may outlive the
+/// molecule it references, and the game simply skips what it cannot draw.
+fn validate_peptidovka_weights(
+    raw: serde_json::Value,
+) -> Result<std::collections::BTreeMap<String, f64>, DbError> {
+    let object = raw.as_object().ok_or_else(|| {
+        DbError::Validation(
+            "Weights must be a JSON object mapping amino-acid slugs to weights".into(),
+        )
+    })?;
+    let mut weights = std::collections::BTreeMap::new();
+    let mut positive = 0usize;
+    for (key, value) in object {
+        let slug = key.trim();
+        if slug.is_empty() {
+            return Err(DbError::Validation(
+                "Weight keys must be non-empty amino-acid slugs".into(),
+            ));
+        }
+        let weight = value
+            .as_f64()
+            .ok_or_else(|| DbError::Validation(format!("Weight for {slug} must be a number")))?;
+        if !weight.is_finite() || !(0.0..=1.0).contains(&weight) {
+            return Err(DbError::Validation(format!(
+                "Weight for {slug} must be a number between 0 and 1"
+            )));
+        }
+        if weight > 0.0 {
+            positive += 1;
+        }
+        weights.insert(slug.to_string(), weight);
+    }
+    if positive < 2 {
+        return Err(DbError::Validation(
+            "Weights must include at least two amino acids with a weight above 0".into(),
+        ));
+    }
+    Ok(weights)
+}
+
 /// Both modes' settings, Učeň first.
 pub fn do_list_peptidovka_settings(conn: &Connection) -> Result<Vec<PeptidovkaSettings>, DbError> {
-    PeptidovkaRepo::list_settings(conn)?
-        .into_iter()
-        .map(|row: PeptidovkaSettingsRecord| {
+    let rows: Vec<(String, i64, i64, i64, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT mode, min_len, max_len, seconds_per_aa, weights
+             FROM peptidovka_settings
+             ORDER BY CASE mode WHEN 'ucen' THEN 0 ELSE 1 END, mode",
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        mapped.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    rows.into_iter()
+        .map(|(mode, min_len, max_len, seconds_per_aa, weights_json)| {
             Ok(PeptidovkaSettings {
-                mode: row.mode,
-                min_len: row.min_len,
-                max_len: row.max_len,
-                seconds_per_aa: row.seconds_per_aa,
-                slugs: serde_json::from_str(&row.slugs_json)?,
+                mode,
+                min_len,
+                max_len,
+                seconds_per_aa,
+                weights: serde_json::from_str(&weights_json)?,
             })
         })
         .collect()
@@ -1357,7 +1471,7 @@ pub fn do_update_peptidovka_settings(
     teacher_id: &Uuid,
     payload: UpdatePeptidovkaSettingsPayload,
 ) -> Result<(), DbError> {
-    let mode = validate_peptidovka_mode(&payload.mode)?;
+    let mode = validate_peptidovka_mode(&payload.mode)?.to_string();
     if payload.min_len < PEPTIDOVKA_MIN_LEN_FLOOR {
         return Err(DbError::Validation(format!(
             "Minimum length must be at least {PEPTIDOVKA_MIN_LEN_FLOOR}"
@@ -1380,51 +1494,40 @@ pub fn do_update_peptidovka_settings(
             "Seconds per amino acid must be {PEPTIDOVKA_SECONDS_PER_AA_MIN}-{PEPTIDOVKA_SECONDS_PER_AA_MAX}"
         )));
     }
-    let mut seen = std::collections::HashSet::new();
-    let slugs: Vec<String> = payload
-        .slugs
-        .iter()
-        .map(|slug| slug.trim().to_string())
-        .filter(|slug| !slug.is_empty())
-        .filter(|slug| seen.insert(slug.clone()))
-        .collect();
-    if slugs.is_empty() || slugs.iter().any(|slug| !is_valid_slug(slug)) {
-        return Err(DbError::Validation(
-            "Slugs must be a non-empty list of amino-acid slugs".into(),
-        ));
-    }
-    // Format alone lets a typo'd slug silently break the game pool later;
-    // demand every slug names a real molecule (any category — a teacher's
-    // custom amino-acid entry is just as valid as a seeded one).
-    for slug in &slugs {
-        if !BiomoleculeRepo::molecule_slug_exists(conn, slug)? {
-            return Err(DbError::Validation(format!(
-                "Unknown molecule slug: {slug}"
-            )));
-        }
-    }
-    let slugs_json = serde_json::to_string(&slugs)?;
-    PeptidovkaRepo::upsert_settings(
-        conn,
-        mode,
-        payload.min_len,
-        payload.max_len,
-        payload.seconds_per_aa,
-        &slugs_json,
+    // Validation happens before any write, so a rejected payload leaves the
+    // mode's stored settings untouched.
+    let weights = validate_peptidovka_weights(payload.weights)?;
+    let weights_json = serde_json::to_string(&weights)?;
+    conn.execute(
+        "INSERT INTO peptidovka_settings
+             (mode, min_len, max_len, seconds_per_aa, weights)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(mode) DO UPDATE SET
+             min_len = excluded.min_len,
+             max_len = excluded.max_len,
+             seconds_per_aa = excluded.seconds_per_aa,
+             weights = excluded.weights",
+        rusqlite::params![
+            mode,
+            payload.min_len,
+            payload.max_len,
+            payload.seconds_per_aa,
+            weights_json
+        ],
     )?;
     let detail = format!(
-        "{}–{} · {} s/aa · {} slugs",
+        "{}–{} · {} s/aa · {} amino acids",
         payload.min_len,
         payload.max_len,
         payload.seconds_per_aa,
-        slugs.len()
+        weights.len()
     );
     BiomoleculeHistoryRepo::record(
         conn,
         teacher_id,
         "peptidovka",
         "settings",
-        mode,
+        &mode,
         Some(detail.as_str()),
     )
 }
@@ -1453,6 +1556,1182 @@ pub fn do_record_peptidovka_run(
     )
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteCodeCountView {
+    pub code: String,
+    pub student_count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestView {
+    pub id: String,
+    pub title: String,
+    pub category_slugs: Vec<String>,
+    pub molecule_ids: Vec<String>,
+    pub question_types: Vec<String>,
+    pub question_count: i64,
+    pub question_set: String,
+    pub monochrome: bool,
+    pub available_from: String,
+    pub available_to: String,
+    /// Teacher-only: students get the seed of their own attempt instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    pub created_at: String,
+    /// Student invite codes this test targets; `[]` means ALL students.
+    /// Omitted from student responses — the audience is the teacher's business
+    /// (students only need to know whether the test is available to them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_codes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestAttemptSummary {
+    pub attempt_id: String,
+    pub user_id: String,
+    pub username: String,
+    pub started_at: String,
+    pub submitted_at: Option<String>,
+    pub total_count: Option<i64>,
+    pub correct_count: Option<i64>,
+    /// The attempt's generation seed, so the teacher can regenerate the batch.
+    pub seed: i64,
+    /// Stored per-item breakdown; `None` until the attempt is submitted.
+    pub detail_json: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestRosterEntry {
+    pub user_id: String,
+    pub username: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestTeacherView {
+    pub test: BiomoleculeTestView,
+    pub attempts: Vec<BiomoleculeTestAttemptSummary>,
+    pub roster: Vec<BiomoleculeTestRosterEntry>,
+}
+
+/// Page-level teacher response: the tests plus the invite-code picker data and
+/// one server timestamp. Kept top-level (not per test) so the create form can
+/// offer audience codes even when no test exists yet.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestsTeacherPage {
+    pub tests: Vec<BiomoleculeTestTeacherView>,
+    /// All student invite codes and their registered-user counts.
+    pub codes: Vec<InviteCodeCountView>,
+    pub server_now: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestAttemptView {
+    pub attempt_id: String,
+    pub seed: i64,
+    pub started_at: String,
+    pub submitted_at: Option<String>,
+    pub total_count: Option<i64>,
+    pub correct_count: Option<i64>,
+    pub detail_json: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestStudentView {
+    pub test: BiomoleculeTestView,
+    pub attempt: Option<BiomoleculeTestAttemptView>,
+    /// Server clock at listing time, so the client can offset its own clock
+    /// when rendering the window/deadline (same purpose as the teacher page's
+    /// `serverNow`).
+    pub server_now: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestStartResult {
+    /// `"started"` for a new attempt, `"exists"` when one was already there.
+    pub status: String,
+    pub attempt_id: String,
+    pub seed: i64,
+    pub started_at: String,
+    pub submitted_at: Option<String>,
+    pub total_count: Option<i64>,
+    pub correct_count: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBiomoleculeTestPayload {
+    pub title: String,
+    /// Raw JSON arrays: validated here (not by serde) so malformed values get
+    /// the same `Validation` error as the other bounds.
+    #[serde(default)]
+    pub category_slugs: serde_json::Value,
+    #[serde(default)]
+    pub molecule_ids: serde_json::Value,
+    #[serde(default)]
+    pub question_types: serde_json::Value,
+    pub question_count: i64,
+    pub question_set: String,
+    #[serde(default)]
+    pub monochrome: bool,
+    pub available_from: String,
+    pub available_to: String,
+    /// Optional client-chosen reproducibility seed; omitted means server-side.
+    #[serde(default)]
+    pub seed: Option<i64>,
+    /// Student invite codes to target; omitted/`[]` means ALL students.
+    #[serde(default = "empty_json_array")]
+    pub assigned_codes: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiomoleculeTestIdPayload {
+    pub test_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitBiomoleculeTestAttemptPayload {
+    pub attempt_id: Uuid,
+    pub total_count: i64,
+    pub correct_count: i64,
+    #[serde(default)]
+    pub detail_json: Option<String>,
+}
+
+fn parse_json_string_array(raw: &serde_json::Value, field: &str) -> Result<Vec<String>, DbError> {
+    let items = raw
+        .as_array()
+        .ok_or_else(|| DbError::Validation(format!("{field} must be a JSON array")))?;
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        let value = item
+            .as_str()
+            .ok_or_else(|| DbError::Validation(format!("{field} must contain only strings")))?;
+        values.push(value.trim().to_string());
+    }
+    Ok(values)
+}
+
+/// `#[serde(default)]` for a JSON array field: an omitted `assignedCodes` means
+/// ALL students (the same as an explicit `[]`).
+fn empty_json_array() -> serde_json::Value {
+    serde_json::Value::Array(Vec::new())
+}
+
+/// Every targeted code must be an existing student invite code. Unknown codes
+/// are `NotFound` (like an unknown category slug); a teacher-role code is a
+/// `Validation` error because it can never name a student group.
+fn validate_assigned_codes(conn: &Connection, codes: &[String]) -> Result<(), DbError> {
+    for code in codes {
+        let role: Option<String> = conn
+            .query_row(
+                "SELECT role FROM invite_codes WHERE code = ?1",
+                rusqlite::params![code],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(DbError::Sqlite)?;
+        match role.as_deref() {
+            Some("student") => {}
+            Some(_) => {
+                return Err(DbError::Validation(format!(
+                    "Invite code {code} is not a student code"
+                )))
+            }
+            None => return Err(DbError::NotFound(format!("Invite code {code} not found"))),
+        }
+    }
+    Ok(())
+}
+
+/// Trimmed, order-preserving dedupe of a teacher's audience selection.
+fn normalize_assigned_codes(codes: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    codes
+        .into_iter()
+        .filter(|code| seen.insert(code.clone()))
+        .collect()
+}
+
+/// The audience gate shared by both test systems: `[]` = ALL students;
+/// otherwise the student's `users.invite_code` must be one of the codes.
+fn test_audience_matches(
+    assigned_codes_json: &str,
+    student_code: Option<&str>,
+) -> Result<bool, DbError> {
+    let codes: Vec<String> = serde_json::from_str(assigned_codes_json)?;
+    if codes.is_empty() {
+        return Ok(true);
+    }
+    Ok(student_code.is_some_and(|code| codes.iter().any(|assigned| assigned == code)))
+}
+
+fn student_invite_code(conn: &Connection, student_id: &Uuid) -> Result<Option<String>, DbError> {
+    Ok(UserRepo::get_by_id(conn, student_id)?.invite_code)
+}
+
+fn parse_client_instant(field: &str, raw: &str) -> Result<DateTime<Utc>, DbError> {
+    DateTime::parse_from_rfc3339(raw.trim())
+        .map(|instant| instant.with_timezone(&Utc))
+        .map_err(|_| DbError::Validation(format!("{field} must be an RFC 3339 instant")))
+}
+
+fn stored_instant(raw: &str) -> Result<DateTime<Utc>, DbError> {
+    DateTime::parse_from_rfc3339(raw.trim())
+        .map(|instant| instant.with_timezone(&Utc))
+        .map_err(|_| DbError::Internal(format!("Stored instant is invalid: {raw}")))
+}
+
+/// The window check always runs on the server clock, never on a string
+/// comparison (RFC 3339 offsets make lexical order meaningless).
+fn test_is_open(test: &BiomoleculeTestRecord, now: DateTime<Utc>) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(test.available_from.trim()),
+        DateTime::parse_from_rfc3339(test.available_to.trim()),
+    ) {
+        (Ok(from), Ok(to)) => {
+            let from = from.with_timezone(&Utc);
+            let to = to.with_timezone(&Utc);
+            from <= now && now <= to
+        }
+        _ => false,
+    }
+}
+
+/// A reproducible per-attempt seed for `random` tests (fixed tests copy theirs).
+fn generate_test_seed() -> i64 {
+    (crate::commands::practice::entropy_seed() & i64::MAX as u64) as i64
+}
+
+fn test_view(record: &BiomoleculeTestRecord) -> Result<BiomoleculeTestView, DbError> {
+    Ok(BiomoleculeTestView {
+        id: record.id.to_string(),
+        title: record.title.clone(),
+        category_slugs: serde_json::from_str(&record.category_slugs)?,
+        molecule_ids: serde_json::from_str(&record.molecule_ids)?,
+        question_types: serde_json::from_str(&record.question_types)?,
+        question_count: record.question_count,
+        question_set: record.question_set.clone(),
+        monochrome: record.monochrome,
+        available_from: record.available_from.clone(),
+        available_to: record.available_to.clone(),
+        seed: Some(record.seed),
+        created_at: record.created_at.clone(),
+        assigned_codes: Some(serde_json::from_str(&record.assigned_codes)?),
+    })
+}
+
+/// Student copy of `test_view`: strips the teacher-only audience list and
+/// the generation seed. Attempts carry the seed they generate from, so a fixed
+/// test cannot be previewed before it is started.
+fn student_test_view(record: &BiomoleculeTestRecord) -> Result<BiomoleculeTestView, DbError> {
+    let mut view = test_view(record)?;
+    view.assigned_codes = None;
+    view.seed = None;
+    Ok(view)
+}
+
+fn attempt_summary_view(row: &BiomoleculeTestAttemptSummaryRow) -> BiomoleculeTestAttemptSummary {
+    BiomoleculeTestAttemptSummary {
+        attempt_id: row.attempt.id.to_string(),
+        user_id: row.attempt.user_id.to_string(),
+        username: row.username.clone(),
+        started_at: row.attempt.started_at.clone(),
+        submitted_at: row.attempt.submitted_at.clone(),
+        total_count: row.attempt.total_count,
+        correct_count: row.attempt.correct_count,
+        seed: row.attempt.seed,
+        detail_json: row.attempt.detail_json.clone(),
+    }
+}
+
+fn roster_view(row: &BiomoleculeTestRosterRow) -> BiomoleculeTestRosterEntry {
+    BiomoleculeTestRosterEntry {
+        user_id: row.user_id.to_string(),
+        username: row.username.clone(),
+    }
+}
+
+fn attempt_view(record: &BiomoleculeTestAttemptRecord) -> BiomoleculeTestAttemptView {
+    BiomoleculeTestAttemptView {
+        attempt_id: record.id.to_string(),
+        seed: record.seed,
+        started_at: record.started_at.clone(),
+        submitted_at: record.submitted_at.clone(),
+        total_count: record.total_count,
+        correct_count: record.correct_count,
+        detail_json: record.detail_json.clone(),
+    }
+}
+
+/// Teacher-only (the HTTP layer gates it). Everything is validated before the
+/// first write, so a rejected payload leaves no partial test or history row.
+pub fn do_create_biomolecule_test(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    payload: CreateBiomoleculeTestPayload,
+) -> Result<BiomoleculeTestView, DbError> {
+    let title = payload.title.trim();
+    if title.is_empty() || title.chars().count() > MAX_TEST_TITLE_CHARS {
+        return Err(DbError::Validation(format!(
+            "Test title must be 1-{MAX_TEST_TITLE_CHARS} characters"
+        )));
+    }
+
+    let category_slugs = parse_json_string_array(&payload.category_slugs, "categorySlugs")?;
+    for slug in &category_slugs {
+        if !is_valid_slug(slug) || !BiomoleculeRepo::category_exists(conn, slug)? {
+            return Err(DbError::NotFound(format!("Category {slug} not found")));
+        }
+    }
+
+    let molecule_ids = parse_json_string_array(&payload.molecule_ids, "moleculeIds")?;
+    for id in &molecule_ids {
+        if id.is_empty()
+            || id.chars().count() > 64
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(DbError::Validation(
+                "moleculeIds must contain non-empty id strings".into(),
+            ));
+        }
+    }
+
+    let question_types = parse_json_string_array(&payload.question_types, "questionTypes")?;
+    if question_types.is_empty() {
+        return Err(DbError::Validation(
+            "questionTypes must include at least one question type".into(),
+        ));
+    }
+    for question_type in &question_types {
+        if !BIOMOLECULE_QUESTION_TYPES.contains(&question_type.as_str()) {
+            return Err(DbError::Validation(format!(
+                "Unknown question type: {question_type}"
+            )));
+        }
+    }
+
+    if !(1..=MAX_TEST_QUESTIONS).contains(&payload.question_count) {
+        return Err(DbError::Validation(format!(
+            "Question count must be 1-{MAX_TEST_QUESTIONS}"
+        )));
+    }
+    let question_set = payload.question_set.trim();
+    if !BIOMOLECULE_QUESTION_SETS.contains(&question_set) {
+        return Err(DbError::Validation(format!(
+            "Invalid question set: {question_set}"
+        )));
+    }
+
+    let available_from = parse_client_instant("availableFrom", &payload.available_from)?;
+    let available_to = parse_client_instant("availableTo", &payload.available_to)?;
+    if available_from >= available_to {
+        return Err(DbError::Validation(
+            "availableFrom must be before availableTo".into(),
+        ));
+    }
+
+    let assigned_codes = normalize_assigned_codes(parse_json_string_array(
+        &payload.assigned_codes,
+        "assignedCodes",
+    )?);
+    validate_assigned_codes(conn, &assigned_codes)?;
+
+    let seed = payload.seed.unwrap_or_else(generate_test_seed);
+    let test_id = BiomoleculeTestRepo::insert(
+        conn,
+        &NewBiomoleculeTest {
+            title: title.to_string(),
+            created_by: *teacher_id,
+            category_slugs: serde_json::to_string(&category_slugs)?,
+            molecule_ids: serde_json::to_string(&molecule_ids)?,
+            question_types: serde_json::to_string(&question_types)?,
+            question_count: payload.question_count,
+            question_set: question_set.to_string(),
+            monochrome: payload.monochrome,
+            available_from: available_from.to_rfc3339(),
+            available_to: available_to.to_rfc3339(),
+            seed,
+            assigned_codes: serde_json::to_string(&assigned_codes)?,
+        },
+    )?;
+
+    let detail = format!(
+        "{} questions · {} types · {}",
+        payload.question_count,
+        question_types.len(),
+        question_set
+    );
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "test",
+        "create",
+        title,
+        Some(detail.as_str()),
+    )?;
+
+    let record = BiomoleculeTestRepo::find(conn, &test_id)?
+        .ok_or_else(|| DbError::Internal("Test vanished right after creation".into()))?;
+    test_view(&record)
+}
+
+/// Teacher-only. A test with any attempt is permanent (deleting it would erase
+/// a student's submitted result); a fresh test may be removed, and its unused
+/// child rows would cascade if any existed.
+pub fn do_delete_biomolecule_test(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    test_id: &Uuid,
+) -> Result<(), DbError> {
+    let test = BiomoleculeTestRepo::find(conn, test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {test_id} not found")))?;
+    if BiomoleculeTestRepo::attempt_count(conn, test_id)? > 0 {
+        return Err(DbError::Validation(
+            "A test with attempts cannot be deleted".into(),
+        ));
+    }
+    BiomoleculeTestRepo::delete(conn, test_id)?;
+    BiomoleculeHistoryRepo::record(conn, teacher_id, "test", "delete", &test.title, None)?;
+    Ok(())
+}
+
+/// Teacher page (any teacher sees all, house style): every test, newest first,
+/// each with its per-student attempt summaries and audience-filtered roster,
+/// plus the page-level invite-code picker data (needed before the first test
+/// exists) and one server timestamp for skew-free window rendering.
+pub fn do_list_biomolecule_tests(
+    conn: &Connection,
+    _teacher_id: &Uuid,
+) -> Result<BiomoleculeTestsTeacherPage, DbError> {
+    let server_now = Utc::now().to_rfc3339();
+    let codes: Vec<InviteCodeCountView> = BiomoleculeTestRepo::list_student_codes(conn)?
+        .into_iter()
+        .map(|row| InviteCodeCountView {
+            code: row.code,
+            student_count: row.student_count,
+        })
+        .collect();
+
+    let mut tests = Vec::new();
+    for record in BiomoleculeTestRepo::list(conn)? {
+        let assigned: Vec<String> = serde_json::from_str(&record.assigned_codes)?;
+        let roster: Vec<BiomoleculeTestRosterEntry> =
+            BiomoleculeTestRepo::eligible_roster(conn, &assigned)?
+                .iter()
+                .map(roster_view)
+                .collect();
+        let attempts = BiomoleculeTestRepo::attempt_summaries(conn, &record.id)?
+            .iter()
+            .map(attempt_summary_view)
+            .collect();
+        tests.push(BiomoleculeTestTeacherView {
+            test: test_view(&record)?,
+            attempts,
+            roster,
+        });
+    }
+    Ok(BiomoleculeTestsTeacherPage {
+        tests,
+        codes,
+        server_now,
+    })
+}
+
+/// Student view: open tests for everyone; closed tests stay visible only to
+/// students who already have an attempt there (submitted result or an
+/// in-progress run inside the grace window), so results and resumes survive
+/// the deadline.
+pub fn do_list_available_biomolecule_tests(
+    conn: &Connection,
+    student_id: &Uuid,
+) -> Result<Vec<BiomoleculeTestStudentView>, DbError> {
+    let now = Utc::now();
+    let server_now = now.to_rfc3339();
+    let student_code = student_invite_code(conn, student_id)?;
+    let mut views = Vec::new();
+    for record in BiomoleculeTestRepo::list(conn)? {
+        // Audience is an additional AND: a targeted test only reaches students
+        // whose registration code is in its audience.
+        if !test_audience_matches(&record.assigned_codes, student_code.as_deref())? {
+            continue;
+        }
+        let attempt = BiomoleculeTestRepo::find_attempt(conn, &record.id, student_id)?;
+        if !test_is_open(&record, now) && attempt.is_none() {
+            continue;
+        }
+        views.push(BiomoleculeTestStudentView {
+            test: student_test_view(&record)?,
+            attempt: attempt.as_ref().map(attempt_view),
+            server_now: server_now.clone(),
+        });
+    }
+    Ok(views)
+}
+
+/// Start (or resume) one student's attempt. The window is checked against the
+/// server clock; an existing row is never duplicated — it is returned in the
+/// `"exists"` shape so the client can resume or show the submitted result.
+pub fn do_start_biomolecule_test_attempt(
+    conn: &Connection,
+    student_id: &Uuid,
+    test_id: &Uuid,
+) -> Result<BiomoleculeTestStartResult, DbError> {
+    let test = BiomoleculeTestRepo::find(conn, test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {test_id} not found")))?;
+    if !test_is_open(&test, Utc::now()) {
+        return Err(DbError::Validation("Test is not open at this time".into()));
+    }
+    let student_code = student_invite_code(conn, student_id)?;
+    if !test_audience_matches(&test.assigned_codes, student_code.as_deref())? {
+        return Err(DbError::Validation(
+            "Test is not available to this student".into(),
+        ));
+    }
+
+    if let Some(attempt) = BiomoleculeTestRepo::find_attempt(conn, test_id, student_id)? {
+        return Ok(BiomoleculeTestStartResult {
+            status: "exists".into(),
+            attempt_id: attempt.id.to_string(),
+            seed: attempt.seed,
+            started_at: attempt.started_at,
+            submitted_at: attempt.submitted_at,
+            total_count: attempt.total_count,
+            correct_count: attempt.correct_count,
+        });
+    }
+
+    let seed = if test.question_set == "fixed" {
+        test.seed
+    } else {
+        generate_test_seed()
+    };
+    let attempt = BiomoleculeTestRepo::insert_attempt(conn, test_id, student_id, seed)?;
+    Ok(BiomoleculeTestStartResult {
+        status: "started".into(),
+        attempt_id: attempt.id.to_string(),
+        seed: attempt.seed,
+        started_at: attempt.started_at,
+        submitted_at: None,
+        total_count: None,
+        correct_count: None,
+    })
+}
+
+/// Submit one attempt. Ownership and the grace deadline are checked first; an
+/// already-submitted attempt is a no-op success (idempotent), and the UPDATE
+/// itself only targets unsubmitted rows so a race cannot rewrite a result.
+pub fn do_submit_biomolecule_test_attempt(
+    conn: &Connection,
+    student_id: &Uuid,
+    attempt_id: &Uuid,
+    total_count: i64,
+    correct_count: i64,
+    detail_json: Option<&str>,
+) -> Result<(), DbError> {
+    let (attempt, available_to) =
+        BiomoleculeTestRepo::find_attempt_with_deadline(conn, attempt_id)?
+            .ok_or_else(|| DbError::NotFound(format!("Attempt {attempt_id} not found")))?;
+    if attempt.user_id != *student_id {
+        return Err(DbError::NotFound(format!("Attempt {attempt_id} not found")));
+    }
+    if attempt.submitted_at.is_some() {
+        return Ok(());
+    }
+    if !(1..=MAX_TEST_QUESTIONS).contains(&total_count)
+        || !(0..=total_count).contains(&correct_count)
+    {
+        return Err(DbError::Validation("Invalid test score".into()));
+    }
+    // `correct_count` cannot be verified server-side: grading happens in the
+    // client over client-generated questions that embed their answers, so this
+    // is only the student's claim. The teacher's results re-grade the stored
+    // answers from the server-issued seed and flag any difference.
+    //
+    // `total_count`, unlike the score, is constrained by generation: dataset
+    // drift can shrink a batch but never grow it, so more than the configured
+    // count (plus a small tolerance) is a bogus submission.
+    let test = BiomoleculeTestRepo::find(conn, &attempt.test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {} not found", attempt.test_id)))?;
+    if total_count > test.question_count + TEST_COUNT_DRIFT_TOLERANCE {
+        return Err(DbError::Validation("Invalid test score".into()));
+    }
+    // The breakdown is a client-built JSON blob — bound its size so a hostile
+    // payload cannot bloat the row.
+    if let Some(detail) = detail_json {
+        if detail.len() > MAX_TEST_DETAIL_JSON {
+            return Err(DbError::Validation("Invalid test detail".into()));
+        }
+    }
+    let deadline = stored_instant(&available_to)? + chrono::Duration::seconds(SUBMIT_GRACE_SECONDS);
+    if Utc::now() > deadline {
+        return Err(DbError::Validation("deadline passed".into()));
+    }
+    BiomoleculeTestRepo::mark_submitted(
+        conn,
+        attempt_id,
+        student_id,
+        total_count,
+        correct_count,
+        detail_json,
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Peptidovka: teacher-created tests and once-only student attempts. The twin
+// of the Biomolekuly test block above — same shapes, same validation-before-
+// write discipline, only the pool (amino-acid slugs) and the size bounds differ.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestView {
+    pub id: String,
+    pub title: String,
+    pub pool_slugs: Vec<String>,
+    pub peptide_count: i64,
+    pub peptide_min_length: i64,
+    pub peptide_max_length: i64,
+    pub question_set: String,
+    pub monochrome: bool,
+    pub available_from: String,
+    pub available_to: String,
+    /// Teacher-only: students get the seed of their own attempt instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i64>,
+    pub created_at: String,
+    /// Student invite codes this test targets; `[]` means ALL students.
+    /// Omitted from student responses — the audience is the teacher's business
+    /// (students only need to know whether the test is available to them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assigned_codes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestAttemptSummary {
+    pub attempt_id: String,
+    pub user_id: String,
+    pub username: String,
+    pub started_at: String,
+    pub submitted_at: Option<String>,
+    pub total_count: Option<i64>,
+    pub correct_count: Option<i64>,
+    /// The attempt's generation seed, so the teacher can regenerate the batch.
+    pub seed: i64,
+    /// Stored per-item breakdown; `None` until the attempt is submitted.
+    pub detail_json: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestRosterEntry {
+    pub user_id: String,
+    pub username: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestTeacherView {
+    pub test: PeptidovkaTestView,
+    pub attempts: Vec<PeptidovkaTestAttemptSummary>,
+    pub roster: Vec<PeptidovkaTestRosterEntry>,
+}
+
+/// Page-level teacher response: the tests plus the invite-code picker data and
+/// one server timestamp. Kept top-level (not per test) so the create form can
+/// offer audience codes even when no test exists yet.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestsTeacherPage {
+    pub tests: Vec<PeptidovkaTestTeacherView>,
+    /// All student invite codes and their registered-user counts.
+    pub codes: Vec<InviteCodeCountView>,
+    pub server_now: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestAttemptView {
+    pub attempt_id: String,
+    pub seed: i64,
+    pub started_at: String,
+    pub submitted_at: Option<String>,
+    pub total_count: Option<i64>,
+    pub correct_count: Option<i64>,
+    pub detail_json: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestStudentView {
+    pub test: PeptidovkaTestView,
+    pub attempt: Option<PeptidovkaTestAttemptView>,
+    /// Server clock at listing time, so the client can offset its own clock
+    /// when rendering the window/deadline (same purpose as the teacher page's
+    /// `serverNow`).
+    pub server_now: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestStartResult {
+    /// `"started"` for a new attempt, `"exists"` when one was already there.
+    pub status: String,
+    pub attempt_id: String,
+    pub seed: i64,
+    pub started_at: String,
+    pub submitted_at: Option<String>,
+    pub total_count: Option<i64>,
+    pub correct_count: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePeptidovkaTestPayload {
+    pub title: String,
+    /// Raw JSON array: validated here (not by serde) so malformed values get
+    /// the same `Validation` error as the other bounds.
+    #[serde(default)]
+    pub pool_slugs: serde_json::Value,
+    pub peptide_count: i64,
+    pub peptide_min_length: i64,
+    pub peptide_max_length: i64,
+    pub question_set: String,
+    #[serde(default)]
+    pub monochrome: bool,
+    pub available_from: String,
+    pub available_to: String,
+    /// Optional client-chosen reproducibility seed; omitted means server-side.
+    #[serde(default)]
+    pub seed: Option<i64>,
+    /// Student invite codes to target; omitted/`[]` means ALL students.
+    #[serde(default = "empty_json_array")]
+    pub assigned_codes: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeptidovkaTestIdPayload {
+    pub test_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitPeptidovkaTestAttemptPayload {
+    pub attempt_id: Uuid,
+    pub total_count: i64,
+    pub correct_count: i64,
+    #[serde(default)]
+    pub detail_json: Option<String>,
+}
+
+/// The window check always runs on the server clock, never on a string
+/// comparison (RFC 3339 offsets make lexical order meaningless).
+fn peptidovka_test_is_open(test: &PeptidovkaTestRecord, now: DateTime<Utc>) -> bool {
+    match (
+        DateTime::parse_from_rfc3339(test.available_from.trim()),
+        DateTime::parse_from_rfc3339(test.available_to.trim()),
+    ) {
+        (Ok(from), Ok(to)) => {
+            let from = from.with_timezone(&Utc);
+            let to = to.with_timezone(&Utc);
+            from <= now && now <= to
+        }
+        _ => false,
+    }
+}
+
+fn peptidovka_test_view(record: &PeptidovkaTestRecord) -> Result<PeptidovkaTestView, DbError> {
+    Ok(PeptidovkaTestView {
+        id: record.id.to_string(),
+        title: record.title.clone(),
+        pool_slugs: serde_json::from_str(&record.pool_slugs)?,
+        peptide_count: record.peptide_count,
+        peptide_min_length: record.peptide_min_length,
+        peptide_max_length: record.peptide_max_length,
+        question_set: record.question_set.clone(),
+        monochrome: record.monochrome,
+        available_from: record.available_from.clone(),
+        available_to: record.available_to.clone(),
+        seed: Some(record.seed),
+        created_at: record.created_at.clone(),
+        assigned_codes: Some(serde_json::from_str(&record.assigned_codes)?),
+    })
+}
+
+/// Student copy of `peptidovka_test_view`: strips the teacher-only audience
+/// list and the generation seed (see `student_test_view`).
+fn student_peptidovka_test_view(
+    record: &PeptidovkaTestRecord,
+) -> Result<PeptidovkaTestView, DbError> {
+    let mut view = peptidovka_test_view(record)?;
+    view.assigned_codes = None;
+    view.seed = None;
+    Ok(view)
+}
+
+fn peptidovka_attempt_summary_view(
+    row: &PeptidovkaTestAttemptSummaryRow,
+) -> PeptidovkaTestAttemptSummary {
+    PeptidovkaTestAttemptSummary {
+        attempt_id: row.attempt.id.to_string(),
+        user_id: row.attempt.user_id.to_string(),
+        username: row.username.clone(),
+        started_at: row.attempt.started_at.clone(),
+        submitted_at: row.attempt.submitted_at.clone(),
+        total_count: row.attempt.total_count,
+        correct_count: row.attempt.correct_count,
+        seed: row.attempt.seed,
+        detail_json: row.attempt.detail_json.clone(),
+    }
+}
+
+fn peptidovka_roster_view(row: &PeptidovkaTestRosterRow) -> PeptidovkaTestRosterEntry {
+    PeptidovkaTestRosterEntry {
+        user_id: row.user_id.to_string(),
+        username: row.username.clone(),
+    }
+}
+
+fn peptidovka_attempt_view(record: &PeptidovkaTestAttemptRecord) -> PeptidovkaTestAttemptView {
+    PeptidovkaTestAttemptView {
+        attempt_id: record.id.to_string(),
+        seed: record.seed,
+        started_at: record.started_at.clone(),
+        submitted_at: record.submitted_at.clone(),
+        total_count: record.total_count,
+        correct_count: record.correct_count,
+        detail_json: record.detail_json.clone(),
+    }
+}
+
+/// Teacher-only (the HTTP layer gates it). Everything is validated before the
+/// first write, so a rejected payload leaves no partial test or history row.
+pub fn do_create_peptidovka_test(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    payload: CreatePeptidovkaTestPayload,
+) -> Result<PeptidovkaTestView, DbError> {
+    let title = payload.title.trim();
+    if title.is_empty() || title.chars().count() > MAX_TEST_TITLE_CHARS {
+        return Err(DbError::Validation(format!(
+            "Test title must be 1-{MAX_TEST_TITLE_CHARS} characters"
+        )));
+    }
+
+    let pool_slugs = parse_json_string_array(&payload.pool_slugs, "poolSlugs")?;
+    if pool_slugs.len() < PEPTIDOVKA_TEST_MIN_POOL {
+        return Err(DbError::Validation(format!(
+            "poolSlugs must include at least {PEPTIDOVKA_TEST_MIN_POOL} molecules"
+        )));
+    }
+    for slug in &pool_slugs {
+        if slug.is_empty() || !BiomoleculeRepo::molecule_slug_exists(conn, slug)? {
+            return Err(DbError::Validation(format!(
+                "Unknown molecule slug: {slug}"
+            )));
+        }
+    }
+
+    if !(1..=PEPTIDOVKA_TEST_MAX_COUNT).contains(&payload.peptide_count) {
+        return Err(DbError::Validation(format!(
+            "Peptide count must be 1-{PEPTIDOVKA_TEST_MAX_COUNT}"
+        )));
+    }
+    let length_in_range =
+        |value: i64| (PEPTIDOVKA_TEST_MIN_LENGTH..=PEPTIDOVKA_TEST_MAX_LENGTH).contains(&value);
+    if !length_in_range(payload.peptide_min_length) || !length_in_range(payload.peptide_max_length)
+    {
+        return Err(DbError::Validation(format!(
+            "Peptide length bounds must be {PEPTIDOVKA_TEST_MIN_LENGTH}-{PEPTIDOVKA_TEST_MAX_LENGTH}"
+        )));
+    }
+    if payload.peptide_min_length > payload.peptide_max_length {
+        return Err(DbError::Validation(
+            "peptideMinLength must not exceed peptideMaxLength".into(),
+        ));
+    }
+
+    let question_set = payload.question_set.trim();
+    if !BIOMOLECULE_QUESTION_SETS.contains(&question_set) {
+        return Err(DbError::Validation(format!(
+            "Invalid question set: {question_set}"
+        )));
+    }
+
+    let available_from = parse_client_instant("availableFrom", &payload.available_from)?;
+    let available_to = parse_client_instant("availableTo", &payload.available_to)?;
+    if available_from >= available_to {
+        return Err(DbError::Validation(
+            "availableFrom must be before availableTo".into(),
+        ));
+    }
+
+    let assigned_codes = normalize_assigned_codes(parse_json_string_array(
+        &payload.assigned_codes,
+        "assignedCodes",
+    )?);
+    validate_assigned_codes(conn, &assigned_codes)?;
+
+    let seed = payload.seed.unwrap_or_else(generate_test_seed);
+    let test_id = PeptidovkaTestRepo::insert(
+        conn,
+        &NewPeptidovkaTest {
+            title: title.to_string(),
+            created_by: *teacher_id,
+            pool_slugs: serde_json::to_string(&pool_slugs)?,
+            peptide_count: payload.peptide_count,
+            peptide_min_length: payload.peptide_min_length,
+            peptide_max_length: payload.peptide_max_length,
+            question_set: question_set.to_string(),
+            monochrome: payload.monochrome,
+            available_from: available_from.to_rfc3339(),
+            available_to: available_to.to_rfc3339(),
+            seed,
+            assigned_codes: serde_json::to_string(&assigned_codes)?,
+        },
+    )?;
+
+    let detail = format!(
+        "{} peptides · length {}-{} · {}",
+        payload.peptide_count, payload.peptide_min_length, payload.peptide_max_length, question_set
+    );
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "peptidovka-test",
+        "create",
+        title,
+        Some(detail.as_str()),
+    )?;
+
+    let record = PeptidovkaTestRepo::find(conn, &test_id)?
+        .ok_or_else(|| DbError::Internal("Test vanished right after creation".into()))?;
+    peptidovka_test_view(&record)
+}
+
+/// Teacher-only. A test with any attempt is permanent (deleting it would erase
+/// a student's submitted result); a fresh test may be removed, and its unused
+/// child rows would cascade if any existed.
+pub fn do_delete_peptidovka_test(
+    conn: &Connection,
+    teacher_id: &Uuid,
+    test_id: &Uuid,
+) -> Result<(), DbError> {
+    let test = PeptidovkaTestRepo::find(conn, test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {test_id} not found")))?;
+    if PeptidovkaTestRepo::attempt_count(conn, test_id)? > 0 {
+        return Err(DbError::Validation(
+            "A test with attempts cannot be deleted".into(),
+        ));
+    }
+    PeptidovkaTestRepo::delete(conn, test_id)?;
+    BiomoleculeHistoryRepo::record(
+        conn,
+        teacher_id,
+        "peptidovka-test",
+        "delete",
+        &test.title,
+        None,
+    )?;
+    Ok(())
+}
+
+/// Teacher page (any teacher sees all, house style): every test, newest first,
+/// each with its per-student attempt summaries and audience-filtered roster,
+/// plus the page-level invite-code picker data (needed before the first test
+/// exists) and one server timestamp for skew-free window rendering.
+pub fn do_list_peptidovka_tests(
+    conn: &Connection,
+    _teacher_id: &Uuid,
+) -> Result<PeptidovkaTestsTeacherPage, DbError> {
+    let server_now = Utc::now().to_rfc3339();
+    let codes: Vec<InviteCodeCountView> = PeptidovkaTestRepo::list_student_codes(conn)?
+        .into_iter()
+        .map(|row| InviteCodeCountView {
+            code: row.code,
+            student_count: row.student_count,
+        })
+        .collect();
+
+    let mut tests = Vec::new();
+    for record in PeptidovkaTestRepo::list(conn)? {
+        let assigned: Vec<String> = serde_json::from_str(&record.assigned_codes)?;
+        let roster: Vec<PeptidovkaTestRosterEntry> =
+            PeptidovkaTestRepo::eligible_roster(conn, &assigned)?
+                .iter()
+                .map(peptidovka_roster_view)
+                .collect();
+        let attempts = PeptidovkaTestRepo::attempt_summaries(conn, &record.id)?
+            .iter()
+            .map(peptidovka_attempt_summary_view)
+            .collect();
+        tests.push(PeptidovkaTestTeacherView {
+            test: peptidovka_test_view(&record)?,
+            attempts,
+            roster,
+        });
+    }
+    Ok(PeptidovkaTestsTeacherPage {
+        tests,
+        codes,
+        server_now,
+    })
+}
+
+/// Student view: open tests for everyone; closed tests stay visible only to
+/// students who already have an attempt there (submitted result or an
+/// in-progress run inside the grace window), so results and resumes survive
+/// the deadline.
+pub fn do_list_available_peptidovka_tests(
+    conn: &Connection,
+    student_id: &Uuid,
+) -> Result<Vec<PeptidovkaTestStudentView>, DbError> {
+    let now = Utc::now();
+    let server_now = now.to_rfc3339();
+    let student_code = student_invite_code(conn, student_id)?;
+    let mut views = Vec::new();
+    for record in PeptidovkaTestRepo::list(conn)? {
+        // Audience is an additional AND: a targeted test only reaches students
+        // whose registration code is in its audience.
+        if !test_audience_matches(&record.assigned_codes, student_code.as_deref())? {
+            continue;
+        }
+        let attempt = PeptidovkaTestRepo::find_attempt(conn, &record.id, student_id)?;
+        if !peptidovka_test_is_open(&record, now) && attempt.is_none() {
+            continue;
+        }
+        views.push(PeptidovkaTestStudentView {
+            test: student_peptidovka_test_view(&record)?,
+            attempt: attempt.as_ref().map(peptidovka_attempt_view),
+            server_now: server_now.clone(),
+        });
+    }
+    Ok(views)
+}
+
+/// Start (or resume) one student's attempt. The window is checked against the
+/// server clock; an existing row is never duplicated — it is returned in the
+/// `"exists"` shape so the client can resume or show the submitted result.
+pub fn do_start_peptidovka_test_attempt(
+    conn: &Connection,
+    student_id: &Uuid,
+    test_id: &Uuid,
+) -> Result<PeptidovkaTestStartResult, DbError> {
+    let test = PeptidovkaTestRepo::find(conn, test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {test_id} not found")))?;
+    if !peptidovka_test_is_open(&test, Utc::now()) {
+        return Err(DbError::Validation("Test is not open at this time".into()));
+    }
+    let student_code = student_invite_code(conn, student_id)?;
+    if !test_audience_matches(&test.assigned_codes, student_code.as_deref())? {
+        return Err(DbError::Validation(
+            "Test is not available to this student".into(),
+        ));
+    }
+
+    if let Some(attempt) = PeptidovkaTestRepo::find_attempt(conn, test_id, student_id)? {
+        return Ok(PeptidovkaTestStartResult {
+            status: "exists".into(),
+            attempt_id: attempt.id.to_string(),
+            seed: attempt.seed,
+            started_at: attempt.started_at,
+            submitted_at: attempt.submitted_at,
+            total_count: attempt.total_count,
+            correct_count: attempt.correct_count,
+        });
+    }
+
+    let seed = if test.question_set == "fixed" {
+        test.seed
+    } else {
+        generate_test_seed()
+    };
+    let attempt = PeptidovkaTestRepo::insert_attempt(conn, test_id, student_id, seed)?;
+    Ok(PeptidovkaTestStartResult {
+        status: "started".into(),
+        attempt_id: attempt.id.to_string(),
+        seed: attempt.seed,
+        started_at: attempt.started_at,
+        submitted_at: None,
+        total_count: None,
+        correct_count: None,
+    })
+}
+
+/// Submit one attempt. Ownership and the grace deadline are checked first; an
+/// already-submitted attempt is a no-op success (idempotent), and the UPDATE
+/// itself only targets unsubmitted rows so a race cannot rewrite a result.
+pub fn do_submit_peptidovka_test_attempt(
+    conn: &Connection,
+    student_id: &Uuid,
+    attempt_id: &Uuid,
+    total_count: i64,
+    correct_count: i64,
+    detail_json: Option<&str>,
+) -> Result<(), DbError> {
+    let (attempt, available_to) = PeptidovkaTestRepo::find_attempt_with_deadline(conn, attempt_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Attempt {attempt_id} not found")))?;
+    if attempt.user_id != *student_id {
+        return Err(DbError::NotFound(format!("Attempt {attempt_id} not found")));
+    }
+    if attempt.submitted_at.is_some() {
+        return Ok(());
+    }
+    if !(1..=PEPTIDOVKA_TEST_MAX_COUNT).contains(&total_count)
+        || !(0..=total_count).contains(&correct_count)
+    {
+        return Err(DbError::Validation("Invalid test score".into()));
+    }
+    // `correct_count` cannot be verified server-side: grading happens in the
+    // client over client-generated questions that embed their answers, so this
+    // is only the student's claim. The teacher's results re-grade the stored
+    // answers from the server-issued seed and flag any difference.
+    //
+    // `total_count`, unlike the score, is constrained by generation: dataset
+    // drift can shrink a batch but never grow it, so more than the configured
+    // count (plus a small tolerance) is a bogus submission.
+    let test = PeptidovkaTestRepo::find(conn, &attempt.test_id)?
+        .ok_or_else(|| DbError::NotFound(format!("Test {} not found", attempt.test_id)))?;
+    if total_count > test.peptide_count + TEST_COUNT_DRIFT_TOLERANCE {
+        return Err(DbError::Validation("Invalid test score".into()));
+    }
+    // The breakdown is a client-built JSON blob — bound its size so a hostile
+    // payload cannot bloat the row.
+    if let Some(detail) = detail_json {
+        if detail.len() > MAX_TEST_DETAIL_JSON {
+            return Err(DbError::Validation("Invalid test detail".into()));
+        }
+    }
+    let deadline = stored_instant(&available_to)? + chrono::Duration::seconds(SUBMIT_GRACE_SECONDS);
+    if Utc::now() > deadline {
+        return Err(DbError::Validation("deadline passed".into()));
+    }
+    PeptidovkaTestRepo::mark_submitted(
+        conn,
+        attempt_id,
+        student_id,
+        total_count,
+        correct_count,
+        detail_json,
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1462,7 +2741,8 @@ mod tests {
     fn setup_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         crate::db::schema::run_migrations(&conn).expect("migrations");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("fk on");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("fk on");
         conn
     }
 
@@ -1489,6 +2769,7 @@ mod tests {
             email: None,
             sections: SectionAccess::Both,
             preferred_section: None,
+            invite_code: None,
         };
         crate::db::repos::UserRepo::insert(conn, &user).expect("insert user");
         user.id
@@ -1528,7 +2809,10 @@ mod tests {
             .find(|m| m.slug == "ala")
             .expect("alanine seeded");
         assert_eq!(ala.traits.get("oneLetter").map(String::as_str), Some("A"));
-        assert_eq!(ala.traits.get("sideChain").map(String::as_str), Some("nonpolar"));
+        assert_eq!(
+            ala.traits.get("sideChain").map(String::as_str),
+            Some("nonpolar")
+        );
     }
 
     #[test]
@@ -1566,7 +2850,10 @@ mod tests {
             .iter()
             .find(|m| m.slug == "deoxyriboza-b")
             .expect("deoxyribose seeded");
-        assert_eq!(deoxy.traits.get("ringForm").map(String::as_str), Some("furanose"));
+        assert_eq!(
+            deoxy.traits.get("ringForm").map(String::as_str),
+            Some("furanose")
+        );
         assert_eq!(deoxy.traits.get("anomer").map(String::as_str), Some("beta"));
         assert_eq!(deoxy.traits.get("deoxy").map(String::as_str), Some("true"));
     }
@@ -1823,7 +3110,11 @@ mod tests {
         )
         .expect("rename topic");
         assert_eq!(
-            data.topics.iter().find(|t| t.slug == "vitaminy").unwrap().name,
+            data.topics
+                .iter()
+                .find(|t| t.slug == "vitaminy")
+                .unwrap()
+                .name,
             "Vitaminy II"
         );
 
@@ -1839,7 +3130,11 @@ mod tests {
         )
         .expect("clear description");
         assert_eq!(
-            data.topics.iter().find(|t| t.slug == "vitaminy").unwrap().description,
+            data.topics
+                .iter()
+                .find(|t| t.slug == "vitaminy")
+                .unwrap()
+                .description,
             None
         );
 
@@ -1907,7 +3202,11 @@ mod tests {
             },
         )
         .expect("create with topic");
-        let category = data.categories.iter().find(|c| c.slug == "nukleotidy").unwrap();
+        let category = data
+            .categories
+            .iter()
+            .find(|c| c.slug == "nukleotidy")
+            .unwrap();
         assert_eq!(category.topic_slug.as_deref(), Some("nukleove-kyseliny"));
 
         // An unknown topic reference is refused.
@@ -1937,7 +3236,12 @@ mod tests {
         )
         .expect("move topic");
         assert_eq!(
-            data.categories.iter().find(|c| c.slug == "nukleotidy").unwrap().topic_slug.as_deref(),
+            data.categories
+                .iter()
+                .find(|c| c.slug == "nukleotidy")
+                .unwrap()
+                .topic_slug
+                .as_deref(),
             Some("sacharidy")
         );
 
@@ -1954,7 +3258,11 @@ mod tests {
         )
         .expect("ungroup");
         assert_eq!(
-            data.categories.iter().find(|c| c.slug == "nukleotidy").unwrap().topic_slug,
+            data.categories
+                .iter()
+                .find(|c| c.slug == "nukleotidy")
+                .unwrap()
+                .topic_slug,
             None
         );
 
@@ -1996,7 +3304,10 @@ mod tests {
             .expect("category survives");
         assert_eq!(bases.topic_slug, None);
         assert_eq!(bases.molecule_count, 5);
-        assert!(data.molecules.iter().any(|m| m.category_slug == "dusikate-baze"));
+        assert!(data
+            .molecules
+            .iter()
+            .any(|m| m.category_slug == "dusikate-baze"));
     }
 
     #[test]
@@ -2015,7 +3326,14 @@ mod tests {
             },
         )
         .expect("rename");
-        assert_eq!(data.categories.iter().find(|c| c.slug == "dusikate-baze").unwrap().name, "Báze");
+        assert_eq!(
+            data.categories
+                .iter()
+                .find(|c| c.slug == "dusikate-baze")
+                .unwrap()
+                .name,
+            "Báze"
+        );
 
         // Blank name is not allowed anywhere.
         assert!(matches!(
@@ -2078,7 +3396,10 @@ mod tests {
         )
         .expect("delete");
         assert!(!data.categories.iter().any(|c| c.slug == "dusikate-baze"));
-        assert!(!data.molecules.iter().any(|m| m.category_slug == "dusikate-baze"));
+        assert!(!data
+            .molecules
+            .iter()
+            .any(|m| m.category_slug == "dusikate-baze"));
         assert!(matches!(
             do_delete_category(
                 &conn,
@@ -2130,11 +3451,19 @@ mod tests {
 
         // Duplicate name and duplicate one-letter are both refused.
         assert!(matches!(
-            do_create_molecule(&conn, &teacher, molecule_payload("aminokyseliny", "Watsonin", "CCO")),
+            do_create_molecule(
+                &conn,
+                &teacher,
+                molecule_payload("aminokyseliny", "Watsonin", "CCO")
+            ),
             Err(DbError::Validation(_))
         ));
         assert!(matches!(
-            do_create_molecule(&conn, &teacher, molecule_payload("aminokyseliny", "alanin", "CCO")),
+            do_create_molecule(
+                &conn,
+                &teacher,
+                molecule_payload("aminokyseliny", "alanin", "CCO")
+            ),
             Err(DbError::Validation(_))
         ));
         let mut letter = HashMap::new();
@@ -2178,9 +3507,15 @@ mod tests {
         let updated = data.molecules.iter().find(|m| m.id == created.id).unwrap();
         assert_eq!(updated.name, "Watsonin II");
         assert_eq!(updated.slug, "watsonin", "slug stays stable across renames");
-        assert!(!updated.haworth, "an explicit false round-trips through update");
+        assert!(
+            !updated.haworth,
+            "an explicit false round-trips through update"
+        );
         assert_eq!(updated.traits.len(), 1);
-        assert_eq!(updated.traits.get("polarity").map(String::as_str), Some("hydrophobic"));
+        assert_eq!(
+            updated.traits.get("polarity").map(String::as_str),
+            Some("hydrophobic")
+        );
 
         let data = do_delete_molecule(
             &conn,
@@ -2264,21 +3599,44 @@ mod tests {
                 },
             )
         };
-        assert!(matches!(create("charge", "spicy"), Err(DbError::Validation(_))));
-        assert!(matches!(create("essential", "1"), Err(DbError::Validation(_))));
-        assert!(matches!(create("oneLetter", "AB"), Err(DbError::Validation(_))));
-        assert!(matches!(create("pairsWith", "Not A Slug"), Err(DbError::Validation(_))));
-        assert!(matches!(create("unknownTrait", "x"), Err(DbError::Validation(_))));
+        assert!(matches!(
+            create("charge", "spicy"),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            create("essential", "1"),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            create("oneLetter", "AB"),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            create("pairsWith", "Not A Slug"),
+            Err(DbError::Validation(_))
+        ));
+        assert!(matches!(
+            create("unknownTrait", "x"),
+            Err(DbError::Validation(_))
+        ));
         // Seed data uses these — they must keep validating.
         assert!(create("pairsWith", "thy, ura").is_ok());
 
         // Blank or non-printable SMILES cannot pass the server-side check.
         assert!(matches!(
-            do_create_molecule(&conn, &teacher, molecule_payload("aminokyseliny", "Testin2", "  ")),
+            do_create_molecule(
+                &conn,
+                &teacher,
+                molecule_payload("aminokyseliny", "Testin2", "  ")
+            ),
             Err(DbError::Validation(_))
         ));
         assert!(matches!(
-            do_create_molecule(&conn, &teacher, molecule_payload("aminokyseliny", "Testin3", "C C")),
+            do_create_molecule(
+                &conn,
+                &teacher,
+                molecule_payload("aminokyseliny", "Testin3", "C C")
+            ),
             Err(DbError::Validation(_))
         ));
         assert!(matches!(
@@ -2319,8 +3677,8 @@ mod tests {
         ));
         record("aminokyseliny", 7, 10).expect("valid score");
 
-        let board = do_quiz_leaderboard(&conn, &QuizLeaderboardPayload::default())
-            .expect("leaderboard");
+        let board =
+            do_quiz_leaderboard(&conn, &QuizLeaderboardPayload::default()).expect("leaderboard");
         assert_eq!(board.len(), 1);
         assert_eq!(board[0].correct_count, 7);
         assert_eq!(board[0].answered_count, 10);
@@ -2472,8 +3830,7 @@ mod tests {
     #[test]
     fn seed_is_not_reapplied_after_a_teacher_deletes_built_ins() {
         let conn = setup_conn();
-        crate::db::repos::BiomoleculeRepo::delete_category(&conn, "aminokyseliny")
-            .expect("delete");
+        crate::db::repos::BiomoleculeRepo::delete_category(&conn, "aminokyseliny").expect("delete");
         crate::db::biomolecule_seed::seed_builtins_if_empty(&conn).expect("re-seed is a no-op");
         assert!(!BiomoleculeRepo::category_exists(&conn, "aminokyseliny").expect("exists"));
     }
@@ -2813,10 +4170,12 @@ mod tests {
             (3, 10, 15)
         );
 
-        // Both modes default to the canonical 20 amino-acid slugs.
-        assert_eq!(settings[0].slugs.len(), 20);
-        assert!(settings[0].slugs.iter().any(|slug| slug == "ala"));
-        assert_eq!(settings[0].slugs, settings[1].slugs);
+        // Both modes default to an all-1 weight map over the canonical 20
+        // amino acids.
+        assert_eq!(settings[0].weights.len(), 20);
+        assert_eq!(settings[0].weights.get("ala"), Some(&1.0));
+        assert!(settings[0].weights.values().all(|weight| *weight == 1.0));
+        assert_eq!(settings[0].weights, settings[1].weights);
     }
 
     #[test]
@@ -2832,7 +4191,7 @@ mod tests {
                     min_len: 4,
                     max_len,
                     seconds_per_aa: 30,
-                    slugs: vec!["ala".into(), "gly".into()],
+                    weights: serde_json::json!({"ala": 1.0, "gly": 0.5}),
                 },
             )
             .expect("update");
@@ -2845,7 +4204,8 @@ mod tests {
             .expect("ucen settings");
         assert_eq!((ucen.min_len, ucen.max_len), (4, 5));
         assert_eq!(ucen.seconds_per_aa, 30);
-        assert_eq!(ucen.slugs, vec!["ala".to_string(), "gly".to_string()]);
+        assert_eq!(ucen.weights.get("ala"), Some(&1.0));
+        assert_eq!(ucen.weights.get("gly"), Some(&0.5));
 
         let mistr = settings
             .iter()
@@ -2853,28 +4213,31 @@ mod tests {
             .expect("mistr settings");
         assert_eq!((mistr.min_len, mistr.max_len), (4, 9));
         assert_eq!(mistr.seconds_per_aa, 30);
-        assert_eq!(mistr.slugs, vec!["ala".to_string(), "gly".to_string()]);
+        assert_eq!(mistr.weights, ucen.weights);
     }
 
     #[test]
     fn peptidovka_settings_validation_rejects_bad_input() {
         let conn = setup_conn();
         let teacher = teacher_id(&conn);
-        let update =
-            |mode: &str, min_len: i64, max_len: i64, seconds_per_aa: i64, slugs: Vec<String>| {
-                do_update_peptidovka_settings(
-                    &conn,
-                    &teacher,
-                    UpdatePeptidovkaSettingsPayload {
-                        mode: mode.into(),
-                        min_len,
-                        max_len,
-                        seconds_per_aa,
-                        slugs,
-                    },
-                )
-            };
-        let aa = || vec!["ala".to_string()];
+        let update = |mode: &str,
+                      min_len: i64,
+                      max_len: i64,
+                      seconds_per_aa: i64,
+                      weights: serde_json::Value| {
+            do_update_peptidovka_settings(
+                &conn,
+                &teacher,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: mode.into(),
+                    min_len,
+                    max_len,
+                    seconds_per_aa,
+                    weights,
+                },
+            )
+        };
+        let aa = || serde_json::json!({"ala": 1.0, "gly": 1.0});
 
         assert!(matches!(
             update("beginner", 3, 6, 15, aa()),
@@ -2900,13 +4263,84 @@ mod tests {
             matches!(update("ucen", 3, 6, 121, aa()), Err(DbError::Validation(_))),
             "seconds per amino acid above 120 must be rejected"
         );
-        assert!(
-            matches!(
-                update("ucen", 3, 6, 15, vec![]),
-                Err(DbError::Validation(_))
-            ),
-            "an empty slug set must be rejected"
-        );
+    }
+
+    /// Each of the weight-shape rejections must leave the *whole* stored row
+    /// alone — including the distinct valid numerics in the rejected payload.
+    /// Mirrors the G2 "distinct rejected numerics" precedent.
+    #[test]
+    fn peptidovka_weights_rejections_do_not_partially_write() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        // Baseline differs from every rejected payload's bounds/time.
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 4,
+                max_len: 8,
+                seconds_per_aa: 20,
+                weights: serde_json::json!({"ala": 1.0, "gly": 0.5}),
+            },
+        )
+        .expect("baseline");
+
+        let read = || -> (i64, i64, i64, HashMap<String, f64>) {
+            let (min_len, max_len, seconds_per_aa, weights_json): (i64, i64, i64, String) = conn
+                .query_row(
+                    "SELECT min_len, max_len, seconds_per_aa, weights
+                     FROM peptidovka_settings WHERE mode = 'ucen'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("stored settings");
+            (
+                min_len,
+                max_len,
+                seconds_per_aa,
+                serde_json::from_str(&weights_json).expect("stored weights"),
+            )
+        };
+
+        for bad in [
+            serde_json::json!({"ala": 1.5, "gly": 0.5}), // weight > 1
+            serde_json::json!({"ala": -0.1, "gly": 0.5}), // weight < 0
+            serde_json::json!({"ala": "1", "gly": 0.5}), // non-number
+            serde_json::json!({}),                       // empty object
+            serde_json::json!({"ala": 1.0}),             // exactly one positive
+            serde_json::json!({"ala": 0.0, "gly": 0.0}), // no positive weight
+            serde_json::json!({"": 1.0, "gly": 1.0}),    // empty key
+        ] {
+            let result = do_update_peptidovka_settings(
+                &conn,
+                &teacher,
+                UpdatePeptidovkaSettingsPayload {
+                    mode: "ucen".into(),
+                    min_len: 3,
+                    max_len: 5,
+                    seconds_per_aa: 30,
+                    weights: bad.clone(),
+                },
+            );
+            assert!(
+                matches!(result, Err(DbError::Validation(_))),
+                "{bad} must be rejected"
+            );
+
+            let (min_len, max_len, seconds_per_aa, weights) = read();
+            assert_eq!(
+                (min_len, max_len, seconds_per_aa),
+                (4, 8, 20),
+                "a rejected update must not write its valid numerics: {bad}"
+            );
+            assert_eq!(
+                weights,
+                HashMap::from([("ala".to_string(), 1.0), ("gly".to_string(), 0.5)]),
+                "a rejected update must not touch the stored weights: {bad}"
+            );
+        }
     }
 
     #[test]
@@ -2968,7 +4402,7 @@ mod tests {
                             min_len: 3,
                             max_len: 6,
                             seconds_per_aa: 15,
-                            slugs: vec!["ala".into()],
+                            weights: serde_json::json!({"ala": 1.0, "gly": 1.0}),
                         },
                     ),
                     Err(DbError::Validation(_))
@@ -3010,7 +4444,10 @@ mod tests {
             record("ucen", MAX_STREAK_CORRECT + 1, 30.0),
             Err(DbError::Validation(_))
         ));
-        assert!(matches!(record("ucen", 5, 0.0), Err(DbError::Validation(_))));
+        assert!(matches!(
+            record("ucen", 5, 0.0),
+            Err(DbError::Validation(_))
+        ));
         assert!(matches!(
             record("ucen", 5, -4.0),
             Err(DbError::Validation(_))
@@ -3099,38 +4536,13 @@ mod tests {
     }
 
     #[test]
-    fn peptidovka_update_rejects_unknown_slugs_and_dedupes() {
+    fn peptidovka_weights_tolerate_unknown_or_deleted_slugs() {
         let conn = setup_conn();
         let teacher = teacher_id(&conn);
 
-        // Well-formed but nonexistent slug — format checks alone used to let
-        // this through, silently breaking the game's pool. Distinct numerics,
-        // so the "stored untouched" assertion below actually discriminates
-        // (seed defaults are 3/6/15).
-        assert!(matches!(
-            do_update_peptidovka_settings(
-                &conn,
-                &teacher,
-                UpdatePeptidovkaSettingsPayload {
-                    mode: "ucen".into(),
-                    min_len: 4,
-                    max_len: 8,
-                    seconds_per_aa: 20,
-                    slugs: vec!["ala".into(), "gly".into(), "nesmysl-123".into()],
-                },
-            ),
-            Err(DbError::Validation(_))
-        ));
-        let stored_seconds: i64 = conn
-            .query_row(
-                "SELECT seconds_per_aa FROM peptidovka_settings WHERE mode = 'ucen'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("untouched settings");
-        assert_eq!(stored_seconds, 15, "a rejected update writes nothing");
-
-        // Duplicates collapse once, in first-seen order.
+        // A well-formed slug that no longer names a seeded molecule (a
+        // teacher's custom entry may have been deleted since) is tolerated,
+        // preserving the existing laxity rather than breaking re-saves.
         do_update_peptidovka_settings(
             &conn,
             &teacher,
@@ -3139,21 +4551,54 @@ mod tests {
                 min_len: 3,
                 max_len: 6,
                 seconds_per_aa: 15,
-                slugs: vec!["ala".into(), "ala".into(), "gly".into()],
+                weights: serde_json::json!({
+                    "ala": 1.0,
+                    "gly": 0.5,
+                    "nesmysl-123": 0.25
+                }),
             },
         )
-        .expect("deduped update");
-        let slugs_json: String = conn
-            .query_row(
-                "SELECT slugs FROM peptidovka_settings WHERE mode = 'ucen'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("slugs");
-        assert_eq!(
-            serde_json::from_str::<Vec<String>>(&slugs_json).expect("slugs json"),
-            vec!["ala".to_string(), "gly".to_string()]
-        );
+        .expect("unknown slug tolerated");
+
+        let weights: HashMap<String, f64> = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT weights FROM peptidovka_settings WHERE mode = 'ucen'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("weights"),
+        )
+        .expect("weights json");
+        assert_eq!(weights.get("ala"), Some(&1.0));
+        assert_eq!(weights.get("gly"), Some(&0.5));
+        assert_eq!(weights.get("nesmysl-123"), Some(&0.25));
+
+        // Keys are trimmed; two spellings of one slug collapse to one entry.
+        do_update_peptidovka_settings(
+            &conn,
+            &teacher,
+            UpdatePeptidovkaSettingsPayload {
+                mode: "ucen".into(),
+                min_len: 3,
+                max_len: 6,
+                seconds_per_aa: 15,
+                weights: serde_json::json!({" ala ": 0.5, "ala": 1.0, "gly": 1.0}),
+            },
+        )
+        .expect("trimmed keys");
+        let weights: HashMap<String, f64> = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT weights FROM peptidovka_settings WHERE mode = 'ucen'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("weights"),
+        )
+        .expect("weights json");
+        assert_eq!(weights.len(), 2);
+        assert_eq!(weights.get("ala"), Some(&1.0));
     }
 
     #[test]
@@ -3199,7 +4644,7 @@ mod tests {
                 min_len: 3,
                 max_len: 6,
                 seconds_per_aa: 15,
-                slugs: vec!["ala".into(), "gly".into()],
+                weights: serde_json::json!({"ala": 1.0, "gly": 0.5}),
             },
         )
         .expect("settings");
@@ -3223,10 +4668,1366 @@ mod tests {
         assert_eq!(entries[1].action, "reorder");
 
         BiomoleculeHistoryRepo::clear_all(&conn).expect("clear");
-        assert!(
-            BiomoleculeHistoryRepo::list_all(&conn, 50, 0)
-                .expect("after clear")
-                .is_empty()
+        assert!(BiomoleculeHistoryRepo::list_all(&conn, 50, 0)
+            .expect("after clear")
+            .is_empty());
+    }
+
+    fn insert_student_with_sections(
+        conn: &Connection,
+        username: &str,
+        sections: SectionAccess,
+    ) -> Uuid {
+        let user = crate::db::repos::UserRecord {
+            id: Uuid::new_v4(),
+            username: username.into(),
+            password_hash: "h".into(),
+            role: Role::Student,
+            created_at: chrono::Utc::now(),
+            protected: false,
+            email: None,
+            sections,
+            preferred_section: None,
+            invite_code: None,
+        };
+        crate::db::repos::UserRepo::insert(conn, &user).expect("insert user");
+        user.id
+    }
+
+    fn test_payload() -> CreateBiomoleculeTestPayload {
+        let now = Utc::now();
+        CreateBiomoleculeTestPayload {
+            title: "  Biomolekuly test  ".into(),
+            category_slugs: serde_json::json!(["aminokyseliny"]),
+            molecule_ids: serde_json::json!([Uuid::new_v4().to_string()]),
+            question_types: serde_json::json!(["nameToLetter", "characteristic"]),
+            question_count: 10,
+            question_set: "fixed".into(),
+            monochrome: false,
+            available_from: (now - chrono::Duration::hours(1)).to_rfc3339(),
+            available_to: (now + chrono::Duration::hours(1)).to_rfc3339(),
+            seed: Some(1234),
+            assigned_codes: serde_json::json!([]),
+        }
+    }
+
+    #[test]
+    fn create_biomolecule_test_validation_matrix_leaves_no_partial_write() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let create = |payload| do_create_biomolecule_test(&conn, &teacher, payload);
+
+        let mut bad = test_payload();
+        bad.title = "   ".into();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.title = "a".repeat(MAX_TEST_TITLE_CHARS + 1);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.question_types = serde_json::json!(["bogusType"]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.question_types = serde_json::json!("nameToLetter");
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.question_types = serde_json::json!([1, 2]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.question_types = serde_json::json!([]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        for count in [0_i64, MAX_TEST_QUESTIONS + 1] {
+            let mut bad = test_payload();
+            bad.question_count = count;
+            assert!(
+                matches!(create(bad), Err(DbError::Validation(_))),
+                "question_count {count} must be rejected"
+            );
+        }
+
+        let mut bad = test_payload();
+        bad.available_to = bad.available_from.clone();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.available_from = "not a date".into();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.category_slugs = serde_json::json!(["neexistuje"]);
+        assert!(create(bad).is_err());
+
+        let mut bad = test_payload();
+        bad.molecule_ids = serde_json::json!([""]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = test_payload();
+        bad.question_set = "shuffled".into();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let tests: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_tests", [], |row| {
+                row.get(0)
+            })
+            .expect("count");
+        let history: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_history", [], |row| {
+                row.get(0)
+            })
+            .expect("history count");
+        assert_eq!(tests, 0, "rejected payloads write no test");
+        assert_eq!(history, 0, "rejected payloads write no history");
+    }
+
+    #[test]
+    fn create_biomolecule_test_stores_pool_and_logs_history() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let payload = test_payload();
+        let molecule_id = payload.molecule_ids[0].as_str().unwrap().to_string();
+
+        let view = do_create_biomolecule_test(&conn, &teacher, payload).expect("create");
+        assert_eq!(view.title, "Biomolekuly test");
+        assert_eq!(view.category_slugs, vec!["aminokyseliny".to_string()]);
+        assert_eq!(view.molecule_ids, vec![molecule_id]);
+        assert_eq!(
+            view.question_types,
+            vec!["nameToLetter".to_string(), "characteristic".to_string()]
         );
+        assert_eq!(view.question_count, 10);
+        assert_eq!(view.question_set, "fixed");
+        assert!(!view.monochrome);
+        assert_eq!(view.seed, Some(1234));
+
+        let entries = BiomoleculeHistoryRepo::list_all(&conn, 10, 0).expect("history");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "test");
+        assert_eq!(entries[0].action, "create");
+        assert_eq!(entries[0].label, "Biomolekuly test");
+
+        let teacher_view = do_list_biomolecule_tests(&conn, &teacher).expect("list");
+        assert_eq!(teacher_view.tests.len(), 1);
+        assert_eq!(teacher_view.tests[0].test.id, view.id);
+        assert!(teacher_view.tests[0].attempts.is_empty());
+        assert!(chrono::DateTime::parse_from_rfc3339(&teacher_view.server_now).is_ok());
+    }
+
+    #[test]
+    fn start_returns_a_fresh_fixed_seed_and_resumes_existing_attempts() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let test = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+
+        let first = do_start_biomolecule_test_attempt(&conn, &student, &test_id).expect("start");
+        assert_eq!(first.status, "started");
+        assert_eq!(first.seed, 1234, "fixed mode copies the test seed");
+        assert_eq!(first.submitted_at, None);
+
+        let again = do_start_biomolecule_test_attempt(&conn, &student, &test_id).expect("resume");
+        assert_eq!(again.status, "exists");
+        assert_eq!(again.attempt_id, first.attempt_id);
+        assert_eq!(again.seed, first.seed);
+        let attempts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM biomolecule_test_attempts WHERE test_id = ?1",
+                rusqlite::params![test_id],
+                |row| row.get(0),
+            )
+            .expect("attempt count");
+        assert_eq!(attempts, 1, "starting twice never duplicates the row");
+
+        // The available list reports the in-progress attempt.
+        let available = do_list_available_biomolecule_tests(&conn, &student).expect("available");
+        assert_eq!(available.len(), 1);
+        let attempt = available[0].attempt.as_ref().expect("attempt");
+        assert_eq!(attempt.attempt_id, first.attempt_id);
+        assert_eq!(attempt.seed, 1234);
+        assert_eq!(attempt.submitted_at, None);
+    }
+
+    #[test]
+    fn random_tests_get_a_per_attempt_seed() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let mut payload = test_payload();
+        payload.question_set = "random".into();
+        payload.seed = Some(777);
+        let test = do_create_biomolecule_test(&conn, &teacher, payload).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+
+        let started =
+            do_start_biomolecule_test_attempt(&conn, &student, &test_id).expect("start random");
+        assert_eq!(started.status, "started");
+        let stored: i64 = conn
+            .query_row(
+                "SELECT seed FROM biomolecule_test_attempts WHERE id = ?1",
+                rusqlite::params![Uuid::parse_str(&started.attempt_id).unwrap()],
+                |row| row.get(0),
+            )
+            .expect("stored seed");
+        assert_eq!(stored, started.seed);
+    }
+
+    #[test]
+    fn start_rejects_tests_outside_their_window() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        let now = Utc::now();
+        for (from, to) in [
+            (
+                now + chrono::Duration::hours(1),
+                now + chrono::Duration::hours(2),
+            ),
+            (
+                now - chrono::Duration::hours(2),
+                now - chrono::Duration::hours(1),
+            ),
+        ] {
+            let mut payload = test_payload();
+            payload.available_from = from.to_rfc3339();
+            payload.available_to = to.to_rfc3339();
+            let test = do_create_biomolecule_test(&conn, &teacher, payload).expect("create");
+            let test_id = Uuid::parse_str(&test.id).expect("uuid");
+            assert!(matches!(
+                do_start_biomolecule_test_attempt(&conn, &student, &test_id),
+                Err(DbError::Validation(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn submit_is_idempotent_and_checks_ownership_scores_and_deadline() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let other = insert_student(&conn, "other");
+        let test = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+        let started = do_start_biomolecule_test_attempt(&conn, &student, &test_id).expect("start");
+        let attempt_id = Uuid::parse_str(&started.attempt_id).expect("uuid");
+
+        // Someone else's attempt is invisible.
+        assert!(matches!(
+            do_submit_biomolecule_test_attempt(&conn, &other, &attempt_id, 8, 6, None),
+            Err(DbError::NotFound(_))
+        ));
+
+        // Invalid scores never land.
+        for (total, correct) in [(0, 0), (MAX_TEST_QUESTIONS + 1, 1), (5, 6)] {
+            assert!(
+                matches!(
+                    do_submit_biomolecule_test_attempt(
+                        &conn,
+                        &student,
+                        &attempt_id,
+                        total,
+                        correct,
+                        None
+                    ),
+                    Err(DbError::Validation(_))
+                ),
+                "score {correct}/{total} must be rejected"
+            );
+        }
+
+        // An oversize breakdown is refused.
+        let oversize = "x".repeat(MAX_TEST_DETAIL_JSON + 1);
+        assert!(matches!(
+            do_submit_biomolecule_test_attempt(
+                &conn,
+                &student,
+                &attempt_id,
+                10,
+                8,
+                Some(&oversize)
+            ),
+            Err(DbError::Validation(_))
+        ));
+
+        do_submit_biomolecule_test_attempt(
+            &conn,
+            &student,
+            &attempt_id,
+            10,
+            8,
+            Some(r#"{"nameToLetter":{"correct":8,"total":10}}"#),
+        )
+        .expect("submit");
+
+        let (submitted, total, correct, detail): (Option<String>, i64, i64, Option<String>) = conn
+            .query_row(
+                "SELECT submitted_at, total_count, correct_count, detail_json
+                 FROM biomolecule_test_attempts WHERE id = ?1",
+                rusqlite::params![attempt_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("stored result");
+        assert!(submitted.is_some());
+        assert_eq!((total, correct), (10, 8));
+        assert!(detail.unwrap().contains("nameToLetter"));
+
+        // A repeated submit reports success but never rewrites the result.
+        do_submit_biomolecule_test_attempt(&conn, &student, &attempt_id, 1, 0, None)
+            .expect("idempotent submit");
+        let (total, correct): (i64, i64) = conn
+            .query_row(
+                "SELECT total_count, correct_count FROM biomolecule_test_attempts WHERE id = ?1",
+                rusqlite::params![attempt_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("unchanged result");
+        assert_eq!((total, correct), (10, 8));
+
+        // The student view reports the submitted result.
+        let available = do_list_available_biomolecule_tests(&conn, &student).expect("available");
+        let view = available[0].attempt.as_ref().expect("attempt");
+        assert_eq!(view.total_count, Some(10));
+        assert_eq!(view.correct_count, Some(8));
+        assert!(view.submitted_at.is_some());
+
+        // Past the deadline plus grace, a still-unsubmitted attempt is refused.
+        let late_test =
+            do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create late");
+        let late_test_id = Uuid::parse_str(&late_test.id).expect("uuid");
+        let late =
+            do_start_biomolecule_test_attempt(&conn, &student, &late_test_id).expect("start late");
+        let late_attempt_id = Uuid::parse_str(&late.attempt_id).expect("uuid");
+        conn.execute(
+            "UPDATE biomolecule_tests SET available_to = ?1 WHERE id = ?2",
+            rusqlite::params![
+                (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339(),
+                late_test_id
+            ],
+        )
+        .expect("close window");
+        match do_submit_biomolecule_test_attempt(&conn, &student, &late_attempt_id, 5, 5, None) {
+            Err(DbError::Validation(message)) => assert!(message.contains("deadline passed")),
+            other => panic!("expected deadline rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_is_refused_once_an_attempt_exists() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        let fresh = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create");
+        let fresh_id = Uuid::parse_str(&fresh.id).expect("uuid");
+        do_delete_biomolecule_test(&conn, &teacher, &fresh_id).expect("delete fresh");
+        assert!(BiomoleculeTestRepo::find(&conn, &fresh_id)
+            .expect("find")
+            .is_none());
+
+        let used = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create");
+        let used_id = Uuid::parse_str(&used.id).expect("uuid");
+        do_start_biomolecule_test_attempt(&conn, &student, &used_id).expect("start");
+        assert!(matches!(
+            do_delete_biomolecule_test(&conn, &teacher, &used_id),
+            Err(DbError::Validation(_))
+        ));
+        assert!(BiomoleculeTestRepo::find(&conn, &used_id)
+            .expect("find")
+            .is_some());
+
+        let actions: Vec<String> = BiomoleculeHistoryRepo::list_all(&conn, 10, 0)
+            .expect("history")
+            .into_iter()
+            .map(|entry| entry.action)
+            .collect();
+        assert_eq!(actions, vec!["create", "delete", "create"]);
+    }
+
+    #[test]
+    fn teacher_list_joins_usernames_and_lists_the_eligible_roster() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let both = insert_student_with_sections(&conn, "both", SectionAccess::Both);
+        let biomolecules = insert_student_with_sections(&conn, "bio", SectionAccess::Biomolecules);
+        insert_student_with_sections(&conn, "calc", SectionAccess::Calculations);
+
+        let test = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+        let started = do_start_biomolecule_test_attempt(&conn, &both, &test_id).expect("start");
+        let attempt_id = Uuid::parse_str(&started.attempt_id).expect("uuid");
+        let detail = format!(r#"{{"items":"{}"}}"#, "x".repeat(5000));
+        do_submit_biomolecule_test_attempt(&conn, &both, &attempt_id, 7, 5, Some(detail.as_str()))
+            .expect("submit");
+        // An eligible student who started but never submitted: seed present,
+        // detail still absent.
+        do_start_biomolecule_test_attempt(&conn, &biomolecules, &test_id).expect("start pending");
+
+        let views = do_list_biomolecule_tests(&conn, &teacher).expect("list");
+        assert_eq!(views.tests.len(), 1);
+        let view = &views.tests[0];
+        assert_eq!(view.attempts.len(), 2);
+        let submitted = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "both")
+            .expect("submitted summary");
+        assert_eq!(submitted.user_id, both.to_string());
+        assert_eq!(submitted.total_count, Some(7));
+        assert_eq!(submitted.correct_count, Some(5));
+        assert_eq!(submitted.seed, 1234, "summary carries the attempt seed");
+        assert_eq!(submitted.detail_json.as_deref(), Some(detail.as_str()));
+        let pending = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "bio")
+            .expect("pending summary");
+        assert_eq!(pending.seed, 1234);
+        assert!(
+            pending.detail_json.is_none(),
+            "unsubmitted attempt has no detail"
+        );
+
+        let roster: Vec<&str> = view
+            .roster
+            .iter()
+            .map(|entry| entry.username.as_str())
+            .collect();
+        assert!(roster.contains(&"both"));
+        assert!(roster.contains(&"bio"));
+        assert!(
+            !roster.contains(&"calc"),
+            "calculations-only is not eligible"
+        );
+        assert!(view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == biomolecules.to_string()));
+    }
+
+    #[test]
+    fn available_list_hides_tests_outside_their_window() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        let open = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("open");
+        let mut future_payload = test_payload();
+        let now = Utc::now();
+        future_payload.available_from = (now + chrono::Duration::hours(1)).to_rfc3339();
+        future_payload.available_to = (now + chrono::Duration::hours(2)).to_rfc3339();
+        do_create_biomolecule_test(&conn, &teacher, future_payload).expect("future");
+
+        let available = do_list_available_biomolecule_tests(&conn, &student).expect("available");
+        assert_eq!(available.len(), 1);
+        assert_eq!(available[0].test.id, open.id);
+        assert!(available[0].attempt.is_none());
+    }
+
+    fn peptidovka_test_payload() -> CreatePeptidovkaTestPayload {
+        let now = Utc::now();
+        CreatePeptidovkaTestPayload {
+            title: "  Peptidovka test  ".into(),
+            pool_slugs: serde_json::json!(["ala", "gly"]),
+            peptide_count: 10,
+            peptide_min_length: 5,
+            peptide_max_length: 5,
+            question_set: "fixed".into(),
+            monochrome: false,
+            available_from: (now - chrono::Duration::hours(1)).to_rfc3339(),
+            available_to: (now + chrono::Duration::hours(1)).to_rfc3339(),
+            seed: Some(1234),
+            assigned_codes: serde_json::json!([]),
+        }
+    }
+
+    #[test]
+    fn create_peptidovka_test_validation_matrix_leaves_no_partial_write() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let create = |payload| do_create_peptidovka_test(&conn, &teacher, payload);
+
+        let mut bad = peptidovka_test_payload();
+        bad.title = "   ".into();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.title = "a".repeat(MAX_TEST_TITLE_CHARS + 1);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.pool_slugs = serde_json::json!("ala");
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.pool_slugs = serde_json::json!([1, 2]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.pool_slugs = serde_json::json!(["ala"]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.pool_slugs = serde_json::json!([""]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.pool_slugs = serde_json::json!(["ala", "neexistuje"]);
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        for count in [0_i64, PEPTIDOVKA_TEST_MAX_COUNT + 1] {
+            let mut bad = peptidovka_test_payload();
+            bad.peptide_count = count;
+            assert!(
+                matches!(create(bad), Err(DbError::Validation(_))),
+                "peptide_count {count} must be rejected"
+            );
+        }
+
+        for (min, max) in [(1_i64, 5_i64), (5, PEPTIDOVKA_TEST_MAX_LENGTH + 1), (7, 5)] {
+            let mut bad = peptidovka_test_payload();
+            bad.peptide_min_length = min;
+            bad.peptide_max_length = max;
+            assert!(
+                matches!(create(bad), Err(DbError::Validation(_))),
+                "length bounds {min}..{max} must be rejected"
+            );
+        }
+
+        let mut bad = peptidovka_test_payload();
+        bad.question_set = "shuffled".into();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.available_to = bad.available_from.clone();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let mut bad = peptidovka_test_payload();
+        bad.available_from = "not a date".into();
+        assert!(matches!(create(bad), Err(DbError::Validation(_))));
+
+        let tests: i64 = conn
+            .query_row("SELECT COUNT(*) FROM peptidovka_tests", [], |row| {
+                row.get(0)
+            })
+            .expect("count");
+        let history: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_history", [], |row| {
+                row.get(0)
+            })
+            .expect("history count");
+        assert_eq!(tests, 0, "rejected payloads write no test");
+        assert_eq!(history, 0, "rejected payloads write no history");
+    }
+
+    #[test]
+    fn create_peptidovka_test_stores_pool_and_logs_history() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let view =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        assert_eq!(view.title, "Peptidovka test");
+        assert_eq!(view.pool_slugs, vec!["ala".to_string(), "gly".to_string()]);
+        assert_eq!(view.peptide_count, 10);
+        assert_eq!(view.peptide_min_length, 5);
+        assert_eq!(view.peptide_max_length, 5);
+        assert_eq!(view.question_set, "fixed");
+        assert!(!view.monochrome);
+        assert_eq!(view.seed, Some(1234));
+        // Window instants are stored normalized to UTC.
+        assert!(view.available_from.ends_with("+00:00"));
+
+        let entries = BiomoleculeHistoryRepo::list_all(&conn, 10, 0).expect("history");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, "peptidovka-test");
+        assert_eq!(entries[0].action, "create");
+        assert_eq!(entries[0].label, "Peptidovka test");
+
+        let teacher_view = do_list_peptidovka_tests(&conn, &teacher).expect("list");
+        assert_eq!(teacher_view.tests.len(), 1);
+        assert_eq!(teacher_view.tests[0].test.id, view.id);
+        assert!(teacher_view.tests[0].attempts.is_empty());
+        assert!(chrono::DateTime::parse_from_rfc3339(&teacher_view.server_now).is_ok());
+    }
+
+    #[test]
+    fn start_peptidovka_returns_fixed_seed_and_resumes_existing_attempts() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let test =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+
+        let first = do_start_peptidovka_test_attempt(&conn, &student, &test_id).expect("start");
+        assert_eq!(first.status, "started");
+        assert_eq!(first.seed, 1234, "fixed mode copies the test seed");
+        assert_eq!(first.submitted_at, None);
+
+        let again = do_start_peptidovka_test_attempt(&conn, &student, &test_id).expect("resume");
+        assert_eq!(again.status, "exists");
+        assert_eq!(again.attempt_id, first.attempt_id);
+        assert_eq!(again.seed, first.seed);
+        let attempts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM peptidovka_test_attempts WHERE test_id = ?1",
+                rusqlite::params![test_id],
+                |row| row.get(0),
+            )
+            .expect("attempt count");
+        assert_eq!(attempts, 1, "starting twice never duplicates the row");
+
+        let available = do_list_available_peptidovka_tests(&conn, &student).expect("available");
+        assert_eq!(available.len(), 1);
+        let attempt = available[0].attempt.as_ref().expect("attempt");
+        assert_eq!(attempt.attempt_id, first.attempt_id);
+        assert_eq!(attempt.seed, 1234);
+        assert_eq!(attempt.submitted_at, None);
+    }
+
+    #[test]
+    fn random_peptidovka_tests_get_a_per_attempt_seed() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let mut payload = peptidovka_test_payload();
+        payload.question_set = "random".into();
+        payload.seed = Some(777);
+        let test = do_create_peptidovka_test(&conn, &teacher, payload).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+
+        let started =
+            do_start_peptidovka_test_attempt(&conn, &student, &test_id).expect("start random");
+        assert_eq!(started.status, "started");
+        let stored: i64 = conn
+            .query_row(
+                "SELECT seed FROM peptidovka_test_attempts WHERE id = ?1",
+                rusqlite::params![Uuid::parse_str(&started.attempt_id).unwrap()],
+                |row| row.get(0),
+            )
+            .expect("stored seed");
+        assert_eq!(stored, started.seed);
+    }
+
+    #[test]
+    fn start_peptidovka_rejects_tests_outside_their_window() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        let now = Utc::now();
+        for (from, to) in [
+            (
+                now + chrono::Duration::hours(1),
+                now + chrono::Duration::hours(2),
+            ),
+            (
+                now - chrono::Duration::hours(2),
+                now - chrono::Duration::hours(1),
+            ),
+        ] {
+            let mut payload = peptidovka_test_payload();
+            payload.available_from = from.to_rfc3339();
+            payload.available_to = to.to_rfc3339();
+            let test = do_create_peptidovka_test(&conn, &teacher, payload).expect("create");
+            let test_id = Uuid::parse_str(&test.id).expect("uuid");
+            assert!(matches!(
+                do_start_peptidovka_test_attempt(&conn, &student, &test_id),
+                Err(DbError::Validation(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn submit_peptidovka_is_idempotent_and_checks_ownership_scores_detail_and_deadline() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let other = insert_student(&conn, "other");
+        let test =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+        let started = do_start_peptidovka_test_attempt(&conn, &student, &test_id).expect("start");
+        let attempt_id = Uuid::parse_str(&started.attempt_id).expect("uuid");
+
+        // Someone else's attempt is invisible.
+        assert!(matches!(
+            do_submit_peptidovka_test_attempt(&conn, &other, &attempt_id, 8, 6, None),
+            Err(DbError::NotFound(_))
+        ));
+
+        // Invalid scores never land.
+        for (total, correct) in [(0, 0), (PEPTIDOVKA_TEST_MAX_COUNT + 1, 1), (5, 6)] {
+            assert!(
+                matches!(
+                    do_submit_peptidovka_test_attempt(
+                        &conn,
+                        &student,
+                        &attempt_id,
+                        total,
+                        correct,
+                        None
+                    ),
+                    Err(DbError::Validation(_))
+                ),
+                "score {correct}/{total} must be rejected"
+            );
+        }
+
+        // An oversize breakdown is refused.
+        let oversize = "x".repeat(MAX_TEST_DETAIL_JSON + 1);
+        assert!(matches!(
+            do_submit_peptidovka_test_attempt(&conn, &student, &attempt_id, 10, 8, Some(&oversize)),
+            Err(DbError::Validation(_))
+        ));
+
+        do_submit_peptidovka_test_attempt(
+            &conn,
+            &student,
+            &attempt_id,
+            10,
+            8,
+            Some(r#"{"peptides":{"correct":8,"total":10}}"#),
+        )
+        .expect("submit");
+
+        let (submitted, total, correct, detail): (Option<String>, i64, i64, Option<String>) = conn
+            .query_row(
+                "SELECT submitted_at, total_count, correct_count, detail_json
+                 FROM peptidovka_test_attempts WHERE id = ?1",
+                rusqlite::params![attempt_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("stored result");
+        assert!(submitted.is_some());
+        assert_eq!((total, correct), (10, 8));
+        assert!(detail.unwrap().contains("peptides"));
+
+        // A repeated submit reports success but never rewrites the result.
+        do_submit_peptidovka_test_attempt(&conn, &student, &attempt_id, 1, 0, None)
+            .expect("idempotent submit");
+        let (total, correct): (i64, i64) = conn
+            .query_row(
+                "SELECT total_count, correct_count FROM peptidovka_test_attempts WHERE id = ?1",
+                rusqlite::params![attempt_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("unchanged result");
+        assert_eq!((total, correct), (10, 8));
+
+        let available = do_list_available_peptidovka_tests(&conn, &student).expect("available");
+        let view = available[0].attempt.as_ref().expect("attempt");
+        assert_eq!(view.total_count, Some(10));
+        assert_eq!(view.correct_count, Some(8));
+        assert!(view.submitted_at.is_some());
+
+        // Past the deadline plus grace, a still-unsubmitted attempt is refused.
+        let late_test = do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload())
+            .expect("create late");
+        let late_test_id = Uuid::parse_str(&late_test.id).expect("uuid");
+        let late =
+            do_start_peptidovka_test_attempt(&conn, &student, &late_test_id).expect("start late");
+        let late_attempt_id = Uuid::parse_str(&late.attempt_id).expect("uuid");
+        conn.execute(
+            "UPDATE peptidovka_tests SET available_to = ?1 WHERE id = ?2",
+            rusqlite::params![
+                (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339(),
+                late_test_id
+            ],
+        )
+        .expect("close window");
+        match do_submit_peptidovka_test_attempt(&conn, &student, &late_attempt_id, 5, 5, None) {
+            Err(DbError::Validation(message)) => assert!(message.contains("deadline passed")),
+            other => panic!("expected deadline rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_peptidovka_is_refused_once_an_attempt_exists() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        let fresh =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        let fresh_id = Uuid::parse_str(&fresh.id).expect("uuid");
+        do_delete_peptidovka_test(&conn, &teacher, &fresh_id).expect("delete fresh");
+        assert!(PeptidovkaTestRepo::find(&conn, &fresh_id)
+            .expect("find")
+            .is_none());
+
+        let used =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        let used_id = Uuid::parse_str(&used.id).expect("uuid");
+        do_start_peptidovka_test_attempt(&conn, &student, &used_id).expect("start");
+        assert!(matches!(
+            do_delete_peptidovka_test(&conn, &teacher, &used_id),
+            Err(DbError::Validation(_))
+        ));
+        assert!(PeptidovkaTestRepo::find(&conn, &used_id)
+            .expect("find")
+            .is_some());
+
+        let actions: Vec<String> = BiomoleculeHistoryRepo::list_all(&conn, 10, 0)
+            .expect("history")
+            .into_iter()
+            .map(|entry| entry.action)
+            .collect();
+        assert_eq!(actions, vec!["create", "delete", "create"]);
+    }
+
+    #[test]
+    fn teacher_peptidovka_list_joins_usernames_and_lists_the_eligible_roster() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let both = insert_student_with_sections(&conn, "both", SectionAccess::Both);
+        let biomolecules = insert_student_with_sections(&conn, "bio", SectionAccess::Biomolecules);
+        insert_student_with_sections(&conn, "calc", SectionAccess::Calculations);
+
+        let test =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+        let started = do_start_peptidovka_test_attempt(&conn, &both, &test_id).expect("start");
+        let attempt_id = Uuid::parse_str(&started.attempt_id).expect("uuid");
+        let detail = format!(r#"{{"items":"{}"}}"#, "x".repeat(5000));
+        do_submit_peptidovka_test_attempt(&conn, &both, &attempt_id, 7, 5, Some(detail.as_str()))
+            .expect("submit");
+        // An eligible student who started but never submitted: seed present,
+        // detail still absent.
+        do_start_peptidovka_test_attempt(&conn, &biomolecules, &test_id).expect("start pending");
+
+        let views = do_list_peptidovka_tests(&conn, &teacher).expect("list");
+        assert_eq!(views.tests.len(), 1);
+        let view = &views.tests[0];
+        assert_eq!(view.attempts.len(), 2);
+        let submitted = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "both")
+            .expect("submitted summary");
+        assert_eq!(submitted.user_id, both.to_string());
+        assert_eq!(submitted.total_count, Some(7));
+        assert_eq!(submitted.correct_count, Some(5));
+        assert_eq!(submitted.seed, 1234, "summary carries the attempt seed");
+        assert_eq!(submitted.detail_json.as_deref(), Some(detail.as_str()));
+        let pending = view
+            .attempts
+            .iter()
+            .find(|attempt| attempt.username == "bio")
+            .expect("pending summary");
+        assert_eq!(pending.seed, 1234);
+        assert!(
+            pending.detail_json.is_none(),
+            "unsubmitted attempt has no detail"
+        );
+
+        let roster: Vec<&str> = view
+            .roster
+            .iter()
+            .map(|entry| entry.username.as_str())
+            .collect();
+        assert!(roster.contains(&"both"));
+        assert!(roster.contains(&"bio"));
+        assert!(
+            !roster.contains(&"calc"),
+            "calculations-only is not eligible"
+        );
+        assert!(view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == biomolecules.to_string()));
+    }
+
+    #[test]
+    fn available_peptidovka_list_keeps_closed_tests_visible_to_attempt_holders_only() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        let bystander = insert_student(&conn, "bystander");
+
+        let test =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create");
+        let test_id = Uuid::parse_str(&test.id).expect("uuid");
+        do_start_peptidovka_test_attempt(&conn, &student, &test_id).expect("start");
+
+        // Close the window: the attempt holder still sees their result route.
+        conn.execute(
+            "UPDATE peptidovka_tests SET available_to = ?1 WHERE id = ?2",
+            rusqlite::params![
+                (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339(),
+                test_id
+            ],
+        )
+        .expect("close window");
+
+        let held = do_list_available_peptidovka_tests(&conn, &student).expect("held");
+        assert_eq!(held.len(), 1, "an attempt keeps a closed test visible");
+        assert!(held[0].attempt.is_some());
+
+        let hidden = do_list_available_peptidovka_tests(&conn, &bystander).expect("bystander");
+        assert!(
+            hidden.is_empty(),
+            "closed tests without an attempt are hidden"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test audiences by invite code (migration v66). The two systems mirror
+    // each other, so every test below is paired.
+    // -----------------------------------------------------------------------
+
+    fn create_student_code(conn: &Connection, code: &str, sections: SectionAccess) {
+        crate::db::repos::InviteCodeRepo::create(conn, code, Role::Student, sections, None)
+            .expect("create student code");
+    }
+
+    fn register_with_code(conn: &Connection, username: &str, code: &str) -> Uuid {
+        crate::commands::auth::do_register(
+            conn,
+            crate::commands::auth::RegisterPayload {
+                username: username.into(),
+                password: "password123".into(),
+                invite_code: code.into(),
+                email: None,
+            },
+        )
+        .expect("register")
+        .user
+        .id
+    }
+
+    fn register_audience_students(conn: &Connection) -> (Uuid, Uuid) {
+        // Distinct section scopes keep both codes live at once (the repo allows
+        // only one live code per (role, sections) pair).
+        create_student_code(conn, "ALPHA", SectionAccess::Biomolecules);
+        create_student_code(conn, "BETA", SectionAccess::Both);
+        let alice = register_with_code(conn, "alice", "ALPHA");
+        let bob = register_with_code(conn, "bob", "BETA");
+        (alice, bob)
+    }
+
+    #[test]
+    fn create_biomolecule_test_validates_audience_codes() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        // Unknown code → NotFound, and no test/history row is written.
+        let mut payload = test_payload();
+        payload.assigned_codes = serde_json::json!(["NOPE"]);
+        assert!(matches!(
+            do_create_biomolecule_test(&conn, &teacher, payload),
+            Err(DbError::NotFound(_))
+        ));
+
+        // A teacher-role code can never name a student group.
+        crate::db::repos::InviteCodeRepo::create(
+            &conn,
+            "TEACHONLY",
+            Role::Teacher,
+            SectionAccess::Both,
+            None,
+        )
+        .expect("teacher code");
+        let mut payload = test_payload();
+        payload.assigned_codes = serde_json::json!(["TEACHONLY"]);
+        assert!(matches!(
+            do_create_biomolecule_test(&conn, &teacher, payload),
+            Err(DbError::Validation(_))
+        ));
+
+        // Real student code is accepted and persisted.
+        create_student_code(&conn, "ALPHA", SectionAccess::Biomolecules);
+        let mut payload = test_payload();
+        payload.assigned_codes = serde_json::json!(["ALPHA", "ALPHA"]);
+        let targeted = do_create_biomolecule_test(&conn, &teacher, payload).expect("create");
+        assert_eq!(
+            targeted.assigned_codes.as_deref(),
+            Some(&["ALPHA".to_string()][..]),
+            "duplicates collapse to one audience entry"
+        );
+
+        // Empty audience is explicitly ALL students.
+        let all = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create all");
+        assert!(all.assigned_codes.as_deref().unwrap().is_empty());
+
+        let tests: i64 = conn
+            .query_row("SELECT COUNT(*) FROM biomolecule_tests", [], |row| {
+                row.get(0)
+            })
+            .expect("count");
+        assert_eq!(tests, 2, "only accepted audiences wrote a test");
+    }
+
+    #[test]
+    fn available_biomolecule_tests_respect_the_audience() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let (alice, bob) = register_audience_students(&conn);
+
+        let all = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create all");
+        let mut targeted_payload = test_payload();
+        targeted_payload.assigned_codes = serde_json::json!(["ALPHA"]);
+        let targeted =
+            do_create_biomolecule_test(&conn, &teacher, targeted_payload).expect("create targeted");
+        let targeted_id = Uuid::parse_str(&targeted.id).expect("uuid");
+
+        let alice_ids: Vec<String> = do_list_available_biomolecule_tests(&conn, &alice)
+            .expect("alice")
+            .into_iter()
+            .map(|view| view.test.id)
+            .collect();
+        assert!(alice_ids.contains(&all.id));
+        assert!(alice_ids.contains(&targeted.id), "ALPHA is alice's code");
+
+        let bob_ids: Vec<String> = do_list_available_biomolecule_tests(&conn, &bob)
+            .expect("bob")
+            .into_iter()
+            .map(|view| view.test.id)
+            .collect();
+        assert!(bob_ids.contains(&all.id), "ALL reaches every student");
+        assert!(
+            !bob_ids.contains(&targeted.id),
+            "a targeted test stays hidden from other codes"
+        );
+        assert!(
+            matches!(
+                do_start_biomolecule_test_attempt(&conn, &bob, &targeted_id),
+                Err(DbError::Validation(_))
+            ),
+            "the audience is enforced on start, not just listing"
+        );
+
+        // Interplay: a closed test with an in-progress attempt stays visible to
+        // its audience; the audience gate still hides it from everyone else.
+        do_start_biomolecule_test_attempt(&conn, &alice, &targeted_id).expect("alice start");
+        conn.execute(
+            "UPDATE biomolecule_tests SET available_to = ?1 WHERE id = ?2",
+            rusqlite::params![
+                (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339(),
+                targeted_id
+            ],
+        )
+        .expect("close window");
+
+        let alice_after = do_list_available_biomolecule_tests(&conn, &alice).expect("alice after");
+        let visible = alice_after
+            .iter()
+            .find(|view| view.test.id == targeted.id)
+            .expect("audience holder keeps the closed test");
+        assert!(visible.attempt.is_some());
+
+        let bob_after = do_list_available_biomolecule_tests(&conn, &bob).expect("bob after");
+        assert!(bob_after.iter().all(|view| view.test.id != targeted.id));
+        assert!(bob_after.iter().any(|view| view.test.id == all.id));
+    }
+
+    #[test]
+    fn teacher_biomolecule_roster_and_codes_respect_the_audience() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let (alice, bob) = register_audience_students(&conn);
+        let nocode = insert_student_with_sections(&conn, "nocode", SectionAccess::Biomolecules);
+
+        let mut targeted_payload = test_payload();
+        targeted_payload.assigned_codes = serde_json::json!(["ALPHA"]);
+        let targeted =
+            do_create_biomolecule_test(&conn, &teacher, targeted_payload).expect("targeted");
+
+        let views = do_list_biomolecule_tests(&conn, &teacher).expect("list");
+        let targeted_view = views
+            .tests
+            .iter()
+            .find(|view| view.test.id == targeted.id)
+            .expect("targeted view");
+        let roster: Vec<&str> = targeted_view
+            .roster
+            .iter()
+            .map(|entry| entry.username.as_str())
+            .collect();
+        assert_eq!(roster, vec!["alice"], "only the ALPHA audience is rostered");
+
+        let codes: Vec<(&str, i64)> = views
+            .codes
+            .iter()
+            .map(|entry| (entry.code.as_str(), entry.student_count))
+            .collect();
+        assert!(codes.contains(&("ALPHA", 1)));
+        assert!(codes.contains(&("BETA", 1)));
+
+        // ALL test: the roster is the full eligible set, including a student
+        // with no recorded invite code (pre-v66 accounts).
+        let all = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("all");
+        let views = do_list_biomolecule_tests(&conn, &teacher).expect("list all");
+        let all_view = views
+            .tests
+            .iter()
+            .find(|view| view.test.id == all.id)
+            .expect("all view");
+        let roster: Vec<&str> = all_view
+            .roster
+            .iter()
+            .map(|entry| entry.username.as_str())
+            .collect();
+        assert!(roster.contains(&"alice"));
+        assert!(roster.contains(&"bob"));
+        assert!(roster.contains(&"nocode"));
+        assert!(all_view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == alice.to_string()));
+        assert!(all_view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == bob.to_string()));
+        assert!(all_view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == nocode.to_string()));
+    }
+
+    #[test]
+    fn create_peptidovka_test_validates_audience_codes() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+
+        let mut payload = peptidovka_test_payload();
+        payload.assigned_codes = serde_json::json!(["NOPE"]);
+        assert!(matches!(
+            do_create_peptidovka_test(&conn, &teacher, payload),
+            Err(DbError::NotFound(_))
+        ));
+
+        crate::db::repos::InviteCodeRepo::create(
+            &conn,
+            "TEACHONLY",
+            Role::Teacher,
+            SectionAccess::Both,
+            None,
+        )
+        .expect("teacher code");
+        let mut payload = peptidovka_test_payload();
+        payload.assigned_codes = serde_json::json!(["TEACHONLY"]);
+        assert!(matches!(
+            do_create_peptidovka_test(&conn, &teacher, payload),
+            Err(DbError::Validation(_))
+        ));
+
+        create_student_code(&conn, "ALPHA", SectionAccess::Biomolecules);
+        let mut payload = peptidovka_test_payload();
+        payload.assigned_codes = serde_json::json!(["ALPHA"]);
+        let targeted = do_create_peptidovka_test(&conn, &teacher, payload).expect("create");
+        assert_eq!(
+            targeted.assigned_codes.as_deref(),
+            Some(&["ALPHA".to_string()][..])
+        );
+
+        let all =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("all");
+        assert!(all.assigned_codes.as_deref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn available_peptidovka_tests_respect_the_audience() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let (alice, bob) = register_audience_students(&conn);
+
+        let all = do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload())
+            .expect("create all");
+        let mut targeted_payload = peptidovka_test_payload();
+        targeted_payload.assigned_codes = serde_json::json!(["ALPHA"]);
+        let targeted =
+            do_create_peptidovka_test(&conn, &teacher, targeted_payload).expect("create targeted");
+        let targeted_id = Uuid::parse_str(&targeted.id).expect("uuid");
+
+        let alice_ids: Vec<String> = do_list_available_peptidovka_tests(&conn, &alice)
+            .expect("alice")
+            .into_iter()
+            .map(|view| view.test.id)
+            .collect();
+        assert!(alice_ids.contains(&all.id));
+        assert!(alice_ids.contains(&targeted.id));
+
+        let bob_ids: Vec<String> = do_list_available_peptidovka_tests(&conn, &bob)
+            .expect("bob")
+            .into_iter()
+            .map(|view| view.test.id)
+            .collect();
+        assert!(bob_ids.contains(&all.id));
+        assert!(!bob_ids.contains(&targeted.id));
+        assert!(matches!(
+            do_start_peptidovka_test_attempt(&conn, &bob, &targeted_id),
+            Err(DbError::Validation(_))
+        ));
+
+        do_start_peptidovka_test_attempt(&conn, &alice, &targeted_id).expect("alice start");
+        conn.execute(
+            "UPDATE peptidovka_tests SET available_to = ?1 WHERE id = ?2",
+            rusqlite::params![
+                (Utc::now() - chrono::Duration::minutes(5)).to_rfc3339(),
+                targeted_id
+            ],
+        )
+        .expect("close window");
+
+        let alice_after = do_list_available_peptidovka_tests(&conn, &alice).expect("alice after");
+        assert!(alice_after
+            .iter()
+            .any(|view| view.test.id == targeted.id && view.attempt.is_some()));
+        let bob_after = do_list_available_peptidovka_tests(&conn, &bob).expect("bob after");
+        assert!(bob_after.iter().all(|view| view.test.id != targeted.id));
+    }
+
+    #[test]
+    fn teacher_peptidovka_roster_and_codes_respect_the_audience() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let (alice, bob) = register_audience_students(&conn);
+        insert_student_with_sections(&conn, "nocode", SectionAccess::Biomolecules);
+
+        let mut targeted_payload = peptidovka_test_payload();
+        targeted_payload.assigned_codes = serde_json::json!(["ALPHA"]);
+        let targeted =
+            do_create_peptidovka_test(&conn, &teacher, targeted_payload).expect("targeted");
+
+        let views = do_list_peptidovka_tests(&conn, &teacher).expect("list");
+        let targeted_view = views
+            .tests
+            .iter()
+            .find(|view| view.test.id == targeted.id)
+            .expect("targeted view");
+        let roster: Vec<&str> = targeted_view
+            .roster
+            .iter()
+            .map(|entry| entry.username.as_str())
+            .collect();
+        assert_eq!(roster, vec!["alice"]);
+        let codes: Vec<(&str, i64)> = views
+            .codes
+            .iter()
+            .map(|entry| (entry.code.as_str(), entry.student_count))
+            .collect();
+        assert!(codes.contains(&("ALPHA", 1)));
+        assert!(codes.contains(&("BETA", 1)));
+
+        let all =
+            do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("all");
+        let views = do_list_peptidovka_tests(&conn, &teacher).expect("list all");
+        let all_view = views
+            .tests
+            .iter()
+            .find(|view| view.test.id == all.id)
+            .expect("all view");
+        let roster: Vec<&str> = all_view
+            .roster
+            .iter()
+            .map(|entry| entry.username.as_str())
+            .collect();
+        assert!(roster.contains(&"alice"));
+        assert!(roster.contains(&"bob"));
+        assert!(roster.contains(&"nocode"));
+        assert!(all_view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == alice.to_string()));
+        assert!(all_view
+            .roster
+            .iter()
+            .any(|entry| entry.user_id == bob.to_string()));
+    }
+
+    /// The create form needs the audience picker before the first test exists:
+    /// both teacher list endpoints return page-level `codes`/`serverNow` even
+    /// when `tests` is empty.
+    #[test]
+    fn teacher_lists_carry_audience_codes_with_zero_tests() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        create_student_code(&conn, "ALPHA", SectionAccess::Biomolecules);
+        register_with_code(&conn, "alice", "ALPHA");
+
+        let bio = do_list_biomolecule_tests(&conn, &teacher).expect("bio page");
+        assert!(bio.tests.is_empty(), "no tests have been created");
+        assert_eq!(bio.codes.len(), 1);
+        assert_eq!(bio.codes[0].code, "ALPHA");
+        assert_eq!(bio.codes[0].student_count, 1);
+        assert!(chrono::DateTime::parse_from_rfc3339(&bio.server_now).is_ok());
+
+        let pep = do_list_peptidovka_tests(&conn, &teacher).expect("pep page");
+        assert!(pep.tests.is_empty(), "no tests have been created");
+        assert_eq!(pep.codes.len(), 1);
+        assert_eq!(pep.codes[0].code, "ALPHA");
+        assert_eq!(pep.codes[0].student_count, 1);
+        assert!(chrono::DateTime::parse_from_rfc3339(&pep.server_now).is_ok());
+    }
+
+    /// Dataset drift can shrink a generated batch but never grow it, so a
+    /// submit claiming more items than the test was configured for (beyond the
+    /// tolerance) must be rejected — on both test systems.
+    #[test]
+    fn submit_rejects_batches_larger_than_the_configured_count() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+
+        // Biomolekuly: configured 10 + tolerance 5 → 16 is rejected, 15 lands.
+        let bio = do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create bio");
+        let bio_id = Uuid::parse_str(&bio.id).expect("uuid");
+        let bio_start =
+            do_start_biomolecule_test_attempt(&conn, &student, &bio_id).expect("start bio");
+        let bio_attempt = Uuid::parse_str(&bio_start.attempt_id).expect("uuid");
+        assert!(matches!(
+            do_submit_biomolecule_test_attempt(&conn, &student, &bio_attempt, 16, 1, None),
+            Err(DbError::Validation(_))
+        ));
+        do_submit_biomolecule_test_attempt(&conn, &student, &bio_attempt, 15, 1, None)
+            .expect("configured count plus tolerance is still accepted");
+
+        // Peptidovka: configured 10 + tolerance 5 → 16 is rejected, 15 lands.
+        let pep = do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload())
+            .expect("create pep");
+        let pep_id = Uuid::parse_str(&pep.id).expect("uuid");
+        let pep_start =
+            do_start_peptidovka_test_attempt(&conn, &student, &pep_id).expect("start pep");
+        let pep_attempt = Uuid::parse_str(&pep_start.attempt_id).expect("uuid");
+        assert!(matches!(
+            do_submit_peptidovka_test_attempt(&conn, &student, &pep_attempt, 16, 1, None),
+            Err(DbError::Validation(_))
+        ));
+        do_submit_peptidovka_test_attempt(&conn, &student, &pep_attempt, 15, 1, None)
+            .expect("configured count plus tolerance is still accepted");
+    }
+
+    /// Students get a server timestamp for deadline offset but never the
+    /// teacher's audience list or the test seed.
+    #[test]
+    fn student_available_lists_carry_server_now_and_hide_the_audience() {
+        let conn = setup_conn();
+        let teacher = teacher_id(&conn);
+        let student = insert_student(&conn, "student");
+        do_create_biomolecule_test(&conn, &teacher, test_payload()).expect("create bio");
+        do_create_peptidovka_test(&conn, &teacher, peptidovka_test_payload()).expect("create pep");
+
+        let bio = do_list_available_biomolecule_tests(&conn, &student).expect("bio list");
+        assert_eq!(bio.len(), 1);
+        assert!(chrono::DateTime::parse_from_rfc3339(&bio[0].server_now).is_ok());
+        assert!(
+            bio[0].test.assigned_codes.is_none(),
+            "the audience is teacher-only"
+        );
+        assert!(bio[0].test.seed.is_none(), "students only get an attempt seed");
+
+        let pep = do_list_available_peptidovka_tests(&conn, &student).expect("pep list");
+        assert_eq!(pep.len(), 1);
+        assert!(chrono::DateTime::parse_from_rfc3339(&pep[0].server_now).is_ok());
+        assert!(
+            pep[0].test.assigned_codes.is_none(),
+            "the audience is teacher-only"
+        );
+        assert!(pep[0].test.seed.is_none(), "students only get an attempt seed");
     }
 }

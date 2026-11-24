@@ -13,6 +13,13 @@ import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
 import { BiomoleculesReportsPage } from "@/pages/biomolecules-reports-page"
 import { BiomoleculesStreakPage } from "@/pages/biomolecules-streak-page"
 import { BiomoleculesTestPage } from "@/pages/biomolecules-test-page"
+import { BiomoleculesTestResultPage } from "@/pages/biomolecules-test-result-page"
+import { BiomoleculesTestRunPage } from "@/pages/biomolecules-test-run-page"
+import { BiomoleculesTestsHubPage } from "@/pages/biomolecules-tests-hub-page"
+import {
+  BiomoleculesTestCreatePage,
+  BiomoleculesTestResultsPage,
+} from "@/pages/biomolecules-tests-page"
 import { BulkImportPage } from "@/pages/bulk-import-page"
 import { ConstantsPage } from "@/pages/constants-page"
 import { DatabazePage } from "@/pages/databaze-page"
@@ -23,6 +30,9 @@ import { HistoryPage } from "@/pages/history-page"
 import { LoginPage } from "@/pages/login-page"
 import { PeptidovkaPage, PeptidovkaRunPage } from "@/pages/peptidovka-page"
 import { PeptidovkaSettingsPage } from "@/pages/peptidovka-settings-page"
+import { PeptidovkaTestResultPage } from "@/pages/peptidovka-test-result-page"
+import { PeptidovkaTestRunPage } from "@/pages/peptidovka-test-run-page"
+import { PeptidovkaTestCreatePage, PeptidovkaTestResultsPage } from "@/pages/peptidovka-tests-page"
 import { ProjektyPage } from "@/pages/projekty-page"
 import { RegisterPage } from "@/pages/register-page"
 import { ReportsPage } from "@/pages/reports-page"
@@ -83,7 +93,21 @@ function TeacherRoutes() {
             <Route path="/biomolekuly/projekce" element={<BiomoleculesProjectionPage />} />
             <Route path="/biomolekuly/hlaseni" element={<BiomoleculesReportsPage />} />
             <Route path="/biomolekuly/historie" element={<BiomoleculesHistoryPage />} />
+            <Route path="/biomolekuly/testy" element={<BiomoleculesTestsHubPage />} />
+            <Route
+              path="/biomolekuly/testy/vytvorit/klasicky"
+              element={<BiomoleculesTestCreatePage />}
+            />
+            <Route path="/biomolekuly/testy/vysledky" element={<BiomoleculesTestResultsPage />} />
             <Route path="/biomolekuly/peptidovka" element={<PeptidovkaSettingsPage />} />
+            <Route
+              path="/biomolekuly/peptidovka/testy/vytvorit"
+              element={<PeptidovkaTestCreatePage />}
+            />
+            <Route
+              path="/biomolekuly/peptidovka/testy/vysledky"
+              element={<PeptidovkaTestResultsPage />}
+            />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"
@@ -147,6 +171,14 @@ function StudentRoutes() {
             <Route path="/biomolekuly/procvicovani" element={<BiomoleculesQuizPage />} />
             <Route path="/biomolekuly/test" element={<BiomoleculesTestPage />} />
             <Route
+              path="/biomolekuly/test/zadane/:testId/pisat"
+              element={<BiomoleculesTestRunPage />}
+            />
+            <Route
+              path="/biomolekuly/test/zadane/:testId/vysledek"
+              element={<BiomoleculesTestResultPage />}
+            />
+            <Route
               path="/biomolekuly/test/ucen"
               element={<BiomoleculesStreakPage kind="apprentice" />}
             />
@@ -162,6 +194,14 @@ function StudentRoutes() {
             <Route
               path="/biomolekuly/peptidovka/mistr"
               element={<PeptidovkaRunPage mode="mistr" />}
+            />
+            <Route
+              path="/biomolekuly/peptidovka/test/zadane/:testId/pisat"
+              element={<PeptidovkaTestRunPage />}
+            />
+            <Route
+              path="/biomolekuly/peptidovka/test/zadane/:testId/vysledek"
+              element={<PeptidovkaTestResultPage />}
             />
             <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
             <Route

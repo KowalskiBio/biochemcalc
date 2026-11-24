@@ -16,6 +16,10 @@ pub struct UserRecord {
     pub created_at: DateTime<Utc>,
     pub protected: bool,
     pub email: Option<String>,
+    /// The student invite code this account registered with (migration v66).
+    /// Internal only: it groups students for targeted tests, so it is never
+    /// part of the public `User` shape.
+    pub invite_code: Option<String>,
     /// Which sections the account reaches. For a teacher this is also what
     /// they can manage — a Biomolekuly-only teacher can't touch calculations.
     pub sections: SectionAccess,
@@ -39,14 +43,14 @@ impl UserRecord {
 }
 
 const SELECT_COLUMNS: &str =
-    "id, username, password_hash, role, created_at, protected, email, sections, preferred_section";
+    "id, username, password_hash, role, created_at, protected, email, invite_code, sections, preferred_section";
 
 pub struct UserRepo;
 
 impl UserRepo {
     pub fn insert(conn: &Connection, user: &UserRecord) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, role, created_at, protected, email, sections, preferred_section) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO users (id, username, password_hash, role, created_at, protected, email, invite_code, sections, preferred_section) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 user.id,
                 user.username,
@@ -55,6 +59,7 @@ impl UserRepo {
                 user.created_at.to_rfc3339(),
                 user.protected,
                 user.email,
+                user.invite_code,
                 user.sections.as_str(),
                 user.preferred_section.map(|s| s.as_str()),
             ],
@@ -209,10 +214,11 @@ fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UserRecord> {
         created_at: parse_dt(row.get::<_, String>(4)?),
         protected: row.get(5)?,
         email: row.get(6)?,
-        sections: SectionAccess::parse(&row.get::<_, String>(7)?)
+        invite_code: row.get(7)?,
+        sections: SectionAccess::parse(&row.get::<_, String>(8)?)
             .unwrap_or(SectionAccess::Calculations),
         preferred_section: row
-            .get::<_, Option<String>>(8)?
+            .get::<_, Option<String>>(9)?
             .as_deref()
             .and_then(Section::parse),
     })
@@ -247,6 +253,7 @@ mod tests {
             created_at: Utc::now(),
             protected: false,
             email: None,
+            invite_code: None,
             sections: crate::models::SectionAccess::Calculations,
             preferred_section: None,
         }

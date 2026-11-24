@@ -186,6 +186,7 @@ pub fn do_register(conn: &Connection, payload: RegisterPayload) -> Result<AuthSe
         created_at: Utc::now(),
         protected: false,
         email,
+        invite_code: Some(invite.code.clone()),
         sections: invite.sections,
         preferred_section: None,
     };
@@ -295,6 +296,7 @@ pub fn do_admin_create_user(
         created_at: Utc::now(),
         protected: false,
         email,
+        invite_code: None,
         sections: payload.sections,
         preferred_section: None,
     };
@@ -458,6 +460,7 @@ pub fn do_bootstrap_admin_if_empty(
         created_at: Utc::now(),
         protected: true,
         email: None,
+        invite_code: None,
         sections: SectionAccess::Both,
         preferred_section: None,
     };
@@ -1502,5 +1505,51 @@ mod tests {
         assert!(SessionRepo::find_valid(&conn, &session.token)
             .expect("find")
             .is_none());
+    }
+
+    /// v66's key fact: the validated student code is stored on the account, so
+    /// teachers can later target tests at groups of students by code. The code
+    /// must never leak through the public `User` shape.
+    #[test]
+    fn register_records_the_student_invite_code_on_the_account() {
+        let conn = setup_conn();
+        InviteCodeRepo::create(
+            &conn,
+            "CLASS66",
+            Role::Student,
+            SectionAccess::Biomolecules,
+            None,
+        )
+        .expect("create invite");
+        do_register(
+            &conn,
+            RegisterPayload {
+                username: "coded".into(),
+                password: "password123".into(),
+                invite_code: "CLASS66".into(),
+                email: None,
+            },
+        )
+        .expect("register");
+
+        let record = UserRepo::find_by_username(&conn, "coded")
+            .expect("find")
+            .expect("present");
+        assert_eq!(record.invite_code.as_deref(), Some("CLASS66"));
+
+        // Admin-created accounts never get a code.
+        let admin_created = do_admin_create_user(
+            &conn,
+            AdminCreateUserPayload {
+                username: "direct".into(),
+                password: "password123".into(),
+                email: None,
+                role: Role::Student,
+                sections: SectionAccess::Biomolecules,
+            },
+        )
+        .expect("admin create");
+        let direct = UserRepo::get_by_id(&conn, &admin_created.id).expect("get");
+        assert_eq!(direct.invite_code, None);
     }
 }

@@ -2,6 +2,7 @@ import { cva } from "class-variance-authority"
 import {
   Atom,
   BookOpen,
+  ClipboardList,
   Database,
   Dna,
   Eye,
@@ -122,6 +123,11 @@ const biomoleculesNavItems: NavItem[] = [
     label: cs.navigation.peptidovka,
   },
   {
+    path: "/biomolekuly/testy",
+    icon: <ClipboardList className="size-[18px]" strokeWidth={1.75} />,
+    label: cs.navigation.biomoleculeTests,
+  },
+  {
     path: "/biomolekuly/hlaseni",
     icon: <Flag className="size-[18px]" strokeWidth={1.75} />,
     label: cs.navigation.hlaseni,
@@ -143,10 +149,11 @@ const navBySection: Record<Section, { main: NavItem[]; bottom: NavItem[] }> = {
   biomolecules: { main: biomoleculesNavItems, bottom: [settingsNavItem] },
 }
 
-/** Biomolekuly owns its category pages; Projekce, Peptidovka, Hlášení and Historie have sibling nav items. */
+/** Biomolekuly owns its category pages; Projekce, Peptidovka, Testy, Hlášení and Historie have sibling nav items. */
 const BIOMOLECULES_SIBLING_PATHS = [
   "/biomolekuly/projekce",
   "/biomolekuly/peptidovka",
+  "/biomolekuly/testy",
   "/biomolekuly/hlaseni",
   "/biomolekuly/historie",
 ]

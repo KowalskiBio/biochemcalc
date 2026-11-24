@@ -154,6 +154,7 @@ mod tests {
             email: None,
             sections: crate::models::SectionAccess::Biomolecules,
             preferred_section: None,
+            invite_code: None,
         };
         UserRepo::insert(conn, &user).expect("insert user");
         user.id

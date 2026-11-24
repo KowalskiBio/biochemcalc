@@ -623,6 +623,109 @@ describe("sugar-ring recognition", () => {
   })
 })
 
+// Cobalamin regression: the nucleotide loop's α-riboside (base drawn DOWN —
+// the one natural α N-glycosidic bond) must render its DMB base clear of the
+// descending 3′-phosphate chain and of the ribose itself. The α base mirrors
+// the β parity convention and leans its glycosidic arm twice as far toward
+// free space; without both, the DMB stacks onto the phosphate chain (the
+// user-visible B12 overlap). The DB SMILES leaves C2′ unmarked, which the
+// strict recognizer refuses — the tagged variant is what a fully
+// stereo-tagged write-up produces.
+describe("cobalamin nucleotide loop", () => {
+  const BOND = 24
+  const B12_UNTAGGED =
+    "CC1=CC2=C(C=C1C)N(C=N2)[C@@H]3C([C@@H]([C@H](O3)CO)OP(=O)([O-])O[C@H](C)CNC(=O)CC[C@@]\\4([C@H]([C@@H]5[C@]6([C@@]([C@@H](C(=N6)/C(=C\\7/[C@@]([C@@H](C(=N7)/C=C\\8/C([C@@H](C(=N8)/C(=C4\\[N-]5)/C)CCC(=O)N)(C)C)CCC(=O)N)(C)CC(=O)N)/C)CCC(=O)N)(C)CC(=O)N)C)CC(=O)N)C)O.[C-]#N.[Co+3]"
+  const B12_TAGGED = B12_UNTAGGED.replace("[C@@H]3C(", "[C@@H]3[C@H](")
+
+  it("stays skeletal for the untagged DB SMILES (unmarked 2′ centre)", () => {
+    expect(recognizeSugarRings(snapshotOf(B12_UNTAGGED))).toEqual([])
+    expect(pipelineOf(B12_UNTAGGED).recognized).toBe(false)
+  })
+
+  it("renders the tagged loop with the α base clear of the chain and ribose", () => {
+    const pipeline = pipelineOf(B12_TAGGED)
+    expect(pipeline.recognized, "B12: loop ribose recognized").toBe(true)
+    expect(pipeline.plans.length, "B12: one recognized sugar").toBe(1)
+    const plan = pipeline.plans[0]
+    const pos = (id: number) => pipeline.positions.get(id) ?? { x: 0, y: 0 }
+
+    // α base: the glycosidic N sits BELOW the anomeric carbon (down = +y).
+    const anomeric = plan.cycle[0] ?? -1
+    const anomericAtom = plan.atoms.find((atom) => atom.vertexId === plan.cycle[0])
+    const glycoN =
+      [...(anomericAtom?.up ?? []), ...(anomericAtom?.down ?? [])].find((id) => {
+        const atom = pipeline.snapshot.atoms.get(id)
+        return atom !== undefined && atom.element === "N" && atom.isAromatic === true
+      }) ?? -1
+    expect(glycoN, "B12: glycosidic N found").not.toBe(-1)
+    expect(pos(glycoN).y - pos(anomeric).y, "B12: α base drawn down").toBeGreaterThan(BOND * 0.5)
+
+    // Trigonal rule still holds on the tilted arm: the DMB's ring-bond
+    // bisector lies along the glycosidic bond.
+    const ringNeighbours = (pipeline.snapshot.adjacency.get(glycoN) ?? []).filter(
+      (id) =>
+        id !== anomeric &&
+        pipeline.snapshot.atoms.get(id)?.element !== "H" &&
+        pipeline.snapshot.atoms.get(id)?.isAromatic === true,
+    )
+    expect(ringNeighbours.length, "B12: two ring bonds at the glyco N").toBe(2)
+    const unitFromN = (id: number) => {
+      const point = pos(id)
+      const dx = point.x - pos(glycoN).x
+      const dy = point.y - pos(glycoN).y
+      const length = Math.hypot(dx, dy) || 1
+      return { x: dx / length, y: dy / length }
+    }
+    const first = unitFromN(ringNeighbours[0] ?? -1)
+    const second = unitFromN(ringNeighbours[1] ?? -1)
+    const bisectorDeg = (Math.atan2(first.y + second.y, first.x + second.x) * 180) / Math.PI
+    const bondDeg =
+      (Math.atan2(pos(glycoN).y - pos(anomeric).y, pos(glycoN).x - pos(anomeric).x) * 180) / Math.PI
+    const degDiff = (a: number, b: number) => Math.abs(((((a - b) % 360) + 540) % 360) - 180)
+    expect(
+      degDiff(bisectorDeg, bondDeg),
+      "B12: base bisector collinear with the bond",
+    ).toBeLessThan(2)
+
+    // DMB subtree (aromatic BFS from the glycosidic N).
+    const dmb = new Set<number>([glycoN])
+    const stack = [glycoN]
+    while (stack.length > 0) {
+      const current = stack.pop() ?? -1
+      for (const next of pipeline.snapshot.adjacency.get(current) ?? []) {
+        if (!dmb.has(next) && pipeline.snapshot.atoms.get(next)?.isAromatic === true) {
+          dmb.add(next)
+          stack.push(next)
+        }
+      }
+    }
+
+    // Anti-overlap: every DMB atom keeps ≥ 0.9 bond from every other heavy
+    // atom (except the bonded glycosidic anchor) — the phosphate chain, the
+    // ribose, the 2′ hydroxyl, and the corrin alike.
+    const bondedToDmb = new Set<number>([anomeric])
+    for (const id of dmb) {
+      for (const next of pipeline.snapshot.adjacency.get(id) ?? []) {
+        if (!dmb.has(next)) {
+          bondedToDmb.add(next)
+        }
+      }
+    }
+    for (const a of dmb) {
+      for (const [id, atom] of pipeline.snapshot.atoms) {
+        if (dmb.has(id) || bondedToDmb.has(id) || atom.element === "H") {
+          continue
+        }
+        const distance = Math.hypot(pos(a).x - pos(id).x, pos(a).y - pos(id).y)
+        expect(
+          distance,
+          `B12: DMB atom ${a} clear of atom ${id} (${atom.element})`,
+        ).toBeGreaterThan(BOND * 0.9)
+      }
+    }
+  })
+})
+
 describe("round-trip chemistry", () => {
   it("keeps atom/bond counts and every CIP code after the coordinate patch", () => {
     for (const smiles of [TRUE_ALPHA_GLUCOSE, TRUE_BETA_GLUCOSE, AMP, SUCROSE]) {
@@ -705,6 +808,21 @@ describe("nucleotide placement", () => {
   // Second, differently-traversed kekulé write-up of 5'-GMP (guanine form of
   // the AMP_KEKULE sugar fragment keeps the natural β-D-ribose config).
   const GMP_KEKULE = "NC1=NC2=C(N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O)C(=O)N1"
+  // Pyrimidine nucleosides (β-D-ribose, kekulé forms): the regression cases
+  // for the trigonal base rule.
+  const CYTIDINE = "O=C1N=C(N)C=CN1[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
+  const URIDINE = "C1=CN(C(=O)NC1=O)[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
+  // Same uridine written from the other ring carbonyl — a different traversal
+  // the canonical parity rule must neutralize.
+  const URIDINE_REVERSED = "O=C1C=CN(C(=O)N1)[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
+  // NAD+: nicotinamide riboside and adenosine joined by a pyrophosphate bridge
+  // between the 5′-oxygens. Kekulé adenine half copied from the FADH2 fixture.
+  const NAD =
+    "NC(=O)c1ccc[n+]([C@@H]2O[C@H](COP(=O)(O)OP(=O)(O)OC[C@@H]3[C@H]([C@H]([C@@H](O3)N4C=NC5=C(N=CN=C54)N)O)O)[C@@H](O)[C@H]2O)c1"
+  // UDP-glucose: uridine ribose joined by the same pyrophosphate to the
+  // ANOMERIC carbon of α-D-glucose (no free tail on the sugar end).
+  const UDP_GLUCOSE =
+    "O=c1ccn([C@@H]2O[C@H](COP(=O)(O)OP(=O)(O)O[C@H]3O[C@H](CO)[C@@H](O)[C@H](O)[C@H]3O)[C@@H](O)[C@H]2O)c(=O)[nH]1"
 
   interface NucleotideCase {
     pipeline: HaworthLayoutResult
@@ -808,6 +926,9 @@ describe("nucleotide placement", () => {
     ["FADH2 (adenine)", PUBCHEM_FADH2],
     ["acetyl-CoA", PUBCHEM_ACETYL_COA],
     ["cAMP", PUBCHEM_CAMP],
+    ["cytidine", CYTIDINE],
+    ["uridine", URIDINE],
+    ["uridine (reversed traversal)", URIDINE_REVERSED],
   ] as const
 
   it("places every glycosidic nucleobase to the right of the sugar ring", () => {
@@ -817,8 +938,11 @@ describe("nucleotide placement", () => {
       const dxs = [...analysis.glycosidicBase].map((id) => analysis.rel(id).dx)
       const center = dxs.reduce((sum, value) => sum + value, 0) / dxs.length
       expect(center, `${label}: base center right of the ring`).toBeGreaterThanOrEqual(0.5)
-      expect(Math.min(...dxs), `${label}: no base atom leans left of the ring`).toBeGreaterThan(
-        -0.1,
+      // Upright trigonal pose: the purine six-ring towers over the sugar
+      // (anti, textbook pose), so a far six-ring atom may reach ~0.75 bond
+      // left of the ring centroid — but never across the whole ring.
+      expect(Math.min(...dxs), `${label}: base does not cross left past the ring`).toBeGreaterThan(
+        -1.0,
       )
     }
   })
@@ -970,114 +1094,626 @@ describe("nucleotide placement", () => {
     }
   })
 
-  // The textbook pose: the purine long axis is tilted to −30°, so its fused
-  // ring system reads essentially horizontal. Mirrored engine variants must
-  // be FLIPPED back — never free-rotated to an odd tilt. Proof: every
-  // purine's atom coordinates in its own glyco-N/axis frame are identical
-  // across all sources of adenine AND of guanine (same fused skeleton).
-  it("renders every purine nucleobase in the same canonical pose (flip, not tilt)", () => {
-    interface BasePose {
-      axisDeg: number
-      frame: { along: number; perp: number }[]
+  // The textbook N-glycosidic pose is TRIGONAL at the glycosidic nitrogen:
+  // its two ring bonds sit at ±120° around the N–C1′ bond, so the base's
+  // ring-bond bisector lies exactly on the bond line, pointing away from the
+  // sugar. Heading therefore depends only on the bond direction, never on
+  // the engine's initial layout; mirrored engine variants are flipped back
+  // across the bond line (canonical parity: the ring neighbour stepping
+  // directly into a ring nitrogen — purine C8 / pyrimidine C2 — on the −
+  // side for five-ring glyco N purines, on the + side for six-ring glyco N
+  // pyrimidines). Proof: collinearity for every write-up and identical
+  // bond-frame coordinates per base skeleton.
+  const N_GLYCO_CASES = [
+    ["ATP", PUBCHEM_ATP],
+    ["AMP (PubChem)", PUBCHEM_AMP],
+    ["AMP (kekulé)", AMP_KEKULE],
+    ["GMP (PubChem)", PUBCHEM_GMP],
+    ["GMP (kekulé)", GMP_KEKULE],
+    ["FADH2 (adenine)", PUBCHEM_FADH2],
+    ["acetyl-CoA (adenine)", PUBCHEM_ACETYL_COA],
+    ["cAMP", PUBCHEM_CAMP],
+    ["cytidine", CYTIDINE],
+    ["uridine", URIDINE],
+    ["uridine (reversed traversal)", URIDINE_REVERSED],
+  ] as const
+
+  const degDiff = (a: number, b: number) => Math.abs(((((a - b) % 360) + 540) % 360) - 180)
+
+  /** Bond-axis frame: glyco N position + unit direction away from the sugar. */
+  function bondFrame(
+    analysis: NucleotideCase,
+    label: string,
+  ): { nPos: { x: number; y: number }; unit: { x: number; y: number } } {
+    if (analysis.glycoRoot === undefined) {
+      throw new Error(`${label}: glycoRoot missing`)
     }
-    const poseOf = (label: string, smiles: string): BasePose => {
-      const analysis = analyzeNucleotide(smiles, label)
-      if (analysis.glycoRoot === undefined) {
-        throw new Error(`${label}: glycoRoot missing`)
-      }
-      const nPos = analysis.pipeline.positions.get(analysis.glycoRoot)
-      if (nPos === undefined) {
-        throw new Error(`${label}: glycoRoot position missing`)
-      }
-      let far = analysis.glycoRoot
-      let farDist = -1
-      for (const id of analysis.glycosidicBase) {
+    const anchorId = analysis.plan.cycle[0]
+    const nPos = analysis.pipeline.positions.get(analysis.glycoRoot)
+    const aPos = anchorId === undefined ? undefined : analysis.pipeline.positions.get(anchorId)
+    if (nPos === undefined || aPos === undefined) {
+      throw new Error(`${label}: bond endpoints missing`)
+    }
+    const dx = nPos.x - aPos.x
+    const dy = nPos.y - aPos.y
+    const length = Math.hypot(dx, dy)
+    return { nPos, unit: { x: dx / length, y: dy / length } }
+  }
+
+  /** Glycosidic-base atoms in bond-frame coordinates, sorted for comparison. */
+  function baseFrameOf(analysis: NucleotideCase, label: string): { along: number; perp: number }[] {
+    const { nPos, unit } = bondFrame(analysis, label)
+    return [...analysis.glycosidicBase]
+      .map((id) => {
         const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
-        const dist = Math.hypot(point.x - nPos.x, point.y - nPos.y)
-        if (dist > farDist) {
-          farDist = dist
-          far = id
+        const vx = point.x - nPos.x
+        const vy = point.y - nPos.y
+        return {
+          along: (vx * unit.x + vy * unit.y) / BOND,
+          perp: (unit.x * vy - unit.y * vx) / BOND,
         }
+      })
+      .sort((a, b) => a.along - b.along || a.perp - b.perp)
+  }
+
+  it("stands every N-glycosidic base on its bond (trigonal 120°), canonical parity", () => {
+    for (const [label, smiles] of N_GLYCO_CASES) {
+      const analysis = analyzeNucleotide(smiles, label)
+      const { nPos, unit } = bondFrame(analysis, label)
+      const ringNeighbours = (
+        analysis.pipeline.snapshot.adjacency.get(analysis.glycoRoot ?? -1) ?? []
+      ).filter(
+        (id) =>
+          id !== analysis.plan.cycle[0] &&
+          analysis.pipeline.snapshot.atoms.get(id)?.element !== "H",
+      )
+      expect(ringNeighbours.length, `${label}: two ring bonds at the glyco N`).toBe(2)
+      const unitFromN = (id: number | undefined): { x: number; y: number } => {
+        const point = id === undefined ? undefined : analysis.pipeline.positions.get(id)
+        const dx = (point?.x ?? nPos.x) - nPos.x
+        const dy = (point?.y ?? nPos.y) - nPos.y
+        const length = Math.hypot(dx, dy) || 1
+        return { x: dx / length, y: dy / length }
       }
-      const farPos = analysis.pipeline.positions.get(far) ?? { x: 0, y: 0 }
-      const axis = Math.atan2(farPos.y - nPos.y, farPos.x - nPos.x)
-      const unit = { x: Math.cos(axis), y: Math.sin(axis) }
-      const frame = [...analysis.glycosidicBase]
-        .map((id) => {
-          const point = analysis.pipeline.positions.get(id) ?? { x: 0, y: 0 }
-          const vx = point.x - nPos.x
-          const vy = point.y - nPos.y
-          return {
-            along: (vx * unit.x + vy * unit.y) / BOND,
-            perp: (unit.x * vy - unit.y * vx) / BOND,
+      const first = unitFromN(ringNeighbours[0])
+      const second = unitFromN(ringNeighbours[1])
+      const bisectorDeg = (Math.atan2(first.y + second.y, first.x + second.x) * 180) / Math.PI
+      const bondDeg = (Math.atan2(unit.y, unit.x) * 180) / Math.PI
+      expect(
+        degDiff(bisectorDeg, bondDeg),
+        `${label}: ring-bond bisector collinear with the C1′–N bond`,
+      ).toBeLessThan(2)
+
+      const marked = ringNeighbours.find((id) => {
+        const continuations = (analysis.pipeline.snapshot.adjacency.get(id) ?? []).filter(
+          (next) =>
+            next !== analysis.glycoRoot &&
+            analysis.pipeline.snapshot.atoms.get(next)?.element !== "H" &&
+            analysis.pipeline.snapshot.atoms.get(next)?.isAromatic === true,
+        )
+        return (
+          continuations.length === 1 &&
+          analysis.pipeline.snapshot.atoms.get(continuations[0] ?? -1)?.element === "N"
+        )
+      })
+      expect(marked, `${label}: marked ring neighbour (C8/C2) exists`).toBeDefined()
+      const markedPos = marked === undefined ? undefined : analysis.pipeline.positions.get(marked)
+      // Canonical side depends on the glyco ring size: purines (five-ring N)
+      // keep the marked C8 on the − side (fused six-ring right of the bond),
+      // pyrimidines (six-ring N) keep the marked C2 on the + side.
+      const glycoRingSize = analysis.pipeline.preprocessor.rings.find((ring) =>
+        ring.members.includes(analysis.glycoRoot ?? -1),
+      )?.members.length
+      const canonicalSide = glycoRingSize === 5 ? -1 : 1
+      if (markedPos !== undefined) {
+        expect(
+          (unit.x * (markedPos.y - nPos.y) - unit.y * (markedPos.x - nPos.x)) * canonicalSide,
+          `${label}: marked neighbour on the canonical side of the bond`,
+        ).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it("renders the same nucleobase in the same pose from every SMILES write-up", () => {
+    // Nearest-point matching: near-symmetric ring atoms (purine C4/C8) can
+    // tie within a tenth of a pixel on the axis coordinate, so an
+    // index-by-index pairing after sorting mispairs mirrored atoms even when
+    // the poses are identical. Greedy nearest-match is stable and strict.
+    const expectSameFrame = (
+      frame: { along: number; perp: number }[],
+      reference: { along: number; perp: number }[],
+      label: string,
+    ) => {
+      expect(frame.length, `${label}: atom count matches reference`).toBe(reference.length)
+      const matched = new Set<number>()
+      for (const atom of frame) {
+        let best = -1
+        let bestDistance = Number.POSITIVE_INFINITY
+        reference.forEach((candidate, index) => {
+          if (matched.has(index)) {
+            return
+          }
+          const distance = Math.hypot(atom.along - candidate.along, atom.perp - candidate.perp)
+          if (distance < bestDistance) {
+            bestDistance = distance
+            best = index
           }
         })
-        .sort((a, b) => a.along - b.along || a.perp - b.perp)
-      return { axisDeg: (axis * 180) / Math.PI, frame }
+        expect(
+          best >= 0 && bestDistance < 0.05,
+          `${label}: atom matched within reference pose (${bestDistance.toFixed(3)} off)`,
+        ).toBe(true)
+        matched.add(best)
+      }
     }
 
-    const cases = [
+    // Adenine core: identical to the ATP frame in every adenosine derivative.
+    const adenineReference = baseFrameOf(analyzeNucleotide(PUBCHEM_ATP, "ATP"), "ATP")
+    expect(adenineReference.length).toBe(9)
+    const adenineCases = [
       ["AMP (PubChem)", PUBCHEM_AMP],
       ["AMP (kekulé)", AMP_KEKULE],
-      ["GMP (PubChem)", PUBCHEM_GMP],
-      ["GMP (kekulé)", GMP_KEKULE],
       ["FADH2 (adenine)", PUBCHEM_FADH2],
       ["acetyl-CoA (adenine)", PUBCHEM_ACETYL_COA],
       ["cAMP", PUBCHEM_CAMP],
     ] as const
-
-    // Axis snapped to the anomer-side heading that reads horizontal (−30°).
-    for (const [label, smiles] of cases) {
-      expect(Math.abs(poseOf(label, smiles).axisDeg - -30), `${label}: axis −30°`).toBeLessThan(3)
+    for (const [label, smiles] of adenineCases) {
+      expectSameFrame(baseFrameOf(analyzeNucleotide(smiles, label), label), adenineReference, label)
     }
 
-    // The purine's fused-ring axis (ring5 center → ring6 center) sits
-    // essentially horizontal — the visible "tilt slightly so they are
-    // horizontal" reading of the −30° snap.
-    for (const [label, smiles] of cases) {
-      const analysis = analyzeNucleotide(smiles, label)
-      const baseRings = analysis.pipeline.preprocessor.rings.filter(
-        (ring) =>
-          ring.members.length <= 6 && ring.members.every((id) => analysis.glycosidicBase.has(id)),
-      )
-      const five = baseRings.find((ring) => ring.members.length === 5)
-      const six = baseRings.find((ring) => ring.members.length === 6)
-      expect(five, `${label}: imidazole ring`).toBeDefined()
-      expect(six, `${label}: pyrimidine ring`).toBeDefined()
-      if (five === undefined || six === undefined) {
-        continue
+    // Guanine: two independent write-ups, one pose.
+    const guanineReference = baseFrameOf(analyzeNucleotide(PUBCHEM_GMP, "GMP (PubChem)"), "GMP")
+    expect(guanineReference.length).toBe(9)
+    expectSameFrame(
+      baseFrameOf(analyzeNucleotide(GMP_KEKULE, "GMP (kekulé)"), "GMP (kekulé)"),
+      guanineReference,
+      "GMP (kekulé)",
+    )
+
+    // Pyrimidines: the reversed traversal draws the same pose, and the
+    // six-member skeleton is shared across bases.
+    const uridineReference = baseFrameOf(analyzeNucleotide(URIDINE, "uridine"), "uridine")
+    expect(uridineReference.length).toBe(6)
+    expectSameFrame(
+      baseFrameOf(analyzeNucleotide(URIDINE_REVERSED, "uridine (reversed)"), "uridine (reversed)"),
+      uridineReference,
+      "uridine (reversed traversal)",
+    )
+    expectSameFrame(
+      baseFrameOf(analyzeNucleotide(CYTIDINE, "cytidine"), "cytidine"),
+      uridineReference,
+      "cytidine skeleton",
+    )
+  })
+
+  // The NAD+ layout: the ribose pair is read as a pyrophosphate-bridged
+  // dinucleotide. The adenosine ribose keeps the canonical orientation on
+  // the right; the nicotinamide ribose is drawn as a horizontal FLIP of the
+  // canonical drawing (ring geometry mirrored, canonical arm sides kept —
+  // the same molecule, not an arm swap), both 5′ tails rise vertically, and
+  // the P–O–P bridge runs as a straight horizontal line across the middle
+  // with the phosphate =O/–O groups straight up and down.
+  it("lays out NAD+ as a linear dinucleotide (mirrored nicotinamide ribose)", () => {
+    const pipeline = pipelineOf(NAD)
+    expect(pipeline.recognized, "NAD+: sugar recognized").toBe(true)
+    expect(pipeline.plans.length, "NAD+: two ribose rings").toBe(2)
+
+    // Identify the two riboses by base size (adenine 9 aromatic atoms,
+    // nicotinamide 6).
+    const infoOf = pipeline.plans.map((plan) => {
+      const anomeric = plan.atoms.find((atom) => atom.vertexId === plan.cycle[0])
+      const baseRoot =
+        [...(anomeric?.up ?? []), ...(anomeric?.down ?? [])].find((id) => {
+          const atom = pipeline.snapshot.atoms.get(id)
+          return atom !== undefined && atom.element === "N" && atom.isAromatic === true
+        }) ?? -1
+      const baseSet = new Set<number>([baseRoot])
+      const stack = [baseRoot]
+      while (stack.length > 0) {
+        const current = stack.pop() ?? -1
+        for (const next of pipeline.snapshot.adjacency.get(current) ?? []) {
+          if (!baseSet.has(next) && pipeline.snapshot.atoms.get(next)?.isAromatic === true) {
+            baseSet.add(next)
+            stack.push(next)
+          }
+        }
       }
-      const centerOf = (members: number[]) => ({
-        x:
-          members.reduce((sum, id) => sum + (analysis.pipeline.positions.get(id)?.x ?? 0), 0) /
-          members.length,
-        y:
-          members.reduce((sum, id) => sum + (analysis.pipeline.positions.get(id)?.y ?? 0), 0) /
-          members.length,
-      })
-      const fiveCenter = centerOf(five.members)
-      const sixCenter = centerOf(six.members)
-      const fusedDeg =
-        (Math.atan2(sixCenter.y - fiveCenter.y, sixCenter.x - fiveCenter.x) * 180) / Math.PI
-      const deviation = Math.min(Math.abs(fusedDeg), Math.abs(Math.abs(fusedDeg) - 180))
-      expect(deviation, `${label}: fused rings horizontal`).toBeLessThan(8)
+      return { plan, baseRoot, baseSet }
+    })
+    const adenosine = infoOf.find((info) => info.baseSet.size === 9)
+    const nicotinamide = infoOf.find((info) => info.baseSet.size === 6)
+    expect(adenosine, "NAD+: adenosine ribose found").toBeDefined()
+    expect(nicotinamide, "NAD+: nicotinamide ribose found").toBeDefined()
+    if (adenosine === undefined || nicotinamide === undefined) {
+      return
     }
 
-    // Pose equality with the ATP reference: identical frame coordinates.
-    const reference = poseOf("ATP", PUBCHEM_ATP)
-    expect(reference.frame.length).toBe(9)
-    for (const [label, smiles] of cases) {
-      const pose = poseOf(label, smiles)
-      expect(pose.frame.length, `${label}: purine atom count`).toBe(9)
-      for (let index = 0; index < reference.frame.length; index += 1) {
+    // Each ribose's bridge anchor: the ring atom carrying the aliphatic C5′
+    // chain starter (the base carries the aromatic carbon, not counted here).
+    const anchorAndTailOf = (plan: (typeof pipeline.plans)[number]) => {
+      for (const ringAtom of plan.cycle) {
+        for (const neighbour of pipeline.snapshot.adjacency.get(ringAtom) ?? []) {
+          const atom = pipeline.snapshot.atoms.get(neighbour)
+          if (
+            atom !== undefined &&
+            atom.element === "C" &&
+            atom.isAromatic !== true &&
+            !plan.cycle.includes(neighbour)
+          ) {
+            return { anchor: ringAtom, tail: neighbour }
+          }
+        }
+      }
+      return undefined
+    }
+    const ad = anchorAndTailOf(adenosine.plan)
+    const nmd = anchorAndTailOf(nicotinamide.plan)
+    expect(ad, "NAD+: adenosine 5′ tail found").toBeDefined()
+    expect(nmd, "NAD+: nicotinamide 5′ tail found").toBeDefined()
+    if (ad === undefined || nmd === undefined) {
+      return
+    }
+    const pos = (id: number) => pipeline.positions.get(id) ?? { x: 0, y: 0 }
+    const anomericAd = adenosine.plan.cycle[0] ?? -1
+    const anomericNmd = nicotinamide.plan.cycle[0] ?? -1
+
+    // Linear order + ring parity: the nicotinamide ribose is mirrored (its 4′
+    // right of its 1′), the adenosine ribose canonical (4′ left of 1′);
+    // nicotinamide sits left of adenosine overall.
+    expect(
+      pos(nmd.anchor).x - pos(anomericNmd).x,
+      "NAD+: nicotinamide ribose x-mirrored (4′ right of 1′)",
+    ).toBeGreaterThan(0)
+    expect(
+      pos(ad.anchor).x - pos(anomericAd).x,
+      "NAD+: adenosine ribose canonical (4′ left of 1′)",
+    ).toBeLessThan(0)
+    expect(pos(anomericNmd).x, "NAD+: nicotinamide left of adenosine").toBeLessThan(
+      pos(anomericAd).x,
+    )
+
+    // Both 5′ tails strictly vertical and level with each other.
+    for (const [label, pair] of [
+      ["adenosine", ad],
+      ["nicotinamide", nmd],
+    ] as const) {
+      expect(
+        Math.abs(pos(pair.tail).x - pos(pair.anchor).x),
+        `NAD+: ${label} 5′ tail vertical`,
+      ).toBeLessThan(0.5)
+      const rise = pos(pair.anchor).y - pos(pair.tail).y
+      expect(rise, `NAD+: ${label} 5′ tail rises up`).toBeGreaterThan(BOND * 0.8)
+      expect(rise, `NAD+: ${label} 5′ tail length`).toBeLessThan(BOND)
+    }
+    expect(Math.abs(pos(ad.tail).y - pos(nmd.tail).y), "NAD+: tails level").toBeLessThan(1)
+    // Span for a 4-bond horizontal middle run plus two ±30° diagonal entrances.
+    const span = pos(ad.tail).x - pos(nmd.tail).x
+    expect(
+      Math.abs(span - BOND * (4 + 2 * Math.cos(Math.PI / 6))),
+      "NAD+: bridge span fits the horizontal run",
+    ).toBeLessThan(2)
+
+    // Both riboses (canonical AND flipped) draw their 2′/3′-OH below the ring
+    // — never arm-swapped up into the ring interior.
+    for (const [label, info] of [
+      ["adenosine", adenosine],
+      ["nicotinamide", nicotinamide],
+    ] as const) {
+      for (const atom of info.plan.atoms) {
+        const role = info.plan.cycle.indexOf(atom.vertexId)
+        if (role < 1 || role > 2) {
+          continue
+        }
+        for (const hydroxyl of atom.down) {
+          if (pipeline.snapshot.atoms.get(hydroxyl)?.element !== "O") {
+            continue
+          }
+          expect(
+            pos(hydroxyl).y - pos(atom.vertexId).y,
+            `NAD+: ${label} role${role} OH below the ring`,
+          ).toBeGreaterThan(BOND * 0.5)
+        }
+      }
+    }
+
+    // Walk the bridge nicotinamide → adenosine: C–O–P–O–P–O–C, monotonically
+    // advancing rightward, every bond ≈ one bond long.
+    const path = [nmd.tail]
+    let previous = nmd.anchor
+    let current =
+      (pipeline.snapshot.adjacency.get(nmd.tail) ?? []).find(
+        (id) => id !== nmd.anchor && pipeline.snapshot.atoms.get(id)?.element !== "H",
+      ) ?? -1
+    for (let step = 0; step < 6 && current !== -1; step += 1) {
+      path.push(current)
+      const onward = (pipeline.snapshot.adjacency.get(current) ?? [])
+        .filter((id) => id !== previous && pipeline.snapshot.atoms.get(id)?.element !== "H")
+        .map((id) => ({
+          id,
+          degree: (pipeline.snapshot.adjacency.get(id) ?? []).filter(
+            (next) => pipeline.snapshot.atoms.get(next)?.element !== "H",
+          ).length,
+        }))
+        .sort((left, right) => right.degree - left.degree)
+      previous = current
+      current = onward[0]?.id ?? -1
+    }
+    expect(path.length, "NAD+: C–O–P–O–P–O–C bridge").toBe(7)
+    expect(
+      (pipeline.snapshot.adjacency.get(path[6] ?? -1) ?? []).includes(ad.anchor),
+      "NAD+: bridge reaches the adenosine ribose",
+    ).toBe(true)
+    for (let index = 1; index < path.length; index += 1) {
+      expect(
+        pos(path[index] ?? -1).x - pos(path[index - 1] ?? -1).x,
+        `NAD+: bridge atom ${index} advances rightward`,
+      ).toBeGreaterThan(4)
+      const length = Math.hypot(
+        pos(path[index] ?? -1).x - pos(path[index - 1] ?? -1).x,
+        pos(path[index] ?? -1).y - pos(path[index - 1] ?? -1).y,
+      )
+      expect(length, `NAD+: bridge bond ${index} ≈ one bond`).toBeGreaterThan(BOND * 0.75)
+      expect(length, `NAD+: bridge bond ${index} ≈ one bond`).toBeLessThan(BOND * 1.25)
+    }
+    // The horizontal run: the O–P–O–P–O middles share one y, the two P atoms
+    // sit two bonds apart, and each phosphate's exocyclic oxygens point
+    // straight up and down from it.
+    const pAtoms = [path[2], path[4]].map((id) => id ?? -1)
+    expect(
+      Math.abs(pos(pAtoms[1] ?? -1).x - pos(pAtoms[0] ?? -1).x),
+      "NAD+: P–O–P spacing ≈ two bonds",
+    ).toBeGreaterThan(BOND * 1.8)
+    expect(
+      Math.abs(pos(pAtoms[1] ?? -1).x - pos(pAtoms[0] ?? -1).x),
+      "NAD+: P–O–P spacing ≈ two bonds",
+    ).toBeLessThan(BOND * 2.2)
+    for (let index = 1; index <= 5; index += 1) {
+      expect(
+        Math.abs(pos(path[index] ?? -1).y - pos(path[1] ?? -1).y),
+        `NAD+: bridge atom ${index} on the horizontal line`,
+      ).toBeLessThan(1)
+    }
+    for (const phosphorus of pAtoms) {
+      const exoOxygens = (pipeline.snapshot.adjacency.get(phosphorus) ?? []).filter(
+        (id) => !path.includes(id) && pipeline.snapshot.atoms.get(id)?.element === "O",
+      )
+      expect(exoOxygens.length, "NAD+: two exocyclic oxygens").toBe(2)
+      let above = 0
+      let below = 0
+      for (const oxygen of exoOxygens) {
         expect(
-          Math.abs(pose.frame[index].along - reference.frame[index].along),
-          `${label}: atom ${index} along-axis vs ATP`,
-        ).toBeLessThan(0.05)
+          Math.abs(pos(oxygen).x - pos(phosphorus).x),
+          "NAD+: exocyclic oxygen directly above/below P",
+        ).toBeLessThan(2)
+        const dy = pos(oxygen).y - pos(phosphorus).y
+        expect(Math.abs(dy), "NAD+: exocyclic oxygen a full bond out").toBeGreaterThan(BOND * 0.8)
+        expect(Math.abs(dy), "NAD+: exocyclic oxygen a full bond out").toBeLessThan(BOND * 1.2)
+        if (dy < 0) {
+          above += 1
+        } else {
+          below += 1
+        }
+      }
+      expect([above, below], "NAD+: one P=O up, one P–O down").toEqual([1, 1])
+    }
+
+    // Nicotinamide carboxamide parity: the amide carbon on the canonical
+    // (+) side of the glycosidic bond axis.
+    const amideId = [...pipeline.snapshot.atoms.entries()].find(([id, atom]) => {
+      if (atom.element !== "C" || atom.isAromatic === true) {
+        return false
+      }
+      const neighbourIds = pipeline.snapshot.adjacency.get(id) ?? []
+      return (
+        neighbourIds.some((next) => nicotinamide.baseSet.has(next)) &&
+        neighbourIds.some((next) => pipeline.snapshot.atoms.get(next)?.element === "O") &&
+        neighbourIds.some((next) => pipeline.snapshot.atoms.get(next)?.element === "N")
+      )
+    })?.[0]
+    expect(amideId, "NAD+: carboxamide carbon found").toBeDefined()
+    if (amideId !== undefined) {
+      const glycoN = pos(nicotinamide.baseRoot)
+      const anchor = pos(nmd.anchor)
+      const dx = glycoN.x - anchor.x
+      const dy = glycoN.y - anchor.y
+      const length = Math.hypot(dx, dy) || 1
+      const side =
+        (dx / length) * (pos(amideId).y - glycoN.y) - (dy / length) * (pos(amideId).x - glycoN.x)
+      expect(side, "NAD+: carboxamide on the canonical side of the bond").toBeGreaterThan(0)
+    }
+  })
+
+  // The UDP-sugar layout: same pyrophosphate bridge, but it ends AT the
+  // anomeric carbon of the phospho-sugar. The uridine ribose keeps the
+  // canonical orientation on the right with its 5′-tail vertical; the
+  // glucose stays CANONICAL too and connects through its α anomeric arm
+  // tilted down-right into the bridge's last oxygen. The bridge leaves the
+  // tail at −150°, then runs strictly HORIZONTAL left; hooking up-left into
+  // the anomeric vertex sets the glucose ring ABOVE the ribose's level.
+  it("lays out UDP-glucose: flipped phospho-sugar anchored through its anomeric arm", () => {
+    const pipeline = pipelineOf(UDP_GLUCOSE)
+    expect(pipeline.recognized, "UDP: sugar recognized").toBe(true)
+    expect(pipeline.plans.length, "UDP: ribose + glucose rings").toBe(2)
+
+    // Uridine ribose (has the base) vs glucose (no anomeric N substituent).
+    const hasBase = (plan: (typeof pipeline.plans)[number]) => {
+      const anomeric = plan.atoms.find((atom) => atom.vertexId === plan.cycle[0])
+      return [...(anomeric?.up ?? []), ...(anomeric?.down ?? [])].some((id) => {
+        const atom = pipeline.snapshot.atoms.get(id)
+        return atom !== undefined && atom.element === "N" && atom.isAromatic === true
+      })
+    }
+    const ribose = pipeline.plans.find((plan) => hasBase(plan))
+    const glucose = pipeline.plans.find((plan) => !hasBase(plan))
+    expect(ribose, "UDP: uridine ribose found").toBeDefined()
+    expect(glucose, "UDP: glucose found").toBeDefined()
+    if (ribose === undefined || glucose === undefined) {
+      return
+    }
+    const pos = (id: number) => pipeline.positions.get(id) ?? { x: 0, y: 0 }
+    const centroidOf = (ids: number[]) => ({
+      x: ids.reduce((sum, id) => sum + pos(id).x, 0) / ids.length,
+      y: ids.reduce((sum, id) => sum + pos(id).y, 0) / ids.length,
+    })
+
+    // The ribose C4′ carries the aliphatic 5′ tail; the glucose anomeric C1
+    // carries the phosphorylated O.
+    const riboseAnomeric = ribose.cycle[0] ?? -1
+    const adTail = ribose.cycle
+      .flatMap((ringAtom) =>
+        (pipeline.snapshot.adjacency.get(ringAtom) ?? []).map((id) => ({
+          anchor: ringAtom,
+          tail: id,
+          element: pipeline.snapshot.atoms.get(id)?.element,
+          aromatic: pipeline.snapshot.atoms.get(id)?.isAromatic === true,
+        })),
+      )
+      .find(
+        (entry) =>
+          entry.element === "C" && entry.aromatic !== true && !ribose.cycle.includes(entry.tail),
+      )
+    expect(adTail, "UDP: ribose 5′ tail found").toBeDefined()
+    if (adTail === undefined) {
+      return
+    }
+    const glucoseAnomeric = glucose.cycle[0] ?? -1
+
+    // Ring parity and layout: ribose canonical (4′ left of 1′), glucose
+    // canonical too (anomeric right of its ring centroid), sitting left
+    // BELOW the ribose tail level (the diagonal bridge).
+    expect(
+      pos(adTail.anchor).x - pos(riboseAnomeric).x,
+      "UDP: ribose canonical (4′ left of 1′)",
+    ).toBeLessThan(0)
+    expect(
+      pos(glucoseAnomeric).x - centroidOf(glucose.cycle).x,
+      "UDP: glucose canonical (anomeric right of the ring)",
+    ).toBeGreaterThan(0)
+    expect(pos(glucoseAnomeric).x, "UDP: glucose left of the ribose").toBeLessThan(
+      pos(riboseAnomeric).x,
+    )
+    expect(
+      Math.abs(pos(adTail.tail).x - pos(adTail.anchor).x),
+      "UDP: ribose 5′ tail vertical",
+    ).toBeLessThan(1)
+    expect(
+      pos(adTail.anchor).y - pos(adTail.tail).y,
+      "UDP: ribose 5′ tail rises up",
+    ).toBeGreaterThan(BOND * 0.8)
+
+    // Walk the bridge ribose tail → glucose: C–O–P–O–P–O straight into the
+    // anomeric carbon; monotonic leftward; the last arm bond leaves the
+    // anomeric O below the anomeric carbon (α).
+    const path = [adTail.tail]
+    let previous = adTail.anchor
+    let current =
+      (pipeline.snapshot.adjacency.get(adTail.tail) ?? []).find(
+        (id) => id !== adTail.anchor && pipeline.snapshot.atoms.get(id)?.element !== "H",
+      ) ?? -1
+    for (let step = 0; step < 6 && current !== -1; step += 1) {
+      path.push(current)
+      const onward = (pipeline.snapshot.adjacency.get(current) ?? [])
+        .filter((id) => id !== previous && pipeline.snapshot.atoms.get(id)?.element !== "H")
+        .map((id) => ({
+          id,
+          degree: (pipeline.snapshot.adjacency.get(id) ?? []).filter(
+            (next) => pipeline.snapshot.atoms.get(next)?.element !== "H",
+          ).length,
+        }))
+        .sort((left, right) => right.degree - left.degree)
+      previous = current
+      current = onward[0]?.id ?? -1
+    }
+    expect(path.length, "UDP: C–O–P–O–P–O–C(anomeric) bridge").toBe(7)
+    const armOxygen = path[5] ?? -1
+    const armCarbon = path[6] ?? -1
+    expect(armCarbon, "UDP: bridge ends at the glucose anomeric carbon").toBe(glucoseAnomeric)
+    for (let index = 1; index <= 5; index += 1) {
+      const before = pos(path[index - 1] ?? -1)
+      const after = pos(path[index] ?? -1)
+      expect(after.x - before.x, `UDP: bridge atom ${index} advances leftward`).toBeLessThan(-4)
+      const length = Math.hypot(after.x - before.x, after.y - before.y)
+      expect(length, `UDP: bridge bond ${index} ≈ one bond`).toBeGreaterThan(BOND * 0.75)
+      expect(length, `UDP: bridge bond ${index} ≈ one bond`).toBeLessThan(BOND * 1.25)
+    }
+    // The middle O–P–O–P–O run is horizontal (the P–O–P line of the NAD+
+    // bridge), pushing the glucose ring above the ribose.
+    for (let index = 1; index <= 5; index += 1) {
+      expect(
+        Math.abs(pos(path[index] ?? -1).y - pos(path[1] ?? -1).y),
+        `UDP: bridge atom ${index} on the horizontal line`,
+      ).toBeLessThan(1)
+    }
+    const pSpacing = pos(path[4] ?? -1).x - pos(path[2] ?? -1).x
+    expect(Math.abs(pSpacing), "UDP: P atoms two bonds apart").toBeGreaterThan(BOND * 1.8)
+    expect(Math.abs(pSpacing), "UDP: P atoms two bonds apart").toBeLessThan(BOND * 2.2)
+    expect(
+      centroidOf(ribose.cycle).y - centroidOf(glucose.cycle).y,
+      "UDP: glucose ring above the ribose",
+    ).toBeGreaterThan(BOND)
+    // The α arm: the oxygen below the anomeric carbon (down side).
+    expect(pos(armOxygen).y - pos(armCarbon).y, "UDP: anomeric arm down (α)").toBeGreaterThan(
+      BOND * 0.5,
+    )
+
+    // Exocyclic P oxygens: vertical, double-bond up / single down.
+    for (const phosphorus of [path[2] ?? -1, path[4] ?? -1]) {
+      const exoOxygens = (pipeline.snapshot.adjacency.get(phosphorus) ?? []).filter(
+        (id) => !path.includes(id) && pipeline.snapshot.atoms.get(id)?.element === "O",
+      )
+      expect(exoOxygens.length, "UDP: two exocyclic oxygens").toBe(2)
+      let above = 0
+      let below = 0
+      for (const oxygen of exoOxygens) {
         expect(
-          Math.abs(pose.frame[index].perp - reference.frame[index].perp),
-          `${label}: atom ${index} off-axis vs ATP (mirror parity)`,
-        ).toBeLessThan(0.05)
+          Math.abs(pos(oxygen).x - pos(phosphorus).x),
+          "UDP: exo O directly above/below P",
+        ).toBeLessThan(2)
+        if (pos(oxygen).y - pos(phosphorus).y < -BOND * 0.5) {
+          above += 1
+        } else if (pos(oxygen).y - pos(phosphorus).y > BOND * 0.5) {
+          below += 1
+        }
+      }
+      expect([above, below], "UDP: one P=O up, one P–O down").toEqual([1, 1])
+    }
+
+    // Both rings draw their 2′/3′-OH below the ring (never into the interior).
+    for (const plan of [ribose, glucose]) {
+      for (const atom of plan.atoms) {
+        const role = plan.cycle.indexOf(atom.vertexId)
+        if (role < 1 || role > 2) {
+          continue
+        }
+        for (const hydroxyl of atom.down) {
+          if (pipeline.snapshot.atoms.get(hydroxyl)?.element !== "O") {
+            continue
+          }
+          expect(
+            pos(hydroxyl).y - pos(atom.vertexId).y,
+            `UDP: role${role} OH below the ring`,
+          ).toBeGreaterThan(BOND * 0.5)
+        }
+      }
+    }
+
+    // The bridge descends and hooks into the anomeric arm WITHOUT crossing
+    // either ring: every middle atom keeps clear of every ring vertex
+    // (bridge-adjacent anchors excluded — the arm bond itself is one bond).
+    const middles = path.slice(1, 6)
+    for (const middle of middles) {
+      for (const ringAtom of [...glucose.cycle, ...ribose.cycle]) {
+        if (ringAtom === glucoseAnomeric || ringAtom === adTail.anchor) {
+          continue
+        }
+        const distance = Math.hypot(
+          pos(middle).x - pos(ringAtom).x,
+          pos(middle).y - pos(ringAtom).y,
+        )
+        expect(
+          distance,
+          `UDP: bridge atom ${middle} clear of ring atom ${ringAtom}`,
+        ).toBeGreaterThan(BOND * 0.7)
       }
     }
   })
