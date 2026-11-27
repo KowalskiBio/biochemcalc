@@ -123,7 +123,7 @@ export function PeptidovkaTestResultPage() {
       <div>
         <Link
           to="/biomolekuly/test"
-          className="inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
+          className="-my-2 inline-flex min-h-[44px] items-center gap-1.5 rounded-[4px] py-2 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
         >
           <ArrowLeft className="size-4" strokeWidth={1.75} />
           {testyStrings.backToHub}

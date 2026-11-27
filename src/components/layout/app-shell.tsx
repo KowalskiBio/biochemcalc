@@ -16,7 +16,7 @@ interface AppShellProps {
   children: ReactNode
 }
 
-const mainContentVariants = cva("flex-1 flex flex-col ml-[var(--sidebar-width)]")
+const mainContentVariants = cva("flex-1 flex flex-col min-w-0 ml-[var(--sidebar-width)]")
 
 export function AppShell({ children }: AppShellProps) {
   useEffect(() => {

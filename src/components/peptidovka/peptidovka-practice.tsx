@@ -104,7 +104,7 @@ export function PeptidovkaPractice({ mode, onExit }: { mode: PeptidovkaMode; onE
         type="button"
         onClick={onExit}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground",
+          "-my-2 inline-flex min-h-[44px] items-center gap-1.5 rounded-[4px] py-2 text-sm text-muted-foreground",
           "transition-colors duration-150 hover:text-foreground",
           FOCUS_RING_CLASS,
         )}
