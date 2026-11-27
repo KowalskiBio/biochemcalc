@@ -7,7 +7,7 @@ import { LocalRunBadge } from "@/components/layout/local-run-badge"
 import { StudentShell } from "@/components/layout/student-shell"
 import { allowedSections, STUDENT_HOME_PATH } from "@/hooks/use-section"
 import { BiomoleculesHistoryPage } from "@/pages/biomolecules-history-page"
-import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
+import { BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesProjectionPage } from "@/pages/biomolecules-projection-page"
 import { BiomoleculesQuizPage } from "@/pages/biomolecules-quiz-page"
 import { BiomoleculesReportsPage } from "@/pages/biomolecules-reports-page"
@@ -109,7 +109,7 @@ function TeacherRoutes() {
               path="/biomolekuly/peptidovka/testy/vysledky"
               element={<PeptidovkaTestResultsPage />}
             />
-            <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
+            <Route path="/biomolekuly/:categoryId" element={<BiomoleculesPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"
               element={<BiomoleculesQuizPage />}
@@ -212,7 +212,7 @@ function StudentRoutes() {
               path="/biomolekuly/peptidovka/test/zadane/:testId/vysledek"
               element={<PeptidovkaTestResultPage />}
             />
-            <Route path="/biomolekuly/:categoryId" element={<BiomoleculesCategoryPage />} />
+            <Route path="/biomolekuly/:categoryId" element={<BiomoleculesPage />} />
             <Route
               path="/biomolekuly/:categoryId/procvicovani"
               element={<BiomoleculesQuizPage />}

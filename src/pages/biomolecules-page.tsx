@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowUpDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ArrowUpDown, Pencil, Plus, Search, Trash2, X } from "lucide-react"
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom"
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { ReorderDialog } from "@/components/biomolecules/reorder-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -20,7 +20,9 @@ import { RichText } from "@/components/ui/rich-text"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -68,16 +70,8 @@ function moleculeCountLabel(count: number): string {
   return cs.biomolekuly.categoryCount.replace("{count}", String(count))
 }
 
-const cardButtonClass = cn(
-  "group flex cursor-pointer items-start gap-4 rounded-[4px] border bg-card p-5 text-left",
-  "transition-colors duration-150 hover:border-primary/50",
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-)
-
 const FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-
-const categoryGridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3"
 
 /** Radix Select can't use an empty string as a value – sentinel for "no topic". */
 const NO_TOPIC_VALUE = "none"
@@ -101,13 +95,57 @@ interface HubSection {
   categories: BiomoleculeCategoryInfo[]
 }
 
+/** The category a student last opened, so returning to the library lands there. */
+const LAST_CATEGORY_KEY = "biomolecules:lastCategory"
+
+function readLastCategory(): string | null {
+  try {
+    return sessionStorage.getItem(LAST_CATEGORY_KEY)
+  } catch {
+    return null
+  }
+}
+
+function rememberCategory(slug: string) {
+  try {
+    sessionStorage.setItem(LAST_CATEGORY_KEY, slug)
+  } catch {
+    // Private mode without storage: the library just opens the first category.
+  }
+}
+
+/** Case- and diacritics-insensitive form for the library search. */
+function searchKey(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+}
+
+function moleculeSearchText(molecule: Biomolecule): string {
+  return searchKey(
+    [
+      stripRichMarkup(molecule.name),
+      ...moleculeAliases(molecule).map(stripRichMarkup),
+      traitOf(molecule, TRAIT.abbreviation) ?? "",
+      traitOf(molecule, TRAIT.oneLetter) ?? "",
+    ].join("\n"),
+  )
+}
+
 /**
- * Hub: category cards grouped under topic headings. Ungrouped categories go
- * last under "Ostatní"; teachers additionally see empty topic sections (so
- * they can manage them) plus the new-topic/new-category affordances.
+ * The molecule library as two panes: topics and their categories pinned on
+ * the left, the open category (or search results across every category) on
+ * the right. `/biomolekuly` opens the last-viewed category, else the first;
+ * `/biomolekuly/:categoryId` opens that one – switching categories never
+ * leaves the page. On narrow screens the list collapses into a picker.
+ * Teachers manage topics from the list (edit/delete icons, new category)
+ * and from the header (order, new topic).
  */
 export function BiomoleculesPage() {
+  const { categoryId } = useParams<{ categoryId?: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
   const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
   const categories = useMoleculeCategories()
@@ -115,8 +153,7 @@ export function BiomoleculesPage() {
   const loaded = useBiomoleculeDataLoaded()
   const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const nameOf = useCategoryNames()
-  const descriptionOf = useCategoryDescriptions()
-  const { nameOf: topicNameOf, descriptionOf: topicDescriptionOf } = useTopicText()
+  const { nameOf: topicNameOf } = useTopicText()
   const deleteTopic = useBiomoleculeDataStore((s) => s.deleteTopic)
   const reorderTopics = useBiomoleculeDataStore((s) => s.reorderTopics)
   const reorderCategories = useBiomoleculeDataStore((s) => s.reorderCategories)
@@ -126,6 +163,19 @@ export function BiomoleculesPage() {
   const [editingTopic, setEditingTopic] = useState<BiomoleculeTopicInfo | null>(null)
   const [deletingTopic, setDeletingTopic] = useState<BiomoleculeTopicInfo | null>(null)
   const [topicDeleting, setTopicDeleting] = useState(false)
+
+  const query = searchParams.get("hledat") ?? ""
+  const setQuery = (next: string) => {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        if (next) params.set("hledat", next)
+        else params.delete("hledat")
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   // The hub-level practice link applies only while some category can actually
   // generate questions. Students only: TeacherRoutes has no
@@ -168,14 +218,16 @@ export function BiomoleculesPage() {
     return grouped
   }, [categories, topics])
 
-  // Students skip empty topic sections; teachers see them so they can manage.
+  // Students skip empty topics; teachers see them so they can manage.
   const visibleSections = sections.filter(
     (section) => section.categories.length > 0 || (isTeacher && section.topic !== null),
   )
+  // Categories in list order – the default pick is the first one shown.
+  const orderedCategories = visibleSections.flatMap((section) => section.categories)
 
   // Sections for the category reorder dialog: the hub grouping minus empty
   // topics. Moves stay inside a topic; the dialog concatenates on save, so
-  // ungrouped categories ("Ostatní") end up last, matching the hub.
+  // ungrouped categories ("Ostatní") end up last, matching the list.
   const categoryReorderSections = useMemo(
     () =>
       sections
@@ -189,6 +241,28 @@ export function BiomoleculesPage() {
         })),
     [sections, topicNameOf, nameOf],
   )
+
+  const activeCategory = categoryId
+    ? categories.find((category) => category.slug === categoryId)
+    : undefined
+
+  useEffect(() => {
+    if (activeCategory) rememberCategory(activeCategory.slug)
+  }, [activeCategory])
+
+  const searchKeyText = searchKey(query.trim())
+  const searchGroups = useMemo(() => {
+    if (!searchKeyText) return null
+    return orderedCategories
+      .map((category) => ({
+        category,
+        molecules: allMolecules
+          .filter((molecule) => molecule.categorySlug === category.slug)
+          .filter((molecule) => moleculeSearchText(molecule).includes(searchKeyText))
+          .sort((a, b) => a.position - b.position),
+      }))
+      .filter((group) => group.molecules.length > 0)
+  }, [searchKeyText, orderedCategories, allMolecules])
 
   const handleDeleteTopic = async () => {
     if (!deletingTopic || topicDeleting) return
@@ -205,129 +279,157 @@ export function BiomoleculesPage() {
     }
   }
 
-  const categoryCard = (category: BiomoleculeCategoryInfo) => (
-    <button
-      key={category.slug}
-      type="button"
-      onClick={() => navigate(`/biomolekuly/${category.slug}`)}
-      className={cardButtonClass}
-    >
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <span className="font-semibold tracking-tight">{nameOf(category.slug)}</span>
-        <span className="font-mono tabular text-xs text-muted-foreground">
-          {moleculeCountLabel(category.moleculeCount)}
-        </span>
-        <span className="text-sm text-muted-foreground">{descriptionOf(category.slug)}</span>
-      </div>
-      <ChevronRight
-        className="ml-auto mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors duration-150 group-hover:text-foreground"
-        strokeWidth={1.75}
+  // `/biomolekuly` (or a slug that no longer exists, once the data is in)
+  // opens the remembered category, else the first one in the list. A
+  // search keeps its query across the redirect.
+  if (loaded && !activeCategory && orderedCategories.length > 0) {
+    const remembered = readLastCategory()
+    const target =
+      orderedCategories.find((category) => category.slug === remembered) ?? orderedCategories[0]
+    return (
+      <Navigate
+        to={{ pathname: `/biomolekuly/${target.slug}`, search: searchParams.toString() }}
+        replace
       />
-    </button>
-  )
+    )
+  }
 
-  const newCategoryCard = isTeacher ? (
-    <button
-      type="button"
-      onClick={() => setCreateOpen(true)}
-      className={cn(
-        cardButtonClass,
-        "items-center justify-center border-dashed text-muted-foreground",
-      )}
-    >
-      <Plus className="size-4 shrink-0" strokeWidth={1.75} />
-      <span className="text-sm font-medium">{manage.addCategory}</span>
-    </button>
-  ) : null
+  const openCategory = (slug: string) => {
+    navigate(`/biomolekuly/${slug}`)
+  }
+
+  const listProps = {
+    sections: visibleSections,
+    activeSlug: searchGroups ? null : (activeCategory?.slug ?? null),
+    onPick: openCategory,
+    onEditTopic: (topic: BiomoleculeTopicInfo) => {
+      setEditingTopic(topic)
+      setTopicFormOpen(true)
+    },
+    onDeleteTopic: setDeletingTopic,
+    onAddCategory: () => setCreateOpen(true),
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {cs.biomolekuly.title}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">{cs.biomolekuly.pageDescription}</p>
         </div>
-        {isTeacher && (
-          <div className="mt-1 flex shrink-0 flex-wrap justify-end gap-2">
-            {topics.length > 1 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setReordering("topics")}
-              >
-                <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
-                {manage.reorderTopics}
-              </Button>
-            )}
-            {categories.length > 1 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setReordering("categories")}
-              >
-                <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
-                {manage.reorderCategories}
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditingTopic(null)
-                setTopicFormOpen(true)
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
+          <div className="relative w-full sm:w-72">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              strokeWidth={1.75}
+            />
+            <Input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setQuery("")
               }}
-            >
-              <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
-              {cs.biomolekuly.newTopic}
-            </Button>
+              placeholder={cs.biomolekuly.searchPlaceholder}
+              aria-label={cs.biomolekuly.searchPlaceholder}
+              className="pl-9"
+            />
           </div>
-        )}
-        {!isTeacher && anyQuizTypes && (
-          <Button asChild size="sm" className="mt-1 shrink-0">
-            <Link to="/biomolekuly/procvicovani">{quizStrings.practice}</Link>
-          </Button>
-        )}
-      </div>
-
-      {visibleSections.length > 0 ? (
-        /* One section per topic; ungrouped categories last under "Ostatní". */
-        <div className="space-y-8">
-          {visibleSections.map((section, index) => (
-            <section key={section.topic?.slug ?? "no-topic"} className="space-y-3">
-              <HubSectionHeading
-                name={section.topic ? topicNameOf(section.topic.slug) : cs.biomolekuly.noTopic}
-                description={
-                  section.topic ? topicDescriptionOf(section.topic.slug) || undefined : undefined
-                }
-                topic={section.topic}
-                onEdit={(topic) => {
-                  setEditingTopic(topic)
+          {isTeacher && (
+            <>
+              {topics.length > 1 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setReordering("topics")}
+                >
+                  <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
+                  {manage.reorderTopics}
+                </Button>
+              )}
+              {categories.length > 1 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setReordering("categories")}
+                >
+                  <ArrowUpDown className="size-4 mr-1.5" strokeWidth={1.75} />
+                  {manage.reorderCategories}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditingTopic(null)
                   setTopicFormOpen(true)
                 }}
-                onDelete={setDeletingTopic}
-              />
-              <div className={categoryGridClass}>
-                {section.categories.map(categoryCard)}
-                {index === visibleSections.length - 1 && newCategoryCard}
-              </div>
-            </section>
-          ))}
+              >
+                <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
+                {cs.biomolekuly.newTopic}
+              </Button>
+            </>
+          )}
+          {!isTeacher && anyQuizTypes && (
+            <Button asChild size="sm" className="shrink-0">
+              <Link to="/biomolekuly/procvicovani">{quizStrings.practice}</Link>
+            </Button>
+          )}
         </div>
-      ) : (
-        /* No topics yet – the flat pre-grouping grid. */
-        <div className={categoryGridClass}>
-          {!loaded && categories.length === 0
-            ? [1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-[4px]" />)
-            : categories.map(categoryCard)}
-          {newCategoryCard}
+      </div>
+
+      <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+        {/* Wide screens: the pinned list. Narrow: a picker above the content. */}
+        <div className="hidden lg:block lg:sticky lg:top-4">
+          {!loaded && categories.length === 0 ? (
+            <Skeleton className="h-96 rounded-[4px]" />
+          ) : (
+            <CategoryList {...listProps} />
+          )}
         </div>
-      )}
+        <div className="lg:hidden">
+          <CategoryPicker {...listProps} />
+        </div>
+
+        <div className="min-w-0">
+          {searchGroups ? (
+            <SearchResults
+              query={query.trim()}
+              groups={searchGroups}
+              onClear={() => setQuery("")}
+            />
+          ) : activeCategory ? (
+            <CategoryPanel categoryId={activeCategory.slug} />
+          ) : loaded ? (
+            <div className="rounded-[4px] border border-dashed px-6 py-12 text-center">
+              <p className="font-medium">{cs.biomolekuly.emptyLibrary}</p>
+              {isTeacher && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => setCreateOpen(true)}
+                >
+                  <Plus className="size-4 mr-1.5" strokeWidth={1.75} />
+                  {manage.addCategory}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <Skeleton className="h-8 w-48 rounded-[4px]" />
+              <Skeleton className="h-64 rounded-[4px]" />
+            </div>
+          )}
+        </div>
+      </div>
 
       <CreateCategoryDialog open={createOpen} onOpenChange={setCreateOpen} />
       <TopicFormDialog open={topicFormOpen} onOpenChange={setTopicFormOpen} topic={editingTopic} />
@@ -360,54 +462,221 @@ export function BiomoleculesPage() {
   )
 }
 
+interface CategoryListProps {
+  sections: HubSection[]
+  activeSlug: string | null
+  onPick: (slug: string) => void
+  onEditTopic: (topic: BiomoleculeTopicInfo) => void
+  onDeleteTopic: (topic: BiomoleculeTopicInfo) => void
+  onAddCategory: () => void
+}
+
 /**
- * A topic's heading row above its hub section. Teachers get small edit/delete
- * icon buttons; the "Ostatní" section (`topic === null`) shows no controls.
+ * The library's left pane: every topic as a small heading over its
+ * categories, each with its molecule count. It keeps its own scroll, so a
+ * long list never pushes the molecules away. Teachers get edit/delete icons
+ * on topic headings and a new-category row at the end.
  */
-function HubSectionHeading({
-  name,
-  description,
-  topic,
-  onEdit,
-  onDelete,
-}: {
-  name: string
-  description?: string
-  topic: BiomoleculeTopicInfo | null
-  onEdit: (topic: BiomoleculeTopicInfo) => void
-  onDelete: (topic: BiomoleculeTopicInfo) => void
-}) {
+function CategoryList({
+  sections,
+  activeSlug,
+  onPick,
+  onEditTopic,
+  onDeleteTopic,
+  onAddCategory,
+}: CategoryListProps) {
   const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const nameOf = useCategoryNames()
+  const { nameOf: topicNameOf, descriptionOf: topicDescriptionOf } = useTopicText()
+
   return (
-    <div>
-      <div className="flex items-center gap-1.5">
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">{name}</h2>
-        {isTeacher && topic && (
-          <div className="flex items-center gap-0.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={cs.biomolekuly.editTopic}
-              className="text-muted-foreground hover:text-foreground"
-              onClick={() => onEdit(topic)}
+    <nav
+      aria-label={cs.biomolekuly.categoriesLabel}
+      className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-[4px] border bg-card py-2"
+    >
+      {sections.map((section) => (
+        <div key={section.topic?.slug ?? "no-topic"} className="py-1">
+          <div className="group flex items-center gap-1 px-3 pb-1 pt-1.5">
+            <p
+              className="min-w-0 flex-1 truncate font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground"
+              title={
+                section.topic ? topicDescriptionOf(section.topic.slug) || undefined : undefined
+              }
             >
-              <Pencil className="size-3.5" strokeWidth={1.75} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={cs.biomolekuly.deleteTopic}
-              className="text-muted-foreground hover:text-destructive"
-              onClick={() => onDelete(topic)}
-            >
-              <Trash2 className="size-3.5" strokeWidth={1.75} />
-            </Button>
+              {section.topic ? topicNameOf(section.topic.slug) : cs.biomolekuly.noTopic}
+            </p>
+            {isTeacher && section.topic && (
+              <span className="flex shrink-0 items-center opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={cs.biomolekuly.editTopic}
+                  className="size-6 text-muted-foreground hover:text-foreground"
+                  onClick={() => section.topic && onEditTopic(section.topic)}
+                >
+                  <Pencil className="size-3" strokeWidth={1.75} />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={cs.biomolekuly.deleteTopic}
+                  className="size-6 text-muted-foreground hover:text-destructive"
+                  onClick={() => section.topic && onDeleteTopic(section.topic)}
+                >
+                  <Trash2 className="size-3" strokeWidth={1.75} />
+                </Button>
+              </span>
+            )}
           </div>
-        )}
+          {section.categories.length === 0 && (
+            <p className="px-3 py-1 text-xs text-muted-foreground">{cs.biomolekuly.topicEmpty}</p>
+          )}
+          {section.categories.map((category) => {
+            const active = category.slug === activeSlug
+            return (
+              <button
+                key={category.slug}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                onClick={() => onPick(category.slug)}
+                className={cn(
+                  "flex w-full items-center gap-2 border-l-2 px-3 py-1.5 text-left text-[13px]",
+                  "transition-colors duration-150",
+                  FOCUS_RING_CLASS,
+                  active
+                    ? "border-primary bg-primary/10 font-medium text-primary"
+                    : "border-transparent hover:bg-primary/5",
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate" title={nameOf(category.slug)}>
+                  {nameOf(category.slug)}
+                </span>
+                <span className="font-mono tabular text-[11px] text-muted-foreground">
+                  {category.moleculeCount}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      ))}
+      {isTeacher && (
+        <div className="border-t px-2 pt-2 mt-1">
+          <button
+            type="button"
+            onClick={onAddCategory}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-[4px] px-2 py-1.5 text-left text-[13px] text-muted-foreground",
+              "transition-colors duration-150 hover:bg-primary/5 hover:text-foreground",
+              FOCUS_RING_CLASS,
+            )}
+          >
+            <Plus className="size-3.5" strokeWidth={1.75} />
+            {manage.addCategory}
+          </button>
+        </div>
+      )}
+    </nav>
+  )
+}
+
+/** Narrow screens: the same list as a grouped picker above the content. */
+function CategoryPicker({ sections, activeSlug, onPick, onAddCategory }: CategoryListProps) {
+  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const nameOf = useCategoryNames()
+  const { nameOf: topicNameOf } = useTopicText()
+  const withCategories = sections.filter((section) => section.categories.length > 0)
+  if (withCategories.length === 0 && !isTeacher) return null
+  return (
+    <div className="flex gap-2">
+      <Select value={activeSlug ?? ""} onValueChange={onPick}>
+        <SelectTrigger aria-label={cs.biomolekuly.categoriesLabel} className="flex-1">
+          <SelectValue placeholder={cs.biomolekuly.pickCategory} />
+        </SelectTrigger>
+        <SelectContent>
+          {withCategories.map((section) => (
+            <SelectGroup key={section.topic?.slug ?? "no-topic"}>
+              <SelectLabel>
+                {section.topic ? topicNameOf(section.topic.slug) : cs.biomolekuly.noTopic}
+              </SelectLabel>
+              {section.categories.map((category) => (
+                <SelectItem key={category.slug} value={category.slug}>
+                  {nameOf(category.slug)} · {category.moleculeCount}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
+        </SelectContent>
+      </Select>
+      {isTeacher && (
+        <Button type="button" variant="outline" onClick={onAddCategory}>
+          <Plus className="size-4" strokeWidth={1.75} />
+          <span className="sr-only">{manage.addCategory}</span>
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Search results across the whole library, one block per category (in list
+ * order) so each molecule keeps its category's card layout and detail
+ * dialog.
+ */
+function SearchResults({
+  query,
+  groups,
+  onClear,
+}: {
+  query: string
+  groups: { category: BiomoleculeCategoryInfo; molecules: Biomolecule[] }[]
+  onClear: () => void
+}) {
+  const nameOf = useCategoryNames()
+  const total = groups.reduce((sum, group) => sum + group.molecules.length, 0)
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">
+            {cs.biomolekuly.searchResultsTitle.replace("{query}", query)}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {total === 0
+              ? cs.biomolekuly.searchNoResults
+              : cs.biomolekuly.searchResultsCount
+                  .replace("{count}", String(total))
+                  .replace("{categories}", String(groups.length))}
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onClear}>
+          <X className="size-4 mr-1.5" strokeWidth={1.75} />
+          {cs.biomolekuly.searchClear}
+        </Button>
       </div>
-      {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
+      {groups.map(({ category, molecules }) => {
+        const kind = categoryKind(category.slug)
+        return (
+          <section key={category.slug} className="space-y-3">
+            <h3 className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              <Link
+                to={`/biomolekuly/${category.slug}`}
+                className={cn("rounded-[2px] hover:text-foreground", FOCUS_RING_CLASS)}
+              >
+                {nameOf(category.slug)}
+              </Link>
+              <span className="tabular">{molecules.length}</span>
+            </h3>
+            <MoleculeBrowser
+              categoryId={category.slug}
+              kind={kind}
+              molecules={molecules}
+              bits={bitsFor(kind)}
+            />
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -1656,7 +1925,7 @@ function InlineCategoryText({
   const [draft, setDraft] = useState("")
   const [saving, setSaving] = useState(false)
   const styles = INLINE_TEXT_STYLES[field]
-  const Tag = field === "name" ? "h1" : "p"
+  const Tag = field === "name" ? "h2" : "p"
 
   const handleSave = useCallback(async () => {
     const trimmed = draft.trim()
@@ -1721,12 +1990,15 @@ function InlineCategoryText({
   )
 }
 
-export function BiomoleculesCategoryPage() {
-  const { categoryId = "" } = useParams<{ categoryId: string }>()
+/**
+ * The right pane for one category: its header (inline-editable name and
+ * description for teachers, practice link, teacher actions) over the
+ * molecule grid. The library page decides which category is open.
+ */
+function CategoryPanel({ categoryId }: { categoryId: string }) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
-  const loaded = useBiomoleculeDataLoaded()
   const category = useMoleculeCategory(categoryId)
   const molecules = useCategoryMolecules(categoryId)
   const nameOf = useCategoryNames()
@@ -1784,12 +2056,6 @@ export function BiomoleculesCategoryPage() {
     }
   }
 
-  // Wait for the first load before judging a slug – otherwise a direct link
-  // would bounce to the hub while the dataset is still being fetched.
-  if (loaded && !category) {
-    return <Navigate to="/biomolekuly" replace />
-  }
-
   if (!category) {
     return (
       <div className="space-y-6">
@@ -1801,31 +2067,19 @@ export function BiomoleculesCategoryPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        to="/biomolekuly"
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-[4px] text-sm text-muted-foreground",
-          "transition-colors duration-150 hover:text-foreground",
-          FOCUS_RING_CLASS,
-        )}
-      >
-        <ArrowLeft className="size-4" strokeWidth={1.75} />
-        {cs.biomolekuly.backToCategories}
-      </Link>
-
       {/* Category header */}
       <div>
         {category.topicSlug && (
           <p className="mb-1 text-xs text-muted-foreground">{topicNameOf(category.topicSlug)}</p>
         )}
-        <div className="flex items-baseline justify-between gap-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
           <InlineCategoryText
             categoryId={category.slug}
             field="name"
             value={nameOf(category.slug)}
           />
-          <div className="flex items-center gap-3">
-            <span className="whitespace-nowrap font-mono tabular text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 whitespace-nowrap font-mono tabular text-sm text-muted-foreground">
               {moleculeCountLabel(category.moleculeCount)}
             </span>
             {isTeacher && (
