@@ -361,17 +361,19 @@ export const cs = {
     loadError: "Hru se nepodařilo načíst. Zkuste to prosím znovu.",
 
     // Peptidovka as a procvičování topic: endless, untimed, every answer
-    // graded on the spot. Its two difficulties are the game's two modes.
+    // graded on the spot. Its two difficulties draw like the game's two modes
+    // (keyed ucen/mistr) but are named Lehká/Těžká — Učeň and Mistr are the
+    // Test-mode names.
     practice: {
       title: {
-        ucen: "Peptidovka – Učeň",
-        mistr: "Peptidovka – Mistr",
+        ucen: "Peptidovka – Lehká",
+        mistr: "Peptidovka – Těžká",
       },
       descriptionUcen: "Barevná struktura čtená zleva od N-konce. Bez časového limitu.",
       descriptionMistr: "Jednobarevná struktura natočená náhodným směrem. Bez časového limitu.",
       modeLabel: {
-        ucen: "Učeň",
-        mistr: "Mistr",
+        ucen: "Lehká",
+        mistr: "Těžká",
       },
       modeHint: {
         ucen: "Barevné atomy, čtení od N-konce",
@@ -841,8 +843,6 @@ export const cs = {
       modeUcenTopicDescription:
         "Nekonečná série lehkých otázek z vybraného tématu — vybíráte ze čtyř možností. Série končí první špatnou odpovědí. Vyberte téma:",
       allTopics: "Všechna témata",
-      peptidovkaColour: "Barevně",
-      peptidovkaMono: "Černobíle",
       streakEmptyTitle: "Zatím tu nejsou žádné otázky pro tento režim",
       streakEmptyDescription:
         "Žádná kategorie zatím nemá otázky, které by tento režim uměl použít. Až vyučující doplní molekuly, série půjde spustit.",
@@ -1887,6 +1887,8 @@ export const cs = {
     openTestsEmpty: "Právě teď nemáte žádný otevřený test.",
     openTestsEmptyHint: "Až vyučující nějaký test zpřístupní, objeví se tady.",
     openTestsError: "Testy se nepodařilo načíst",
+    openTestsSectionEmpty: "V sekci {section} teď nemáte žádný otevřený test.",
+    openTestsOtherSection: "Další sekce · {section}",
     practiceTestBadge: "Cvičný test",
     practiceTestStart: "Otevřít",
     kindBiomolecules: "Biomolekuly",

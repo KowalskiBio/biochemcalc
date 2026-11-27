@@ -61,13 +61,13 @@ function PeptidovkaSplitTile() {
     {
       to: "/biomolekuly/test/peptidovka/ucen",
       coloured: true,
-      label: testStrings.peptidovkaColour,
+      label: cs.test.modeUcenTitle,
       hint: cs.peptidovka.modeUcenDescription,
     },
     {
       to: "/biomolekuly/test/peptidovka/mistr",
       coloured: false,
-      label: testStrings.peptidovkaMono,
+      label: cs.test.modeMistrTitle,
       hint: cs.peptidovka.modeMistrDescription,
     },
   ]
@@ -92,9 +92,6 @@ function PeptidovkaSplitTile() {
           >
             <AtomLetters coloured={coloured} />
             <span className="text-sm font-medium">{label}</span>
-            <span className="text-xs text-muted-foreground">
-              {coloured ? cs.test.modeUcenTitle : cs.test.modeMistrTitle}
-            </span>
           </Link>
         ))}
       </div>
