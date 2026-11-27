@@ -1,7 +1,7 @@
 // Peptide game core: residue fragments, SMILES synthesis, seeded generation,
 // canonical N-left orientation and one-letter answer semantics.
 
-export { expectedChainLetters, isChainCorrect } from "@/lib/peptides/answer"
+export { expectedChainLetters, isChainCorrect, normalizeChainInput } from "@/lib/peptides/answer"
 export { generatePeptide } from "@/lib/peptides/generate"
 export { nLeftOrientationDeg } from "@/lib/peptides/geometry"
 export {

@@ -13,6 +13,7 @@ import {
 } from "@/lib/biomolecules-api"
 import { extractErrorMessage } from "@/lib/http"
 import { nLeftOrientationDeg } from "@/lib/peptides"
+import { normalizeChainInput } from "@/lib/peptides/answer"
 import {
   chainFingerprints,
   generatePeptidovkaTestRun,
@@ -232,9 +233,12 @@ export function PeptidovkaTestRunPage() {
       const chain = prepared?.chains[index]
       if (chain === undefined) return
       const verdict = isPeptideAnswerCorrect(chain, value)
+      // Saved as shown in the input box (uppercase, no spaces), so the
+      // review and the teacher's detail read the same as what was typed.
+      const saved = normalizeChainInput(value)
       const next: RunState = {
         index: runState.index,
-        typed: runState.typed.map((typed, i) => (i === index ? value : typed)),
+        typed: runState.typed.map((typed, i) => (i === index ? saved : typed)),
         verdicts: runState.verdicts.map((current, i) => (i === index ? verdict : current)),
       }
       setState(next)

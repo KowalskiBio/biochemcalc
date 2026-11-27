@@ -6,6 +6,7 @@ import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
 import type { PeptidovkaTestStudentView } from "@/lib/biomolecules-api"
 import { nLeftOrientationDeg } from "@/lib/peptides"
+import { normalizeChainInput } from "@/lib/peptides/answer"
 import { generatePeptidovkaTestRun, type PeptidovkaTestRun } from "@/lib/peptides/test"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
@@ -80,7 +81,7 @@ export function PeptidovkaTestResultPage() {
           id: `${attempt.attemptId}-${index}`,
           chain,
           structure: review.structures[index] ?? { smiles: "", nIndex: 0 },
-          typed: review.typed[index] ?? null,
+          typed: normalizeTyped(review.typed[index]),
           verdict: review.verdicts[index],
         }))
       : regenerated !== null
@@ -178,8 +179,8 @@ export function PeptidovkaTestResultPage() {
                       <span
                         className={
                           row.verdict
-                            ? "font-mono font-semibold text-accent"
-                            : "font-mono font-semibold text-destructive"
+                            ? "break-all font-mono font-semibold tracking-[0.2em] text-accent"
+                            : "break-all font-mono font-semibold tracking-[0.2em] text-destructive"
                         }
                       >
                         {row.typed}
@@ -198,3 +199,7 @@ export function PeptidovkaTestResultPage() {
 
 const quizCorrect = cs.biomolekuly.quiz.correct
 const quizIncorrect = cs.biomolekuly.quiz.incorrect
+
+function normalizeTyped(typed: string | null | undefined): string | null {
+  return typed === null || typed === undefined ? null : normalizeChainInput(typed)
+}
