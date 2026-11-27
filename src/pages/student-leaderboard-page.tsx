@@ -48,7 +48,7 @@ function formatMinutesSeconds(totalSeconds: number): string {
 }
 
 /**
- * Best-streak board for one streak-run kind (Učeň/Mistr) — its own fetch,
+ * Best-streak board for one streak-run kind (Učeň/Mistr) – its own fetch,
  * its own table. "Apprentice" streaks from different topics or difficulties
  * aren't a meaningful comparison (a 10-streak on a narrow set and a
  * 10-streak on a huge mixed topic aren't the same accomplishment), so that
@@ -102,7 +102,7 @@ function StreakLeaderboardCard({
 
   useEffect(() => {
     // A scoped "apprentice" board only makes sense once a topic and
-    // difficulty are actually picked — pooling every topic together would
+    // difficulty are actually picked – pooling every topic together would
     // be comparing unrelated streaks, so there is nothing to fetch yet.
     if (kind === "apprentice" && (!topicId || !pointValue)) {
       setEntries([])
@@ -286,7 +286,7 @@ function StreakLeaderboardCard({
 
 /**
  * Who has calculated what. The main table is ranked by correctly answered
- * practice/test questions — the server counts one score per attempt and
+ * practice/test questions – the server counts one score per attempt and
  * refuses to re-grade one, so the only way up is to answer more correctly.
  * Below it, two more boards track each streak-run kind's best run
  * (Učeň/Mistr) separately: those scores aren't points, they're "how far did
@@ -415,8 +415,8 @@ function CalculationsLeaderboard() {
 
 /**
  * Biomolekuly's best-run board for one game variant. Unlike the calculations
- * `StreakLeaderboardCard` there is nothing to scope by — every biomolecules
- * game already draws from a fixed pool — so the card is just the table:
+ * `StreakLeaderboardCard` there is nothing to scope by – every biomolecules
+ * game already draws from a fixed pool – so the card is just the table:
  * fetch on mount, then loading/error/empty like the others. `source` selects
  * the data contract (quiz streak vs. Peptidovka runs); both produce the same
  * leaderboard row shape.
@@ -536,10 +536,10 @@ function BestRunLeaderboardCard({
 }
 
 /**
- * Biomolekuly's own board — same table layout as the calculations board, but
+ * Biomolekuly's own board – same table layout as the calculations board, but
  * ranked by weighted points (a correct hard-mode answer counts double) and
  * optionally narrowed to one category. Below it, the two streak boards
- * (Učeň/Mistr) — same "how far before the first mistake" story as the
+ * (Učeň/Mistr) – same "how far before the first mistake" story as the
  * calculations section's, minus the scoping selectors.
  */
 function BiomoleculesLeaderboard() {

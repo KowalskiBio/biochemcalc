@@ -428,7 +428,7 @@ export function TopicDetailPage() {
                     <CardDescription>
                       {sets.length} {cs.topics.sets.toLowerCase()}
                       {isDropTarget && (
-                        <span className="text-primary font-medium ml-2">— pusťte sem</span>
+                        <span className="text-primary font-medium ml-2">– pusťte sem</span>
                       )}
                     </CardDescription>
                   </CardHeader>

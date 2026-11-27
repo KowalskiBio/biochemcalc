@@ -6,7 +6,7 @@ interface WeightedEntry {
 }
 
 /**
- * Draw `length` residue slugs from `pool`, seeded — the same seed and weights
+ * Draw `length` residue slugs from `pool`, seeded – the same seed and weights
  * always yield the same peptide, so a game round is stable across rerenders
  * and unit-testable.
  *

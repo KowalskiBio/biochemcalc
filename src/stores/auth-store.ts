@@ -4,7 +4,7 @@ import type { Section, User } from "@/lib/types"
 import { useUiStore } from "@/stores/ui-store"
 
 /**
- * Auth state. Deliberately holds no session token — that lives only in the
+ * Auth state. Deliberately holds no session token – that lives only in the
  * `HttpOnly` session cookie, invisible to JS by design. `fetchMe()` is how
  * the app recovers `user` after a page reload (the cookie is already there;
  * this just asks the server who it belongs to).

@@ -14,7 +14,7 @@ function expectBounds(
 
 describe("computeDepictionBounds", () => {
   it("returns the size square in fixed mode regardless of viewBox and caps", () => {
-    // Today's behavior: grids/previews stay uniform — even a huge molecule
+    // Today's behavior: grids/previews stay uniform – even a huge molecule
     // with tiny caps keeps the plain square element.
     expectBounds(
       computeDepictionBounds({ vbw: 800, vbh: 400, size: 160, capW: 100, capH: 100, grow: false }),
@@ -30,7 +30,7 @@ describe("computeDepictionBounds", () => {
 
   it("never renders small molecules tinier than their grid preview (fill floor)", () => {
     // The current policy's floor: structures under the square get the
-    // grid-parity scale first — never below it — so detail never punishes
+    // grid-parity scale first – never below it – so detail never punishes
     // small molecules relative to the grid.
     const square = computeDepictionBounds({
       vbw: 100,

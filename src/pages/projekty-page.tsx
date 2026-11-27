@@ -346,7 +346,7 @@ export function ProjektyPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>{p.questionCount}</TableCell>
-                          <TableCell>{p.topicName || "—"}</TableCell>
+                          <TableCell>{p.topicName || "–"}</TableCell>
                           <TableCell>{new Date(p.createdAt).toLocaleDateString("cs-CZ")}</TableCell>
                           <TableCell>
                             <DropdownMenu>

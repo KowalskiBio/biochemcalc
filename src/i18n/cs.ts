@@ -17,7 +17,7 @@ export const cs = {
     inviteCodePlaceholder: "Zadejte zvací kód",
     emailLabel: "E-mail",
     emailPlaceholder: "vas@email.cz",
-    emailOptionalHint: "Nepovinné — umožní obnovení zapomenutého hesla",
+    emailOptionalHint: "Nepovinné – umožní obnovení zapomenutého hesla",
     loginButton: "Přihlásit se",
     loginButtonLoading: "Přihlašování...",
     registerButton: "Zaregistrovat se",
@@ -105,7 +105,7 @@ export const cs = {
     calculations: "Laboratorní výpočty",
     biomolecules: "Biomolekuly",
     cooking: "We are cooking…",
-    // Students learn in a section; teachers manage its content — so the
+    // Students learn in a section; teachers manage its content – so the
     // switcher label and the one-time picker are worded per role.
     switcherLabel: {
       student: "Co se chcete učit",
@@ -349,7 +349,7 @@ export const cs = {
     checkAnswer: "Zkontrolovat",
     failedWrong: "Špatně. Série skončila.",
     failedTimeout: "Čas vypršel. Série skončila.",
-    failedInterrupted: "Série byla přerušena — další peptid se nepodařilo nalosovat.",
+    failedInterrupted: "Série byla přerušena – další peptid se nepodařilo nalosovat.",
     correctAnswerLabel: "Správné složení",
     resultsPoints: "Získané body",
     resultsPeptides: "Dokončené peptidy",
@@ -362,7 +362,7 @@ export const cs = {
 
     // Peptidovka as a procvičování topic: endless, untimed, every answer
     // graded on the spot. Its two difficulties draw like the game's two modes
-    // (keyed ucen/mistr) but are named Lehká/Těžká — Učeň and Mistr are the
+    // (keyed ucen/mistr) but are named Lehká/Těžká – Učeň and Mistr are the
     // Test-mode names.
     practice: {
       title: {
@@ -388,11 +388,11 @@ export const cs = {
       backToSetup: "Zpět na výběr tématu",
     },
 
-    // Teacher settings (`/biomolekuly/peptidovka` under the teacher shell) —
+    // Teacher settings (`/biomolekuly/peptidovka` under the teacher shell) –
     // one save per mode, bounds mirrored from the server, which stays the
     // authority.
     settingsDescription:
-      "Délka peptidů, časový limit a aminokyseliny ve hře — pro každý režim zvlášť.",
+      "Délka peptidů, časový limit a aminokyseliny ve hře – pro každý režim zvlášť.",
     minLenLabel: "Minimální délka",
     maxLenLabel: "Maximální délka",
     secondsPerAaLabel: "Sekund na aminokyselinu",
@@ -414,7 +414,7 @@ export const cs = {
     poolEmptyAction: "Otevřít aminokyseliny",
     testy: {
       hubTitle: "Zadané testy",
-      hubDescription: "Testy připravené vyučujícím — pevné peptidy, jediné odevzdání.",
+      hubDescription: "Testy připravené vyučujícím – pevné peptidy, jediné odevzdání.",
       loadError: "Zadané testy se nepodařilo načíst",
       retry: "Zkusit znovu",
       emptyTitle: "Zatím tu není žádný zadaný test",
@@ -466,7 +466,7 @@ export const cs = {
       createDescription:
         "Vyberte aminokyseliny a pravidla. Test se studentům ukáže v nastaveném časovém okně.",
       titleLabel: "Název testu",
-      titlePlaceholder: "např. Peptidovka — opakování",
+      titlePlaceholder: "např. Peptidovka – opakování",
       poolLabel: "Zadané aminokyseliny",
       poolEmpty: "Vyberte alespoň dvě aminokyseliny.",
       poolSummary: "{count} aminokyselin v sadě",
@@ -519,7 +519,7 @@ export const cs = {
       deleteError: "Test se nepodařilo smazat",
       deleteAction: "Smazat",
       cancel: "Zrušit",
-      detailUnavailable: "Podrobný přehled nelze zobrazit — materiál testu se změnil.",
+      detailUnavailable: "Podrobný přehled nelze zobrazit – materiál testu se změnil.",
       audienceLabel: "Test pro",
       audienceAll: "Všichni studenti",
       audienceCodes: "Vybrané zvací kódy",
@@ -675,7 +675,7 @@ export const cs = {
   biomolekuly: {
     history: {
       title: "Historie",
-      description: "Poslední změny v knihovně biomolekul — kdo co změnil a kdy.",
+      description: "Poslední změny v knihovně biomolekul – kdo co změnil a kdy.",
       pageTitle: "Poslední akce",
       pageDescription: "Všechny akce učitelů nad obsahem modulu.",
       loadError: "Historii se nepodařilo načíst",
@@ -748,11 +748,11 @@ export const cs = {
     categories: {
       aminokyseliny: {
         name: "Aminokyseliny",
-        description: "Dvacet proteinogenních aminokyselin — názvy, zkratky a strukturní vzorce.",
+        description: "Dvacet proteinogenních aminokyselin – názvy, zkratky a strukturní vzorce.",
       },
       "dusikate-baze": {
         name: "Dusíkaté báze",
-        description: "Pět základních bází DNA a RNA — názvy, zkratky a strukturní vzorce.",
+        description: "Pět základních bází DNA a RNA – názvy, zkratky a strukturní vzorce.",
       },
     },
     topics: {
@@ -762,11 +762,11 @@ export const cs = {
       },
       "nukleove-kyseliny": {
         name: "Nukleové kyseliny",
-        description: "Dusíkaté báze a nukleotidy — stavební kameny nukleových kyselin.",
+        description: "Dusíkaté báze a nukleotidy – stavební kameny nukleových kyselin.",
       },
       sacharidy: {
         name: "Sacharidy",
-        description: "Monosacharidy a další cukry — struktura a označení.",
+        description: "Monosacharidy a další cukry – struktura a označení.",
       },
     },
     quiz: {
@@ -785,7 +785,7 @@ export const cs = {
         hard: "Těžká",
       },
       modeEasyHint: "Výběr ze 4 možností",
-      modeHardHint: "Otevřené odpovědi — odpověď napíšete",
+      modeHardHint: "Otevřené odpovědi – odpověď napíšete",
       types: {
         nameToLetter: "Název → Zkratka",
         letterToName: "Zkratka → Název",
@@ -837,11 +837,11 @@ export const cs = {
     // difficulty across all categories, not by a picked topic.
     test: {
       modeUcenDescription:
-        "Nekonečná série lehkých otázek ze všech kategorií — vybíráte ze čtyř možností. Série končí první špatnou odpovědí.",
+        "Nekonečná série lehkých otázek ze všech kategorií – vybíráte ze čtyř možností. Série končí první špatnou odpovědí.",
       modeMistrDescription:
-        "Nekonečná série těžkých otázek ze všech kategorií — odpověď napíšete. Série končí první špatnou odpovědí.",
+        "Nekonečná série těžkých otázek ze všech kategorií – odpověď napíšete. Série končí první špatnou odpovědí.",
       modeUcenTopicDescription:
-        "Nekonečná série lehkých otázek z vybraného tématu — vybíráte ze čtyř možností. Série končí první špatnou odpovědí. Vyberte téma:",
+        "Nekonečná série lehkých otázek z vybraného tématu – vybíráte ze čtyř možností. Série končí první špatnou odpovědí. Vyberte téma:",
       allTopics: "Všechna témata",
       streakEmptyTitle: "Zatím tu nejsou žádné otázky pro tento režim",
       streakEmptyDescription:
@@ -897,7 +897,7 @@ export const cs = {
         "Materiál testu se změnil, proto nelze otázky znovu zobrazit. Výsledek zůstává uložený.",
       breakdownUnavailable: "Podrobný rozpis podle typů otázek není k dispozici.",
       correctOption: "Správná odpověď",
-      detailUnavailable: "Podrobný přehled nelze zobrazit — materiál testu se změnil.",
+      detailUnavailable: "Podrobný přehled nelze zobrazit – materiál testu se změnil.",
       audienceLabel: "Test pro",
       audienceAll: "Všichni studenti",
       audienceCodes: "Vybrané zvací kódy",
@@ -912,9 +912,9 @@ export const cs = {
         createPeptidovkaDescription: "Peptidový test z aminokyselin s pevným odevzdáním.",
         createClassicTitle: "Vytvořit klasický test",
         createClassicDescription: "Test z kategorií Biomolekul s výběrem typů otázek.",
-        resultsPeptidovkaTitle: "Výsledky — Peptidovka",
+        resultsPeptidovkaTitle: "Výsledky – Peptidovka",
         resultsPeptidovkaDescription: "Odevzdané peptidovky a výsledky studentů.",
-        resultsClassicTitle: "Výsledky — klasické testy",
+        resultsClassicTitle: "Výsledky – klasické testy",
         resultsClassicDescription: "Odevzdané klasické testy a výsledky studentů.",
       },
       teacherTitle: "Testy",
@@ -923,7 +923,7 @@ export const cs = {
       createDescription:
         "Vyberte materiál a pravidla. Test se studentům ukáže v nastaveném časovém okně.",
       titleLabel: "Název testu",
-      titlePlaceholder: "např. Aminokyseliny — opakování",
+      titlePlaceholder: "např. Aminokyseliny – opakování",
       scopeLabel: "Rozsah testu",
       scopeEmpty: "Vyberte alespoň jedno téma nebo kategorii s molekulami.",
       scopeOtherTopic: "Ostatní",
@@ -1019,9 +1019,9 @@ export const cs = {
       moleculeNamePlaceholder: "např. Kofein",
       smilesLabel: "Struktura (SMILES)",
       smilesPlaceholder: "např. C[C@@H](C(=O)O)N",
-      smilesInvalid: "SMILES se nepodařilo vykreslit — zkontrolujte zápis.",
+      smilesInvalid: "SMILES se nepodařilo vykreslit – zkontrolujte zápis.",
       projectionReadonlyHint:
-        "Náhled vykresluje uloženou Haworthovu projekci (zatím pouze ke čtení) — SMILES zůstává záložním zápisem struktury.",
+        "Náhled vykresluje uloženou Haworthovu projekci (zatím pouze ke čtení) – SMILES zůstává záložním zápisem struktury.",
       abbreviationLabel: "Zkratka",
       abbreviationPlaceholder: "např. Ala",
       aliasesLabel: "Alternativní názvy",
@@ -1041,7 +1041,7 @@ export const cs = {
       factsLabel: "Zajímavosti",
       factsPlaceholder: "Jedna zajímavost na řádek (nepovinné)",
       scriptHint:
-        "Dolní/horní indexy: _{…} resp. ^{…} (FADH_{2}, SO_{4}^{2-}). Bez složených závorek zůstane text obyčejný — např. Vitamin B12.",
+        "Dolní/horní indexy: _{…} resp. ^{…} (FADH_{2}, SO_{4}^{2-}). Bez složených závorek zůstane text obyčejný – např. Vitamin B12.",
       essentialLabel: "Esenciální",
       sulfurLabel: "Obsahuje síru",
       dnaLabel: "DNA",
@@ -1137,7 +1137,7 @@ export const cs = {
       smilesLabel: "SMILES molekuly",
       smilesPlaceholder: "např. OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O",
       verdictRecognized: "Rozpoznáno jako sacharid:",
-      verdictNone: "Sacharid nerozpoznán — zobrazí se pouze skelet.",
+      verdictNone: "Sacharid nerozpoznán – zobrazí se pouze skelet.",
       verdictInvalid: "SMILES se nepodařilo přečíst.",
       ringPyranose: "pyranózový prstenec",
       ringFuranose: "furanózový prstenec",
@@ -1146,7 +1146,7 @@ export const cs = {
       howItWorksP1:
         "Cyklus o 5–6 atomech s jedním kyslíkem v kruhu (pyranóza / furanóza) se sestrojí jako Haworthova projekce, když všechny jeho substituované atomy mají v záznamu stereochemické značky (@ / @@), ze kterých lze odvodit strany vazeb.",
       howItWorksP2:
-        "Chybí-li stereochemie (nebo cyklus není cukr), zůstává běžné skeletové zobrazení — nástroj nikdy neodhadne strany vazeb, raději nic nesestrojí.",
+        "Chybí-li stereochemie (nebo cyklus není cukr), zůstává běžné skeletové zobrazení – nástroj nikdy neodhadne strany vazeb, raději nic nesestrojí.",
       howItWorksP3:
         "U disacharidů se přes glykosidický kyslík navzájem polohují obě cukrové jednotky; nerozpoznaný cyklus zůstává skeletový.",
       howItWorksP4:
@@ -1425,7 +1425,7 @@ export const cs = {
     // The Test pill cycles through these four states: off → úvodní →
     // průběžný → obojí. Úvodní draws 5 questions per bodové ohodnocení,
     // průběžný 4.
-    /** Field label in the create dialog, where a test is just on/off — a
+    /** Field label in the create dialog, where a test is just on/off – a
      *  new test topic starts as průběžný and the teacher cycles it on the card. */
     testFieldLabel: "Test",
     testLabelOff: "Není test",
@@ -1449,7 +1449,7 @@ export const cs = {
     addSetTitle: "Přidat novou sadu",
     addSetDescription: "Vyberte kategorii, do které chcete přidat novou sadu.",
     addSetAggregateDescription:
-      "Souhrnná sada obsahuje otázky z vybraných sad téže kategorie. Otázky jsou sdílené — úpravy a smazání se projeví i v původních sadách.",
+      "Souhrnná sada obsahuje otázky z vybraných sad téže kategorie. Otázky jsou sdílené – úpravy a smazání se projeví i v původních sadách.",
     setModeLabel: "Režim sady",
     setNameLabel: "Název sady",
     setNamePlaceholder: "např. Opakování 1. čtvrtletí (nepovinné)",
@@ -1489,7 +1489,7 @@ export const cs = {
     deleteSetSuccess: "Sada smazána",
     deleteSetError: "Nepodařilo se smazat sadu",
     dropQuestionHere: "Sem pusťte otázku",
-    carryingQuestion: "Nesete otázku — přetáhněte ji nad navigaci a počkejte pro přesun",
+    carryingQuestion: "Nesete otázku – přetáhněte ji nad navigaci a počkejte pro přesun",
     dragSadaHint: "Přetáhněte sadu do jiné kategorie",
     searchPlaceholder: "Hledat téma...",
     createGroup: "Třídit",
@@ -1510,7 +1510,7 @@ export const cs = {
     moveGroupUp: "Posunout skupinu nahoru",
     moveGroupDown: "Posunout skupinu dolů",
     dropTopicHere: "Sem pusťte téma",
-    carryingTopic: "Nesete téma — přetáhněte ho do skupiny a klikněte pro přesun",
+    carryingTopic: "Nesete téma – přetáhněte ho do skupiny a klikněte pro přesun",
     duplicateSuccess: "Téma bylo zduplikováno",
     duplicateError: "Nepodařilo se zduplikovat téma",
   },
@@ -1633,7 +1633,7 @@ export const cs = {
     formulaDetails: "Vzorec a jednotky",
     resultUnit: "Jednotka výsledku",
     multiTargetUnitHint:
-      "Otázka má více hledaných veličin — zadejte jednotku pro každou z nich odděleně středníkem, v pořadí [x][y]…, např. mol;g.",
+      "Otázka má více hledaných veličin – zadejte jednotku pro každou z nich odděleně středníkem, v pořadí [x][y]…, např. mol;g.",
     pointValue: "Bodová hodnota",
     variables: "Proměnné",
     variablesDescription: "Seznam proměnných v otázce",
@@ -1729,7 +1729,7 @@ export const cs = {
     mockResultValues: "Zvolené hodnoty",
     mockQuestionTitle: "Testovací zadání",
     regenerateMock: "Znovu",
-    cannotComputeString: "Nelze vypočítat — rovnice odkazuje na textovou proměnnou.",
+    cannotComputeString: "Nelze vypočítat – rovnice odkazuje na textovou proměnnou.",
     importedAnswer: "Importovaná odpověď",
     correctAnswer: "Správná odpověď",
     recalculate: "Rekalkulovat",
@@ -1795,7 +1795,7 @@ export const cs = {
       precisionMax: "Přesnost musí být ≤ 10",
       stringValuesRequired: "Zadejte alespoň dvě neprázdné hodnoty oddělené čárkou.",
       checkHighlighted: "Zkontrolujte zvýrazněná pole.",
-      sdNoGoRequiresSd: "No-go SD funguje jen spolu se SD — nejprve zadejte povolenou SD.",
+      sdNoGoRequiresSd: "No-go SD funguje jen spolu se SD – nejprve zadejte povolenou SD.",
       sdNoGoLessThanSd: "No-go SD musí být menší než povolená SD.",
     },
   },

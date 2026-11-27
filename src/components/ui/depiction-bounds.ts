@@ -8,7 +8,7 @@
  * up to viewport-safe caps. Concretely, k = min(capK, max(fillScale, 1)):
  * structures smaller than the square get the grid-parity fill scale first,
  * big structures stay at their natural bond length until the viewport-safe
- * cap, and only that cap — never the square — is permitted to shrink them
+ * cap, and only that cap – never the square – is permitted to shrink them
  * (uniformly, so aspect always survives).
  */
 
@@ -37,7 +37,7 @@ export interface DepictionBounds {
  *
  * Fixed mode is today's behavior verbatim: a `size` × `size` square (the
  * svg letterboxes the viewBox into it, preserving aspect itself). Grow mode:
- * scale = min(capK, max(fillScale, 1)) — grid-parity as the floor (so a
+ * scale = min(capK, max(fillScale, 1)) – grid-parity as the floor (so a
  * small molecule never reads tinier than its grid preview), natural
  * 1:1-style elsewhere, and anything exceeding the viewport-safe cap
  * downscales uniformly, aspect intact. A degenerate viewBox (nothing drawn,

@@ -1,8 +1,8 @@
-// Projection renderer — pure geometry for chemistry-teaching projections.
+// Projection renderer – pure geometry for chemistry-teaching projections.
 //
 // The first projection kind is the Haworth depiction of cyclic saccharides:
 // a fixed textbook skeleton per ring form (pyranose hexagon with the ring
-// oxygen at the top-right, furanose pentagon with the oxygen on top — both
+// oxygen at the top-right, furanose pentagon with the oxygen on top – both
 // slightly wider than tall, see `haworth-polygon.ts`) plus strictly vertical
 // substituent bonds labelled by a declarative spec.
 
@@ -108,7 +108,7 @@ function ringVertices(spec: HaworthSpec): RingVertex[] {
   }))
 }
 
-/** Ring atom positions keyed by label — exposed for the golden tests. */
+/** Ring atom positions keyed by label – exposed for the golden tests. */
 export function ringAtomPositions(spec: HaworthSpec): Record<string, Pt> {
   return Object.fromEntries(ringVertices(spec).map((vertex) => [vertex.atom, vertex.pt]))
 }
@@ -321,7 +321,7 @@ function boundingBox(elements: DrawingElement[]): Box {
 /**
  * Ring edges plus substituent bonds and labels, unshifted. The ring oxygen is
  * drawn as an "O" label with its two edges shortened so they don't cross it;
- * the lowest ring edge(s) — the ones facing the viewer — are marked bold.
+ * the lowest ring edge(s) – the ones facing the viewer – are marked bold.
  */
 function buildElements(spec: ProjectionSpec): DrawingElement[] {
   const vertices = ringVertices(spec)
@@ -382,7 +382,7 @@ function buildElements(spec: ProjectionSpec): DrawingElement[] {
 
   /**
    * OH label direction convention: an OH on the LEFT half of the ring reads
-   * "HO" anchored LEFT of its bond — the classic skeletal-formula idiom (so
+   * "HO" anchored LEFT of its bond – the classic skeletal-formula idiom (so
    * hexose C4, being a left-half carbon, always gets "HO"), which also pulls
    * the label out of crowded ring areas. Right-half OHs keep a centred "OH".
    */

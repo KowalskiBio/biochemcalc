@@ -64,7 +64,7 @@ interface Round extends PeptideDraw {
 
 interface Run {
   startedAt: number
-  /** Frozen at the moment of the mistake/timeout — the results readout's end. */
+  /** Frozen at the moment of the mistake/timeout – the results readout's end. */
   endedAt: number | null
   /** One point per amino acid of every correctly read peptide. */
   points: number
@@ -135,8 +135,8 @@ function ChainAnswerForm({ answered, verdict, onSubmit }: ChainAnswerFormProps) 
 /**
  * The Peptidovka run: one generated peptide structure per round, answered as
  * one-letter codes N→C. Like the biomolecules streak, the whole run lives in
- * this component — the quiz material is local and settings are fetched once
- * per page mount — and only the final {points, totalSeconds} pair is posted,
+ * this component – the quiz material is local and settings are fetched once
+ * per page mount – and only the final {points, totalSeconds} pair is posted,
  * best effort, the moment the run fails. A reload loses the in-progress run,
  * same limitation the other streaks have.
  */
@@ -147,12 +147,12 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   const [run, setRun] = useState<Run | null>(null)
   const [round, setRound] = useState<Round | null>(null)
   const [roundIndex, setRoundIndex] = useState(1)
-  // Bumped at every startRun — the answer form keys on it together with the
+  // Bumped at every startRun – the answer form keys on it together with the
   // round index, so a restart after a round-ONE failure also remounts the
   // input (key changes 1→2 even though the round index restarts at 1).
   const [runId, setRunId] = useState(0)
   // Set when synthesis proves impossible even after the one redraw (a pool
-  // slug with no residue template) — the run can never serve a round.
+  // slug with no residue template) – the run can never serve a round.
   const [roundImpossible, setRoundImpossible] = useState(false)
   // Synchronous double-end guard: an Enter submit plus a timer tick inside
   // one React batch would both end the run.
@@ -188,7 +188,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
     })
   }, [nextRound])
 
-  // Kick off the first run as soon as everything it draws from is there —
+  // Kick off the first run as soon as everything it draws from is there –
   // after it `run` is set, so this fires exactly once per page entry
   // (restart is startRun called from the UI).
   useEffect(() => {
@@ -204,7 +204,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
       const totalSeconds = Math.max(0, Math.round((endedAt - current.startedAt) / 1000))
       // Best effort: a lost score only costs a leaderboard entry, not the
       // end screen the student is looking at. The board's "best run" means
-      // the number of SOLVED peptides — points stay decorative in-game.
+      // the number of SOLVED peptides – points stay decorative in-game.
       biomoleculesApi
         .recordPeptidovkaRun({ mode, correctCount: current.solvedCount, totalSeconds })
         .catch(() => {})
@@ -220,7 +220,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   )
 
   const active = run?.phase === "active"
-  // The countdown only ticks while the round is live — on failure it is cut
+  // The countdown only ticks while the round is live – on failure it is cut
   // (undefined deadline) and the display switches to the frozen value.
   const { remainingSeconds, expired } = useCountdown(
     active && round !== null ? round.deadlineMs : undefined,
@@ -231,7 +231,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
     if (active && expired) endRun("timeout", remainingSeconds)
   }, [active, expired, remainingSeconds, endRun])
 
-  // Enter restarts once the run has failed — unless the keystroke belongs
+  // Enter restarts once the run has failed – unless the keystroke belongs
   // to a focused button/link, which has its own Enter semantics.
   useEffect(() => {
     if (run?.phase !== "failed") return
@@ -254,14 +254,14 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
       return
     }
     // Correct: +1 point per amino acid of this peptide, next round straight
-    // away — deliberately no per-round celebration, like the streak.
+    // away – deliberately no per-round celebration, like the streak.
     const points = current.points + round.length
     const solvedCount = current.solvedCount + 1
     const next = nextRound(Date.now())
     if (next === null) {
       // The pool can still hold a slug with no residue template (a teacher's
       // custom amino acid). Never strand an active run: the session ends
-      // HERE inside the results card — not in the launch-failure empty
+      // HERE inside the results card – not in the launch-failure empty
       // state, which would hide the results and read "wait for the teacher"
       // mid-game. Earned points still show; the recorded run's solved count
       // is what just reached history.
@@ -312,7 +312,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   }
 
   // The dataset is missing the amino-acid category, no one-letter-coded
-  // molecules, or the mode's pool is below two acids — a friendly state
+  // molecules, or the mode's pool is below two acids – a friendly state
   // instead of a run that can never serve a round.
   if (roundImpossible || status === "empty") {
     return (
@@ -329,7 +329,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   }
 
   if (!run || !round) {
-    // The dataset is loaded and the start effect is about to fire — a single
+    // The dataset is loaded and the start effect is about to fire – a single
     // frame at most; render nothing rather than flicker a skeleton again.
     return null
   }
@@ -370,7 +370,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
         </div>
       </div>
 
-      {/* The round clock as one hairline bar — the same instrument readout
+      {/* The round clock as one hairline bar – the same instrument readout
           at a glance, red under the last five seconds, frozen at failure. */}
       <Progress
         value={100 * remainingFraction}
@@ -388,7 +388,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
           {/* The peptide is the sample on the bench: `grow` keeps the chain
               at 1:1 bonds up to the run column's width (max-w-2xl = 672 px,
               minus a margin = the explicit cap), and the svg scales down
-              with its wrapper on screens narrower than the grown draw —
+              with its wrapper on screens narrower than the grown draw –
               same discipline as the molecule detail dialog. Mistr hides the
               atom colour coding, so the palette can't give residues away. */}
           <StructureView

@@ -424,7 +424,7 @@ export function applyBoldFrontEdges(
 
     const corners: Point[] = []
     // Given the full cycle, the caps become micro-joints at the adjacent thin ring
-    // edges instead — closing the barely-visible wedge at hexose/pentose C1/C4.
+    // edges instead – closing the barely-visible wedge at hexose/pentose C1/C4.
     const cappedEnd = (vertex: Point, edge: OffsetEdge, sign: 1 | -1): Point => ({
       x: vertex.x + sign * edge.nx * edge.tb,
       y: vertex.y + sign * edge.ny * edge.tb,
@@ -604,7 +604,7 @@ export function applyBoldFrontEdges(
     svg.appendChild(polygon)
 
     // Junction seal at each ring end: here the band, the neighbouring thin
-    // ring bond AND the hydroxyl bond meet — a three-way stroke junction.
+    // ring bond AND the hydroxyl bond meet – a three-way stroke junction.
     // The interior miters seal two same-width strokes, but no pair of cap
     // corners can close three incident strokes of two widths; a round union
     // dot of the band's local half-thickness does, exactly like a round
@@ -632,7 +632,7 @@ export function applyBoldFrontEdges(
  * Atom letters are the read layer: raise every atom glyph above all
  * construction strokes (bonds, front-edge bands/seals, coordination lines).
  * RDKit-JS draws letters as `<path class="atom-N">` with no `bond-*` token,
- * so z-order is a stable child reorder — glyphs move to the end in their
+ * so z-order is a stable child reorder – glyphs move to the end in their
  * original order, everything else is untouched. Runs last so overlap from
  * any decoration pass can never swallow a heteroatom letter.
  */
@@ -676,8 +676,8 @@ function isWhite(fill: string): boolean {
 
 /**
  * Recolour RDKit's legacy heteroatom hexes to the app atom palette
- * (atom-palette.ts). RDKit carries each glyph's hue twice — a fill/stroke
- * attribute plus an inline `style="fill:#…"` fragment — and the remap table
+ * (atom-palette.ts). RDKit carries each glyph's hue twice – a fill/stroke
+ * attribute plus an inline `style="fill:#…"` fragment – and the remap table
  * is keyed uppercase, so both the attribute pass and the style regex match
  * case-insensitively. Runs before the light/dark ink switch: the heteroatom
  * palette is theme-independent, like the calculations variable accents it
@@ -735,7 +735,7 @@ function applyNeutralInk(svg: Element, ink: string): void {
  * Crush every colour in the depiction to the single neutral ink. Used by
  * Mistr's quiz prompt, where atom colour coding would give away part of the
  * answer: bonds and heteroatom labels alike end up one flat ink, the light
- * or dark neutral depending on the theme. Only hex colours are rewritten —
+ * or dark neutral depending on the theme. Only hex colours are rewritten –
  * `fill="none"` markers survive.
  */
 function applyMonochromeInk(svg: Element, ink: string): void {
@@ -759,7 +759,7 @@ function applyMonochromeInk(svg: Element, ink: string): void {
  * the theme's neutral ink and returns (Mistr prompts hide the atom colours);
  * otherwise RDKit's carbon black settles to the theme's neutral ink (the
  * light paper ink or, in dark mode, the near-white one) and its heteroatom
- * hexes are recoloured to the app atom palette (same hexes in both themes —
+ * hexes are recoloured to the app atom palette (same hexes in both themes –
  * see atom-palette.ts).
  */
 export function applyTheme(svg: Element, theme: "light" | "dark", monochrome = false): void {
@@ -796,7 +796,7 @@ function adjacencyOf(snapshot: MolGraphSnapshot): number[][] {
  * cannot accidentally trigger the metal passes:
  *
  * 1. Strict: the five-ring is not fused to any other perceived (5/6-membered)
- *    ring — porphyrins (heme) and corrins (B12) resolve here. The strict stage
+ *    ring – porphyrins (heme) and corrins (B12) resolve here. The strict stage
  *    keeps fused imidazoles (adenine, the B12 benzimidazole ligand) out.
  * 2. Broadened: only reached when the strict stage missed, and then the
  *    five-ring may be fused, but solely to carbocyclic partner rings. This is
@@ -956,7 +956,7 @@ function screenBondLength(svg: Element): number | null {
 
 /**
  * The four shortened metal–nitrogen coordination strokes. Plain (not dashed)
- * lines, contracted at both ends to clear the atom labels — same insets as the
+ * lines, contracted at both ends to clear the atom labels – same insets as the
  * legacy pass: min(6, 0.22 · bondLength) at nitrogen, 0.7× that at
  * the metal. The bond length is measured from the drawing unless supplied, so
  * the insets stay proportional for both heme and the much denser B12.

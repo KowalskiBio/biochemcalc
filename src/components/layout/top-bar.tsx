@@ -22,7 +22,7 @@ interface BreadcrumbItem {
 
 const biomoleculesRoot: BreadcrumbItem = { path: "/biomolekuly", label: cs.navigation.biomolekuly }
 
-/** Biomolekuly hub, category, and quiz pages — names come from `nameOf`. */
+/** Biomolekuly hub, category, and quiz pages – names come from `nameOf`. */
 function biomoleculesBreadcrumbs(
   path: string,
   nameOf: (categoryId: string) => string,
@@ -144,7 +144,7 @@ export function TopBar() {
   const loadDynamicBreadcrumbs = useCallback(async () => {
     const path = location.pathname
 
-    // Pre-load the category list is still empty — report every slug as
+    // Pre-load the category list is still empty – report every slug as
     // existing so direct links don't lose their category crumb and pop
     // back in once the dataset arrives.
     const categoryExists = (categoryId: string) =>

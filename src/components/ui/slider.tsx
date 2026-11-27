@@ -6,7 +6,7 @@ import { Slider as SliderPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 /**
- * Single-thumb slider. The thumb — not the presentational root — carries
+ * Single-thumb slider. The thumb – not the presentational root – carries
  * `role="slider"` and the focus ring, so `aria-label` / `aria-labelledby`
  * passed here are forwarded onto the thumb to name the control.
  */

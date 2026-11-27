@@ -159,7 +159,7 @@ function QuestionCard({
 /**
  * A fixed batch of questions generated all at once by `/test`, answered
  * together and graded only once submitted. The session is read from router
- * state rather than a fetchable id — there is no "resume" endpoint yet, so a
+ * state rather than a fetchable id – there is no "resume" endpoint yet, so a
  * page reload here loses the in-progress test (the student must start over).
  */
 export function StudentTestPage() {
@@ -205,7 +205,7 @@ export function StudentTestPage() {
     try {
       // Grade every answered question, keeping each verdict so the results
       // page can show what was right/wrong per question rather than just the
-      // aggregate score — a skipped question naturally stays ungraded (the
+      // aggregate score – a skipped question naturally stays ungraded (the
       // server only reveals its correct answer once one is submitted).
       const outcomes = await Promise.allSettled(
         session.questions.map(

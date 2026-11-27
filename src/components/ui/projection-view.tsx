@@ -7,7 +7,7 @@ export interface ProjectionViewProps {
   /** Parsed projection description (see `parseProjection`). */
   spec: ProjectionSpec
   /**
-   * Rotation of the depiction, in degrees — handed straight to
+   * Rotation of the depiction, in degrees – handed straight to
    * `drawProjection`, which keeps atom labels upright while transforming the
    * coordinates (same convention as StructureView's `orientationDeg`).
    */
@@ -19,8 +19,8 @@ export interface ProjectionViewProps {
   mirror?: boolean
   className?: string
   /**
-   * Draw in the single Mistr ink — the theme's neutral atom ink (#16281F
-   * light, #FCFCF8 dark) — instead of the surrounding text colour. The
+   * Draw in the single Mistr ink – the theme's neutral atom ink (#16281F
+   * light, #FCFCF8 dark) – instead of the surrounding text colour. The
    * projection has no atom palette to hide, but Mistr insists on one flat
    * ink across the whole depiction, projections included. Default false.
    */
@@ -42,7 +42,7 @@ const BOLD_STROKE_WIDTH = STROKE_WIDTH * 2.2
  * component just inks them.
  *
  * Everything strokes/fills with `currentColor` against a transparent
- * background — the drawing follows the surrounding text color instead of a
+ * background – the drawing follows the surrounding text color instead of a
  * baked-in light/dark theme. Mistr sets `monochrome` to pin that colour to
  * the app atom ink, matching what `applyTheme` does to the SMILES
  * depictions.
@@ -56,7 +56,7 @@ export function ProjectionView({
   ariaLabel,
 }: ProjectionViewProps) {
   // `drawProjection` is a pure function of (spec, orientation, mirror), so
-  // the element list is stable until a real input changes — parents memoize
+  // the element list is stable until a real input changes – parents memoize
   // the spec itself (e.g. parsed per molecule).
   const drawing = useMemo(
     () => drawProjection(spec, { rotateDeg: orientationDeg, mirror }),

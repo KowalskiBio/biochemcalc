@@ -13,7 +13,7 @@ export interface BiomoleculeReportOptionSnapshot {
   smiles?: string
   haworth?: boolean
   fischer?: boolean
-  /** Passed through opaquely — the frontend's `ProjectionSpec` union. */
+  /** Passed through opaquely – the frontend's `ProjectionSpec` union. */
   projection?: unknown | null
   correct: boolean
 }
@@ -122,7 +122,7 @@ export function snapshotOfQuestion(
 }
 
 /**
- * `/api/biomolecules/*` — the student report slot plus the teacher-only inbox
+ * `/api/biomolecules/*` – the student report slot plus the teacher-only inbox
  * for broken Biomolecule quiz questions. The student surface is the only one a
  * student account can reach; the teacher endpoints take their identity from
  * the session cookie, never from a request body.
@@ -144,7 +144,7 @@ export const biomoleculeReportsApi = {
   getQuestionReport: (id: string): Promise<BiomoleculeQuestionReportDetail> =>
     httpRequest<BiomoleculeQuestionReportDetail>("/api/biomolecules/get-question-report", { id }),
 
-  /** Hard delete — no archive; for when the underlying question is fixed. */
+  /** Hard delete – no archive; for when the underlying question is fixed. */
   deleteQuestionReport: (id: string): Promise<void> =>
     httpRequest<void>("/api/biomolecules/delete-question-report", { id }),
 }

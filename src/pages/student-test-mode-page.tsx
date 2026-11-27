@@ -259,7 +259,7 @@ function UcenBlock() {
                     <Chip
                       key={value || "either"}
                       active={effectiveMode === value}
-                      // A chosen set fixes the question type — the chips just show it.
+                      // A chosen set fixes the question type – the chips just show it.
                       onClick={() => {
                         if (!selectedSet) setModeFilter(value)
                       }}
@@ -290,7 +290,7 @@ function UcenBlock() {
  * The first choice a student makes before testing themselves: one of the two
  * timed batches ("Úvodní cvičný test", a topic's first, and "Průběžný
  * cvičný test", the recurring one), an endless run drawing from every topic
- * ("Mistr"), or the same but scoped — Učeň, whose topics sit right in its
+ * ("Mistr"), or the same but scoped – Učeň, whose topics sit right in its
  * block.
  */
 export function StudentTestModePage() {

@@ -42,7 +42,7 @@ export interface TopicInput {
  */
 export type TestKind = "uvodni" | "prubezny"
 
-/** Which test(s) a topic flagged `isTest` offers — either, or both. */
+/** Which test(s) a topic flagged `isTest` offers – either, or both. */
 export type TestOffer = TestKind | "both"
 
 /**
@@ -499,7 +499,7 @@ export interface GenerateInput {
   optionCount: number
   /**
    * Optional per-call custom deviation, as a raw percent (e.g. 42 for ±42%).
-   * Overrides the difficulty preset for the whole call. Not persisted —
+   * Overrides the difficulty preset for the whole call. Not persisted –
    * only ExportVariantsDialog's per-row export flow sets this.
    */
   customSpreadPercent?: number
@@ -682,7 +682,7 @@ export interface ExportProjektInput {
 
 export type Role = "teacher" | "student"
 
-/** One app section — what the user is currently learning in. */
+/** One app section – what the user is currently learning in. */
 export type Section = "calculations" | "biomolecules"
 
 /** Which sections an account (or an invite code) can reach. */
@@ -694,16 +694,16 @@ export interface User {
   role: Role
   createdAt: string
   /** The bootstrap admin (or, on older deployments, the earliest-created
-   * teacher) — cannot be deleted by anyone, including other teachers. */
+   * teacher) – cannot be deleted by anyone, including other teachers. */
   protected: boolean
   /** Set only if the account registered with one. Enables self-service
    * password recovery; an account without one has no recovery path. */
   email: string | null
-  /** Sections this account can reach — always "both" for teachers. */
+  /** Sections this account can reach – always "both" for teachers. */
   sections: SectionAccess
   /** The section a user with access to both last chose; null until they pick. */
   preferredSection: Section | null
-  /** The protected bootstrap account — the only one that manages users. */
+  /** The protected bootstrap account – the only one that manages users. */
   isAdmin: boolean
 }
 
@@ -780,7 +780,7 @@ export interface TestTopicOption {
 }
 
 export interface PracticeDifficulty {
-  /** 2, 3 or 4 — the point value the teacher filed the question under. */
+  /** 2, 3 or 4 – the point value the teacher filed the question under. */
   pointValue: number
   questionCount: number
   /** The individual sets (sada) this difficulty draws from. */
@@ -808,7 +808,7 @@ export interface PracticeAnswerSlot {
   /** The target symbol for multi-answer questions, else undefined. */
   symbol?: string
   unit?: string
-  /** Closed mode only — the options to pick between, in display order. */
+  /** Closed mode only – the options to pick between, in display order. */
   numericOptions?: number[]
   /**
    * The template's result significant-figures setting. When present, the UI
@@ -841,7 +841,7 @@ export interface PracticeQuestion {
   assignedStrings: Record<string, string>
   constants: Record<string, number>
   answerSlots: PracticeAnswerSlot[]
-  /** The template's own "always scientific" toggle — `false` means the
+  /** The template's own "always scientific" toggle – `false` means the
    * teacher explicitly wants plain decimal (`12300`, not `1.23×10⁴`) for
    * every option and revealed answer, not just a magnitude-based default. */
   forceScientific: boolean
@@ -903,7 +903,7 @@ export interface StartTestInput {
 export interface TestSessionView {
   sessionId: string
   timeLimitSeconds?: number
-  /** ISO 8601 — combine with `timeLimitSeconds` to compute the deadline. */
+  /** ISO 8601 – combine with `timeLimitSeconds` to compute the deadline. */
   startedAt: string
   questions: PracticeQuestion[]
 }
@@ -920,7 +920,7 @@ export interface TestResults {
   elapsedSeconds: number
 }
 
-/** What a student entered for one test question — the in-progress page's local, unsubmitted state. */
+/** What a student entered for one test question – the in-progress page's local, unsubmitted state. */
 export interface TestAnswer {
   selectedOption?: number
   answers?: string[]
@@ -929,7 +929,7 @@ export interface TestAnswer {
 /**
  * One graded (or skipped) question, built client-side once a test is
  * finished, for the results page's review: the question as served, what the
- * student answered, and — for an answered one — the grading verdict
+ * student answered, and – for an answered one – the grading verdict
  * `submitAnswer` already returned during the finish flow.
  */
 export interface TestReviewItem {
@@ -980,7 +980,7 @@ export interface StreakRunSummary {
 
 export interface StreakLeaderboardInput {
   kind: StreakRunKind
-  /** Scope the board to one topic/difficulty/set — meaningful for "apprentice" only. */
+  /** Scope the board to one topic/difficulty/set – meaningful for "apprentice" only. */
   topicId?: string
   pointValue?: number
   setId?: string

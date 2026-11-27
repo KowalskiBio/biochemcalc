@@ -9,7 +9,7 @@ import { parseMol, snapshotFromMol } from "@/lib/molecules/render/rdkit-engine"
  *
  * Anchors: `nIndex` comes from the synthesizer (0, or 3 when the chain opens
  * with proline's ring-first fragment); the C-end anchor is the trailing
- * carboxyl oxygen — always the last text atom by construction, and RDKit
+ * carboxyl oxygen – always the last text atom by construction, and RDKit
  * preserves SMILES parse order in its JSON atom list, so it is the final
  * index of the parsed snapshot.
  */

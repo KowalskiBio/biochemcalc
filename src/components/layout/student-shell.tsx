@@ -33,9 +33,9 @@ import { useUiStore } from "@/stores/ui-store"
 
 /**
  * The student's whole world: a handful of destinations per section and
- * nothing else — which section(s) they can reach comes from the invite code
+ * nothing else – which section(s) they can reach comes from the invite code
  * they registered with (`user.sections`). Separate
- * from the teacher `AppShell`/`Sidebar` on purpose — that nav is entirely
+ * from the teacher `AppShell`/`Sidebar` on purpose – that nav is entirely
  * content-authoring links that 403 for a student account (`/api/cmd/*` is
  * teacher-only), so sharing one component would mean maintaining a list of
  * things to hide rather than a list of things to show.
@@ -128,7 +128,7 @@ const iconButtonVariants = cva(
 )
 
 /**
- * `onNavigate` closes the mobile drawer this renders inside of — a route
+ * `onNavigate` closes the mobile drawer this renders inside of – a route
  * change doesn't otherwise dismiss it, since it's a plain open/closed dialog
  * state, not tied to the router. The desktop sidebar (always visible, never
  * inside a drawer) passes nothing.
@@ -290,7 +290,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
       </div>
 
       {/* Phone/tablet: the same sidebar content, but as a dismissible drawer
-          behind a hamburger button — there's no room to keep it permanently
+          behind a hamburger button – there's no room to keep it permanently
           on screen below `md`. */}
       <DialogPrimitive.Root open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
         <DialogPrimitive.Portal>

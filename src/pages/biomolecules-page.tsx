@@ -79,7 +79,7 @@ const FOCUS_RING_CLASS =
 
 const categoryGridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3"
 
-/** Radix Select can't use an empty string as a value — sentinel for "no topic". */
+/** Radix Select can't use an empty string as a value – sentinel for "no topic". */
 const NO_TOPIC_VALUE = "none"
 
 /** Which display/management variant a category uses (protected slugs). */
@@ -320,7 +320,7 @@ export function BiomoleculesPage() {
           ))}
         </div>
       ) : (
-        /* No topics yet — the flat pre-grouping grid. */
+        /* No topics yet – the flat pre-grouping grid. */
         <div className={categoryGridClass}>
           {!loaded && categories.length === 0
             ? [1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-[4px]" />)
@@ -743,7 +743,7 @@ const aminoAcidBits: CategoryBits = {
       </span>
       {traitOf(molecule, TRAIT.sideChain) && (
         <>
-          {" — "}
+          {" – "}
           {traitLabel(labels.sideChainLabels, traitOf(molecule, TRAIT.sideChain))}
         </>
       )}
@@ -1004,7 +1004,7 @@ function MoleculeBrowser({
                 {/* Single-molecule context: `grow` keeps big molecules
                     (acetyl-CoA, peptides) at 1:1 bonds. The dialog shrink-fits
                     its content on sm+ screens, so its own width would feed
-                    back on the grown depiction — maxWidth caps it at the
+                    back on the grown depiction – maxWidth caps it at the
                     dialog's inner width at its widest (768 px − 2×24 px
                     padding = 720 px). On screens narrower than the grown
                     draw, the svg scales down with its wrapper instead of
@@ -1105,7 +1105,7 @@ function MoleculeBrowser({
   )
 }
 
-/** Cap on alternative-name rows per molecule — extras the quiz also accepts. */
+/** Cap on alternative-name rows per molecule – extras the quiz also accepts. */
 const MAX_ALIASES = 8
 
 /** Shared class for the toggle buttons of flag traits. */
@@ -1161,7 +1161,7 @@ function MoleculeFormDialog({
   const [saving, setSaving] = useState(false)
 
   // The saved record's projection, parsed once per molecule: when present it
-  // — not the SMILES field — is the structure the preview must show.
+  // – not the SMILES field – is the structure the preview must show.
   const savedProjection = useMemo(
     () => parseProjection(molecule?.projection),
     [molecule?.projection],
@@ -1329,7 +1329,7 @@ function MoleculeFormDialog({
             <Label>{manage.aliasesLabel}</Label>
             <p className="text-xs text-muted-foreground">{manage.aliasesHint}</p>
             {aliases.map((alias, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional — aliases are user text that may repeat, and the fully controlled inputs only ever append/remove
+              // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional – aliases are user text that may repeat, and the fully controlled inputs only ever append/remove
               <div key={index} className="flex items-center gap-2">
                 <Input
                   value={alias}
@@ -1376,7 +1376,7 @@ function MoleculeFormDialog({
               maxLength={300}
               className={cn("font-mono", !smilesValid && "border-destructive")}
             />
-            {/* A saved projection outranks the typed SMILES in the preview —
+            {/* A saved projection outranks the typed SMILES in the preview –
                 the spec itself is read-only here, so a hint says so. */}
             {savedProjection && haworth ? (
               <div className="flex justify-center rounded-[4px] border p-3">
@@ -1386,7 +1386,7 @@ function MoleculeFormDialog({
                 />
               </div>
             ) : smiles.trim() ? (
-              // Keep the preview mounted for ANY non-empty SMILES — only a
+              // Keep the preview mounted for ANY non-empty SMILES – only a
               // mounted StructureView can report validity again after a typo.
               <div className="flex justify-center rounded-[4px] border p-3">
                 <StructureView
@@ -1667,7 +1667,7 @@ function InlineCategoryText({
     }
     try {
       setSaving(true)
-      // Typing the built-in text back just stores it — there is no override
+      // Typing the built-in text back just stores it – there is no override
       // layer anymore, the category row holds the text directly.
       await update(
         categoryId,
@@ -1784,7 +1784,7 @@ export function BiomoleculesCategoryPage() {
     }
   }
 
-  // Wait for the first load before judging a slug — otherwise a direct link
+  // Wait for the first load before judging a slug – otherwise a direct link
   // would bounce to the hub while the dataset is still being fetched.
   if (loaded && !category) {
     return <Navigate to="/biomolekuly" replace />

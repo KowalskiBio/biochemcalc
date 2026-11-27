@@ -35,7 +35,7 @@ interface Verdict {
  * Peptidovka as procvičování: an endless stream of peptides drawn from the
  * teacher's settings for the chosen mode (Učeň = coloured atoms, N-terminus
  * on the left; Mistr = one ink, random rotation). Unlike the Test-mode run
- * there is no clock and a mistake ends nothing — every answer is graded on
+ * there is no clock and a mistake ends nothing – every answer is graded on
  * the spot, the student sees what they typed next to the correct chain, and
  * "Další peptid" (or Enter) serves the next one. Nothing is recorded.
  */
@@ -70,7 +70,7 @@ export function PeptidovkaPractice({ mode, onExit }: { mode: PeptidovkaMode; onE
     }
   }, [status, peptide, drawFailed, draw])
 
-  // Enter moves on once the verdict is showing — the input is disabled by
+  // Enter moves on once the verdict is showing – the input is disabled by
   // then, so this can never double as the grading keystroke.
   useEffect(() => {
     if (verdict === null) return

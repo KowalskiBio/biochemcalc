@@ -33,7 +33,7 @@ interface StudentTestStartPageProps {
  * Where a student launches a timed test: they pick one of the tests the
  * teacher prepared for this kind (a topic flagged as a test that offers it),
  * and the backend draws its questions at each of 2/3/4 points from all of
- * the topic's sets at once — 5 per band for the úvodní test (15), 4 for the
+ * the topic's sets at once – 5 per band for the úvodní test (15), 4 for the
  * průběžný one (12).
  *
  * Both kinds share this component, one route pair each. The generated

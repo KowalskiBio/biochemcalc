@@ -117,7 +117,7 @@ export interface QuizQuestion {
   openAnswer?: OpenAnswer
   /**
    * Client-issued identity for question reporting (`${runSeed}-${n}`), tagged
-   * by the page after generation — the engine itself never sets it.
+   * by the page after generation – the engine itself never sets it.
    */
   uid?: string
 }
@@ -138,7 +138,7 @@ export interface GenerateQuizConfig {
    * questions" enumeration. When set, it replaces the independent type/target
    * queues: pairs are shuffled once and consumed in order; exhausted pairs
    * reshuffle (same back-to-back-repeat avoidance as the queues). The pairs are
-   * authoritative — `types` and the per-type generatability checks are skipped,
+   * authoritative – `types` and the per-type generatability checks are skipped,
    * so callers must only pass pairs they can actually generate.
    */
   pairs?: readonly QuizPair[]
@@ -164,7 +164,7 @@ export const ALL_QUIZ_TYPES: readonly QuizQuestionType[] = [
 /**
  * The types hard mode quizzes: those whose answer is a written name or letter.
  * The structure-as-answer types (`nameToStructure`, `letterToStructure`) are
- * excluded — a structure can't be typed, so they stay multiple-choice only —
+ * excluded – a structure can't be typed, so they stay multiple-choice only –
  * and so is `characteristic`: accepting any matching molecule makes it a
  * trivially repeatable question rather than a recall exercise.
  */
@@ -224,7 +224,7 @@ export function availableQuizTypes(
 }
 
 /**
- * The types a session with these molecules can actually produce — the
+ * The types a session with these molecules can actually produce – the
  * available types, minus those without enough material (four molecules per
  * option set, a qualifying predicate for "characteristic"). The setup
  * screen offers exactly these.
@@ -437,7 +437,7 @@ function buildQuestion(
 /**
  * Normalize a free-text quiz answer for tolerant comparison: Unicode-decompose,
  * strip combining diacritics, lowercase, trim, collapse inner whitespace, and
- * strip rich-text script markup (`_{...}`/`^{...}`) — teacher-stored names may
+ * strip rich-text script markup (`_{...}`/`^{...}`) – teacher-stored names may
  * carry display braces, but students always type the plain form.
  * So "Kyselina asparagová" and "  kyselina   asparagova " compare equal,
  * and "FADH_{2}" accepts "FADH2".

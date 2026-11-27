@@ -170,7 +170,7 @@ describe("renderQuestionText", () => {
 
   it("merges a chained compound subscript into one symbol", () => {
     // K_a_1 names a single symbol (the phosphoric acid's first dissociation
-    // constant), not two separate subscripts — must not stop after "_a" and
+    // constant), not two separate subscripts – must not stop after "_a" and
     // leave a literal "_1" trailing.
     const result = renderQuestionText(
       "K_a_1 = 7.1×10^-3, K_a_2 = 6.2×10^-8, K_a_3 = 4.4×10^-13.",

@@ -63,21 +63,21 @@ interface Round {
 
 interface Run {
   startedAt: number
-  /** Frozen at the moment of the first wrong answer — the timer stops with it. */
+  /** Frozen at the moment of the first wrong answer – the timer stops with it. */
   endedAt: number | null
   correctCount: number
   phase: "active" | "failed" | "results"
 }
 
-/** Text options carry no display string — resolve name/letter from the config molecules. */
+/** Text options carry no display string – resolve name/letter from the config molecules. */
 function optionLabel(molecules: QuizMolecule[], option: QuizOption): string {
   const molecule = molecules.find((m) => m.id === option.moleculeId)
   if (!molecule) return option.key
-  // Letters only — the three-letter code would be a giveaway hint in letter questions.
+  // Letters only – the three-letter code would be a giveaway hint in letter questions.
   return option.display === "letter" ? (molecule.oneLetter ?? option.key) : molecule.name
 }
 
-/** The answer revealed after a wrong open answer — mirrors the quiz page's reveal. */
+/** The answer revealed after a wrong open answer – mirrors the quiz page's reveal. */
 function correctAnswerText(question: QuizQuestion, molecules: QuizMolecule[]): string {
   const target = molecules.find((molecule) => molecule.id === question.targetId)
   const open = question.openAnswer
@@ -112,7 +112,7 @@ function TaskLabel({ children }: { children: string }) {
   return <div className="text-base font-semibold text-foreground">{children}</div>
 }
 
-/** What the typed answer should look like — shared wording with procvičování. */
+/** What the typed answer should look like – shared wording with procvičování. */
 function answerInstruction(type: QuizQuestionType): string {
   return type === "nameToLetter" || type === "structureToLetter"
     ? quizStrings.instructionLetter
@@ -122,7 +122,7 @@ function answerInstruction(type: QuizQuestionType): string {
 function PromptView({ prompt, monochrome }: { prompt: QuizPrompt; monochrome: boolean }) {
   if (prompt.kind === "structure" && prompt.smiles) {
     return (
-      // Mistr draws structures in a single flat ink — atom colour coding
+      // Mistr draws structures in a single flat ink – atom colour coding
       // would give away part of what the open answer is supposed to test.
       // The palette crush happens in applyTheme on the SMILES path and as a
       // label colour swap on the projection branch: one neutral ink per
@@ -288,7 +288,7 @@ function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
  * The Biomolekuly streak run: one endless question at a time, every question
  * drawing from a random category, ending outright on the first wrong answer.
  * Učeň plays the easy multiple-choice types, Mistr the hard open-answer ones.
- * Unlike the calculations streak there is no server-side session — the quiz
+ * Unlike the calculations streak there is no server-side session – the quiz
  * engine is pure and stateless, so the run lives entirely in this component;
  * only the final {correctCount, totalSeconds} pair is posted, best effort,
  * the moment the run fails. A reload loses the in-progress run, same
@@ -302,7 +302,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
   const { nameOf: topicNameOf } = useTopicText()
   // Učeň picked on the Test page can be scoped to one topic (`?tema=slug`);
-  // without it — and always for Mistr — the run draws from everything.
+  // without it – and always for Mistr – the run draws from everything.
   const [searchParams] = useSearchParams()
   const topicScope = master ? null : searchParams.get("tema")
 
@@ -369,7 +369,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
     gradingRef.current = false
     runSeedRef.current = Date.now()
     questionCounterRef.current = 0
-    // Bumped as run identity for the answer form's key — without it the key
+    // Bumped as run identity for the answer form's key – without it the key
     // is 1→1 on a round-1 restart and React keeps the stale draft mounted.
     setRunId((id) => id + 1)
     setSelectedKey(null)
@@ -382,14 +382,14 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   }, [nextRound])
 
   // Kick off the first run as soon as the dataset is there to draw from.
-  // Before that `pool` is empty, and after it `run` is set — so this fires
+  // Before that `pool` is empty, and after it `run` is set – so this fires
   // exactly once per page entry (restart is startRun called from the UI).
   useEffect(() => {
     if (loaded && run === null && pool.length > 0) startRun()
   }, [loaded, run, pool.length, startRun])
 
   // Correct answer: the counter ticks up and the next question appears
-  // immediately — there is deliberately no per-question celebration.
+  // immediately – there is deliberately no per-question celebration.
   const advance = useCallback(() => {
     gradingRef.current = false
     setSelectedKey(null)
@@ -442,7 +442,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
     return () => window.clearInterval(interval)
   }, [active])
 
-  // Enter opens the results once the run has failed — the mistro input that
+  // Enter opens the results once the run has failed – the mistro input that
   // could have swallowed this keystroke is disabled by then.
   useEffect(() => {
     if (run?.phase !== "failed" || isReportDialogOpen) return
@@ -469,7 +469,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   }
 
   // A store with nothing this mode can ask about (e.g. every category too
-  // small for four-option questions — or, for Mistr, none with letter codes)
+  // small for four-option questions – or, for Mistr, none with letter codes)
   // gets a friendly state instead of a run that can never serve a question.
   if (pool.length === 0) {
     return (
@@ -488,7 +488,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   }
 
   if (!run) {
-    // The dataset is loaded and the start effect is about to fire — a single
+    // The dataset is loaded and the start effect is about to fire – a single
     // frame at most; render nothing rather than flicker a skeleton again.
     return null
   }
@@ -497,7 +497,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   const elapsedSeconds = Math.max(0, Math.floor(((run.endedAt ?? now) - run.startedAt) / 1000))
 
   if (run.phase === "results") {
-    // Pace per attempted question, including the one that ended the run —
+    // Pace per attempted question, including the one that ended the run –
     // a 0-streak otherwise couldn't show a meaningful average.
     const secondsPerAnswer = elapsedSeconds / (run.correctCount + 1)
     return (

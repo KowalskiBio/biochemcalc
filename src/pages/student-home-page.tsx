@@ -498,7 +498,7 @@ function MoleculeOfDay({ canBrowse }: { canBrowse: boolean }) {
 // ---------------------------------------------------------------------------
 
 /**
- * The student home page — first item of every section's sidebar and where
+ * The student home page – first item of every section's sidebar and where
  * the app opens: the tests open right now (across every section the
  * student can reach), their standing on the current section's boards, and
  * the molecule of the day.

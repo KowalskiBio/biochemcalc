@@ -12,7 +12,7 @@
 //
 // Strict by design: anything ambiguous (missing stereo, unresolvable
 // priority comparison, unusual ring) yields `null` for that ring and the
-// caller keeps the plain skeletal drawing — never a wrong Haworth.
+// caller keeps the plain skeletal drawing – never a wrong Haworth.
 
 import { haworthPolygon } from "@/lib/molecules/render/haworth-polygon"
 
@@ -83,7 +83,7 @@ function atomicZ(snapshot: GraphSnapshot, vertexId: number): number {
  * never loop (and never re-enter `root`). Multi-bonds duplicate their target
  * with no further expansion (the CIP duplicate-node rule). Comparison is
  * level-by-level over sorted sphere digests; returns 1 when left outranks
- * right, −1 the opposite, 0 when undecided — the strict caller then refuses
+ * right, −1 the opposite, 0 when undecided – the strict caller then refuses
  * to recognize the ring.
  *
  * Exported for the Fischer recognizer: it needs the same "which drawn chain
@@ -360,7 +360,7 @@ function isAnomericCandidate(
   })
 }
 
-/** Haworth polygons (unit bond), shared by the recognizer and the layout —
+/** Haworth polygons (unit bond), shared by the recognizer and the layout –
  * canonical, slightly-wider-than-tall shapes from `haworth-polygon.ts`. */
 export const HAWORTH_POLYGON: Record<5 | 6, { x: number; y: number }[]> = {
   6: haworthPolygon(6),
@@ -456,7 +456,7 @@ function recognizeSingleRing(
     // Achiral centre (deoxy position): no config to solve; both Hs are free.
     if (atom.chirality !== "R" && atom.chirality !== "S") {
       if (exocyclic.length !== 0) {
-        return null // substituent without stereo info — must not guess
+        return null // substituent without stereo info – must not guess
       }
       atoms.push({ vertexId, up: [...hydrogens], down: [...hydrogens] })
       continue

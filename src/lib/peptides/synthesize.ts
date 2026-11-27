@@ -8,7 +8,7 @@ import {
 /**
  * One assembled peptide plus the atom anchors the layout code needs.
  *
- * Neutral free NH2/COOH termini — the settled product decision (no
+ * Neutral free NH2/COOH termini – the settled product decision (no
  * zwitterions). The chain is pure string assembly of per-residue templates
  * whose parity the test suite pins against the seed SMILES; ring digits
  * never cross a fragment boundary, so splicing is safe.
@@ -26,7 +26,7 @@ export interface PeptideParts {
 
 /**
  * Build a peptide from residue slugs left→right N→C. Returns null on any
- * unknown slug (the caller's pool is settings/db-derived, never typed —
+ * unknown slug (the caller's pool is settings/db-derived, never typed –
  * this stays a hard structural guarantee, not a validation UX).
  */
 export function peptideParts(slugs: string[]): PeptideParts | null {

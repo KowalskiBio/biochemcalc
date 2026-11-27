@@ -171,8 +171,8 @@ export function HistoryPage() {
                             ]
                           : entry.fieldName}
                       </TableCell>
-                      <TableCell>{entry.oldValue || "—"}</TableCell>
-                      <TableCell>{entry.newValue || "—"}</TableCell>
+                      <TableCell>{entry.oldValue || "–"}</TableCell>
+                      <TableCell>{entry.newValue || "–"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

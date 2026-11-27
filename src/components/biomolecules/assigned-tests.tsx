@@ -107,7 +107,7 @@ export function useAssignedTests(enabled = true) {
           ? peptidovka.reason
           : null
     if (failure !== null) setLoadError(extractErrorMessage(failure, testyStrings.loadError))
-    // Soonest deadline first — what needs doing first sits on top.
+    // Soonest deadline first – what needs doing first sits on top.
     merged.sort(
       (a, b) =>
         new Date(a.view.test.availableTo).getTime() - new Date(b.view.test.availableTo).getTime(),
@@ -262,7 +262,7 @@ export function AssignedTestsSkeleton({ count = 2 }: { count?: number }) {
 
 /**
  * The Test page's "Zadané testy" section: every teacher-assigned test the
- * student can see — classic and Peptidovka alike — with its attempt status.
+ * student can see – classic and Peptidovka alike – with its attempt status.
  */
 export function AssignedTestsSection() {
   const { tests, loadError, reload } = useAssignedTests()

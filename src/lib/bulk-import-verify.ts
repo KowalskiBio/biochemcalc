@@ -5,7 +5,7 @@ import { extractPlaceholderValues, parseCzechNumber } from "@/lib/utils"
 /**
  * Checking an imported formula against the answer printed in the source
  * assignment. A question is only checkable when it states a known answer, has a
- * paired formula, and pins every placeholder to a value — `[[c=0.89]]` rather
+ * paired formula, and pins every placeholder to a value – `[[c=0.89]]` rather
  * than a range, which is how a worked example from an assignment is written.
  */
 export interface AnswerCheck {
@@ -30,7 +30,7 @@ function significantDigits(value: number): number {
  * A printed "2.75" claims two decimals and nothing more, so anything within one
  * unit of its last digit agrees; "5.383" claims three, and 5.394 does not.
  * Tying the tolerance to the printed precision is what lets the check pass
- * rounding while still catching a wrong constant — the two differ by far more
+ * rounding while still catching a wrong constant – the two differ by far more
  * than the source's own last digit.
  */
 function agrees(expected: number, actual: number): boolean {
@@ -114,7 +114,7 @@ function checkQuestion(
 
 /**
  * Check every question that states a known answer. Whatever comes back failing
- * is either a wrong formula or an error in the source document — both are worth
+ * is either a wrong formula or an error in the source document – both are worth
  * seeing before the import is committed.
  */
 export function verifyExpectedAnswers(
@@ -146,6 +146,6 @@ export function describeFailedChecks(checks: AnswerCheck[]): string[] {
         check.actual !== undefined
           ? `vzorec dává ${check.actual.toPrecision(4)}`
           : `vzorec nelze vyhodnotit (${check.error})`
-      return `${where}: ${got}, očekáváno ${check.expected} pro [${check.target}] — „${shorten(check.questionText)}"`
+      return `${where}: ${got}, očekáváno ${check.expected} pro [${check.target}] – „${shorten(check.questionText)}"`
     })
 }

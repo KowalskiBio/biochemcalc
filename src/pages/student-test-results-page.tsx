@@ -19,7 +19,7 @@ function formatMinutesSeconds(totalSeconds: number): string {
 
 /**
  * The score summary shown once a test session is finished. Reads `results`
- * from router state — reloading this page loses it (there is no fetchable
+ * from router state – reloading this page loses it (there is no fetchable
  * session id yet), so the "start another test" action is the only way back.
  * `input` (the exact settings the finished test was started with) travels
  * alongside it, letting "Znovu" relaunch the identical configuration without

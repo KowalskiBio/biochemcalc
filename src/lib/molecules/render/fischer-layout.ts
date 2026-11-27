@@ -41,7 +41,7 @@ export interface FischerRecognition {
 const BOND = 26
 const PADDING = 14
 const TEXT_HEIGHT = 20
-/** Visible letter size — sized to the 1.5-bond spine step so letters read at
+/** Visible letter size – sized to the 1.5-bond spine step so letters read at
  * the same ink-to-bond ratio as the RDKit skeletal depictions. */
 const FONT_SIZE = 16
 /**
@@ -169,7 +169,7 @@ function findCarbonyl(snapshot: GraphSnapshot, ringMembers: Set<number>): Carbon
     if (doubleOxygens.length !== 1) {
       continue
     }
-    // Acids/esters/anhydrides carry a second oxygen neighbour — not sugars.
+    // Acids/esters/anhydrides carry a second oxygen neighbour – not sugars.
     const anyOxygens = neighboursOf(snapshot, id).filter(
       (neighbour) => elementOf(snapshot, neighbour) === "O",
     )
@@ -208,7 +208,7 @@ export function recognizeOpenChainSugar(
     return null
   }
 
-  // Every heavy atom is C or O — rules out amino acids / nucleotides.
+  // Every heavy atom is C or O – rules out amino acids / nucleotides.
   let heavyTotal = 0
   for (const atom of snapshot.atoms.values()) {
     if (atom.element === "H") {
@@ -336,7 +336,7 @@ const STROKE_WIDTH = 1.5
 const BOLD_STROKE_WIDTH = STROKE_WIDTH * 2.2
 
 // Atom colours (ATOM_COLOR_OXYGEN / ATOM_COLOR_NEUTRAL) come from the shared
-// app palette — see atom-palette.ts — so a Fischer projection matches the
+// app palette – see atom-palette.ts – so a Fischer projection matches the
 // RDKit depictions exactly; the dark-theme ink swap in applyTheme takes care
 // of the neutral parts.
 /** Plain SVG markup for shared drawing elements, styled like a projection. */
@@ -353,7 +353,7 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
       const fontSize = element.fontSize ?? FONT_SIZE
       const text = element.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       // Raise the SVG text's optical midpoint to the model y instead of the
-      // em-box middle — RDKit centers atom ink on the atom point, so letters
+      // em-box middle – RDKit centers atom ink on the atom point, so letters
       // read vertically centered against the bond (dy = −0.1 · font-size).
       const dy = -(fontSize * 0.1).toFixed(2)
       parts.push(
@@ -368,10 +368,10 @@ export function drawingToSvg(drawing: ProjectionDrawing): string {
 const SUBSCRIPT_DROP = 5
 const SUBSCRIPT_SIZE = 12
 
-/** Ink-to-bond-end adjacency for right-side (OH) labels — they nearly touch
+/** Ink-to-bond-end adjacency for right-side (OH) labels – they nearly touch
  * their bond, matching the RDKit depictions. */
 const BOND_LABEL_GAP = 2
-/** Left-side (HO) labels sit a little further out — they read better with
+/** Left-side (HO) labels sit a little further out – they read better with
  * extra room on the bond side and there is no handed-count of the bond ending
  * against the outer H that would argue for the same tightness. */
 const LEFT_BOND_LABEL_GAP = 6
@@ -426,7 +426,7 @@ function terminalLabelRuns(text: "CHO" | "CH2OH", centerX: number, y: number): T
 
 /**
  * The classic Fischer projection as shared drawing elements, atom-colored
- * (red oxygens) and typed like the rest of the app — natural size, padded.
+ * (red oxygens) and typed like the rest of the app – natural size, padded.
  */
 export function drawFischer(recognition: FischerRecognition): ProjectionDrawing {
   const elements: DrawingElement[] = []
@@ -452,7 +452,7 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
     }
     if (slot.kind === "carbonyl") {
       // Ketone vertex: unlabeled carbon on the spine, oxygen to the RIGHT as
-      // a proper double bond — two short parallel strokes ending at a red O.
+      // a proper double bond – two short parallel strokes ending at a red O.
       elements.push({ kind: "line", x1: spineX, y1: y - 2, x2: spineX + ARM, y2: y - 2 })
       elements.push({ kind: "line", x1: spineX, y1: y + 2, x2: spineX + ARM, y2: y + 2 })
       elements.push({
@@ -467,7 +467,7 @@ export function drawFischer(recognition: FischerRecognition): ProjectionDrawing 
     }
     // Crossing: horizontal arm; the hydroxyl reads "HO" on the LEFT of the
     // ring and "OH" on the RIGHT of the ring (the O is always adjacent to its
-    // bond — the same flip idiom the Haworth pass uses). Each letter occupies
+    // bond – the same flip idiom the Haworth pass uses). Each letter occupies
     // its own LETTER_STEP slot so adjacent letters keep the app's breathing
     // room instead of crowding like they did at raw character steps, and the
     // outermost letter's ink touches the bond end like everywhere else.

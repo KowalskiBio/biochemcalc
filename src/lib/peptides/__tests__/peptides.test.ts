@@ -14,7 +14,7 @@ import {
 } from "@/lib/peptides"
 import SEED_SOURCE from "../../../../src-tauri/src/db/biomolecule_seed.rs?raw"
 
-/** Canonical SMILES the RDKit way — what makes lens-vs-seed comparisons honest. */
+/** Canonical SMILES the RDKit way – what makes lens-vs-seed comparisons honest. */
 function canonical(smiles: string): string {
   const mol = parseMol(smiles)
   if (mol === null) {
@@ -27,7 +27,7 @@ function canonical(smiles: string): string {
   }
 }
 
-// Ground truth re-extracted from the Rust seed on EVERY run — a seed edit
+// Ground truth re-extracted from the Rust seed on EVERY run – a seed edit
 // (changed SMILES, renamed slug) fails this file loudly without hand-syncing.
 // Filtered to the slugs our templates know, so a teacher-added 21st row is fine.
 const SEED: { slug: string; smiles: string }[] = Array.from(
@@ -52,7 +52,7 @@ describe("peptideSmiles", () => {
 
   it("pins internal proline parity against the seed-traversal formulation", () => {
     // Alternative formulation: seed's own text with the ring N's lone H
-    // acylated by a glycine — same molecule, different traversal, so a
+    // acylated by a glycine – same molecule, different traversal, so a
     // flipped alpha parity in the INTERNAL template cannot hide.
     const fromTemplate = peptideSmiles(["gly", "pro"])
     const fromSeedOrder = "C1C[C@H](N(C1)C(=O)CN)C(=O)O"

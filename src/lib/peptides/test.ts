@@ -1,4 +1,4 @@
-// Peptidovka teacher-tests — the client-side generation/grading glue.
+// Peptidovka teacher-tests – the client-side generation/grading glue.
 //
 // Pure: no React, no network, no RDKit. The run page passes in the already
 // loaded molecule data plus the attempt seed and gets back exactly the
@@ -57,7 +57,7 @@ export interface BiomoleculeLike {
 
 /** One attempt's generated material: answers and their render parts, parallel. */
 export interface PeptidovkaTestRun {
-  /** One-letter answers N→C, uppercased — the grader's expected strings. */
+  /** One-letter answers N→C, uppercased – the grader's expected strings. */
   chains: string[]
   /** `peptideParts` output per chain, in the same order as `chains`. */
   structures: PeptideParts[]

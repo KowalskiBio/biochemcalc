@@ -23,7 +23,7 @@ import type {
 } from "./types"
 
 /**
- * `/api/student/*` — the practice generator and leaderboard, the only API
+ * `/api/student/*` – the practice generator and leaderboard, the only API
  * surface a student account can reach (`/api/cmd/*` is teacher-only). The
  * acting user comes from the session cookie, never from a request body.
  */
@@ -40,7 +40,7 @@ export const studentApi = {
     httpRequest<TestTopicOption[]>("/api/student/test-topics", { kind }),
 
   /**
-   * A fresh question — new random values every call, so a topic never runs
+   * A fresh question – new random values every call, so a topic never runs
    * out. Open or closed is chosen at random per question, unless `mode` is
    * given to restrict it to just one.
    */
@@ -48,7 +48,7 @@ export const studentApi = {
     httpRequest<PracticeQuestion>("/api/student/next-question", input),
 
   /**
-   * Grade an answer. An attempt can be submitted only once — the server
+   * Grade an answer. An attempt can be submitted only once – the server
    * refuses a second submission rather than re-grading it.
    */
   submitAnswer: (input: SubmitAnswerInput): Promise<PracticeAnswerResult> =>

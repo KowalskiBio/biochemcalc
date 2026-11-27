@@ -494,7 +494,7 @@ extra = 1 + 1`)
     const result = pairFormulasWithQuestions(parsedData, formulaMap)
 
     expect(result.warnings).toEqual([
-      'Sada 2_1: 3 otázky, 3 vzorce — 1 vzorců nebylo spárováno: "extra = 1 + 1"',
+      'Sada 2_1: 3 otázky, 3 vzorce – 1 vzorců nebylo spárováno: "extra = 1 + 1"',
     ])
     expect(result.data.categories[0].sets[0].questions[0].equationText).toBe("w = ms / mr")
     expect(result.data.categories[0].sets[0].questions[0].formula).toBe("w = ms / mr")

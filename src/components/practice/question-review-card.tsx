@@ -13,7 +13,7 @@ const OPTION_LABELS = ["a", "b", "c", "d", "e", "f"] as const
 /**
  * One finished test question, read-only: the selected (or typed) answer
  * highlighted red if it was wrong, the actual correct option or value
- * highlighted green. A question the student skipped shows neither — the
+ * highlighted green. A question the student skipped shows neither – the
  * server never reveals an unanswered attempt's correct answer, so there is
  * nothing here to highlight beyond "unanswered".
  */

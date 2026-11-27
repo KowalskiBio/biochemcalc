@@ -2,7 +2,7 @@ import { httpRequest } from "./http"
 import type { QuestionReportDetail, QuestionReportSummary } from "./types"
 
 /**
- * `/api/cmd/*` — the teacher-only inbox for student question reports. A
+ * `/api/cmd/*` – the teacher-only inbox for student question reports. A
  * student can file a report but can never reach this surface; the acting
  * teacher's identity comes from the session cookie, never from a request
  * body.
@@ -16,7 +16,7 @@ export const reportsApi = {
   get: (id: string): Promise<QuestionReportDetail> =>
     httpRequest<QuestionReportDetail>("/api/cmd/get_question_report", { id }),
 
-  /** Hard delete — no archive; for when the underlying question is fixed. */
+  /** Hard delete – no archive; for when the underlying question is fixed. */
   remove: (id: string): Promise<void> =>
     httpRequest<void>("/api/cmd/delete_question_report", { id }),
 }

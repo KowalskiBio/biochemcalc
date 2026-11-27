@@ -38,7 +38,7 @@ interface RunState {
 
 interface StoredAttemptProgress {
   uids: string[]
-  /** Content hashes of the generated questions — detect prompt/option edits. */
+  /** Content hashes of the generated questions – detect prompt/option edits. */
   fingerprints: string[]
   index: number
   selections: (string | null)[]
@@ -92,7 +92,7 @@ function clearStoredProgress(attemptId: string): void {
   }
 }
 
-/** Text options carry no display string — resolve name/letter from the pool. */
+/** Text options carry no display string – resolve name/letter from the pool. */
 function optionLabel(molecules: QuizMolecule[], option: QuizOption): string {
   const molecule = molecules.find((m) => m.id === option.moleculeId)
   if (!molecule) return option.key
@@ -455,7 +455,7 @@ export function BiomoleculesTestRunPage() {
         setSubmitting(false)
         if (auto) {
           setDeadlineHit(true)
-          // A failed auto-submit never retries itself — the manual button
+          // A failed auto-submit never retries itself – the manual button
           // stays, and a permanent rejection (deadline passed server-side)
           // would otherwise be hammered once a second.
           autoFailedRef.current = true

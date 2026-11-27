@@ -2,13 +2,13 @@
 //
 // Every fragment here is DELIBERATELY derived from the seed SMILES in
 // `src-tauri/src/db/biomolecule_seed.rs` (the 20 neutral free amino acids):
-// the alpha-carbon block is the uniform `N[C@@H](side chain)C(=O)` template —
+// the alpha-carbon block is the uniform `N[C@@H](side chain)C(=O)` template –
 // the free acid is `template + "O"`, which the test suite canonicalizes
 // back to the seed SMILES for all twenty, so the template's parity and any
 // side-chain stereocenter strings remain anchored to ground truth.
 //
 // Vocabulary note: this module is English (`peptides`) while HTTP/UI strings
-// are Czech (`peptidovka`) — same convention as the rest of src/lib.
+// are Czech (`peptidovka`) – same convention as the rest of src/lib.
 
 /** One mid-chain repeat unit (neutral, condensable at both ends). */
 export interface ResidueFragment {
@@ -19,7 +19,7 @@ export interface ResidueFragment {
 /**
  * The twenty canonical residues, keyed by their three-letter seed slugs
  * (`biomolecule_seed.rs`). Glycine is the only achiral row (plain `NCC(=O)`).
- * Proline is deliberately absent — its secondary amine closes a ring, so the
+ * Proline is deliberately absent – its secondary amine closes a ring, so the
  * generic alpha-N template cannot express it; see `synthesize.ts`.
  */
 export const RESIDUES: Readonly<Record<string, ResidueFragment>> = {
@@ -60,7 +60,7 @@ export function isKnownResidueSlug(slug: string): boolean {
 // N-terminal and free-acid shapes reuse the seed's own traversal, so their
 // alpha parity is trusted by construction; the internal unit opens at the
 // amide N instead and closes the pyrrolidine in a branch, keeping the SAME
-// alpha neighbour order (prev N, branch ring chain, next C(=O)) — the
+// alpha neighbour order (prev N, branch ring chain, next C(=O)) – the
 // canonical-crosscheck test in the suite proves the parity transfer.
 
 /** Proline when it opens the chain (free-ring NH, condensable carboxyl). */

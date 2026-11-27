@@ -167,7 +167,7 @@ describe("disaccharide Haworth layout on RDKit coordinates", () => {
       Math.PI
     expect(Math.abs(angleDegrees - -72)).toBeLessThanOrEqual(6)
 
-    // Acceptor arrival: the glc C4 bond goes down and 18° toward the left —
+    // Acceptor arrival: the glc C4 bond goes down and 18° toward the left –
     // a normal Haworth substituent on the acceptor ring, one full bond long.
     expect(bridgePosition.x).toBeLessThan(acceptorAnchor.x)
     expect(bridgePosition.y).toBeGreaterThan(acceptorAnchor.y)
@@ -240,7 +240,7 @@ describe("disaccharide Haworth layout on RDKit coordinates", () => {
     expect(Math.abs(donorLength - BOND)).toBeLessThanOrEqual(1.2)
 
     // Fructose acceptor: the mirrored ring draws its canonical up bridge on
-    // the DOWN side — below the anomeric carbon, tilted 18° left — and a
+    // the DOWN side – below the anomeric carbon, tilted 18° left – and a
     // downward bond keeps the full bond length.
     expect(bridgePosition.x).toBeLessThan(fructoseAnchor.x)
     expect(bridgePosition.y).toBeGreaterThan(fructoseAnchor.y)

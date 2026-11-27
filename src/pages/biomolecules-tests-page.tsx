@@ -227,7 +227,7 @@ export function BiomoleculesTestCreatePage() {
         availableTo: toIso ?? "",
       })
       toast({ title: testyStrings.createSuccess })
-      // The fresh test is at the top of the results list — land there.
+      // The fresh test is at the top of the results list – land there.
       navigate("/biomolekuly/testy/vysledky")
     } catch (error) {
       toast({
@@ -864,7 +864,7 @@ function AttemptRows({ view, allMolecules, onDetail }: AttemptRowsProps) {
                 <td className="px-3 py-2 font-mono tabular text-xs text-muted-foreground">
                   {attempt !== null && attempt.submittedAt !== null
                     ? formatWindowDate(attempt.submittedAt)
-                    : "—"}
+                    : "–"}
                 </td>
                 <td className="px-3 py-2 text-right font-mono tabular">
                   {attempt !== null && submitted ? (
@@ -874,7 +874,7 @@ function AttemptRows({ view, allMolecules, onDetail }: AttemptRowsProps) {
                       strings={testyStrings}
                     />
                   ) : (
-                    "—"
+                    "–"
                   )}
                 </td>
                 <td className="px-3 py-2 text-right">

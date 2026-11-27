@@ -10,7 +10,7 @@
  * Create a mulberry32 pseudo-random number generator.
  *
  * mulberry32 is a tiny, fast, well-distributed 32-bit generator. It is NOT
- * cryptographically secure and must never be used for secrets — it exists only
+ * cryptographically secure and must never be used for secrets – it exists only
  * so quiz questions are reproducible from a seed.
  *
  * @param seed Any number; coerced to a 32-bit unsigned integer via `>>> 0`.

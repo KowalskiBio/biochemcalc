@@ -54,7 +54,7 @@ function NumericInput({
   const [text, setText] = useState(String(value))
   // Tracks the last value *we* pushed via onChange, so the sync effect below
   // can tell "parent echoed our own edit" apart from "value changed
-  // externally" (e.g. a type switch resetting to a default) — without it,
+  // externally" (e.g. a type switch resetting to a default) – without it,
   // every render would re-derive Number(text), and Number("") === 0 would
   // make an in-progress deletion look like a stale/external value and snap
   // the field back before the user could type a replacement.
@@ -115,7 +115,7 @@ function ComparisonSelectors({ variable, allVariables, onChange }: ComparisonSel
   )
 
   // Another variable may already constrain this one from the other side
-  // (e.g. X was set "greater than Y" — opening Y's editor should immediately
+  // (e.g. X was set "greater than Y" – opening Y's editor should immediately
   // show "Y must be less than X" without Y having its own field set).
   const impliedLessThan = allVariables.find(
     (v) => !v.isRemoved && v.greaterThanVariableId === variable.variableId,
@@ -228,7 +228,7 @@ export function serializePairedConstants(pc: Array<Record<string, number>> | und
 }
 
 // Matches each "key=number" pair directly rather than splitting the line on
-// "," first — a bare split breaks on a Czech decimal comma inside the number
+// "," first – a bare split breaks on a Czech decimal comma inside the number
 // itself ("Ka=1,75e-5" turns into "Ka=1" and a dangling "75e-5"), silently
 // dropping most of the value. The number group accepts either separator, so
 // "1.75e-5" and "1,75e-5" both parse, while "," between pairs on the same
@@ -280,7 +280,7 @@ export function VariableEditorRow({
       <div className="p-3 border rounded-lg opacity-50 line-through">
         <div className="flex items-center justify-between">
           <span className="text-sm text-foreground-secondary">
-            <span className={`font-semibold ${placeholderColor}`}>{displayPlaceholder}</span> —{" "}
+            <span className={`font-semibold ${placeholderColor}`}>{displayPlaceholder}</span> –{" "}
             {variable.name}
           </span>
           <Badge variant="destructive">{cs.questions.removeVariable}</Badge>
@@ -459,7 +459,7 @@ export function VariableEditorRow({
                   inputMode="numeric"
                   value={variable.significantDigits ?? ""}
                   className="h-8"
-                  placeholder="—"
+                  placeholder="–"
                   onChange={(e) => {
                     const raw = e.target.value.trim()
                     if (raw === "") {

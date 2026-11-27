@@ -66,7 +66,7 @@ export interface RenderStructureOptions {
   haworth?: boolean
   /**
    * False disables open-chain Fischer auto-recognition (runs only when no
-   * sugar ring is recognized — the two projections stay mutually exclusive).
+   * sugar ring is recognized – the two projections stay mutually exclusive).
    * Default true.
    */
   fischer?: boolean
@@ -166,8 +166,8 @@ export function renderStructure(
     }
   }
 
-  // Letters are the read layer: after every decoration pass so nothing —
-  // front-edge bands, seals, coordination lines, or a crossing bond — can
+  // Letters are the read layer: after every decoration pass so nothing –
+  // front-edge bands, seals, coordination lines, or a crossing bond – can
   // paint over a heteroatom glyph.
   raiseAtomLetters(host)
 

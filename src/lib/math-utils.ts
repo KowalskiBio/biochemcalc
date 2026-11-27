@@ -85,7 +85,7 @@ const MOLAR_MASS_REFERENCE_REGEX = /M_([A-Za-z0-9_().*·∙]+)/g
  * An adduct separator inside an `M_` identifier: the `.` in `M_FeSO4.7H2O`.
  * `*`, `·` and `∙` are also multiplication operators, so the tokenizer only
  * swallows a separator when what follows looks like the formula of the attached
- * molecule — an optional count and then an element symbol, which is always
+ * molecule – an optional count and then an element symbol, which is always
  * capitalised. That keeps `M_NaCl * 2` and `M_H_2O·n` as multiplications while
  * `M_NiCl2*6H2O` stays one identifier, matching what
  * MOLAR_MASS_REFERENCE_REGEX already captures for evaluation.
@@ -93,8 +93,8 @@ const MOLAR_MASS_REFERENCE_REGEX = /M_([A-Za-z0-9_().*·∙]+)/g
 const MOLAR_MASS_SEPARATOR_REGEX = /^[.*·∙]\d*[A-Z]/
 
 /**
- * Scans the chemical group opening at `input[start]` — the `(OH)` in
- * `M_Ca(OH)2`, or the whole `(Cu(NH3)4)` in `M_(Cu(NH3)4)SO4` — and returns the
+ * Scans the chemical group opening at `input[start]` – the `(OH)` in
+ * `M_Ca(OH)2`, or the whole `(Cu(NH3)4)` in `M_(Cu(NH3)4)SO4` – and returns the
  * index just past its closing bracket. Returns -1 when the group is unbalanced
  * or holds anything that cannot be part of a formula, so `M_x(a+b)` is left to
  * the parser as a function call rather than being swallowed half-way.
@@ -582,7 +582,7 @@ export function evaluateExpression(
 /**
  * Every named target of a semicolon-separated multi-answer formula
  * ("c = ...; wDsc = ..."), in declaration order, alongside its computed
- * value — unlike {@link evaluateExpression}, which only returns the last
+ * value – unlike {@link evaluateExpression}, which only returns the last
  * target's value. Used wherever a preview needs to show all of a
  * multi-answer question's answers, not just the graded one.
  */
@@ -743,7 +743,7 @@ function escapeIdentifierPart(name: string): string {
 
 /**
  * The explicit adduct separators of a molar-mass formula: the `·` in
- * `CuSO4·5H2O`. Unambiguous, so anything after one is an attached molecule —
+ * `CuSO4·5H2O`. Unambiguous, so anything after one is an attached molecule –
  * water or otherwise (`CuSO4·6NH3`). They must never reach the output: KaTeX
  * has no glyph for `∙`, and a bare `·` would draw as an operator.
  */
@@ -752,7 +752,7 @@ const ADDUCT_SEPARATOR_REGEX = /[.*·∙]/
 /**
  * The water-of-crystallisation tail written with the underscore separator: the
  * `_5H_2O` in `M_CuSO_4_5H_2O`. Underscores are otherwise subscript markers, so
- * unlike ADDUCT_SEPARATOR_REGEX this only applies to a trailing water molecule —
+ * unlike ADDUCT_SEPARATOR_REGEX this only applies to a trailing water molecule –
  * the same shape `normalizeMolarMassFormula` rewrites before computing, so what
  * we draw matches what we compute. The count is optional: `CaSO_4_H_2O` is a
  * monohydrate.
@@ -766,7 +766,7 @@ function formulaSegmentToLatex(segment: string): string {
       .map((part) => part.replace(/(\d+)/g, "_{$1}").replace(/([A-Za-z]+)/g, "\\mathrm{$1}"))
       .join("")
       // A digits-only part following one that already ended in digits would emit
-      // `_{4}_{2}` — a double subscript, which KaTeX refuses to render at all.
+      // `_{4}_{2}` – a double subscript, which KaTeX refuses to render at all.
       // The empty group keeps it valid; the notation is ambiguous either way.
       .replace(/(_\{\d+\})(?=_\{)/g, "$1{}")
   )
@@ -823,7 +823,7 @@ function stripParentheses(node: AstNode): AstNode {
 }
 
 /**
- * `String(7.2e-10)` is `"7.2e-10"` — literal `e` notation, which reads as
+ * `String(7.2e-10)` is `"7.2e-10"` – literal `e` notation, which reads as
  * broken text rather than math if dropped straight into LaTeX. Render it as
  * `7.2 \times 10^{-10}` instead; every other number passes through as-is.
  */
@@ -846,7 +846,7 @@ function latexDecimalComma(numeric: string): string {
   return numeric.replace(".", "{,}")
 }
 
-/** True for a number that renders as `m \times 10^{n}` — it already ends in
+/** True for a number that renders as `m \times 10^{n}` – it already ends in
  * its own superscript, so using it bare as the base of an outer `^` would
  * stack two exponents with nothing to tell them apart (`10^{-10}^{2}` reads
  * as one compound "-10, 2", not "(10^-10) squared"). */
@@ -1040,7 +1040,7 @@ export function pickMockValues(
 const SCIENTIFIC_MANTISSA_DECIMALS = 2
 
 /**
- * Above this magnitude a plain decimal string stops being readable — and
+ * Above this magnitude a plain decimal string stops being readable – and
  * JavaScript's own `toString` starts emitting `1.5e+25`, which is neither the
  * `×10^n` convention used everywhere else in the app nor something
  * `FormattedResult` can turn into a superscript.
@@ -1062,7 +1062,7 @@ const SCIENTIFIC_EXPONENT_REGEX = /×10\^([+-]?\d+)/g
 
 /**
  * `1.52×10^25` → `1.52×10<sup>25</sup>`, for the places that render markup
- * (question text, answer chips, units). Only for in-app rendering — the
+ * (question text, answer chips, units). Only for in-app rendering – the
  * exported `.txt` builds its own HTML in the Rust writer. A negative exponent
  * carries the real minus sign (U+2212), not the ASCII hyphen-minus.
  */
@@ -1089,7 +1089,7 @@ const SUPERSCRIPT_CHARS: Record<string, string> = {
 
 /**
  * `1.52×10^25` → `1.52×10²⁵` using real superscript characters, for plain-text
- * places that cannot render markup at all — toasts, badges, labels. Keeps a
+ * places that cannot render markup at all – toasts, badges, labels. Keeps a
  * bare `^` from ever reaching the screen.
  */
 export function scientificNotationToUnicode(text: string): string {
@@ -1109,8 +1109,8 @@ export function formatNumberForText(value: number | undefined | null, maxDecimal
 
 /**
  * Multiple-choice options can be numerically distinct yet render identically
- * at a fixed precision — e.g. 0.038 and 0.042 both read "0.04" at two
- * decimals — which is exactly what makes small-magnitude results (percentages
+ * at a fixed precision – e.g. 0.038 and 0.042 both read "0.04" at two
+ * decimals – which is exactly what makes small-magnitude results (percentages
  * under 1%, tiny concentrations) look like duplicate answer choices. Widen
  * the decimal count just enough that every option in the set formats to a
  * distinct string, without touching sets that are already distinguishable.
@@ -1133,14 +1133,14 @@ export function resolveOptionsPrecision(
 }
 
 /** Below this magnitude a fixed-point string has more than one leading zero
- * after the decimal point — `0.1` is acceptable, `0.01` is not. A styling
- * preference for `notation === undefined` (auto) only — see
+ * after the decimal point – `0.1` is acceptable, `0.01` is not. A styling
+ * preference for `notation === undefined` (auto) only – see
  * {@link SCIENTIFIC_WALL_OF_ZEROS_THRESHOLD} for the unconditional floor. */
 const SCIENTIFIC_LOWER_THRESHOLD = 0.1
 
 /**
  * Below this magnitude, no fixed-point rendering is legitimate no matter
- * what the caller asked for — an atomic mass (~1e-22) at, say, 4 significant
+ * what the caller asked for – an atomic mass (~1e-22) at, say, 4 significant
  * digits would otherwise print as 20+ leading decimal zeros instead of
  * scientific notation, even under an explicit `notation: "normal"` ("not
  * scientific") choice. `SCIENTIFIC_LOWER_THRESHOLD` is a style preference
@@ -1166,8 +1166,8 @@ function formatSignificantDigitsRaw(
   const wantNormal = notation === "normal"
 
   // Scientific notation when forced, when the value is too large or would
-  // print as a wall of decimal zeros (both unconditional — never legitimate
-  // as plain decimal regardless of notation), or — for auto only — merely
+  // print as a wall of decimal zeros (both unconditional – never legitimate
+  // as plain decimal regardless of notation), or – for auto only – merely
   // too small for stylistic readability. "normal" suppresses only that last,
   // stylistic trigger.
   const tooSmall = abs < SCIENTIFIC_LOWER_THRESHOLD
@@ -1207,7 +1207,7 @@ function formatNumberMaxDecimalsRaw(
   const wantScientific = notation === "scientific" || (notation == null && forceScientific)
   const wantNormal = notation === "normal"
 
-  // Rounding to zero or being too large to read are unconditional — never
+  // Rounding to zero or being too large to read are unconditional – never
   // legitimate as plain decimal regardless of notation. "normal" suppresses
   // only the "merely small" stylistic threshold.
   const wouldRoundToZero = rounded === 0 && value !== 0
@@ -1225,7 +1225,7 @@ function formatNumberMaxDecimalsRaw(
  * (U+2212), matching what the exported `.txt` already writes. Only the first
  * character: the `×10^n` exponent further in the string must stay ASCII so
  * `SCIENTIFIC_EXPONENT_REGEX` (and its Unicode sibling) can still find and
- * superscript it — those passes write their own real-minus exponent.
+ * superscript it – those passes write their own real-minus exponent.
  */
 function displayMinus(formatted: string): string {
   return formatted.startsWith("-") ? `\u2212${formatted.slice(1)}` : formatted
@@ -1334,7 +1334,7 @@ export function buildSubstitutedEquation(
     symbol: placeholder,
   }))
   // Symbols injected by string variable paired constants (e.g. Ka from wac,
-  // referenced in the text as [[Ka=wac]]) — assignedValues already carries
+  // referenced in the text as [[Ka=wac]]) – assignedValues already carries
   // these (the generator resolves the linked value at sample time), but
   // without registering the symbol here neither the bracket form nor the
   // bare identifier in the formula ever gets substituted.
@@ -1398,7 +1398,7 @@ export function buildSubstitutedEquation(
 }
 
 /**
- * Returns a plain number string the equation evaluator can parse — NOT
+ * Returns a plain number string the equation evaluator can parse – NOT
  * `×10^n` HTML. Uses e-notation for very large/small values so the LaTeX
  * renderer converts it to `\times 10^{n}` for display.
  */

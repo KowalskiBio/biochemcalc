@@ -21,7 +21,7 @@ function formatMinutesSeconds(totalSeconds: number): string {
 /**
  * The frozen score of a streak run once it has failed: how many questions
  * were answered correctly in a row, the total time, and the average time
- * per answer. Read from `runId` in router state — reloading this page loses
+ * per answer. Read from `runId` in router state – reloading this page loses
  * that id, same "no resume" limitation the fixed-batch test results page has.
  * `input` (the exact settings this run was started with) travels alongside
  * it, letting "Znovu" relaunch the identical configuration instantly rather

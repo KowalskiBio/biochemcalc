@@ -72,7 +72,7 @@ function parseBound(text: string): number | undefined {
 
 interface ModeSectionProps {
   settings: PeptidovkaSettings
-  /** The selectable amino acids — category molecules with a one-letter code. */
+  /** The selectable amino acids – category molecules with a one-letter code. */
   pool: Biomolecule[]
 }
 
@@ -143,7 +143,7 @@ function PeptidovkaModeSection({ settings, pool }: ModeSectionProps) {
 
   const save = async () => {
     if (saving || invalidMessage !== null || minLen === undefined || maxLen === undefined) return
-    // Only current-pool slugs go out — a complete snapshot including zeros —
+    // Only current-pool slugs go out – a complete snapshot including zeros –
     // so the teacher can always re-save over drifted settings.
     const postedWeights: Record<string, number> = {}
     for (const molecule of pool) {
@@ -337,7 +337,7 @@ export function PeptidovkaSettingsPage() {
   }, [toast])
 
   // The selectable pool: amino acids carrying a one-letter code, in the
-  // category's own display order — the same playability rule the run uses.
+  // category's own display order – the same playability rule the run uses.
   const pool = useMemo(
     () =>
       allMolecules.filter(

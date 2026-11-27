@@ -16,7 +16,7 @@ export function required<T>(value: T | undefined, name: string): T {
  * Generate a UUID for purely client-side use (React keys, local store ids).
  *
  * `crypto.randomUUID()` is gated behind secure contexts, so it is `undefined`
- * when the app is served over plain HTTP (the headless-VM deployment) — and
+ * when the app is served over plain HTTP (the headless-VM deployment) – and
  * calling it mid-render crashes the whole tree because there is no error
  * boundary. `crypto.getRandomValues()` works on insecure origins too, so fall
  * back to an RFC 4122 v4 UUID built from it, then to Math.random() as a last
@@ -132,7 +132,7 @@ export const PLACEHOLDER_REGEX = /\[\[([^\]=\s]+)(?:=([^\]]*))?\]\]/g
  * text. They tell the generator which symbol to solve for and are never part
  * of the question itself, so they must not be shown to teachers or students.
  *
- * Mirrors `scan_targets` in `src-tauri/src/engine/answer_targets.rs` — only a
+ * Mirrors `scan_targets` in `src-tauri/src/engine/answer_targets.rs` – only a
  * contiguous run of markers at the very end counts, so a bracketed aside in
  * the middle of a sentence survives, and `[[x]]` placeholders are untouched.
  */
@@ -235,7 +235,7 @@ export function downloadTextFile(filename: string, content: string): void {
 /**
  * Sanitize a user-provided filename: strip path separators and other
  * characters that are illegal in filenames on common operating systems.
- * Does NOT add an extension — the caller decides that.
+ * Does NOT add an extension – the caller decides that.
  */
 export function sanitizeFilename(name: string): string {
   return name

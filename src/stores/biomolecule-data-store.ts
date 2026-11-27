@@ -192,7 +192,7 @@ const BUILT_IN: Record<string, { name: string; description: string } | undefined
 const BUILT_IN_TOPICS: Record<string, { name: string; description: string } | undefined> =
   cs.biomolekuly.topics
 
-/** The text shipped in cs — the pre-load fallback and the "reset" spelling of built-ins. */
+/** The text shipped in cs – the pre-load fallback and the "reset" spelling of built-ins. */
 export function builtInCategoryText(categoryId: string, field: CategoryField): string {
   const copy = BUILT_IN[categoryId]
   if (field === "name") return copy?.name ?? categoryId
@@ -200,12 +200,12 @@ export function builtInCategoryText(categoryId: string, field: CategoryField): s
   return ""
 }
 
-/** The built-in name — kept for callers that only deal with names. */
+/** The built-in name – kept for callers that only deal with names. */
 export function builtInCategoryName(categoryId: string): string {
   return builtInCategoryText(categoryId, "name")
 }
 
-/** The topic text shipped in cs — the pre-load / ungrouped fallback. */
+/** The topic text shipped in cs – the pre-load / ungrouped fallback. */
 export function builtInTopicText(topicId: string, field: TopicField): string {
   const copy = BUILT_IN_TOPICS[topicId]
   if (field === "name") return copy?.name ?? topicId

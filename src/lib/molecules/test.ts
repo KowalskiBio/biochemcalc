@@ -1,9 +1,9 @@
-// Teacher-created biomolecules tests — the client-side generation glue.
+// Teacher-created biomolecules tests – the client-side generation glue.
 //
 // A test stores a SNAPSHOT of the material it was built from (category slugs +
 // molecule ids) and the question types it wants. This module turns that
 // snapshot into a quiz session with the shared engine. It is pure: no React,
-// no network — the run page passes in the already-loaded molecule data.
+// no network – the run page passes in the already-loaded molecule data.
 //
 // Notes for the UI lane:
 // - Monochrome and easy/hard `mode` are NOT generation concerns. v1 tests are
@@ -170,7 +170,7 @@ export function enumerateTestPairs(
   return pairs
 }
 
-/** The number of generatable (molecule × type) pairs — the UI's "all" display. */
+/** The number of generatable (molecule × type) pairs – the UI's "all" display. */
 export function testPairCount(
   molecules: QuizMolecule[],
   characteristics: CharacteristicDef[] | undefined,

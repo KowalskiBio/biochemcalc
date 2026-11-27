@@ -6,7 +6,7 @@ import { splitRichText } from "@/lib/rich-text"
  * Renders teacher-authored text with explicit script markup as real
  * sub/superscripts: `_{...}` → <sub>, `^{...}` → <sup> (see
  * `@/lib/rich-text` for the full grammar and its literal fallbacks).
- * Plain strings render as one bare text node — the no-markup fast path
+ * Plain strings render as one bare text node – the no-markup fast path
  * adds no elements.
  */
 export function RichText({ text }: { text: string }) {

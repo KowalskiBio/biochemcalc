@@ -2,7 +2,7 @@
 //
 // Runs AFTER the graph's own layout: any
 // sugar ring the recognizer proved out gets snapped into the canonical
-// Haworth skeleton — ring atoms onto the fixed polygon, exocyclic
+// Haworth skeleton – ring atoms onto the fixed polygon, exocyclic
 // substituents strictly vertical above/below their ring atom, the
 // substituents' subtrees rotated to follow, and the annotated stereo wedges
 // on affected bonds blanked (plain bonds, Haworth convention). Everything
@@ -42,7 +42,7 @@ export interface HOHint {
 
 /**
  * A glycosidic-style connection between two recognized rings: a non-ring
- * atom (O, S, N — no element restriction) with exactly two heavy
+ * atom (O, S, N – no element restriction) with exactly two heavy
  * neighbours, each a ring atom of a different plan. `planA` is the lower
  * plan index (links are recorded first-come, and plans are scanned in
  * order), so a BFS from plans[0] walks the whole connected glycan.
@@ -106,12 +106,12 @@ function detectSugarLinks(
  *
  * - **NAD+ family**: the chain ends at a SECOND free 5′-carbon tail
  *   (`anomericB: false`). `planA` keeps the canonical orientation (the ring
- *   with the richer nucleobase), `planB` flips to its left — the straight
+ *   with the richer nucleobase), `planB` flips to its left – the straight
  *   linear layout with a horizontal P–O–P line.
  * - **UDP-sugar family**: the chain ends AT the anomeric carbon of the
  *   partner ring (`anomericB: true`). The free-tail ribose keeps canonical
  *   on the right; the phospho-sugar flips to the left and anchors through
- *   its (α) anomeric arm — the bridge runs diagonally down-left.
+ *   its (α) anomeric arm – the bridge runs diagonally down-left.
  */
 interface DinucleotideLink {
   planA: number
@@ -215,7 +215,7 @@ export function detectDinucleotideLinks(
           continue
         }
         // Walk toward the partner ring: middle atoms are O/P, phosphorus
-        // carries exocyclic oxygens alongside the chain — at branch points
+        // carries exocyclic oxygens alongside the chain – at branch points
         // follow the continuation that itself continues (pyrophosphate
         // middles keep a heavy continuation; exo leaves are leaves).
         const path = [tailB]
@@ -343,7 +343,7 @@ export function detectDinucleotideLinks(
  *
  * The flip is REPRESENTATION-only: the ring is mirrored in x, but the
  * substituent pass keeps the canonical arm sides (β base up, D-CH2OH up),
- * which together read as the same molecule — a horizontal flip of the
+ * which together read as the same molecule – a horizontal flip of the
  * finished Haworth drawing. Unlike the disaccharide link mirror, the arms
  * are NOT swapped (that convention restores molblock CIP flags but draws a
  * flipped ring's down substituents into the ring interior). `null` leaves
@@ -441,8 +441,8 @@ function placeDinucleotidePair(
 
 /**
  * Exocyclic P oxygens of a pyrophosphate bridge: straight vertical out of
- * the chain — the double-bonded oxygen (higher bond weight) up, the single
- * down — with every oxygen's subtree dragged along rigidly.
+ * the chain – the double-bonded oxygen (higher bond weight) up, the single
+ * down – with every oxygen's subtree dragged along rigidly.
  */
 function placeExoPhosphateOxygens(
   preprocessor: HaworthPreprocessor,
@@ -494,7 +494,7 @@ function placeExoPhosphateOxygens(
  * 5′-tail vertical; the phospho-sugar (planB) stays CANONICAL and anchors
  * the chain through its (α) anomeric arm tilted down-right into the last
  * oxygen like any ordinary chain first bond. From the tail the bridge
- * leaves at −150°, then the O–P–O–P–O run goes strictly HORIZONTAL left —
+ * leaves at −150°, then the O–P–O–P–O run goes strictly HORIZONTAL left –
  * the last oxygen hooks up-left into the anomeric carbon, which sets the
  * glucose ring ABOVE the ribose's level. No mirroring; the bridge line
  * stays clear of both rings. Exocyclic P oxygens vertical (double bond up,
@@ -601,13 +601,13 @@ function placeCanonicalPlan(
 
 /**
  * Place the acceptor ring so its anchor vertex lands one acceptor-side bond
- * (LB) back along the tilted-substituent ray from the bridge — side-aware,
+ * (LB) back along the tilted-substituent ray from the bridge – side-aware,
  * with the same 18° CHAIN_BIAS toward free space as the donor. If the
  * canonical polygon puts the anchor vertex on the wrong x side (facing away
  * from the bridge) the polygon is mirrored in x about its centroid. A pure
  * x-mirror flips the effective chirality reading, so a mirrored ring also
  * swaps up/down on every substituent (two flips compose to identity),
- * keeping each stereocentre's R/S — the textbook flipped furanose of
+ * keeping each stereocentre's R/S – the textbook flipped furanose of
  * sucrose.
  *
  * With opposite anchor sides the donor and acceptor tilts are parallel, so
@@ -680,7 +680,7 @@ function applyPlan(
 ): void {
   const ringIds = plan.cycle
   // Final coordinates from the global placement pass (never a pre-placement
-  // snapshot — a linked ring may have been moved after the root snapped).
+  // snapshot – a linked ring may have been moved after the root snapped).
   const ringPositions = new Map<number, Point>()
   for (const id of ringIds) {
     const position = positionOf(preprocessor, id)
@@ -730,7 +730,7 @@ function applyPlan(
         ]
     for (const group of groups) {
       for (const substituentId of group.ids) {
-        // Glycosidic bridges were positioned by the link pass — rotating or
+        // Glycosidic bridges were positioned by the link pass – rotating or
         // shifting their subtree here would drag the whole other ring.
         if (protectedIds.has(substituentId)) {
           continue
@@ -744,7 +744,7 @@ function applyPlan(
         const continuationIds = heavyNeighboursOf(preprocessor, substituentId, atom.vertexId)
         const isChain = outwardX !== 0 && continuationIds.length > 0
         // Pure -CH2OH tail: the chain atom carries exactly one heavy
-        // continuation (the terminal OH) — draw its first bond strictly
+        // continuation (the terminal OH) – draw its first bond strictly
         // vertical (textbook), no tilt.
         const continuationId = isChain ? continuationIds[0] : undefined
         const isPureTail =
@@ -797,7 +797,7 @@ function applyPlan(
         }
 
         // Nucleobase on the anomeric carbon (purines, pyrimidines, pseudo-
-        // bases): the N-glycosidic nitrogen is sp2 — its two ring bonds sit
+        // bases): the N-glycosidic nitrogen is sp2 – its two ring bonds sit
         // at ±120° around the N–C1′ bond, so the base's ring-bond bisector
         // lies exactly on the bond line, pointing away from the sugar
         // (trigonal rule; base-agnostic, unlike the former long-axis snap
@@ -805,7 +805,7 @@ function applyPlan(
         // above fixes the bond; rotate the rigid aromatic subtree around the
         // N until its bisector matches the bond heading, whatever the source
         // layout handed in. Handedness is canonical: identify the ring
-        // neighbour that steps directly into a ring nitrogen — purine C8,
+        // neighbour that steps directly into a ring nitrogen – purine C8,
         // pyrimidine C2. Pyrimidines (six-ring N) keep it on the + side of
         // the bond axis (second ring N to the right); purines (five-ring N)
         // keep it on the − side, so the fused six-ring swings right of the
@@ -873,8 +873,8 @@ function applyPlan(
                 Math.atan2(outward.y, outward.x) - Math.atan2(bisector.y, bisector.x),
               )
               // Canonical parity (textbook pose): the marked ring neighbour
-              // — purine C8 / pyrimidine C2, recognised by its lone ring
-              // continuation being a nitrogen — belongs on the ring-size
+              // – purine C8 / pyrimidine C2, recognised by its lone ring
+              // continuation being a nitrogen – belongs on the ring-size
               // side of the bond axis: five-ring glyco N (purines) on the −
               // side, six-ring glyco N (pyrimidines) on the + side. Mirror a
               // source-mirrored variant back across that axis.
@@ -918,7 +918,7 @@ function applyPlan(
               // The glyco N's own ring size picks the canonical side; α bases
               // (drawn down) mirror the convention so the base's bulk falls
               // on the opposite side of the bond axis from a descending
-              // phosphate chain — cobalamin's α-DMB base vs its 3′-loop
+              // phosphate chain – cobalamin's α-DMB base vs its 3′-loop
               // otherwise stack on the same side and overlap.
               const glycoRingMembers = preprocessor.rings.find((ring) =>
                 ring.members.includes(substituentId),
@@ -939,8 +939,8 @@ function applyPlan(
 
         // Pure -CH2OH tail: after the chain atom lands vertically on its
         // ray, give its continuation →O bond a full 60° turn on the
-        // away-from-ring side — the textbook 120° interior angle of the
-        // chain — instead of whatever near-linear remnant survived the
+        // away-from-ring side – the textbook 120° interior angle of the
+        // chain – instead of whatever near-linear remnant survived the
         // rigid rotation.
         if (isPureTail && continuationId !== undefined) {
           const chainVertex = preprocessor.graph.vertices.find((c) => c.id === substituentId)
@@ -1067,7 +1067,7 @@ function orderedRingCycle(
  * sugar edge (C3′–C4′) and the generic substituent pass treats BOTH ring
  * oxygens as independent chain tails, tearing the loop apart (the phosphorus
  * lands on top of the base). Rebuild the loop as a regular hexagon fused on
- * the shared edge on the side AWAY from the sugar centroid — the textbook
+ * the shared edge on the side AWAY from the sugar centroid – the textbook
  * cAMP bulge to the left. Exocyclic substituents on the moved atoms (P=O,
  * P–OH) are dragged along rigidly.
  */
@@ -1244,7 +1244,7 @@ function rebuildCyclicDiesters(
 
 /**
  * Run sugar recognition + Haworth reshaping on a preprocessor-shaped graph.
- * Returns true when at least one ring was reshaped — the caller then keeps
+ * Returns true when at least one ring was reshaped – the caller then keeps
  * the drawing canonical (no random orientation) and lets any explicit
  * enantiomer mirror apply to the whole drawing as usual.
  */

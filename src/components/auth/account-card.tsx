@@ -11,7 +11,7 @@ import { useAuthStore } from "@/stores/auth-store"
 
 /**
  * Shared between the teacher Settings page and the student placeholder page
- * — both roles can see their own username and change their password, so
+ * – both roles can see their own username and change their password, so
  * this doesn't live inside either role's own page tree.
  */
 export function AccountCard() {

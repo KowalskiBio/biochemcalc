@@ -33,7 +33,7 @@ interface EditSetDialogProps {
 }
 
 /**
- * Edits a set's own attributes — name and mode — as opposed to its contents
+ * Edits a set's own attributes – name and mode – as opposed to its contents
  * (templates) or its category. Both fields are always saved together on
  * submit; `SetRepo::update_name`/`update_mode` are each idempotent no-ops
  * when the value hasn't actually changed, so there's no need to track which
@@ -45,7 +45,7 @@ export function EditSetDialog({ open, onOpenChange, set, onUpdated }: EditSetDia
   const [mode, setMode] = useState<TemplateMode>("closed")
   const [isSaving, setIsSaving] = useState(false)
 
-  // Re-seed the form from the current set every time the dialog opens —
+  // Re-seed the form from the current set every time the dialog opens –
   // it may have been edited (e.g. via the inline title rename) since the
   // last time this dialog was open.
   useEffect(() => {

@@ -50,7 +50,7 @@ const triggerVariants = cva(
 
 interface SectionSwitcherProps {
   tone: "light" | "sidebar"
-  /** Called after a section is picked — closes the student mobile drawer. */
+  /** Called after a section is picked – closes the student mobile drawer. */
   onSwitch?: () => void
 }
 
