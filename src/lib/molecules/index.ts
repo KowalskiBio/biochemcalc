@@ -1,4 +1,4 @@
-// Biomolekuly molecule traits — pure data, no display strings.
+// Biomolekuly molecule traits – pure data, no display strings.
 //
 // Molecules and categories live in the database (see `biomolecules-api.ts`
 // and `stores/biomolecule-data-store.ts`); this module holds the shared
@@ -50,7 +50,7 @@ export const TRAIT = {
    * one per line.
    */
   aliases: "aliases",
-  /** Saccharides: alpha | beta — cross-checked against the Haworth spec. */
+  /** Saccharides: alpha | beta – cross-checked against the Haworth spec. */
   anomer: "anomer",
   /** Saccharide ring form: pyranose | furanose. */
   ringForm: "ringForm",
@@ -89,7 +89,7 @@ export function moleculeAliases(molecule: Biomolecule): string[] {
 
 /**
  * True when a molecule has no stereocenter. SMILES marks chirality with
- * `@`/`@@`, so its absence is the achirality signal — for the curated sets
+ * `@`/`@@`, so its absence is the achirality signal – for the curated sets
  * this matches the old hand-maintained flags exactly (only glycine).
  * Molecules with a declarative projection spec (saccharides) carry
  * stereochemistry by definition and are treated as chiral upstream

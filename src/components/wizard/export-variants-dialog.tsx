@@ -53,7 +53,7 @@ interface QuestionRowState {
 }
 
 // Mirrors src-tauri/src/engine/generator.rs's max_deviation_for_difficulty
-// (closed) and sd_fraction_for_difficulty (open) tables — kept here only for
+// (closed) and sd_fraction_for_difficulty (open) tables – kept here only for
 // this dialog's placeholder text. Purely cosmetic: never sent to the
 // backend, which is always the source of truth for the actual value used.
 //
@@ -194,7 +194,7 @@ export function ExportVariantsDialog({
   }, [])
 
   const handleSpreadPercentChange = useCallback((templateId: string, value: number | undefined) => {
-    // Blank, non-finite, zero, or negative all mean "no override" — falls
+    // Blank, non-finite, zero, or negative all mean "no override" – falls
     // back to the batch preset, matching the backend's own fallback logic.
     const validated =
       value !== undefined && Number.isFinite(value) && value > 0 ? Math.min(999, value) : undefined

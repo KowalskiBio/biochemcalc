@@ -16,7 +16,7 @@ interface FormattedResultProps {
   significantDigits?: number
   forceScientific?: boolean
   /**
-   * Explicit notation choice — takes precedence over `forceScientific`.
+   * Explicit notation choice – takes precedence over `forceScientific`.
    * Pass `"scientific"`/`"normal"` (never leave both this and
    * `forceScientific` unset) whenever the value belongs to a template with
    * its own notation setting, so a teacher's explicit "not scientific"

@@ -12,7 +12,7 @@ import type { StartStreakRunInput } from "@/lib/types"
 
 /**
  * Where a student launches a Mistr streak run. Mistr has nothing to
- * configure — it always draws from every topic — so this is a description
+ * configure – it always draws from every topic – so this is a description
  * and a start button. (Učeň is configured right in its block on the Test
  * page.)
  */

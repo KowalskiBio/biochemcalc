@@ -42,7 +42,7 @@ import type {
 import { normalizeDecimalCommasInText } from "./utils"
 
 // Re-exported so existing call sites (`import { ApiError } from "@/lib/api"`)
-// don't need to change — the underlying HTTP client moved to `./http`.
+// don't need to change – the underlying HTTP client moved to `./http`.
 export { ApiError, extractErrorMessage }
 
 // ============================================================================
@@ -50,7 +50,7 @@ export { ApiError, extractErrorMessage }
 // ============================================================================
 
 /**
- * POST to `/api/cmd/<command>` — the teacher-only surface that mirrors every
+ * POST to `/api/cmd/<command>` – the teacher-only surface that mirrors every
  * command the desktop app's Tauri IPC bridge used to expose. `body` is sent
  * as-is as the JSON request body (no `{payload: ...}` wrapper).
  */
@@ -70,7 +70,7 @@ export const topicsApi = {
   get: (id: string): Promise<Topic> => apiFetch<Topic>("get_topic", { id }),
 
   /**
-   * Full replacement of a topic's editable fields — pass every one, including
+   * Full replacement of a topic's editable fields – pass every one, including
    * the ones you are not changing. `groupId`/`position` are the exception:
    * the server preserves those from the existing row.
    */

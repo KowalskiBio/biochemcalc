@@ -7,7 +7,7 @@ import { cs } from "@/i18n/cs"
 import { useUiStore } from "@/stores/ui-store"
 
 /**
- * A student's settings: their profile (username, role, password change — the
+ * A student's settings: their profile (username, role, password change – the
  * shared `AccountCard`, which is exactly what a teacher sees on their own
  * settings page) plus the theme toggle. Nothing here touches teacher-only
  * endpoints such as invite codes or the account list.

@@ -1,9 +1,9 @@
 //! Outbound mail for password-reset links. SMTP via `lettre`, configured
-//! entirely from `BIOCHEMCALC_SMTP_*` env vars (see `src/bin/server.rs`) —
+//! entirely from `BIOCHEMCALC_SMTP_*` env vars (see `src/bin/server.rs`) –
 //! matches this codebase's env-var-only config idiom. If unconfigured, the
 //! server still boots (same "optional, no-op if unset" pattern as
 //! `BIOCHEMCALC_ADMIN_USERNAME`) and reset links are logged instead of
-//! emailed — this is also what local development relies on, with no SMTP
+//! emailed – this is also what local development relies on, with no SMTP
 //! server needed at all to exercise the flow end-to-end.
 
 use lettre::message::{Mailbox, MultiPart};
@@ -25,7 +25,7 @@ pub enum Mailer {
         transport: AsyncSmtpTransport<Tokio1Executor>,
         from: Mailbox,
     },
-    /// No SMTP config supplied — reset links are logged instead of emailed.
+    /// No SMTP config supplied – reset links are logged instead of emailed.
     Disabled,
 }
 
@@ -35,7 +35,7 @@ impl Mailer {
     /// treated as absent rather than panicking the server at startup).
     pub fn from_config(config: Option<SmtpConfig>) -> Self {
         let Some(config) = config else {
-            log::info!("SMTP not configured — password reset links will be logged, not emailed");
+            log::info!("SMTP not configured – password reset links will be logged, not emailed");
             return Mailer::Disabled;
         };
 
@@ -64,7 +64,7 @@ impl Mailer {
         Mailer::Smtp { transport, from }
     }
 
-    /// Never surfaces a hard error to the caller — a send failure is logged
+    /// Never surfaces a hard error to the caller – a send failure is logged
     /// and swallowed by design (see `do_forgot_password`'s doc comment on
     /// why the HTTP layer must not distinguish "send failed" from "no such
     /// account").
@@ -72,7 +72,7 @@ impl Mailer {
         match self {
             Mailer::Disabled => {
                 log::warn!(
-                    "SMTP not configured — password reset link for {to_email}: {reset_link}"
+                    "SMTP not configured – password reset link for {to_email}: {reset_link}"
                 );
             }
             Mailer::Smtp { transport, from } => {

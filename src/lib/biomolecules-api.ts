@@ -8,7 +8,7 @@ import { httpRequest } from "./http"
  */
 export type BiomoleculeTraits = Record<string, string>
 
-/** One Biomolekuly topic — the grouping level above categories. */
+/** One Biomolekuly topic – the grouping level above categories. */
 export interface BiomoleculeTopicInfo {
   slug: string
   name: string
@@ -34,7 +34,7 @@ export interface BiomoleculeCategoryInfo {
 export interface Biomolecule {
   id: string
   categorySlug: string
-  /** Stable per-category slug — the molecule's identity in quiz questions. */
+  /** Stable per-category slug – the molecule's identity in quiz questions. */
   slug: string
   name: string
   smiles: string
@@ -100,7 +100,7 @@ export interface PeptidovkaSettings {
 export interface PeptidovkaRunResult {
   mode: PeptidovkaMode
   /**
-   * Number of peptides GUESSED CORRECTLY in the run — the leaderboard's
+   * Number of peptides GUESSED CORRECTLY in the run – the leaderboard's
    * "Nejlepší série" metric. Points (their in-game summary) are computed
    * but NOT recorded: time/answer needs a per-peptide unit to avg over.
    */
@@ -329,11 +329,11 @@ export interface BiomoleculeStreakLeaderboardEntry {
   username: string
   bestCorrectCount: number
   totalSeconds: number
-  /** `totalSeconds / (bestCorrectCount + 1)` — the failed answer counts too. */
+  /** `totalSeconds / (bestCorrectCount + 1)` – the failed answer counts too. */
   secondsPerAnswer: number
 }
 
-/** `/api/biomolecules/*` — the molecule library, its management, and the leaderboard. */
+/** `/api/biomolecules/*` – the molecule library, its management, and the leaderboard. */
 export const biomoleculesApi = {
   /** Any logged-in user: the full category + molecule dataset. */
   data: (): Promise<BiomoleculeData> => httpRequest<BiomoleculeData>("/api/biomolecules/data"),
@@ -460,7 +460,7 @@ export const biomoleculesApi = {
     categoryId: string
     correctCount: number
     totalCount: number
-    /** Played difficulty: `"easy"` or `"hard"` — hard answers score double. */
+    /** Played difficulty: `"easy"` or `"hard"` – hard answers score double. */
     mode: "easy" | "hard"
   }): Promise<void> => httpRequest<void>("/api/biomolecules/record-quiz-result", args),
 

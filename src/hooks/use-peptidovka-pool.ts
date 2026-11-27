@@ -34,7 +34,7 @@ export interface PeptideDraw {
 export type PeptidovkaPoolStatus = "loading" | "error" | "empty" | "ready"
 
 /**
- * Učeň's canonical reading direction — structure laid N-terminus left. Any
+ * Učeň's canonical reading direction – structure laid N-terminus left. Any
  * geometry hiccup (unparseable SMILES, RDKit still initializing) degrades
  * to the unrotated draw rather than killing the round.
  */
@@ -49,7 +49,7 @@ export function nLeftDeg(smiles: string, nIndex: number): number {
 /**
  * The Peptidovka material for one mode, as the teacher configured it: the
  * mode's settings (fetched once per mount), the playable amino acids (the
- * peptide family's molecules that carry a one-letter code — the answer
+ * peptide family's molecules that carry a one-letter code – the answer
  * alphabet), and `draw()` serving a fresh random peptide. Učeň draws keep the
  * N-terminus on the left; Mistr draws rotate to a random angle.
  *
@@ -66,7 +66,7 @@ export function usePeptidovkaPool(mode: PeptidovkaMode) {
   const [settingsAll, setSettingsAll] = useState<PeptidovkaSettings[] | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
 
-  // Settings come once per mount — a teacher's mid-run edits are a non-case,
+  // Settings come once per mount – a teacher's mid-run edits are a non-case,
   // exactly like the streak's pool built from the loaded dataset.
   useEffect(() => {
     let cancelled = false
@@ -133,7 +133,7 @@ export function usePeptidovkaPool(mode: PeptidovkaMode) {
     return { pool: slugs, poolWeights: weights }
   }, [modeSettings, playableBySlug])
 
-  // Unknown slugs in the pool (no residue template — a teacher-added acid
+  // Unknown slugs in the pool (no residue template – a teacher-added acid
   // the synthesizer doesn't know) get exactly one redraw with a fresh seed,
   // then null; length falls back to a sane span should the server's bounds
   // ever slip.

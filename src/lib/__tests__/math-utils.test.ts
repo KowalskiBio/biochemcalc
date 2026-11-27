@@ -130,7 +130,7 @@ describe("renderEquationAsLatex", () => {
   })
 
   it("leaves a parenthesised expression after a molar mass alone", () => {
-    // Only a chemical group is part of the identifier — `(a + b)` is not one.
+    // Only a chemical group is part of the identifier – `(a + b)` is not one.
     expect(renderEquationAsLatex("m = M_x(a+b)")).toBe(
       "$$m = M_{\\mathrm{x}}\\left(a + b\\right)$$",
     )
@@ -262,7 +262,7 @@ describe("renderEquationAsLatex", () => {
   })
 
   it("renders a scientific-notation literal as times-10-to-the-power, not raw 'e' text", () => {
-    // String(7.2e-10) is "7.2e-10" — buildSubstitutedEquation embeds sampled
+    // String(7.2e-10) is "7.2e-10" – buildSubstitutedEquation embeds sampled
     // values with String(value), so this exact form is what a tiny/huge
     // constant (e.g. a Ka) looks like once substituted into equation text.
     expect(renderEquationAsLatex("x = 7.2e-10 + 1")).toBe("$$x = 7{,}2 \\times 10^{-10} + 1$$")
@@ -270,7 +270,7 @@ describe("renderEquationAsLatex", () => {
 
   it("does not fall back to \\text{} for an equation containing scientific notation", () => {
     // Before the tokenizer accepted "e" exponents, "7.2e-10" split into the
-    // number 7.2, identifier "e" (the Euler's-number constant), and "-10" —
+    // number 7.2, identifier "e" (the Euler's-number constant), and "-10" –
     // an unparseable sequence that made renderSingleEquationAsLatex give up
     // and dump the raw formula as literal \text{} instead of real math.
     const rendered = renderEquationAsLatex(
@@ -284,7 +284,7 @@ describe("renderEquationAsLatex", () => {
   it("parenthesizes a scientific-notation base before squaring it", () => {
     // 7.2e-10^2 must read as "(7.2 * 10^-10) squared", not two exponents
     // stacked with nothing to separate them ("10^{-10}^{2}" renders as one
-    // run "-10, 2" — indistinguishable from a typo).
+    // run "-10, 2" – indistinguishable from a typo).
     expect(renderEquationAsLatex("x = 7.2e-10^2")).toBe(
       "$$x = {\\left(7{,}2 \\times 10^{-10}\\right)}^{2}$$",
     )
@@ -357,7 +357,7 @@ describe("evaluateExpression", () => {
 
   it("evaluates a scientific-notation literal as one number, not number*e-number", () => {
     // Before the fix, "7.2e-10" tokenized as 7.2, identifier "e" (the
-    // constant Euler's number), then "-10" — silently computing
+    // constant Euler's number), then "-10" – silently computing
     // 7.2*Math.E - 10 (~9.57) instead of the intended 7.2 * 10^-10.
     expect(evaluateExpression("7.2e-10")).toBeCloseTo(7.2e-10, 20)
     expect(evaluateExpression("1e-10 + 1e-10")).toBeCloseTo(2e-10, 20)
@@ -391,8 +391,8 @@ describe("evaluateAllAssignments", () => {
   it("returns every named target in order, not just the last", () => {
     // Reported bug: the "Testovací výsledek" preview (question-detail-dialog's
     // mockResult fallback, used whenever real server generation fails) only
-    // ever showed evaluateExpression's single return value — the LAST named
-    // target — silently dropping every earlier one for a multi-answer
+    // ever showed evaluateExpression's single return value – the LAST named
+    // target – silently dropping every earlier one for a multi-answer
     // formula like "c = ...; wDsc = ...".
     const result = evaluateAllAssignments(
       "c = 10^(2*pH-28)/Kb + 10^(pH-14); wDsc = 100*10^(pH-14)/c",

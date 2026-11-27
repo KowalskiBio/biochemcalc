@@ -479,7 +479,7 @@ fn check_order<T: Ord + Clone + PartialEq>(
     want.sort();
     if have != want {
         return Err(DbError::Conflict(format!(
-            "The {what} changed in the meantime — reload and reorder again"
+            "The {what} changed in the meantime – reload and reorder again"
         )));
     }
     Ok(())
@@ -579,14 +579,14 @@ pub fn do_update_category_meta(
     let detail = match payload.field {
         CategoryField::Name => format!(
             "name: {} → {}",
-            old_name.as_deref().unwrap_or("—"),
+            old_name.as_deref().unwrap_or("–"),
             new_name.as_str()
         ),
         CategoryField::Description => "description changed".to_string(),
         CategoryField::Topic => format!(
             "topic: {} → {}",
-            old_topic_slug.as_deref().unwrap_or("—"),
-            value.as_deref().unwrap_or("—")
+            old_topic_slug.as_deref().unwrap_or("–"),
+            value.as_deref().unwrap_or("–")
         ),
     };
     BiomoleculeHistoryRepo::record(
@@ -722,7 +722,7 @@ pub fn do_update_topic_meta(
     let detail = match payload.field {
         TopicField::Name => format!(
             "name: {} → {}",
-            old_name.as_deref().unwrap_or("—"),
+            old_name.as_deref().unwrap_or("–"),
             new_name.as_str()
         ),
         TopicField::Description => "description changed".to_string(),
@@ -963,7 +963,7 @@ pub fn do_update_molecule(
     let detail = if old_name.as_deref() != Some(name.as_str()) {
         format!(
             "name: {} → {}",
-            old_name.as_deref().unwrap_or("—"),
+            old_name.as_deref().unwrap_or("–"),
             name.as_str()
         )
     } else if relocation.is_some() {

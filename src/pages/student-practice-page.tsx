@@ -57,7 +57,7 @@ function parseAnswer(raw: string): number | null {
  * one specific set (sada) rather than the whole difficulty. Open and closed
  * questions are mixed at random by default, or a student can restrict
  * practice to just one via the question-type selector. Every answer is
- * graded on the server (see `/api/student/submit-answer`) — the payload
+ * graded on the server (see `/api/student/submit-answer`) – the payload
  * behind a question deliberately contains no correct answer to peek at.
  */
 export function StudentPracticePage() {
@@ -92,7 +92,7 @@ export function StudentPracticePage() {
   )
 
   /**
-   * A specific set's mode is fixed by the teacher — never a separate random
+   * A specific set's mode is fixed by the teacher – never a separate random
    * choice like "any set" is. Once one is picked, the question-type filter
    * has nothing left to decide, so it must reflect (not contradict) that
    * set's actual mode rather than risk silently AND-ing against it and

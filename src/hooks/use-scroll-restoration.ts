@@ -4,8 +4,8 @@ import { useLocation, useNavigationType } from "react-router-dom"
 /**
  * Window scroll position per pathname, kept for the whole browser session
  * (not just this tab's history entries): leaving the Biomolekuly hub for a
- * category and coming back — by the back button OR by an in-app "Zpět" link,
- * which is a fresh PUSH — lands where the student left off.
+ * category and coming back – by the back button OR by an in-app "Zpět" link,
+ * which is a fresh PUSH – lands where the student left off.
  */
 const positions = new Map<string, number>()
 
@@ -40,7 +40,7 @@ export function useScrollRestoration() {
     return () => window.removeEventListener("scroll", onScroll)
   }, [pathname])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per page change — the navigation type only qualifies that change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per page change – the navigation type only qualifies that change
   useLayoutEffect(() => {
     const saved = positions.get(pathname) ?? 0
     const target = navigationType !== "POP" && ALWAYS_TOP.test(pathname) ? 0 : saved

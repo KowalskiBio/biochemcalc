@@ -63,7 +63,7 @@ export function ReorderDialog({
   const [sectionOrder, setSectionOrder] = useState<ReorderSection[]>(sections ?? [])
   const [saving, setSaving] = useState(false)
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the dialog opens — a live `items`/`sections` refresh mustn't discard the user's unsaved moves
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the dialog opens – a live `items`/`sections` refresh mustn't discard the user's unsaved moves
   useEffect(() => {
     if (open) {
       setOrder(items)
@@ -92,7 +92,7 @@ export function ReorderDialog({
   }
 
   // Stable sort: `compareMoleculeNames` returns 0 for equal keys, so ties keep
-  // their relative order. In sections mode each section is sorted separately —
+  // their relative order. In sections mode each section is sorted separately –
   // the topic grouping isn't touched.
   const sortAlphabetically = () => {
     const byName = (a: ReorderItem, b: ReorderItem) => compareMoleculeNames(a.label, b.label)

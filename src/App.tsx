@@ -58,7 +58,7 @@ import { useUiStore } from "@/stores/ui-store"
 
 /**
  * A teacher manages the sections their account is scoped to (`user.sections`,
- * set by the admin) — normally both. The server enforces the same split:
+ * set by the admin) – normally both. The server enforces the same split:
  * `/api/cmd/*` needs calculations access, Biomolekuly editing needs
  * biomolecules access.
  */
@@ -128,7 +128,7 @@ function TeacherRoutes() {
 /**
  * A student sees only the sections their invite code unlocked
  * (`user.sections`): laboratory calculations (the practice generator and
- * tests), Biomolekuly, or both — plus the leaderboard and their own
+ * tests), Biomolekuly, or both – plus the leaderboard and their own
  * profile, which every section shares. Anything else redirects to the
  * student's home. The teacher pages all call `/api/cmd/*`, which is
  * teacher-only server-side, so there is nothing for a student to reach

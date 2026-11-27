@@ -56,8 +56,8 @@ const POINT_VALUE_REGEX = /^(\d+)\s*body\s*$/i
 const SET_INDEX_REGEX = /^(\d+)_(\d+)\s*$/
 
 /**
- * The set header as it is written in the source documents — `Sada 3` under a
- * preceding `3 body` heading — alongside the compact `3_1` form. Accepting both
+ * The set header as it is written in the source documents – `Sada 3` under a
+ * preceding `3 body` heading – alongside the compact `3_1` form. Accepting both
  * means a pasted assignment needs no rewriting of its structure.
  */
 const SET_NAME_REGEX = /^Sada\s+(\d+)\s*$/i
@@ -316,7 +316,7 @@ function buildSkippedWarnings(
 
   for (const line of unconverted.slice(0, UNCONVERTED_SAMPLE_LIMIT)) {
     warnings.push(
-      `Vypadá jako otázka se značkami (X), ale nemá žádné [[proměnné]] — ${quoteLine(line.lineNumber, line.text)}`,
+      `Vypadá jako otázka se značkami (X), ale nemá žádné [[proměnné]] – ${quoteLine(line.lineNumber, line.text)}`,
     )
   }
   if (unconverted.length > UNCONVERTED_SAMPLE_LIMIT) {
@@ -577,7 +577,7 @@ export function pairFormulasWithQuestions(
       if (unconsumed.length > 0) {
         const list = unconsumed.map((f) => `"${f}"`).join(", ")
         warnings.push(
-          `Sada ${setKey}: ${set.questions.length} otázky, ${formulas.length} vzorce — ${unconsumed.length} vzorců nebylo spárováno: ${list}`,
+          `Sada ${setKey}: ${set.questions.length} otázky, ${formulas.length} vzorce – ${unconsumed.length} vzorců nebylo spárováno: ${list}`,
         )
       }
     }

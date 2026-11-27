@@ -356,7 +356,7 @@ describe("Fischer projections", () => {
   it("raises letters onto their bond's vertical midline (optical offset used by everything else)", () => {
     const { svg } = render(OPEN_GLUCOSE)
     // dy = −0.1 · font-size per letter class: cap letters get −1.60 at the
-    // 16 px base size, the subscript "2" gets −1.20 at its 12 px size — the
+    // 16 px base size, the subscript "2" gets −1.20 at its 12 px size – the
     // ink's optical midpoint then lines up with the horizontal bond instead of
     // hanging slightly below it as plain `dominant-baseline: central` leaves it.
     const capLetters = Array.from(svg.querySelectorAll("text")).filter(
@@ -488,7 +488,7 @@ describe("Haworth bold front edges", () => {
     expect(skeletal.svg.querySelectorAll("polygon.haworth-front-edge")).toHaveLength(0)
   })
 
-  it("draws one welded, outline — no seam between the front carbons", () => {
+  it("draws one welded, outline – no seam between the front carbons", () => {
     const { svg } = render(TRUE_BETA_GLUCOSE)
     const quads = quadsOf(svg)
     expect(quads).toHaveLength(1)
@@ -503,7 +503,7 @@ describe("Haworth bold front edges", () => {
     close(outline.halfThicknessB, 1.1)
 
     // Weld continuity: near the two shared front carbons there is exactly one
-    // outline corner per side (the offset-miter join) — earlier each segment
+    // outline corner per side (the offset-miter join) – earlier each segment
     // ended at its own vertex and a wedge opened between quads.
     const outerMiters = [outline.vertices[1], outline.vertices[2]]
     const innerMiters = [outline.vertices[5], outline.vertices[6]]
@@ -557,7 +557,7 @@ describe("Haworth bold front edges", () => {
     expect(svg.querySelectorAll("circle.haworth-front-cap")).toHaveLength(4)
     for (const outline of quads) {
       // Flare direction: each outline's outer cusps (miters) sit beyond the
-      // inner side on the outward-down axis from the ring's own geometry —
+      // inner side on the outward-down axis from the ring's own geometry –
       // the same outward normal that used to expand each quad.
       const outerCusps = [outline.vertices[1], outline.vertices[2]]
       const innerCusps = [outline.vertices[5], outline.vertices[6]]
@@ -690,7 +690,7 @@ describe("natural-size rendering", () => {
     // mitered outline, then again when the cap ends became micro-joints at the
     // neighbouring thin ring edges on BOTH sides (C1/C4 of hexose; pentoses),
     // and again when round junction seals closed each ring end (band + thin
-    // ring bond + hydroxyl bond meet there — a three-way stroke junction).
+    // ring bond + hydroxyl bond meet there – a three-way stroke junction).
     // All three re-recorded once more when atom letters were raised to the
     // top z-layer so construction strokes can never paint over a glyph.
     const golden: Record<string, string> = {
@@ -759,7 +759,7 @@ describe("theme", () => {
 
   it("recolours heteroatoms to the app palette in both themes, with no RDKit hex left", () => {
     // Glucose covers oxygen, alanine adds nitrogen, cysteine adds sulfur,
-    // AMP adds phosphorus. The theme never re-tints the palette — like the
+    // AMP adds phosphorus. The theme never re-tints the palette – like the
     // calculations variable accents, the same hexes serve light and dark.
     const cases: [name: string, smiles: string, accent: string][] = [
       ["glucose", TRUE_BETA_GLUCOSE, ATOM_COLOR_OXYGEN],
@@ -781,7 +781,7 @@ describe("theme", () => {
 })
 
 describe("monochrome", () => {
-  it("draws the whole structure — bonds and labels — in the single theme ink", () => {
+  it("draws the whole structure – bonds and labels – in the single theme ink", () => {
     // Mistr's quiz prompt hides the atom colour coding, so alanine's
     // nitrogen and oxygen crush to the neutral ink along with the bonds,
     // and nothing of the palette (or the other theme's ink) survives.

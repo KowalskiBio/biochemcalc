@@ -25,7 +25,7 @@ export interface StructureViewProps {
   haworth?: boolean
   /**
    * Gate open-chain sugar auto-recognition into a Fischer projection (runs
-   * only when no sugar ring is recognized — mutually exclusive by structure).
+   * only when no sugar ring is recognized – mutually exclusive by structure).
    * Default true.
    */
   fischer?: boolean
@@ -34,7 +34,7 @@ export interface StructureViewProps {
   /**
    * Adaptive sizing for single-molecule contexts (SMILES path only; a
    * projection already draws at its natural size). Default false keeps
-   * today's fixed `size` square — grids, previews and option lists stay
+   * today's fixed `size` square – grids, previews and option lists stay
    * uniform. When true, the element grows with the molecule's natural
    * bounds (1:1 bonds) up to `maxWidth` × 70%-of-viewport-height, and only
    * beyond the caps does the depiction shrink, uniformly. See
@@ -49,7 +49,7 @@ export interface StructureViewProps {
   maxWidth?: number
   /**
    * Rotation of the 2D layout, in degrees. Applied to the coordinates before
-   * rendering (see `orientation.ts`), so atom labels always stay upright — a
+   * rendering (see `orientation.ts`), so atom labels always stay upright – a
    * positive angle is counter-clockwise in the y-up mathematical sense, which
    * reads as clockwise on the downward-y SVG screen. Recognised Haworth
    * skeletons stay canonical and ignore it.
@@ -64,7 +64,7 @@ export interface StructureViewProps {
   /** Drawing theme. Defaults to the app theme from `useUiStore`. */
   theme?: "light" | "dark"
   /**
-   * Draw the whole structure — bonds and atom labels alike — in the theme's
+   * Draw the whole structure – bonds and atom labels alike – in the theme's
    * single neutral ink, hiding the colour coding. Mistr quiz prompts use
    * this so the palette can't give away part of the answer. On the
    * projection branch it swaps the label ink instead. Default false.
@@ -73,7 +73,7 @@ export interface StructureViewProps {
   className?: string
   /** Accessible name; falls back to the SMILES string when omitted. */
   title?: string
-  /** Reports whether the SMILES parsed and drew — used by the editor form. */
+  /** Reports whether the SMILES parsed and drew – used by the editor form. */
   onValidityChange?: (valid: boolean) => void
 }
 
@@ -122,9 +122,9 @@ function applyGrowBounds(
 }
 
 /**
- * The projection branch of StructureView. Validity is a settled question —
+ * The projection branch of StructureView. Validity is a settled question –
  * a `ProjectionSpec` only exists once `parseProjection` accepted the raw
- * string — so it reports `true` once per spec change, mirroring the SMILES
+ * string – so it reports `true` once per spec change, mirroring the SMILES
  * path's `onValidityChange` contract.
  */
 function ProjectionStructureView({

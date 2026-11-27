@@ -29,7 +29,7 @@ function MicroLabel({ children }: { children: string }) {
 interface ProjectionExample {
   name: string
   smiles: string
-  /** Muted one-liner — only the skeletal (unrecognized) group carries one. */
+  /** Muted one-liner – only the skeletal (unrecognized) group carries one. */
   reason?: string
 }
 
@@ -63,7 +63,7 @@ const SKELETAL_EXAMPLES: ProjectionExample[] = [
   {
     name: "tetrahydrofuran",
     smiles: "C1CCOC1",
-    reason: "cyklus bez anomerního uhlíku — není cukr",
+    reason: "cyklus bez anomerního uhlíku – není cukr",
   },
   { name: "benzen", smiles: "c1ccccc1", reason: "aromatický cyklus" },
   {
@@ -183,7 +183,7 @@ export function BiomoleculesProjectionPage() {
               <div className="space-y-2">
                 {/* Single-molecule preview: `grow` keeps 1:1 bonds. The
                     wrapping flex item is shrink-to-fit, so its width would
-                    feed back on the grown depiction — cap with maxWidth. */}
+                    feed back on the grown depiction – cap with maxWidth. */}
                 <StructureView
                   smiles={trimmed}
                   size={320}

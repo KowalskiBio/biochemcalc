@@ -15,7 +15,7 @@ import type { DatabazeEntry, Notation, VariableWithPlaceholder, Variant } from "
 
 /**
  * All this renderer needs of a variable: which placeholder it fills and how
- * to format it. A full `VariableWithPlaceholder` still satisfies it — the
+ * to format it. A full `VariableWithPlaceholder` still satisfies it – the
  * `Partial` half is what keeps the extra authoring fields (sharing,
  * comparison links) permitted rather than rejected as excess properties, so
  * the student practice generator, whose payload deliberately omits them, can
@@ -109,7 +109,7 @@ function getExampleStringValue(
 }
 
 /**
- * The in-app form of a piece of literal question prose — chemical notation
+ * The in-app form of a piece of literal question prose – chemical notation
  * (`K_a`, `H_2SO_4`, `Ca^2+`) typed directly into the question text renders
  * as real subscripts/superscripts, same as substituted placeholder values.
  * Only the raw editable text field and the exported question keep the
@@ -218,7 +218,7 @@ export function buildPreviewVariant(
 /**
  * A representative value to preview a variable with when no variant has been
  * generated yet. The midpoint of the configured range (snapped to `step`) is
- * far more informative than the bare minimum — a template whose mass runs
+ * far more informative than the bare minimum – a template whose mass runs
  * 1–1000 g previewing as "1 g" reads like a broken question rather than a
  * sample of what students will actually be asked.
  */
@@ -247,7 +247,7 @@ function renderPlaceholderSpan(
 ): string {
   const fixedValue = value?.trim()
   if (fixedValue !== undefined && fixedValue !== "") {
-    // Check if fixedValue is a string variable placeholder — a linked constant
+    // Check if fixedValue is a string variable placeholder – a linked constant
     // like [[Ka=wac]] where Ka comes from wac's pairedConstants.
     const linkedVar = variables.find(
       (v) => v.placeholder === fixedValue && v.variable.varType === "string",
@@ -398,7 +398,7 @@ function renderPlaceholderSpanWithVariant(
 ): string {
   const fixedValue = value?.trim()
   if (fixedValue !== undefined && fixedValue !== "") {
-    // Check if fixedValue is a string variable placeholder — [[Ka=wac]] form.
+    // Check if fixedValue is a string variable placeholder – [[Ka=wac]] form.
     const linkedVar = variables.find(
       (v) => v.placeholder === fixedValue && v.variable.varType === "string",
     )

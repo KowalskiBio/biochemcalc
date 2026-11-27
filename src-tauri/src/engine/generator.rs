@@ -589,7 +589,7 @@ fn closed_option_sd_window(
                 "the no-go zone leaves too few distinct closed options \
                  (sd {}, no-go {}, {} options requested): the significant-figures grid \
                  (resolution {base_rounding_unit}) fits only {} distinct values in the ring \
-                 between them — widen the SD, lower the no-go, or allow more significant digits",
+                 between them – widen the SD, lower the no-go, or allow more significant digits",
                 name_pct(sd_pct),
                 name_pct(no_go_pct),
                 count,

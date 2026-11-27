@@ -74,7 +74,7 @@ export function answeredStatusLabel(answeredCorrect: boolean | null): string {
 /**
  * Narrow the snapshot's opaque projection to a `ProjectionSpec`. The snapshot
  * normally stores the already-parsed spec as JSON, but an old bug could have
- * left a raw string (or garbage) behind — `parseProjection` covers both and
+ * left a raw string (or garbage) behind – `parseProjection` covers both and
  * returns `null` on anything structurally invalid, so the caller can fall back
  * to the SMILES depiction.
  */
@@ -217,7 +217,7 @@ function SnapshotOption({
 function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail }) {
   const snapshot = normalizeSnapshot(report.snapshot)
   const promptProjection = parseSnapshotProjection(snapshot.prompt.projection)
-  const targetName = snapshot.target.name || "—"
+  const targetName = snapshot.target.name || "–"
 
   return (
     <Card>
@@ -225,7 +225,7 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
         <CardTitle className="text-lg">
           {strings.reportedQuestion}
           <span className="text-muted-foreground">
-            {" — "}
+            {" – "}
             <RichText text={targetName} />
           </span>
         </CardTitle>
@@ -282,7 +282,7 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-muted-foreground">—</p>
+              <p className="text-sm text-muted-foreground">–</p>
             )}
           </div>
         )}
@@ -302,12 +302,12 @@ function ReportDetailPanel({ report }: { report: BiomoleculeQuestionReportDetail
             <div className="space-y-1">
               <MicroLabel>{strings.metaScope}</MicroLabel>
               <p className="font-mono text-sm font-medium">
-                {snapshot.scopeSlug || report.scopeSlug || "—"}
+                {snapshot.scopeSlug || report.scopeSlug || "–"}
               </p>
             </div>
             <div className="space-y-1">
               <MicroLabel>{strings.metaType}</MicroLabel>
-              <p className="font-medium">{questionTypeLabel(snapshot.questionType) || "—"}</p>
+              <p className="font-medium">{questionTypeLabel(snapshot.questionType) || "–"}</p>
             </div>
             <div className="space-y-1">
               <MicroLabel>{strings.metaAnswered}</MicroLabel>
@@ -500,7 +500,7 @@ export function BiomoleculesReportsPage() {
                     )}
                   >
                     <TableCell className="font-medium">{summary.studentUsername}</TableCell>
-                    <TableCell className="font-mono text-sm">{summary.scopeSlug || "—"}</TableCell>
+                    <TableCell className="font-mono text-sm">{summary.scopeSlug || "–"}</TableCell>
                     <TableCell className="max-w-[300px] truncate">
                       {truncateMessage(summary.message)}
                     </TableCell>

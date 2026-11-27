@@ -187,7 +187,7 @@ export function PeptidovkaTestResultPage() {
                       className="max-w-full"
                     />
                   </div>
-                  {/* What the student wrote next to the correct chain — the
+                  {/* What the student wrote next to the correct chain – the
                       answer box is coloured by its verdict. */}
                   <div
                     className={

@@ -24,7 +24,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 /**
  * Gate on role, assuming a `RequireAuth` ancestor already guarantees a
  * logged-in user. Redirects to `/` rather than `/login` since the visitor
- * IS authenticated — they just don't have the right role for this page.
+ * IS authenticated – they just don't have the right role for this page.
  */
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
   const user = useAuthStore((s) => s.user)

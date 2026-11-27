@@ -171,7 +171,7 @@ describe("generatePeptidovkaTestRun", () => {
 
   it("returns null on synthesis failure (no residue template)", () => {
     // "orn" resolves to a molecule and letter, but the synthesizer has no
-    // template for it — the same "teacher-added acid" case the game redraws.
+    // template for it – the same "teacher-added acid" case the game redraws.
     const molecules: BiomoleculeLike[] = [{ slug: "orn", traits: { oneLetter: "B" } }]
     expect(
       generatePeptidovkaTestRun(

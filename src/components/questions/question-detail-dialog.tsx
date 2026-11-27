@@ -237,7 +237,7 @@ function validateComparisonConstraints(
 }
 
 // The editor UI stores "no comparison" as "" (the Select's sentinel-cleared
-// state), but the backend's Option<Uuid> rejects "" outright — it only
+// state), but the backend's Option<Uuid> rejects "" outright – it only
 // accepts a valid UUID or an absent/null field. Sending "" through fails
 // deserialization for the whole request, silently dropping the entire save.
 function emptyToUndefined(id: string | undefined): string | undefined {
@@ -1275,7 +1275,7 @@ export function QuestionDetailDialog({
         symbol: placeholder,
       }))
       // Symbols injected by string variable paired constants (e.g. Ka from
-      // wac, referenced in the text as [[Ka=wac]]) — without these, neither
+      // wac, referenced in the text as [[Ka=wac]]) – without these, neither
       // the bracket form nor the bare symbol in the formula ever substitutes.
       const pairedConstantSources = displayTemplateVariables.flatMap((vwp) => {
         if (vwp.variable.varType !== "string" || !vwp.variable.pairedConstants?.length) return []
@@ -1514,7 +1514,7 @@ export function QuestionDetailDialog({
           ...referencedFixedPlaceholders.map(() => 2),
         )
       // Multiple semicolon-separated targets (e.g. "c = ...; wDsc = ...")
-      // each get their own answer line — evaluateExpression alone only
+      // each get their own answer line – evaluateExpression alone only
       // surfaces the last one.
       const allTargets = evaluateAllAssignments(normalized, {}, constants)
       const targetUnits = templateDetails
@@ -2848,10 +2848,10 @@ export function QuestionDetailDialog({
                               : entry.fieldName}
                           </TableCell>
                           <TableCell className="break-words align-top">
-                            {entry.oldValue || "—"}
+                            {entry.oldValue || "–"}
                           </TableCell>
                           <TableCell className="break-words align-top">
-                            {entry.newValue || "—"}
+                            {entry.newValue || "–"}
                           </TableCell>
                         </TableRow>
                       ))}

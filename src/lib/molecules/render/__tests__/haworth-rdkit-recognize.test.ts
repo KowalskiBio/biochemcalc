@@ -44,11 +44,11 @@ const AMP = "Nc1ncnc2c1ncn2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
 const CANDIDATE_BETA_FRUCTOSE = "OC[C@]1(O)[C@@H](O)[C@@H](O)[C@@H](CO)O1"
 const CANDIDATE_BETA_RIBOSE = "OC[C@H]1O[C@@H](O)[C@H](O)[C@@H]1O"
 const CANDIDATE_BETA_DEOXYRIBOSE = "OC[C@H]1O[C@@H](O)C[C@@H]1O"
-// The kekulized seed form (uppercase, alternating double bonds) — the exact
+// The kekulized seed form (uppercase, alternating double bonds) – the exact
 // SMILES kept in `biomolecule_seed.rs`; the recognizer works on either form.
 const ADENOSINE_KEKULE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](CO)[C@@H](O)[C@H]3O"
 const AMP_KEKULE = "NC1=NC=NC2=C1N=CN2[C@@H]3O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]3O"
-// PubChem isomeric SMILES (CID 5988, Glcα1↔2βFru) — duplicated from the
+// PubChem isomeric SMILES (CID 5988, Glcα1↔2βFru) – duplicated from the
 // disaccharide suite so this file stays self-contained.
 const SUCROSE =
   "C([C@@H]1[C@H]([C@@H]([C@H]([C@H](O1)O[C@]2([C@H]([C@@H]([C@H](O2)CO)O)O)CO)O)O)O)O"
@@ -124,7 +124,7 @@ describe("haworth layout on RDKit coordinates", () => {
     }
 
     // Every exocyclic heavy substituent is strictly vertical above/below its
-    // ring atom (up = smaller y, down = larger y) — except chain substituents,
+    // ring atom (up = smaller y, down = larger y) – except chain substituents,
     // which are tilted toward free space (checked by the adenosine bias test).
     for (const atom of plan.atoms) {
       const anchor = positionOf(pipeline, atom.vertexId)
@@ -174,7 +174,7 @@ describe("haworth layout on RDKit coordinates", () => {
   it("renders RDKit's native Kekulé adenine base (alternating double bonds, no circles)", () => {
     // The old pass ported a kekulizer; RDKit already emits Kekulé bond orders,
     // so there is nothing to port. Adenine carries four ring double bonds and
-    // AMP adds the P=O — a count of 8 would be chemically impossible.
+    // AMP adds the P=O – a count of 8 would be chemically impossible.
     for (const [smiles, expectedDoubles] of [
       [ADENOSINE, 4],
       [AMP, 5],
@@ -247,7 +247,7 @@ describe("haworth layout on RDKit coordinates", () => {
     const tailCarbon = positionOf(pipeline, tailAtom.up[0])
     expect(tailCarbon.y < tailAnchorPos.y).toBe(true)
     // Pure -CH2OH tails draw strictly vertical (no tilt) with a 120° kink at
-    // the chain vertex — the textbook look, replacing the former 18° lean.
+    // the chain vertex – the textbook look, replacing the former 18° lean.
     expect(Math.abs(tailCarbon.x - tailAnchorPos.x)).toBeLessThan(0.01)
   })
 
@@ -426,8 +426,8 @@ describe("OH label hints (atom-indexed overlay)", () => {
     const prepared = prepareStructureRender(CANDIDATE_BETA_RIBOSE)
     expect(prepared?.recognized).toBe("haworth")
     const hints = prepared?.overlay?.ohHints ?? []
-    // Ribose C3-OH is ~13.8 px left of the centroid — inside the ring, not
-    // on its left edge — so no ring hydroxyl qualifies for an HO swap.
+    // Ribose C3-OH is ~13.8 px left of the centroid – inside the ring, not
+    // on its left edge – so no ring hydroxyl qualifies for an HO swap.
     expect(hints.length).toBeGreaterThan(0)
     expect(hints.some((hint) => hint.side === "HO")).toBe(false)
   })
@@ -589,7 +589,7 @@ describe("sugar-ring recognition", () => {
     const snapshot = snapshotOf(CANDIDATE_BETA_FRUCTOSE)
     const plans = recognizeSugarRings(snapshot)
     if (plans.length === 0) {
-      // Structural topology unsupported yet (ketose) — record, don't guess.
+      // Structural topology unsupported yet (ketose) – record, don't guess.
       expect(plans).toEqual([])
       return
     }
@@ -623,13 +623,13 @@ describe("sugar-ring recognition", () => {
   })
 })
 
-// Cobalamin regression: the nucleotide loop's α-riboside (base drawn DOWN —
+// Cobalamin regression: the nucleotide loop's α-riboside (base drawn DOWN –
 // the one natural α N-glycosidic bond) must render its DMB base clear of the
 // descending 3′-phosphate chain and of the ribose itself. The α base mirrors
 // the β parity convention and leans its glycosidic arm twice as far toward
 // free space; without both, the DMB stacks onto the phosphate chain (the
 // user-visible B12 overlap). The DB SMILES leaves C2′ unmarked, which the
-// strict recognizer refuses — the tagged variant is what a fully
+// strict recognizer refuses – the tagged variant is what a fully
 // stereo-tagged write-up produces.
 describe("cobalamin nucleotide loop", () => {
   const BOND = 24
@@ -701,7 +701,7 @@ describe("cobalamin nucleotide loop", () => {
     }
 
     // Anti-overlap: every DMB atom keeps ≥ 0.9 bond from every other heavy
-    // atom (except the bonded glycosidic anchor) — the phosphate chain, the
+    // atom (except the bonded glycosidic anchor) – the phosphate chain, the
     // ribose, the 2′ hydroxyl, and the corrin alike.
     const bondedToDmb = new Set<number>([anomeric])
     for (const id of dmb) {
@@ -790,7 +790,7 @@ describe("round-trip chemistry", () => {
 // phosphate chains walk out to the LEFT, and a cyclic 3',5'-phosphodiester
 // (cAMP) fuses as a hexagon on the left of the sugar. Placement must depend
 // only on the canonical ring orientation, never on the engine's initial
-// heading — so the same invariants hold for every SMILES traversal/write-up
+// heading – so the same invariants hold for every SMILES traversal/write-up
 // of the same molecule (PubChem canonical + kekulé seed forms).
 describe("nucleotide placement", () => {
   const BOND = 24
@@ -812,7 +812,7 @@ describe("nucleotide placement", () => {
   // for the trigonal base rule.
   const CYTIDINE = "O=C1N=C(N)C=CN1[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
   const URIDINE = "C1=CN(C(=O)NC1=O)[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
-  // Same uridine written from the other ring carbonyl — a different traversal
+  // Same uridine written from the other ring carbonyl – a different traversal
   // the canonical parity rule must neutralize.
   const URIDINE_REVERSED = "O=C1C=CN(C(=O)N1)[C@H]2[C@@H]([C@@H]([C@H](O2)CO)O)O"
   // NAD+: nicotinamide riboside and adenosine joined by a pyrophosphate bridge
@@ -940,7 +940,7 @@ describe("nucleotide placement", () => {
       expect(center, `${label}: base center right of the ring`).toBeGreaterThanOrEqual(0.5)
       // Upright trigonal pose: the purine six-ring towers over the sugar
       // (anti, textbook pose), so a far six-ring atom may reach ~0.75 bond
-      // left of the ring centroid — but never across the whole ring.
+      // left of the ring centroid – but never across the whole ring.
       expect(Math.min(...dxs), `${label}: base does not cross left past the ring`).toBeGreaterThan(
         -1.0,
       )
@@ -1057,7 +1057,7 @@ describe("nucleotide placement", () => {
     ).toBeGreaterThanOrEqual(1.0)
 
     // P's exocyclic oxygens (P=O / P–O) sit in the free hexagon-vertex slots
-    // (outward ±60°), never along/over a P–O ring bond — the "one bond
+    // (outward ±60°), never along/over a P–O ring bond – the "one bond
     // overlapping another" regression.
     const phosphorus = analysis.phosphates[0]
     const ringEster = (analysis.pipeline.snapshot.adjacency.get(phosphorus) ?? []).filter((id) =>
@@ -1100,7 +1100,7 @@ describe("nucleotide placement", () => {
   // sugar. Heading therefore depends only on the bond direction, never on
   // the engine's initial layout; mirrored engine variants are flipped back
   // across the bond line (canonical parity: the ring neighbour stepping
-  // directly into a ring nitrogen — purine C8 / pyrimidine C2 — on the −
+  // directly into a ring nitrogen – purine C8 / pyrimidine C2 – on the −
   // side for five-ring glyco N purines, on the + side for six-ring glyco N
   // pyrimidines). Proof: collinearity for every write-up and identical
   // bond-frame coordinates per base skeleton.
@@ -1289,7 +1289,7 @@ describe("nucleotide placement", () => {
   // The NAD+ layout: the ribose pair is read as a pyrophosphate-bridged
   // dinucleotide. The adenosine ribose keeps the canonical orientation on
   // the right; the nicotinamide ribose is drawn as a horizontal FLIP of the
-  // canonical drawing (ring geometry mirrored, canonical arm sides kept —
+  // canonical drawing (ring geometry mirrored, canonical arm sides kept –
   // the same molecule, not an arm swap), both 5′ tails rise vertically, and
   // the P–O–P bridge runs as a straight horizontal line across the middle
   // with the phosphate =O/–O groups straight up and down.
@@ -1394,7 +1394,7 @@ describe("nucleotide placement", () => {
     ).toBeLessThan(2)
 
     // Both riboses (canonical AND flipped) draw their 2′/3′-OH below the ring
-    // — never arm-swapped up into the ring interior.
+    // – never arm-swapped up into the ring interior.
     for (const [label, info] of [
       ["adenosine", adenosine],
       ["nicotinamide", nicotinamide],
@@ -1699,7 +1699,7 @@ describe("nucleotide placement", () => {
 
     // The bridge descends and hooks into the anomeric arm WITHOUT crossing
     // either ring: every middle atom keeps clear of every ring vertex
-    // (bridge-adjacent anchors excluded — the arm bond itself is one bond).
+    // (bridge-adjacent anchors excluded – the arm bond itself is one bond).
     const middles = path.slice(1, 6)
     for (const middle of middles) {
       for (const ringAtom of [...glucose.cycle, ...ribose.cycle]) {

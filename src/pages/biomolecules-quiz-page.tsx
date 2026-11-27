@@ -67,7 +67,7 @@ const NO_TOPIC_SELECT_VALUE = "__no_topic__"
 /**
  * Topic-select sentinel for Peptidovka: not a molecule topic but the
  * peptide-reading practice, listed last among the topics. Its two
- * difficulties map onto the game's modes — easy = Učeň (coloured atoms),
+ * difficulties map onto the game's modes – easy = Učeň (coloured atoms),
  * hard = Mistr (one ink).
  */
 const PEPTIDOVKA_TOPIC_VALUE = "__peptidovka__"
@@ -93,11 +93,11 @@ function createQuizEntry(config: CategoryQuizConfig): CategoryQuizEntry {
   }
 }
 
-/** Text options carry no display string — resolve name/letter from the config molecules. */
+/** Text options carry no display string – resolve name/letter from the config molecules. */
 function optionLabel(molecules: QuizMolecule[], option: QuizOption): string {
   const molecule = molecules.find((m) => m.id === option.moleculeId)
   if (!molecule) return option.key
-  // Letters only — the three-letter code would be a giveaway hint in letter questions.
+  // Letters only – the three-letter code would be a giveaway hint in letter questions.
   return option.display === "letter" ? (molecule.oneLetter ?? option.key) : molecule.name
 }
 
@@ -271,10 +271,10 @@ interface OpenAnswerFormProps {
  * "Zkontrolovat" locks the answer; the locked input keeps showing the typed
  * text and takes the same accent/destructive verdict state the easy-mode
  * option buttons use. The input owns its Enter keystroke (`stopPropagation`),
- * so grading never trips the window-level "Enter = next question" listener —
+ * so grading never trips the window-level "Enter = next question" listener –
  * the first Enter reveals the verdict, the second advances. Remounted per
  * question (`key={index}`), so the draft starts empty. The typed answer
- * itself lives only here — the session records just the verdict (see
+ * itself lives only here – the session records just the verdict (see
  * QuestionScreen's `onOpenSubmit`).
  */
 function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
@@ -292,7 +292,7 @@ function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
             event.preventDefault()
             // Keep this keystroke off window: the quiz's "Enter = next
             // question" listener must never see the Enter that graded this
-            // answer — only the one pressed once the verdict is on screen.
+            // answer – only the one pressed once the verdict is on screen.
             event.stopPropagation()
             if (canSubmit) onSubmit(value)
           }
@@ -307,7 +307,7 @@ function OpenAnswerForm({ answered, verdict, onSubmit }: OpenAnswerFormProps) {
           "max-w-xs text-center",
           verdict === "correct" && "border-accent bg-accent/5 text-accent",
           verdict === "incorrect" && "border-destructive bg-destructive/10 text-destructive",
-          // A locked-in answer should read as graded, not greyed out — undo
+          // A locked-in answer should read as graded, not greyed out – undo
           // the Input's disabled dimming once the verdict lands.
           verdict !== null && "font-medium disabled:opacity-100",
         )}
@@ -338,7 +338,7 @@ interface SetupScreenProps {
   questionCount: number
   onQuestionCountChange: (count: number) => void
   onStart: () => void
-  /** Peptidovka is picked: no categories, types or count — just the mode. */
+  /** Peptidovka is picked: no categories, types or count – just the mode. */
   peptidovka: boolean
 }
 
@@ -563,8 +563,8 @@ function QuestionScreen({
     .replace("{current}", String(index + 1))
     .replace("{total}", String(total))
   const progressPct = total > 0 ? ((index + (answered ? 1 : 0)) / total) * 100 : 0
-  // Both modes land on an option key — easy mode's is the tapped option,
-  // hard mode's is the verdict-mapped one — so one lookup grades any answer.
+  // Both modes land on an option key – easy mode's is the tapped option,
+  // hard mode's is the verdict-mapped one – so one lookup grades any answer.
   const selectedOption = question.options.find((o) => o.key === selectedKey)
   const wasCorrect = answered && selectedOption?.correct === true
 
@@ -747,7 +747,7 @@ export function BiomoleculesQuizPage() {
   // The topic step above the category picker. `null` is the "Ostatní"
   // pseudo-topic that collects categories without a (known) topic.
   const [topicSlug, setTopicSlug] = useState<string | null>(null)
-  // null = "all of the above" — the chips start fully selected, but only
+  // null = "all of the above" – the chips start fully selected, but only
   // once the category+mode pair lands (before that allTypes is still empty).
   const [chosenTypes, setChosenTypes] = useState<QuizQuestionType[] | null>(null)
   const [questionCount, setQuestionCount] = useState(QUESTION_COUNT_DEFAULT)
@@ -947,7 +947,7 @@ export function BiomoleculesQuizPage() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [activeQuiz, session.finished, session.answered, isReportDialogOpen])
 
-  // Wait for the first load before judging a slug — otherwise a direct
+  // Wait for the first load before judging a slug – otherwise a direct
   // link would bounce to the hub while the dataset is still being fetched.
   if (!loaded) {
     return (
@@ -1028,7 +1028,7 @@ export function BiomoleculesQuizPage() {
   }
 
   // A topic-wide run has no category page to return to; it ran on the plain
-  // picker URL, so the hub is used instead — navigating to the current route
+  // picker URL, so the hub is used instead – navigating to the current route
   // would look like a dead link.
   const runBackHref =
     activeQuiz.slug === ALL_CATEGORIES_VALUE ? "/biomolekuly" : `/biomolekuly/${activeQuiz.slug}`
@@ -1055,8 +1055,8 @@ export function BiomoleculesQuizPage() {
   }
 
   // Hard-mode answers are graded by the engine's open-answer matcher; the
-  // verdict then goes through the reducer the only way it accepts — as the
-  // matching option key (the correct one, or any distractor when wrong) — so
+  // verdict then goes through the reducer the only way it accepts – as the
+  // matching option key (the correct one, or any distractor when wrong) – so
   // the recorded score, the breakdown, and the feedback line agree exactly.
   const submitOpenAnswer = (input: string) => {
     const correct = isOpenAnswerCorrect(question, input)

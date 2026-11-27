@@ -1266,7 +1266,7 @@ export function SetDetailPage() {
           onOpenChange={setShowExportDialog}
           templates={templateDetails}
           // What the teacher actually generated wins over the set's configured
-          // mode — generating open questions in a closed set and exporting
+          // mode – generating open questions in a closed set and exporting
           // used to silently produce multiple-choice options instead of
           // tolerance intervals.
           mode={generatedMode ?? set.mode}
@@ -1276,7 +1276,7 @@ export function SetDetailPage() {
         />
       )}
 
-      {/* Add Question Dialog — preselects the current set */}
+      {/* Add Question Dialog – preselects the current set */}
       {set && (
         <AddQuestionDialog
           open={isAddQuestionOpen}

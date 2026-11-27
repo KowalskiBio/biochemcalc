@@ -174,7 +174,7 @@ describe("polarity axis vs side-chain family", () => {
     expect(characteristicOf("aromatic").matches(phe), "Phe is also aromatic").toBe(true)
   })
 
-  it("keeps tyrosine out of nonpolar — the phenol –OH is hydrophilic", () => {
+  it("keeps tyrosine out of nonpolar – the phenol –OH is hydrophilic", () => {
     const tyr = quizMoleculeOf("tyr")
     expect(characteristicOf("nonpolar").matches(tyr)).toBe(false)
     expect(characteristicOf("polar").matches(tyr)).toBe(true)

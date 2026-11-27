@@ -18,7 +18,7 @@ export function CarryOverlay() {
       ? template?.questionText.slice(0, 120)
       : kind === "set"
         ? set
-          ? `Sada ${set.setIndex}${set.name ? ` — ${set.name}` : ""}`
+          ? `Sada ${set.setIndex}${set.name ? ` – ${set.name}` : ""}`
           : ""
         : (topic?.name ?? "")
 

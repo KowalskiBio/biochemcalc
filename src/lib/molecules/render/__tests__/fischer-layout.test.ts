@@ -75,14 +75,14 @@ describe("recognizeOpenChainSugar", () => {
 })
 
 describe("drawFischer", () => {
-  // Aliases to the shared app palette (atom-palette.ts) — never re-hardcode
+  // Aliases to the shared app palette (atom-palette.ts) – never re-hardcode
   // the hexes here, the projection must track the palette by reference.
   const OXYGEN_RED = ATOM_COLOR_OXYGEN
   const NEUTRAL_INK = ATOM_COLOR_NEUTRAL
   /** Layout plumbing shared with production: bond ≈ ARM, ink-to-bond-end gap 2 px. */
   const ARM_APPROX = 26 * 0.8
   const BOND_LABEL_GAP = 2
-  /** Left-side (HO) ink keeps its own measured adjacency — further out than the right side. */
+  /** Left-side (HO) ink keeps its own measured adjacency – further out than the right side. */
   const LEFT_BOND_LABEL_GAP = 6
 
   interface Glyph {
@@ -184,7 +184,7 @@ describe("drawFischer", () => {
         expect(right[1].text, "right side then H").toBe("H")
       }
       // Letter-slot spacing: the two letters of every pair are one full slot
-      // apart — identical to what the RDKit skeletal side gives them (no
+      // apart – identical to what the RDKit skeletal side gives them (no
       // crowding, no overlap).
       for (const pair of [left, right]) {
         for (let index = 0; index + 1 < pair.length; index += 1) {
@@ -199,7 +199,7 @@ describe("drawFischer", () => {
 
     // Adjacent-to-bond placement like the rest of the app: on the right the
     // O begins 2 px past the bond end; on the left the O's ink ends 2 px from
-    // it — letters nearly touch their bond, never float away.
+    // it – letters nearly touch their bond, never float away.
     for (const rowY of uniqueRowYs) {
       const row = glyphs.filter((glyph) => Math.abs(glyph.y - rowY) < 0.01)
       const rightO = row.find((glyph) => glyph.text === "O" && glyph.x > spineX)
@@ -248,7 +248,7 @@ describe("drawFischer", () => {
     const spineX = [...spineXs][0]
     // The ketone C2 vertex: locate it structurally from its double-bond
     // strokes (short parallel lines starting at the spine, ≈ARM long), then
-    // look at the O on their baseline — independent of any letter arithmetic.
+    // look at the O on their baseline – independent of any letter arithmetic.
     const carbonylStrokes = drawing.elements.filter(
       (element): element is Extract<typeof element, { kind: "line" }> =>
         element.kind === "line" &&
@@ -271,7 +271,7 @@ describe("drawFischer", () => {
     }
 
     // C2 is a junction, not a gap: vertical spine bonds run continuously
-    // through the ketone slot — the bond arriving from above ends exactly at
+    // through the ketone slot – the bond arriving from above ends exactly at
     // the vertex's y and the bond leaving below starts exactly there.
     const spineLinks = drawing.elements
       .filter(

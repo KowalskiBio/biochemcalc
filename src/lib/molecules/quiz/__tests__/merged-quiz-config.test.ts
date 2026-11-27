@@ -101,7 +101,7 @@ describe("getMergedQuizConfig", () => {
     expect(predicates(requireConfig(SACCHARIDES_SLUG, TEST_SACCHARIDES))).toContain(
       traitPredicate("deoxy", "true"),
     )
-    // and nothing else — the retired sugar-class prompts stay out.
+    // and nothing else – the retired sugar-class prompts stay out.
     expect(predicates(requireConfig(SACCHARIDES_SLUG, TEST_SACCHARIDES))).not.toContain(
       traitPredicate("anomer", "alpha"),
     )
@@ -109,7 +109,7 @@ describe("getMergedQuizConfig", () => {
       traitPredicate("anomer", "beta"),
     )
 
-    // Hydrophilic matches 4 of the 5 generic molecules — one distractor.
+    // Hydrophilic matches 4 of the 5 generic molecules – one distractor.
     expect(predicates(requireConfig(GENERIC_SLUG, GENERIC_MOLECULES))).not.toContain(
       traitPredicate("polarity", "hydrophilic"),
     )

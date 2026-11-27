@@ -23,7 +23,7 @@ import { extractErrorMessage } from "@/lib/http"
 const historyStrings = cs.biomolekuly.history
 
 /**
- * Teacher-side log of the biomolecules module — the same trail shape as the
+ * Teacher-side log of the biomolecules module – the same trail shape as the
  * laboratorní výpočty history page: every mutation records its actor and
  * what changed, so a second pair of eyes (or future-you) can review edits.
  */
@@ -157,7 +157,7 @@ export function BiomoleculesHistoryPage() {
                         </p>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {entry.detail ?? "—"}
+                        {entry.detail ?? "–"}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -191,7 +191,7 @@ function actionLabel(action: string): string {
   return strings.actionUpdated
 }
 
-/** "{n} záznam/záznamy/záznamů" — the badge's count text. */
+/** "{n} záznam/záznamy/záznamů" – the badge's count text. */
 function entriesCountText(count: number): string {
   const word = count === 1 ? "záznam" : count >= 2 && count <= 4 ? "záznamy" : "záznamů"
   return `${count} ${word}`

@@ -15,7 +15,7 @@ interface UiState {
   currentPage: string
 
   // Section of the last section-specific page visited this session (not
-  // persisted — the durable choice is `user.preferredSection` on the server)
+  // persisted – the durable choice is `user.preferredSection` on the server)
   lastSection: Section | null
 
   // A teacher previewing the student shell (issue #14). Persisted so a

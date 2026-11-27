@@ -51,9 +51,9 @@ function AtomLetters({ coloured }: { coloured: boolean }) {
 }
 
 /**
- * Peptidovka inside the Učeň block: one tile split down the middle. The
- * coloured half is the easier Učeň run (atoms colour-coded, N-terminus on
- * the left); the black-and-white half is the Mistr run (one ink, random
+ * Peptidovka inside the Učeň block: one row reading "Peptidovka · NOS Učeň –
+ * NOS Mistr". The coloured NOS is the easier Učeň run (atoms colour-coded,
+ * N-terminus on the left); the plain NOS is the Mistr run (one ink, random
  * rotation).
  */
 function PeptidovkaSplitTile() {
@@ -72,29 +72,38 @@ function PeptidovkaSplitTile() {
     },
   ]
   return (
-    <div className="rounded-[4px] border bg-card sm:col-span-2">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+    <div
+      className={cn(
+        "flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1 rounded-[4px] border bg-card px-3 py-1.5 sm:col-span-2",
+      )}
+    >
+      <span className="flex items-center gap-2 text-sm font-medium">
         <Dna className="size-4 text-primary" strokeWidth={1.75} />
-        <span className="text-sm font-medium">{cs.peptidovka.title}</span>
-      </div>
-      <div className="grid grid-cols-2 divide-x">
-        {halves.map(({ to, coloured, label, hint }) => (
-          <Link
-            key={to}
-            to={to}
-            title={hint}
-            className={cn(
-              "flex min-h-[56px] flex-col items-start justify-center gap-1 px-3 py-2",
-              "transition-colors duration-150 hover:bg-primary/5",
-              coloured ? "rounded-bl-[4px]" : "rounded-br-[4px] bg-muted/40",
-              FOCUS_RING_CLASS,
+        {cs.peptidovka.title}
+      </span>
+      <span className="ml-auto flex items-center gap-1">
+        {halves.map(({ to, coloured, label, hint }, index) => (
+          <span key={to} className="flex items-center gap-1">
+            {index > 0 && (
+              <span aria-hidden="true" className="text-muted-foreground">
+                –
+              </span>
             )}
-          >
-            <AtomLetters coloured={coloured} />
-            <span className="text-sm font-medium">{label}</span>
-          </Link>
+            <Link
+              to={to}
+              title={hint}
+              className={cn(
+                "flex min-h-[32px] items-center gap-2 rounded-[4px] border border-transparent px-2 text-sm font-medium",
+                "transition-colors duration-150 hover:border-primary hover:bg-primary/5",
+                FOCUS_RING_CLASS,
+              )}
+            >
+              <AtomLetters coloured={coloured} />
+              {label}
+            </Link>
+          </span>
         ))}
-      </div>
+      </span>
     </div>
   )
 }
@@ -102,7 +111,7 @@ function PeptidovkaSplitTile() {
 /**
  * Učeň as a block that shows its choices right away: "all topics" first,
  * then every topic with easy-mode material, then Peptidovka. Picking one
- * starts the run — there is nothing else to configure.
+ * starts the run – there is nothing else to configure.
  */
 function UcenBlock() {
   const loaded = useBiomoleculeDataLoaded()

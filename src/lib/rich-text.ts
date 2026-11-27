@@ -13,11 +13,11 @@
 // "a^b" or "level_1" is unaffected. Nested braces get the innermost valid
 // pair (`a_{b_{c}}` → `a_{b` + c-sub + `}`): visibly mangled, which is the
 // teacher's feedback that the markup was mistyped. There is deliberately NO
-// escape hatch — a literal underscores/caret simply never sits inside braces.
+// escape hatch – a literal underscores/caret simply never sits inside braces.
 //
 // Display layers render with `splitRichText` (via <RichText/>); layers that
-// can only carry plain strings — aria/title attributes, confirm-dialog
-// interpolations, open-answer comparison — use `stripRichMarkup`.
+// can only carry plain strings – aria/title attributes, confirm-dialog
+// interpolations, open-answer comparison – use `stripRichMarkup`.
 
 export type RichTextStyle = "normal" | "sub" | "sup"
 
@@ -56,7 +56,7 @@ export function splitRichText(value: string): RichTextPart[] {
   return parts
 }
 
-/** The display text without markup braces — what comparison and attributes see. */
+/** The display text without markup braces – what comparison and attributes see. */
 export function stripRichMarkup(value: string): string {
   return value.replace(MARKUP_PATTERN, "$2")
 }

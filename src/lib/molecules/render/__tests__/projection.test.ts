@@ -272,7 +272,7 @@ describe("drawProjection skeletons", () => {
       shareEndpoint({ x: bond.x2, y: bond.y2 }, { x: other.x2, y: other.y2 })
 
     // Every substituent bond (any bond connected to just one ring atom)
-    // must be crossing-free against every other line it doesn't touch —
+    // must be crossing-free against every other line it doesn't touch –
     // universal overlap resolution nudged the fructose rays out of the ring.
     const substituentBonds = lines.filter(
       (line) => !lines.some((other) => other !== line && shareAnyEndpoint(line, other)),
@@ -316,7 +316,7 @@ describe("drawProjection transforms", () => {
     for (const [name, spec] of GOLDEN) {
       // Mirroring reflects the drawing across its vertical center axis: the
       // geometry inverts (an improper transform ⇒ the enantiomer depiction),
-      // while up/down sides are preserved — exactly like the SMILES path's
+      // while up/down sides are preserved – exactly like the SMILES path's
       // mirror decoys. Mirroring twice restores the original drawing.
       const key = (elements: DrawingElement[]): string =>
         elements

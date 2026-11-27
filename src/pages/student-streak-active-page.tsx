@@ -33,7 +33,7 @@ function formatMinutesSeconds(totalSeconds: number): string {
 /**
  * A streak run in progress: one question at a time, exactly like the
  * practice generator, except the run ends outright on the first wrong
- * answer — there is no "try again" once that happens, only a link to the
+ * answer – there is no "try again" once that happens, only a link to the
  * frozen results. The session is read from router state rather than a
  * fetchable id, same limitation the fixed-batch test flow already has: a
  * reload here loses the in-progress run.
@@ -87,7 +87,7 @@ export function StudentStreakActivePage() {
     }
   }, [run, toast])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only on mount — subsequent questions are loaded explicitly.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only on mount – subsequent questions are loaded explicitly.
   useEffect(() => {
     void loadQuestion()
   }, [])

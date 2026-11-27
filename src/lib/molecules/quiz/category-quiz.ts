@@ -165,7 +165,7 @@ function nitrogenBasesQuizConfig(molecules: Biomolecule[]): CategoryQuizConfig {
 
 /**
  * Saccharides (Haworth projections): name↔structure plus the deoxy trait
- * predicate only — anomer and ring-form were retired because teacher-added
+ * predicate only – anomer and ring-form were retired because teacher-added
  * sugars can't carry those trait types anywhere in the edit UI, so the
  * questions would be anchored to a dwindling built-in set. The ring form
  * trait still freely groups same-class distractors below.

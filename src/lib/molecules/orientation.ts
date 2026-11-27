@@ -49,7 +49,7 @@ export function pointsBoundingCenter(points: readonly Point[]): Point {
  *   y' = cy + dx*sin + dy*cos
  * with `dx = x - cx`, `dy = y - cy`. In the y-up sense a positive angle is
  * counter-clockwise, so `(1, 0)` maps to `(0, 1)` at 90°. Because SVG screen
- * space has y pointing down, the same numbers read as clockwise on screen —
+ * space has y pointing down, the same numbers read as clockwise on screen –
  * the convention is documented here so callers can negate if they prefer.
  *
  * Mirroring and rotation are applied around the *same* center, and the

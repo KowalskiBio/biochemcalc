@@ -67,7 +67,7 @@ export function extractTargets(text: string): AnswerTarget[] {
  * per target in order (`"mol;g"` -> first target gets "mol", second "g"); a
  * single unit with no `;` broadcasts to every target. Targets beyond however
  * many units were provided keep whatever unit they already had (e.g. from an
- * inline `[symbol unit]` marker) — this only ever fills in, never blanks out.
+ * inline `[symbol unit]` marker) – this only ever fills in, never blanks out.
  */
 export function applyResultUnits(targets: AnswerTarget[], resultUnit: string): AnswerTarget[] {
   const parts = resultUnit

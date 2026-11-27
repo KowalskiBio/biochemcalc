@@ -1,7 +1,7 @@
-// TEST FIXTURE — a copy of the built-in dataset seeded by
+// TEST FIXTURE – a copy of the built-in dataset seeded by
 // `src-tauri/src/db/biomolecule_seed.rs` (migration v47), reshaped into the
 // frontend's `Biomolecule` rows so the quiz-config tests don't reach into
-// the database. The Rust seed is the source of truth — regenerate/update
+// the database. The Rust seed is the source of truth – regenerate/update
 // this file when it changes.
 
 import type { Biomolecule } from "@/lib/biomolecules-api"
@@ -92,7 +92,7 @@ const AMINO_ACID_SEED: SeedMolecule[] = [
       polarity: "hydrophobic",
       sulfur: "true",
       facts:
-        "Sulfhydrylové skupiny (–SH) dvou cysteinů tvoří disulfidový můstek (–S–S–).\nJako jediná chirální AMK má konfiguraci R — kvůli prioritě síry.",
+        "Sulfhydrylové skupiny (–SH) dvou cysteinů tvoří disulfidový můstek (–S–S–).\nJako jediná chirální AMK má konfiguraci R – kvůli prioritě síry.",
     },
   },
   {
@@ -132,7 +132,7 @@ const AMINO_ACID_SEED: SeedMolecule[] = [
       sideChain: "nonpolar",
       charge: "neutral",
       polarity: "hydrophobic",
-      facts: "Jediná achirální proteinogenní aminokyselina — postranní řetězec je pouze H.",
+      facts: "Jediná achirální proteinogenní aminokyselina – postranní řetězec je pouze H.",
     },
   },
   {
@@ -146,7 +146,7 @@ const AMINO_ACID_SEED: SeedMolecule[] = [
       charge: "neutral",
       polarity: "hydrophilic",
       facts:
-        "Imidazol má pKa ≈ 6,0 — při fyziologickém pH je částečně nabitý.\nProto je častý v aktivních centrech enzymů.",
+        "Imidazol má pKa ≈ 6,0 – při fyziologickém pH je částečně nabitý.\nProto je častý v aktivních centrech enzymů.",
     },
   },
   {
@@ -188,7 +188,7 @@ const AMINO_ACID_SEED: SeedMolecule[] = [
       charge: "positive",
       polarity: "hydrophilic",
       essential: "true",
-      facts: "Dlouhý řetězec zakončený primárním aminem — při fyziologickém pH kladně nabitý.",
+      facts: "Dlouhý řetězec zakončený primárním aminem – při fyziologickém pH kladně nabitý.",
     },
   },
   {
@@ -231,7 +231,7 @@ const AMINO_ACID_SEED: SeedMolecule[] = [
       charge: "neutral",
       polarity: "hydrophobic",
       facts:
-        "Iminokyselina — dusík je součástí pyrrolidinového kruhu.\nZalamuje α-helixy (helix-breaker).",
+        "Iminokyselina – dusík je součástí pyrrolidinového kruhu.\nZalamuje α-helixy (helix-breaker).",
     },
   },
   {
@@ -317,7 +317,7 @@ const NITROGEN_BASE_SEED: SeedMolecule[] = [
       inDna: "true",
       inRna: "true",
       facts:
-        "Páruje se s thyminem (v DNA) nebo uracilem (v RNA) — dvě vodíkové vazby.\nSoučást ATP — hlavního energetického intermediátu buňky.",
+        "Páruje se s thyminem (v DNA) nebo uracilem (v RNA) – dvě vodíkové vazby.\nSoučást ATP – hlavního energetického intermediátu buňky.",
     },
   },
   {
@@ -331,7 +331,7 @@ const NITROGEN_BASE_SEED: SeedMolecule[] = [
       inDna: "true",
       inRna: "true",
       facts:
-        "Páruje se s guaninem — tři vodíkové vazby.\nDeaminací vzniká uracil — častý zdroj bodových mutací.",
+        "Páruje se s guaninem – tři vodíkové vazby.\nDeaminací vzniká uracil – častý zdroj bodových mutací.",
     },
   },
   {
@@ -345,7 +345,7 @@ const NITROGEN_BASE_SEED: SeedMolecule[] = [
       inDna: "true",
       inRna: "true",
       facts:
-        "Páruje se s cytosinem — tři vodíkové vazby (vazba G–C je pevnější než A–T).\nNejnáchylnější báze k oxidaci — vzniká 8-oxoguanin.",
+        "Páruje se s cytosinem – tři vodíkové vazby (vazba G–C je pevnější než A–T).\nNejnáchylnější báze k oxidaci – vzniká 8-oxoguanin.",
     },
   },
   {
@@ -358,7 +358,7 @@ const NITROGEN_BASE_SEED: SeedMolecule[] = [
       pairsWith: "ade",
       inDna: "true",
       facts:
-        "Vyskytuje se pouze v DNA — v RNA jej nahrazuje uracil.\nUV záření vytváří thyminové dimery (poškození DNA).",
+        "Vyskytuje se pouze v DNA – v RNA jej nahrazuje uracil.\nUV záření vytváří thyminové dimery (poškození DNA).",
     },
   },
   {

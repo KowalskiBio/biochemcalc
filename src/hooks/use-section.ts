@@ -6,7 +6,7 @@ import { useUiStore } from "@/stores/ui-store"
 
 /**
  * App sections. Which ones a user can reach comes from the server
- * (`user.sections` — inherited from a student's invite code, set by the
+ * (`user.sections` – inherited from a student's invite code, set by the
  * admin for a teacher); which one they're *in* comes from the URL, falling back on
  * shared pages to the section they were last in, and then to the one they
  * last chose in the switcher (`user.preferredSection`, saved server-side).
@@ -14,10 +14,10 @@ import { useUiStore } from "@/stores/ui-store"
  * who has never chosen gets the one-time picker (`needsChoice`).
  */
 
-/** The student home page — the first nav item of every section, and where a student lands. */
+/** The student home page – the first nav item of every section, and where a student lands. */
 export const STUDENT_HOME_PATH = "/domu"
 
-/** Pages every section shows in its sidebar — they don't imply a section. */
+/** Pages every section shows in its sidebar – they don't imply a section. */
 const SHARED_PATHS = [STUDENT_HOME_PATH, "/leaderboard", "/settings", "/help"]
 
 export function allowedSections(access: SectionAccess): Section[] {
@@ -40,7 +40,7 @@ export interface SectionState {
   /** The section the UI is showing now. */
   section: Section
   allowed: Section[]
-  /** Only one section is reachable — the switcher is shown but disabled. */
+  /** Only one section is reachable – the switcher is shown but disabled. */
   locked: boolean
   /** Both sections are reachable and the user has never picked one. */
   needsChoice: boolean
@@ -99,7 +99,7 @@ export function useLandingRedirect() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately runs only on mount — later navigation to "/" is the user's own choice
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately runs only on mount – later navigation to "/" is the user's own choice
   useEffect(() => {
     if (!user) return
     const allowed = allowedSections(user.sections)

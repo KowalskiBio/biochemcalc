@@ -14,7 +14,7 @@ import type {
 } from "./types"
 
 /**
- * `/api/auth/*` — separate from `/api/cmd/*` because login/register are
+ * `/api/auth/*` – separate from `/api/cmd/*` because login/register are
  * public (no session yet) and `me`/`logout` are for either role, not just
  * teachers.
  */
@@ -34,7 +34,7 @@ export const authApi = {
     httpRequest<void>("/api/auth/change-password", input),
 
   /**
-   * Always resolves, whether or not `email` belongs to an account — the
+   * Always resolves, whether or not `email` belongs to an account – the
    * server deliberately never reveals that (see `do_forgot_password` in
    * `src-tauri/src/commands/auth.rs`). Don't "fix" this to surface a
    * not-found error; that would leak which emails are registered.
@@ -80,7 +80,7 @@ export const authApi = {
   listUsers: (): Promise<User[]> => httpRequest<User[]>("/api/auth/users"),
 
   /**
-   * Admin-only: create an account directly — the only way to add a teacher.
+   * Admin-only: create an account directly – the only way to add a teacher.
    */
   createUser: (input: AdminCreateUserInput): Promise<User> =>
     httpRequest<User>("/api/auth/users/create", input),

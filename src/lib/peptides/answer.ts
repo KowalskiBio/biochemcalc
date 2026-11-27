@@ -1,7 +1,7 @@
 /**
  * Peptidovka answer semantics: the expected chain is the one-letter codes
  * N→C joined; the student's input is tolerated case-insensitively with ALL
- * whitespace stripped ("m k y" == "MKY"). No other normalization — letters
+ * whitespace stripped ("m k y" == "MKY"). No other normalization – letters
  * are deterministic and aliases don't exist here.
  */
 
