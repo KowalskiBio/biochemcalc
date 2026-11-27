@@ -19,7 +19,8 @@ describe("sectionForPath", () => {
     expect(sectionForPath("/biomolekuly/aminokyseliny/procvicovani")).toBe("biomolecules")
   })
 
-  it("treats leaderboard, settings and help as shared", () => {
+  it("treats home, leaderboard, settings and help as shared", () => {
+    expect(sectionForPath("/domu")).toBeNull()
     expect(sectionForPath("/leaderboard")).toBeNull()
     expect(sectionForPath("/settings")).toBeNull()
     expect(sectionForPath("/help")).toBeNull()
@@ -34,13 +35,13 @@ describe("sectionForPath", () => {
 })
 
 describe("sectionHome", () => {
-  it("lands teachers on Témata and students on practice for calculations", () => {
+  it("lands teachers on Témata and students on the shared home for calculations", () => {
     expect(sectionHome("calculations", "teacher")).toBe("/topics")
-    expect(sectionHome("calculations", "student")).toBe("/")
+    expect(sectionHome("calculations", "student")).toBe("/domu")
   })
 
-  it("lands everyone on the Biomolekuly hub for biomolecules", () => {
+  it("lands teachers on the Biomolekuly hub and students on the shared home for biomolecules", () => {
     expect(sectionHome("biomolecules", "teacher")).toBe("/biomolekuly")
-    expect(sectionHome("biomolecules", "student")).toBe("/biomolekuly")
+    expect(sectionHome("biomolecules", "student")).toBe("/domu")
   })
 })

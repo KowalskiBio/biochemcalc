@@ -142,7 +142,7 @@ export function StudentTestResultsPage() {
             <Repeat className="size-4 mr-2" />
             {cs.test.startAnother}
           </Button>
-          <Button variant="outline" onClick={() => navigate("/")}>
+          <Button variant="outline" onClick={() => navigate("/procvicovani")}>
             <Target className="size-4 mr-2" />
             {cs.test.backToPractice}
           </Button>

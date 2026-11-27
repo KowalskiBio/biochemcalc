@@ -76,6 +76,7 @@ export const cs = {
   // Navigation
   navigation: {
     home: "Úvod",
+    studentHome: "Domů",
     topics: "Témata",
     projekty: "Projekty",
     testy: "Testy",
@@ -359,6 +360,32 @@ export const cs = {
       "Ve hře musí být alespoň dvě aminokyseliny s jednopísmenným kódem. Počkejte, až je vyučující vybere v nastavení.",
     loadError: "Hru se nepodařilo načíst. Zkuste to prosím znovu.",
 
+    // Peptidovka as a procvičování topic: endless, untimed, every answer
+    // graded on the spot. Its two difficulties are the game's two modes.
+    practice: {
+      title: {
+        ucen: "Peptidovka – Učeň",
+        mistr: "Peptidovka – Mistr",
+      },
+      descriptionUcen: "Barevná struktura čtená zleva od N-konce. Bez časového limitu.",
+      descriptionMistr: "Jednobarevná struktura natočená náhodným směrem. Bez časového limitu.",
+      modeLabel: {
+        ucen: "Učeň",
+        mistr: "Mistr",
+      },
+      modeHint: {
+        ucen: "Barevné atomy, čtení od N-konce",
+        mistr: "Černobílá struktura, náhodné natočení",
+      },
+      statsLabel: "Správně",
+      stats: "{correct} / {answered}",
+      verdictCorrect: "Správně!",
+      verdictIncorrect: "Špatně.",
+      yourAnswer: "Vaše odpověď",
+      next: "Další peptid",
+      backToSetup: "Zpět na výběr tématu",
+    },
+
     // Teacher settings (`/biomolekuly/peptidovka` under the teacher shell) —
     // one save per mode, bounds mirrored from the server, which stays the
     // authority.
@@ -406,7 +433,7 @@ export const cs = {
       opening: "Otevírám…",
       startError: "Test se nepodařilo otevřít",
       score: "{correct} / {total}",
-      backToHub: "Zpět na Peptidovku",
+      backToHub: "Zpět na testy",
       timeRemaining: "Zbývající čas",
       availableUntil: "Konec: {time}",
       autoSubmitNotice: "Test se odešle automaticky 30 sekund před koncem.",
@@ -811,6 +838,11 @@ export const cs = {
         "Nekonečná série lehkých otázek ze všech kategorií — vybíráte ze čtyř možností. Série končí první špatnou odpovědí.",
       modeMistrDescription:
         "Nekonečná série těžkých otázek ze všech kategorií — odpověď napíšete. Série končí první špatnou odpovědí.",
+      modeUcenTopicDescription:
+        "Nekonečná série lehkých otázek z vybraného tématu — vybíráte ze čtyř možností. Série končí první špatnou odpovědí. Vyberte téma:",
+      allTopics: "Všechna témata",
+      peptidovkaColour: "Barevně",
+      peptidovkaMono: "Černobíle",
       streakEmptyTitle: "Zatím tu nejsou žádné otázky pro tento režim",
       streakEmptyDescription:
         "Žádná kategorie zatím nemá otázky, které by tento režim uměl použít. Až vyučující doplní molekuly, série půjde spustit.",
@@ -1842,6 +1874,47 @@ export const cs = {
       primary: "Vytvořit první úkol",
       secondary: "Prohlédnout dokumentaci",
     },
+  },
+
+  // Student home page (`/domu`): the first nav item of every section and
+  // where a student lands after opening the app.
+  studentHome: {
+    eyebrow: "Domů",
+    greeting: "Dobrý den, {name}",
+    greetingAnonymous: "Dobrý den",
+    openTestsTitle: "Otevřené testy",
+    openTestsDescription: "Testy, které můžete právě teď psát.",
+    openTestsEmpty: "Právě teď nemáte žádný otevřený test.",
+    openTestsEmptyHint: "Až vyučující nějaký test zpřístupní, objeví se tady.",
+    openTestsError: "Testy se nepodařilo načíst",
+    practiceTestBadge: "Cvičný test",
+    practiceTestStart: "Otevřít",
+    kindBiomolecules: "Biomolekuly",
+    kindPeptidovka: "Peptidovka",
+    kindCalculations: "Laboratorní výpočty",
+    leaderboardTitle: "Vaše umístění v žebříčku",
+    leaderboardDescription: "Kde právě stojíte mezi ostatními studenty.",
+    leaderboardLink: "Celý žebříček",
+    leaderboardRankOf: "místo z {total}",
+    leaderboardNoResult: "Zatím bez výsledku",
+    leaderboardError: "Žebříček se nepodařilo načíst",
+    boards: {
+      calculationsPractice: "Procvičování",
+      calculationsMaster: "Série – Mistr",
+      biomoleculesQuiz: "Procvičování",
+      biomoleculesApprentice: "Série – Učeň",
+      biomoleculesMaster: "Série – Mistr",
+      peptidovkaUcen: "Peptidovka – Učeň",
+      peptidovkaMistr: "Peptidovka – Mistr",
+    },
+    values: {
+      correct: "{count} správně",
+      points: "{count} bodů",
+      streak: "série {count}",
+    },
+    moleculeOfDayTitle: "Molekula dne",
+    moleculeOfDayEmpty: "Knihovna molekul je zatím prázdná.",
+    moleculeOfDayOpen: "Zobrazit v knihovně",
   },
 
   // Toast messages

@@ -1,6 +1,6 @@
 import { Flag, Loader2, Timer } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -47,7 +47,9 @@ export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
 
   const [testTopics, setTestTopics] = useState<TestTopicOption[]>([])
   const [isLoadingTopics, setIsLoadingTopics] = useState(true)
-  const [topicId, setTopicId] = useState<string>("")
+  // The home page links straight to one test (`?tema=id`); it's preselected.
+  const [searchParams] = useSearchParams()
+  const [topicId, setTopicId] = useState<string>(() => searchParams.get("tema") ?? "")
   const [isStarting, setIsStarting] = useState(false)
 
   const isUvodni = kind === "uvodni"
@@ -62,6 +64,8 @@ export function StudentTestStartPage({ kind }: StudentTestStartPageProps) {
       .then((loaded) => {
         if (cancelled) return
         setTestTopics(loaded)
+        // A preselected test that isn't on offer (closed, renamed) falls back to "choose one".
+        setTopicId((current) => (loaded.some((topic) => topic.id === current) ? current : ""))
       })
       .catch((error) => {
         if (cancelled) return

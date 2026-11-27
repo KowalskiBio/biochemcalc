@@ -355,7 +355,7 @@ export function PeptidovkaTestRunPage() {
         <div className="mx-auto w-full max-w-2xl space-y-4">
           <p className="text-sm text-destructive">{testyStrings.loadError}</p>
           <Button variant="outline" asChild>
-            <Link to="/biomolekuly/peptidovka">{testyStrings.backToHub}</Link>
+            <Link to="/biomolekuly/test">{testyStrings.backToHub}</Link>
           </Button>
         </div>
       )
@@ -372,7 +372,7 @@ export function PeptidovkaTestRunPage() {
       <div className="mx-auto w-full max-w-2xl space-y-4">
         <p className="text-sm text-destructive">{testyStrings.loadError}</p>
         <Button variant="outline" asChild>
-          <Link to="/biomolekuly/peptidovka">{testyStrings.backToHub}</Link>
+          <Link to="/biomolekuly/test">{testyStrings.backToHub}</Link>
         </Button>
       </div>
     )
@@ -389,7 +389,7 @@ export function PeptidovkaTestRunPage() {
           </p>
         </div>
         <Button variant="outline" asChild>
-          <Link to="/biomolekuly/peptidovka">{testyStrings.backToHub}</Link>
+          <Link to="/biomolekuly/test">{testyStrings.backToHub}</Link>
         </Button>
       </div>
     )
@@ -417,7 +417,7 @@ export function PeptidovkaTestRunPage() {
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <div className="flex items-center justify-between gap-4">
         <Link
-          to="/biomolekuly/peptidovka"
+          to="/biomolekuly/test"
           className="inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
         >
           <ArrowLeft className="size-4" strokeWidth={1.75} />

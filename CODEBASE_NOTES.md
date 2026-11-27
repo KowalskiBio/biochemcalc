@@ -332,6 +332,33 @@ entirely (frontend, `commands/victor.rs`, routes, `reqwest`, the dead `settings_
 - TODO(biomolekuly-launch) in `App.tsx`: pop-up inviting calculations-only students to
   try Biomolekuly once it's ready.
 
+## 8d. Student home, Test-page layout, Peptidovka split (added 2026-11-27)
+
+- **Student home** `/domu` (`pages/student-home-page.tsx`) is a shared path (`STUDENT_HOME_PATH`
+  in `use-section.ts`), the first nav item of both sections, and where students land:
+  StudentRoutes redirects `/` → `/domu`, `sectionHome()` returns it for every non-teacher,
+  and StudentShell no longer runs `useLandingRedirect`. Calculations practice moved from
+  `/` to `/procvicovani`. The page shows open tests (assigned Biomolekuly + Peptidovka tests
+  whose window is open, plus the calculations úvodní/průběžný tests on offer — linked as
+  `/test/{kind}?tema=id`, which the start page preselects), the student's rank on the
+  current section's boards (server order = rank), and a molecule of the day (FNV-1a of the
+  Prague date over molecules sorted by id).
+- **Peptidovka has no student page.** Practice = the "Peptidovka" pseudo-topic in
+  Biomolekuly Procvičování (`components/peptidovka/peptidovka-practice.tsx`, endless and
+  untimed; easy ↔ Učeň/coloured, hard ↔ Mistr/mono). Runs = the split tile in the Test
+  page's Učeň block → `/biomolekuly/test/peptidovka/{ucen,mistr}`. Assigned tests are
+  listed with the classic ones (`components/biomolecules/assigned-tests.tsx`). Both the
+  practice and the run draw peptides through `hooks/use-peptidovka-pool.ts`. Teachers keep
+  their Peptidovka settings page.
+- **Test pages**: Učeň shows its choices inline — Biomolekuly topics (→
+  `/biomolekuly/test/ucen?tema=slug`, which scopes the streak pool) and, in calculations,
+  topic tiles with difficulty/set/type chips. `/test/ucen` redirects to `/test`.
+- **Scroll memory**: `hooks/use-scroll-restoration.ts` (both shells) keeps the window
+  offset per pathname for the session and restores it on back AND on in-app links; result
+  and in-progress pages (`/results`, `/vysledek`, `/active`, `/pisat`) still open at the top.
+- Test results (classic + Peptidovka) rebuild the student's own answers from the attempt's
+  `detailJson`, so the review shows them after reopening, not only right after submitting.
+
 ## 9. Feature-addition checklist
 
 1. Data-model change? → update Rust models + `src/lib/types.ts` + new migration

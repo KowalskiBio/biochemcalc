@@ -3,8 +3,8 @@ import { cva } from "class-variance-authority"
 import {
   ArrowLeft,
   Atom,
-  Dna,
   FlaskConical,
+  House,
   LogOut,
   Menu,
   Moon,
@@ -23,7 +23,8 @@ import { SectionSwitcher } from "@/components/layout/section-switcher"
 import { StudentFooter } from "@/components/layout/student-footer"
 import { PageTransition } from "@/components/ui/page-transition"
 import { Toaster } from "@/components/ui/toaster"
-import { useLandingRedirect, useSection } from "@/hooks/use-section"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration"
+import { STUDENT_HOME_PATH, useSection } from "@/hooks/use-section"
 import { cs } from "@/i18n/cs"
 import type { Section } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -57,15 +58,22 @@ const settingsNavItem: NavItem = {
   label: cs.navigation.settings,
 }
 
+const homeNavItem: NavItem = {
+  path: STUDENT_HOME_PATH,
+  icon: <House className="size-[18px]" strokeWidth={1.75} />,
+  label: cs.navigation.studentHome,
+}
+
 const navBySection: Record<Section, NavItem[]> = {
   calculations: [
+    homeNavItem,
     {
       path: "/test",
       icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
       label: cs.navigation.test,
     },
     {
-      path: "/",
+      path: "/procvicovani",
       icon: <Target className="size-[18px]" strokeWidth={1.75} />,
       label: cs.navigation.practice,
     },
@@ -73,6 +81,7 @@ const navBySection: Record<Section, NavItem[]> = {
     settingsNavItem,
   ],
   biomolecules: [
+    homeNavItem,
     {
       path: "/biomolekuly/procvicovani",
       icon: <Target className="size-[18px]" strokeWidth={1.75} />,
@@ -82,11 +91,6 @@ const navBySection: Record<Section, NavItem[]> = {
       path: "/biomolekuly/test",
       icon: <Timer className="size-[18px]" strokeWidth={1.75} />,
       label: cs.navigation.test,
-    },
-    {
-      path: "/biomolekuly/peptidovka",
-      icon: <Dna className="size-[18px]" strokeWidth={1.75} />,
-      label: cs.navigation.peptidovka,
     },
     {
       path: "/biomolekuly",
@@ -260,7 +264,9 @@ function StudentViewBanner() {
 export function StudentShell({ children }: { children: ReactNode }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
   const { needsChoice } = useSection()
-  useLandingRedirect()
+  // No landing redirect here: a student always lands on the shared home
+  // page ("/" → "/domu" in StudentRoutes), whichever section they are in.
+  useScrollRestoration()
 
   useEffect(() => {
     const root = document.documentElement

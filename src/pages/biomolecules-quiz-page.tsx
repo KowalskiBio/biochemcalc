@@ -3,6 +3,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { Link, Navigate, useParams } from "react-router-dom"
 
 import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/report-question-dialog"
+import { PeptidovkaPractice } from "@/components/peptidovka/peptidovka-practice"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
@@ -19,7 +20,8 @@ import { Slider } from "@/components/ui/slider"
 import { StructureView } from "@/components/ui/structure-view"
 import { cs } from "@/i18n/cs"
 import { biomoleculeReportsApi, snapshotOfQuestion } from "@/lib/biomolecule-reports-api"
-import { biomoleculesApi } from "@/lib/biomolecules-api"
+import { biomoleculesApi, type PeptidovkaMode } from "@/lib/biomolecules-api"
+import { PEPTIDE_FAMILY_SLUGS } from "@/lib/molecules"
 import {
   type CategoryQuizConfig,
   createQuizSession,
@@ -62,6 +64,15 @@ const QUIZ_MODES: QuizMode[] = ["easy", "hard"]
 const ALL_CATEGORIES_VALUE = "*"
 /** Topic-select sentinel for the "Ostatní" (no topic) pseudo-topic. */
 const NO_TOPIC_SELECT_VALUE = "__no_topic__"
+/**
+ * Topic-select sentinel for Peptidovka: not a molecule topic but the
+ * peptide-reading practice, listed last among the topics. Its two
+ * difficulties map onto the game's modes — easy = Učeň (coloured atoms),
+ * hard = Mistr (one ink).
+ */
+const PEPTIDOVKA_TOPIC_VALUE = "__peptidovka__"
+
+const PEPTIDOVKA_MODE: Record<QuizMode, PeptidovkaMode> = { easy: "ucen", hard: "mistr" }
 
 const FOCUS_RING_CLASS =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -327,6 +338,8 @@ interface SetupScreenProps {
   questionCount: number
   onQuestionCountChange: (count: number) => void
   onStart: () => void
+  /** Peptidovka is picked: no categories, types or count — just the mode. */
+  peptidovka: boolean
 }
 
 function SetupScreen({
@@ -346,11 +359,13 @@ function SetupScreen({
   questionCount,
   onQuestionCountChange,
   onStart,
+  peptidovka,
 }: SetupScreenProps) {
   // Reachable only in hard mode: the chosen category has types in easy mode
   // (otherwise it wouldn't be listed), but none survives the hard filter.
-  const noTypesInMode = selectedCategory !== null && allTypes.length === 0
-  const startDisabled = selectedCategory === null || selectedTypes.length === 0
+  const noTypesInMode = !peptidovka && selectedCategory !== null && allTypes.length === 0
+  const startDisabled = !peptidovka && (selectedCategory === null || selectedTypes.length === 0)
+  const showCategoryOptions = !peptidovka && selectedCategory !== null
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
@@ -363,7 +378,7 @@ function SetupScreen({
       </div>
 
       {/* Topic and category side by side; they stack on a phone */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className={cn("grid grid-cols-1 gap-4", !peptidovka && "sm:grid-cols-2")}>
         <div className="min-w-0 space-y-2">
           <MicroLabel>{quizStrings.topicPickerLabel}</MicroLabel>
           <Select value={selectedTopic} onValueChange={onSelectTopic}>
@@ -380,21 +395,23 @@ function SetupScreen({
           </Select>
         </div>
 
-        <div className="min-w-0 space-y-2">
-          <MicroLabel>{quizStrings.categoryLabel}</MicroLabel>
-          <Select value={selectedCategory ?? ""} onValueChange={onSelectCategory}>
-            <SelectTrigger aria-label={quizStrings.categoryLabel}>
-              <SelectValue placeholder={quizStrings.categoryPlaceholder} />
-            </SelectTrigger>
-            <SelectContent>
-              {categoryOptions.map((option) => (
-                <SelectItem key={option.slug} value={option.slug}>
-                  <RichText text={option.name} />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {!peptidovka && (
+          <div className="min-w-0 space-y-2">
+            <MicroLabel>{quizStrings.categoryLabel}</MicroLabel>
+            <Select value={selectedCategory ?? ""} onValueChange={onSelectCategory}>
+              <SelectTrigger aria-label={quizStrings.categoryLabel}>
+                <SelectValue placeholder={quizStrings.categoryPlaceholder} />
+              </SelectTrigger>
+              <SelectContent>
+                {categoryOptions.map((option) => (
+                  <SelectItem key={option.slug} value={option.slug}>
+                    <RichText text={option.name} />
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       {/* Difficulty */}
@@ -419,10 +436,16 @@ function SetupScreen({
                 <span
                   className={cn("text-sm font-medium", active ? "text-primary" : "text-foreground")}
                 >
-                  {quizStrings.mode[candidate]}
+                  {peptidovka
+                    ? cs.peptidovka.practice.modeLabel[PEPTIDOVKA_MODE[candidate]]
+                    : quizStrings.mode[candidate]}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {candidate === "easy" ? quizStrings.modeEasyHint : quizStrings.modeHardHint}
+                  {peptidovka
+                    ? cs.peptidovka.practice.modeHint[PEPTIDOVKA_MODE[candidate]]
+                    : candidate === "easy"
+                      ? quizStrings.modeEasyHint
+                      : quizStrings.modeHardHint}
                 </span>
               </button>
             )
@@ -430,7 +453,7 @@ function SetupScreen({
         </div>
       </div>
 
-      {selectedCategory !== null && (
+      {showCategoryOptions && (
         <>
           {/* Question types */}
           <div className="space-y-2">
@@ -497,7 +520,7 @@ function SetupScreen({
         <Button onClick={onStart} disabled={startDisabled}>
           {quizStrings.start}
         </Button>
-        {selectedCategory !== null && !noTypesInMode && selectedTypes.length === 0 && (
+        {showCategoryOptions && !noTypesInMode && selectedTypes.length === 0 && (
           <p className="text-sm text-muted-foreground">{quizStrings.noTypesHint}</p>
         )}
       </div>
@@ -736,6 +759,8 @@ export function BiomoleculesQuizPage() {
     config: CategoryQuizConfig
     mode: QuizMode
   } | null>(null)
+  // The Peptidovka practice in flight (its own endless screen), if any.
+  const [activePeptidovka, setActivePeptidovka] = useState<PeptidovkaMode | null>(null)
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   const [session, dispatch] = useReducer(quizSessionReducer, EMPTY_QUESTIONS, createQuizSession)
 
@@ -798,6 +823,7 @@ export function BiomoleculesQuizPage() {
     setTopicSlug(paramSlug === null ? defaultTopicSlug : topicOfCategory(paramSlug))
     setChosenTypes(null)
     setActiveQuiz(null)
+    setActivePeptidovka(null)
   }
 
   // The topic-wide entry: each eligible category keeps its own adapter
@@ -825,7 +851,14 @@ export function BiomoleculesQuizPage() {
   const allTypes = entry ? entry[mode] : []
   const selectedTypes = chosenTypes ?? allTypes
 
+  const peptidovkaSelected = topicSlug === PEPTIDOVKA_TOPIC_VALUE
+  const hasPeptidovka = categories.some((category) => PEPTIDE_FAMILY_SLUGS.includes(category.slug))
+
   const startQuiz = () => {
+    if (peptidovkaSelected) {
+      setActivePeptidovka(PEPTIDOVKA_MODE[mode])
+      return
+    }
     if (slug === null || !entry || selectedTypes.length === 0) return
     const seed = Date.now()
     const questions = generateQuizSession(entry.config.molecules, {
@@ -938,6 +971,10 @@ export function BiomoleculesQuizPage() {
     return <Navigate to={`/biomolekuly/${paramSlug}`} replace />
   }
 
+  if (activePeptidovka !== null) {
+    return <PeptidovkaPractice mode={activePeptidovka} onExit={() => setActivePeptidovka(null)} />
+  }
+
   if (!activeQuiz) {
     // The topic step lists topics with quiz material in the active mode (the
     // selected one stays put across a mode switch). The category step lists
@@ -948,6 +985,9 @@ export function BiomoleculesQuizPage() {
       .map((topic) => ({ value: topic.slug, label: topicNameOf(topic.slug) }))
     if (hasUngroupedQuiz || topicSlug === null) {
       topicOptions.push({ value: NO_TOPIC_SELECT_VALUE, label: cs.biomolekuly.noTopic })
+    }
+    if (hasPeptidovka || peptidovkaSelected) {
+      topicOptions.push({ value: PEPTIDOVKA_TOPIC_VALUE, label: cs.peptidovka.title })
     }
 
     const categoryOptions = [
@@ -982,6 +1022,7 @@ export function BiomoleculesQuizPage() {
         questionCount={questionCount}
         onQuestionCountChange={setQuestionCount}
         onStart={startQuiz}
+        peptidovka={peptidovkaSelected}
       />
     )
   }
