@@ -5,7 +5,7 @@ import { RequireAuth } from "@/components/auth/route-guard"
 import { AppShell } from "@/components/layout/app-shell"
 import { LocalRunBadge } from "@/components/layout/local-run-badge"
 import { StudentShell } from "@/components/layout/student-shell"
-import { allowedSections } from "@/hooks/use-section"
+import { allowedSections, STUDENT_HOME_PATH } from "@/hooks/use-section"
 import { BiomoleculesHistoryPage } from "@/pages/biomolecules-history-page"
 import { BiomoleculesCategoryPage, BiomoleculesPage } from "@/pages/biomolecules-page"
 import { BiomoleculesProjectionPage } from "@/pages/biomolecules-projection-page"
@@ -28,7 +28,7 @@ import { FormulasPage } from "@/pages/formulas-page"
 import { HelpPage } from "@/pages/help-page"
 import { HistoryPage } from "@/pages/history-page"
 import { LoginPage } from "@/pages/login-page"
-import { PeptidovkaPage, PeptidovkaRunPage } from "@/pages/peptidovka-page"
+import { PeptidovkaRunPage } from "@/pages/peptidovka-page"
 import { PeptidovkaSettingsPage } from "@/pages/peptidovka-settings-page"
 import { PeptidovkaTestResultPage } from "@/pages/peptidovka-test-result-page"
 import { PeptidovkaTestRunPage } from "@/pages/peptidovka-test-run-page"
@@ -39,6 +39,7 @@ import { ReportsPage } from "@/pages/reports-page"
 import { ResetPasswordPage } from "@/pages/reset-password-page"
 import { SetDetailPage } from "@/pages/set-detail-page"
 import { SettingsPage } from "@/pages/settings-page"
+import { StudentHomePage } from "@/pages/student-home-page"
 import { StudentLeaderboardPage } from "@/pages/student-leaderboard-page"
 import { StudentPracticePage } from "@/pages/student-practice-page"
 import { StudentSettingsPage } from "@/pages/student-settings-page"
@@ -143,14 +144,15 @@ function StudentRoutes() {
   const allowed = allowedSections(access)
   const hasCalculations = allowed.includes("calculations")
   const hasBiomolecules = allowed.includes("biomolecules")
-  const home = hasCalculations ? <StudentPracticePage /> : <Navigate to="/biomolekuly" replace />
-
   return (
     <StudentShell>
       <Routes>
-        <Route path="/" element={home} />
+        {/* Opening the app always lands on the shared home page. */}
+        <Route path="/" element={<Navigate to={STUDENT_HOME_PATH} replace />} />
+        <Route path={STUDENT_HOME_PATH} element={<StudentHomePage />} />
         {hasCalculations && (
           <>
+            <Route path="/procvicovani" element={<StudentPracticePage />} />
             <Route path="/test" element={<StudentTestModePage />} />
             <Route path="/test/uvodni" element={<StudentTestStartPage kind="uvodni" />} />
             <Route path="/test/uvodni/active" element={<StudentTestPage />} />
@@ -158,8 +160,9 @@ function StudentRoutes() {
             <Route path="/test/prubezny" element={<StudentTestStartPage kind="prubezny" />} />
             <Route path="/test/prubezny/active" element={<StudentTestPage />} />
             <Route path="/test/prubezny/results" element={<StudentTestResultsPage />} />
-            <Route path="/test/ucen" element={<StudentStreakSetupPage kind="apprentice" />} />
-            <Route path="/test/mistr" element={<StudentStreakSetupPage kind="master" />} />
+            {/* Učeň is configured inside its block on the Test page now. */}
+            <Route path="/test/ucen" element={<Navigate to="/test" replace />} />
+            <Route path="/test/mistr" element={<StudentStreakSetupPage />} />
             <Route path="/test/streak/active" element={<StudentStreakActivePage />} />
             <Route path="/test/streak/results" element={<StudentStreakResultsPage />} />
           </>
@@ -186,13 +189,19 @@ function StudentRoutes() {
               path="/biomolekuly/test/mistr"
               element={<BiomoleculesStreakPage kind="master" />}
             />
-            <Route path="/biomolekuly/peptidovka" element={<PeptidovkaPage />} />
+            {/* Peptidovka is no longer a page of its own: its practice is a
+                Procvičování topic, its runs live in the Test page's Učeň
+                block, and its assigned tests sit with the other tests. */}
             <Route
-              path="/biomolekuly/peptidovka/ucen"
+              path="/biomolekuly/peptidovka"
+              element={<Navigate to="/biomolekuly/test" replace />}
+            />
+            <Route
+              path="/biomolekuly/test/peptidovka/ucen"
               element={<PeptidovkaRunPage mode="ucen" />}
             />
             <Route
-              path="/biomolekuly/peptidovka/mistr"
+              path="/biomolekuly/test/peptidovka/mistr"
               element={<PeptidovkaRunPage mode="mistr" />}
             />
             <Route
@@ -211,7 +220,7 @@ function StudentRoutes() {
           </>
         )}
         <Route path="/settings" element={<StudentSettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to={STUDENT_HOME_PATH} replace />} />
       </Routes>
     </StudentShell>
   )

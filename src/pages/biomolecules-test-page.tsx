@@ -1,227 +1,182 @@
-import { CheckCircle2, Crown, Play, RotateCcw, Swords } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { ChevronRight, Crown, Dna, Layers, Swords } from "lucide-react"
+import { Link } from "react-router-dom"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { AssignedTestsSection } from "@/components/biomolecules/assigned-tests"
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
-import { type BiomoleculeTestStudentView, biomoleculesApi } from "@/lib/biomolecules-api"
-import { extractErrorMessage } from "@/lib/http"
+import { PEPTIDE_FAMILY_SLUGS } from "@/lib/molecules"
+import { generatableQuizTypes, getCategoryQuizConfig } from "@/lib/molecules/quiz"
+import {
+  ATOM_COLOR_NITROGEN,
+  ATOM_COLOR_OXYGEN,
+  ATOM_COLOR_SULFUR,
+} from "@/lib/molecules/render/atom-palette"
+import { cn } from "@/lib/utils"
+import {
+  useBiomoleculeDataLoaded,
+  useBiomoleculeDataStore,
+  useMoleculeCategories,
+  useMoleculeTopics,
+  useTopicText,
+} from "@/stores/biomolecule-data-store"
 
-const testyStrings = cs.biomolekuly.testy
+const testStrings = cs.biomolekuly.test
 
-const MODES = [
-  {
-    to: "/biomolekuly/test/ucen",
-    icon: Swords,
-    title: cs.test.modeUcenTitle,
-    description: cs.biomolekuly.test.modeUcenDescription,
-  },
-  {
-    to: "/biomolekuly/test/mistr",
-    icon: Crown,
-    title: cs.test.modeMistrTitle,
-    description: cs.biomolekuly.test.modeMistrDescription,
-  },
-] as const
+const FOCUS_RING_CLASS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
-export function questionCountText(count: number): string {
-  const forms = testyStrings.questionCount
-  const form = count === 1 ? forms.one : count >= 2 && count <= 4 ? forms.few : forms.many
-  return form.replace("{count}", String(count))
-}
+const TILE_CLASS = cn(
+  "flex min-h-[44px] items-center justify-between gap-2 rounded-[4px] border bg-card px-3 py-2 text-left text-sm font-medium",
+  "transition-colors duration-150 hover:border-primary hover:bg-primary/5",
+  FOCUS_RING_CLASS,
+)
 
-function formatWindowDate(value: string): string {
-  return new Date(value).toLocaleString("cs-CZ", {
-    day: "numeric",
-    month: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-/** Cards share the result payload with the run/result routes through router state. */
-export function biomoleculeTestRouteState(view: BiomoleculeTestStudentView) {
-  return { view }
-}
-
-function AssignedTests() {
-  const navigate = useNavigate()
-  const { toast } = useToast()
-  const [tests, setTests] = useState<BiomoleculeTestStudentView[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [openingId, setOpeningId] = useState<string | null>(null)
-
-  const loadTests = useCallback(async () => {
-    setLoadError(null)
-    try {
-      setTests(await biomoleculesApi.availableBiomoleculeTests())
-    } catch (error) {
-      setLoadError(extractErrorMessage(error, testyStrings.loadError))
-      setTests((current) => current ?? [])
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadTests()
-  }, [loadTests])
-
-  const openTest = async (view: BiomoleculeTestStudentView) => {
-    const { test, attempt } = view
-    if (attempt?.submittedAt) {
-      navigate(`/biomolekuly/test/zadane/${test.id}/vysledek`, {
-        state: biomoleculeTestRouteState(view),
-      })
-      return
-    }
-
-    setOpeningId(test.id)
-    try {
-      const started = await biomoleculesApi.startBiomoleculeTestAttempt(test.id)
-      const nextView: BiomoleculeTestStudentView = {
-        ...view,
-        attempt: {
-          ...started,
-          detailJson: attempt?.detailJson ?? null,
-        },
-      }
-      const destination = started.submittedAt ? "vysledek" : "pisat"
-      navigate(`/biomolekuly/test/zadane/${test.id}/${destination}`, {
-        state: biomoleculeTestRouteState(nextView),
-      })
-    } catch (error) {
-      toast({
-        title: testyStrings.startError,
-        description: extractErrorMessage(error, testyStrings.startError),
-        variant: "destructive",
-      })
-      // The card can outlive its window by a few seconds. Re-read the server's
-      // view so a just-closed or already-submitted test resolves to fresh state.
-      await loadTests()
-    } finally {
-      setOpeningId(null)
-    }
-  }
-
+/** The three heteroatom letters that make the colour/no-colour difference visible at a glance. */
+function AtomLetters({ coloured }: { coloured: boolean }) {
+  const atoms = [
+    { letter: "N", color: ATOM_COLOR_NITROGEN },
+    { letter: "O", color: ATOM_COLOR_OXYGEN },
+    { letter: "S", color: ATOM_COLOR_SULFUR },
+  ]
   return (
-    <section className="space-y-4 border-t border-border pt-6" aria-labelledby="assigned-tests">
-      <div>
-        <h2 id="assigned-tests" className="text-xl font-semibold tracking-tight text-foreground">
-          {testyStrings.hubTitle}
-        </h2>
-        <p className="text-sm text-muted-foreground">{testyStrings.hubDescription}</p>
-      </div>
-
-      {loadError && (
-        <Card>
-          <CardContent className="flex flex-col items-start gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-destructive">{loadError}</p>
-            <Button variant="outline" size="sm" onClick={() => void loadTests()}>
-              {testyStrings.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {tests === null ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {[0, 1].map((item) => (
-            <Card key={item}>
-              <CardHeader>
-                <Skeleton className="h-5 w-48" />
-                <Skeleton className="h-4 w-full" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-36" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : tests.length === 0 && !loadError ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="font-medium">{testyStrings.emptyTitle}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{testyStrings.emptyDescription}</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
-          {tests.map((view) => {
-            const { test, attempt } = view
-            const submitted = attempt?.submittedAt != null
-            const expired = !submitted && new Date(test.availableTo).getTime() <= Date.now()
-            const status = submitted
-              ? testyStrings.statusSubmitted
-              : expired
-                ? testyStrings.statusClosed
-                : attempt
-                  ? testyStrings.statusInProgress
-                  : testyStrings.statusNotStarted
-            const action = submitted
-              ? testyStrings.showResult
-              : attempt
-                ? testyStrings.resume
-                : testyStrings.start
-            const ActionIcon = submitted ? CheckCircle2 : attempt ? RotateCcw : Play
-            const isOpening = openingId === test.id
-
-            return (
-              <Card key={test.id} className="overflow-hidden">
-                <CardHeader className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <CardTitle className="text-lg leading-snug">{test.title}</CardTitle>
-                    <Badge
-                      variant="outline"
-                      className={submitted ? "border-accent/40 text-accent" : undefined}
-                    >
-                      {status}
-                    </Badge>
-                  </div>
-                  <CardDescription className="space-y-1">
-                    <span className="block">
-                      {testyStrings.windowLabel}: {formatWindowDate(test.availableFrom)} –{" "}
-                      {formatWindowDate(test.availableTo)}
-                    </span>
-                    <span className="block">{questionCountText(test.questionCount)}</span>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-h-5 text-sm">
-                    {submitted ? (
-                      <span className="font-mono tabular font-semibold text-accent">
-                        {testyStrings.score
-                          .replace("{correct}", String(attempt.correctCount ?? 0))
-                          .replace("{total}", String(attempt.totalCount ?? test.questionCount))}
-                      </span>
-                    ) : attempt ? (
-                      <span className="text-muted-foreground">{testyStrings.statusInProgress}</span>
-                    ) : null}
-                  </div>
-                  <Button
-                    onClick={() => void openTest(view)}
-                    disabled={openingId !== null || (expired && attempt == null)}
-                    variant={submitted ? "outline" : "default"}
-                  >
-                    <ActionIcon className="size-4" />
-                    {isOpening ? testyStrings.opening : action}
-                  </Button>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      )}
-    </section>
+    <span aria-hidden="true" className="flex gap-1 font-mono text-sm font-semibold">
+      {atoms.map(({ letter, color }) => (
+        <span key={letter} style={coloured ? { color } : undefined}>
+          {letter}
+        </span>
+      ))}
+    </span>
   )
 }
 
 /**
- * Biomolekuly's test hub: the two endless practice modes, followed by the
- * teacher-assigned, once-only tests whose attempts live on the server.
+ * Peptidovka inside the Učeň block: one tile split down the middle. The
+ * coloured half is the easier Učeň run (atoms colour-coded, N-terminus on
+ * the left); the black-and-white half is the Mistr run (one ink, random
+ * rotation).
+ */
+function PeptidovkaSplitTile() {
+  const halves = [
+    {
+      to: "/biomolekuly/test/peptidovka/ucen",
+      coloured: true,
+      label: testStrings.peptidovkaColour,
+      hint: cs.peptidovka.modeUcenDescription,
+    },
+    {
+      to: "/biomolekuly/test/peptidovka/mistr",
+      coloured: false,
+      label: testStrings.peptidovkaMono,
+      hint: cs.peptidovka.modeMistrDescription,
+    },
+  ]
+  return (
+    <div className="rounded-[4px] border bg-card sm:col-span-2">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <Dna className="size-4 text-primary" strokeWidth={1.75} />
+        <span className="text-sm font-medium">{cs.peptidovka.title}</span>
+      </div>
+      <div className="grid grid-cols-2 divide-x">
+        {halves.map(({ to, coloured, label, hint }) => (
+          <Link
+            key={to}
+            to={to}
+            title={hint}
+            className={cn(
+              "flex min-h-[56px] flex-col items-start justify-center gap-1 px-3 py-2",
+              "transition-colors duration-150 hover:bg-primary/5",
+              coloured ? "rounded-bl-[4px]" : "rounded-br-[4px] bg-muted/40",
+              FOCUS_RING_CLASS,
+            )}
+          >
+            <AtomLetters coloured={coloured} />
+            <span className="text-sm font-medium">{label}</span>
+            <span className="text-xs text-muted-foreground">
+              {coloured ? cs.test.modeUcenTitle : cs.test.modeMistrTitle}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Učeň as a block that shows its choices right away: "all topics" first,
+ * then every topic with easy-mode material, then Peptidovka. Picking one
+ * starts the run — there is nothing else to configure.
+ */
+function UcenBlock() {
+  const loaded = useBiomoleculeDataLoaded()
+  const topics = useMoleculeTopics()
+  const categories = useMoleculeCategories()
+  const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
+  const { nameOf } = useTopicText()
+
+  const playableTopics = topics.filter((topic) =>
+    categories.some((category) => {
+      if (category.topicSlug !== topic.slug) return false
+      const config = getCategoryQuizConfig(
+        category.slug,
+        allMolecules.filter((molecule) => molecule.categorySlug === category.slug),
+      )
+      return (
+        config != null && generatableQuizTypes(config.molecules, config.characteristics).length > 0
+      )
+    }),
+  )
+  const hasPeptidovka = categories.some((category) => PEPTIDE_FAMILY_SLUGS.includes(category.slug))
+
+  return (
+    <Card className="h-full lg:col-span-2">
+      <CardHeader className="space-y-4">
+        <div className="space-y-1.5">
+          <Swords className="size-6 text-primary" strokeWidth={1.75} />
+          <CardTitle className="text-lg">{cs.test.modeUcenTitle}</CardTitle>
+          <CardDescription>{testStrings.modeUcenTopicDescription}</CardDescription>
+        </div>
+
+        {!loaded ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {[0, 1, 2, 3].map((item) => (
+              <Skeleton key={item} className="h-11 rounded-[4px]" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Link to="/biomolekuly/test/ucen" className={TILE_CLASS}>
+              <span className="flex items-center gap-2">
+                <Layers className="size-4 text-muted-foreground" strokeWidth={1.75} />
+                {testStrings.allTopics}
+              </span>
+              <ChevronRight className="size-4 text-muted-foreground" strokeWidth={1.75} />
+            </Link>
+            {playableTopics.map((topic) => (
+              <Link
+                key={topic.slug}
+                to={`/biomolekuly/test/ucen?tema=${encodeURIComponent(topic.slug)}`}
+                className={TILE_CLASS}
+              >
+                <span className="min-w-0 truncate">{nameOf(topic.slug)}</span>
+                <ChevronRight
+                  className="size-4 shrink-0 text-muted-foreground"
+                  strokeWidth={1.75}
+                />
+              </Link>
+            ))}
+            {hasPeptidovka && <PeptidovkaSplitTile />}
+          </div>
+        )}
+      </CardHeader>
+    </Card>
+  )
+}
+
+/**
+ * Biomolekuly's test hub: Učeň with its topics laid out in the block, Mistr
+ * across everything, then the teacher-assigned, once-only tests (classic and
+ * Peptidovka) whose attempts live on the server.
  */
 export function BiomoleculesTestPage() {
   return (
@@ -233,21 +188,20 @@ export function BiomoleculesTestPage() {
         <p className="text-muted-foreground text-sm">{cs.test.modePickerDescription}</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {MODES.map(({ to, icon: Icon, title, description }) => (
-          <Link key={to} to={to} className="block h-full">
-            <Card className="h-full cursor-pointer transition-colors hover:border-primary hover:bg-primary/5">
-              <CardHeader>
-                <Icon className="size-6 text-primary" strokeWidth={1.75} />
-                <CardTitle className="text-lg">{title}</CardTitle>
-                <CardDescription>{description}</CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ))}
+      <div className="grid items-start gap-4 lg:grid-cols-3">
+        <UcenBlock />
+        <Link to="/biomolekuly/test/mistr" className="block h-full">
+          <Card className="h-full cursor-pointer transition-colors hover:border-primary hover:bg-primary/5">
+            <CardHeader>
+              <Crown className="size-6 text-primary" strokeWidth={1.75} />
+              <CardTitle className="text-lg">{cs.test.modeMistrTitle}</CardTitle>
+              <CardDescription>{testStrings.modeMistrDescription}</CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
       </div>
 
-      <AssignedTests />
+      <AssignedTestsSection />
     </div>
   )
 }

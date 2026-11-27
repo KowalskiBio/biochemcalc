@@ -4,6 +4,7 @@ import { CarryOverlay } from "@/components/layout/carry-overlay"
 import { SectionPicker } from "@/components/layout/section-picker"
 import { PageTransition } from "@/components/ui/page-transition"
 import { Toaster } from "@/components/ui/toaster"
+import { useScrollRestoration } from "@/hooks/use-scroll-restoration"
 import { useLandingRedirect, useSection } from "@/hooks/use-section"
 import { cn } from "@/lib/utils"
 import { useCarryStore } from "@/stores/drag-store"
@@ -26,6 +27,7 @@ export function AppShell({ children }: AppShellProps) {
 
   const { needsChoice } = useSection()
   useLandingRedirect()
+  useScrollRestoration()
 
   const isCarrying = useCarryStore((s) => s.isCarrying)
   const updateMouse = useCarryStore((s) => s.updateMouse)

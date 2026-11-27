@@ -1,6 +1,6 @@
 import { ArrowLeft, Flag, RotateCcw, Target, Timer, Trophy } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 
 import { BiomoleculeReportQuestionDialog } from "@/components/biomolecules/report-question-dialog"
 import { Button } from "@/components/ui/button"
@@ -32,6 +32,7 @@ import {
   useBiomoleculeDataLoaded,
   useBiomoleculeDataStore,
   useMoleculeCategories,
+  useTopicText,
 } from "@/stores/biomolecule-data-store"
 
 const quizStrings = cs.biomolekuly.quiz
@@ -299,13 +300,19 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
   const loaded = useBiomoleculeDataLoaded()
   const categories = useMoleculeCategories()
   const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
+  const { nameOf: topicNameOf } = useTopicText()
+  // Učeň picked on the Test page can be scoped to one topic (`?tema=slug`);
+  // without it — and always for Mistr — the run draws from everything.
+  const [searchParams] = useSearchParams()
+  const topicScope = master ? null : searchParams.get("tema")
 
-  // The endless pool: every category with at least one generatable type in
-  // this mode, each with its config prebuilt so a question is one seeded
-  // engine call away.
+  // The endless pool: every category (of the scoped topic, if any) with at
+  // least one generatable type in this mode, each with its config prebuilt
+  // so a question is one seeded engine call away.
   const pool = useMemo<StreakCategory[]>(() => {
     const entries: StreakCategory[] = []
     for (const category of categories) {
+      if (topicScope !== null && category.topicSlug !== topicScope) continue
       const config = getCategoryQuizConfig(
         category.slug,
         allMolecules.filter((molecule) => molecule.categorySlug === category.slug),
@@ -315,7 +322,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
       if (types.length > 0) entries.push({ slug: category.slug, config, types })
     }
     return entries
-  }, [categories, allMolecules, mode])
+  }, [categories, allMolecules, mode, topicScope])
 
   const [run, setRun] = useState<Run | null>(null)
   const [round, setRound] = useState<Round | null>(null)
@@ -501,6 +508,7 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
           </h1>
           <p className="text-muted-foreground text-sm">
             {master ? streakStrings.kindMaster : streakStrings.kindApprentice}
+            {topicScope !== null && ` · ${topicNameOf(topicScope)}`}
           </p>
         </div>
 
@@ -584,6 +592,11 @@ export function BiomoleculesStreakPage({ kind }: { kind: BiomoleculeStreakKind }
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {streakStrings.activeTitle}
           </h1>
+          {topicScope !== null && (
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              {topicNameOf(topicScope)}
+            </p>
+          )}
           <p className="text-muted-foreground text-sm" aria-live="polite">
             {streakStrings.correctSoFar.replace("{count}", String(run.correctCount))}
           </p>

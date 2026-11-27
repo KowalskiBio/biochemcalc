@@ -87,9 +87,9 @@ export function BiomoleculesTestResultPage() {
   const test = view?.test ?? null
   const attempt = view?.attempt ?? null
 
-  // Post-hub review: regenerate the batch from the attempt seed. The
-  // student's own picks were never stored server-side, so that review marks
-  // the correct options only.
+  // Post-hub review: regenerate the batch from the attempt seed; the picks
+  // the submission stored (detailJson `answers`, matched by uid) mark what
+  // the student chose next to the correct options.
   let regenerated: QuizQuestion[] | null = null
   if (loaded && test !== null && review === null && attempt !== null) {
     regenerated = generateTestSession(test, attempt.seed, allMolecules)
@@ -110,10 +110,27 @@ export function BiomoleculesTestResultPage() {
   const correct = attempt.correctCount ?? 0
   const percentage = total === 0 ? 0 : Math.round((correct / total) * 100)
   let byType: Record<string, { correct: number; total: number }> = {}
+  const storedAnswers = new Map<string, { correct: boolean; selectedKey: string | null }>()
   if (attempt.detailJson !== null) {
     try {
-      const parsed = JSON.parse(attempt.detailJson) as { byType?: typeof byType }
+      const parsed = JSON.parse(attempt.detailJson) as {
+        byType?: typeof byType
+        answers?: unknown
+      }
       byType = parsed.byType ?? {}
+      if (Array.isArray(parsed.answers)) {
+        for (const answer of parsed.answers as {
+          uid?: unknown
+          correct?: unknown
+          selectedKey?: unknown
+        }[]) {
+          if (typeof answer?.uid !== "string") continue
+          storedAnswers.set(answer.uid, {
+            correct: answer.correct === true,
+            selectedKey: typeof answer.selectedKey === "string" ? answer.selectedKey : null,
+          })
+        }
+      }
     } catch {
       byType = {}
     }
@@ -133,11 +150,14 @@ export function BiomoleculesTestResultPage() {
           selectedKey: review.selections[index] ?? null,
         }))
       : regenerated !== null
-        ? regenerated.map((question) => ({
-            question,
-            verdict: undefined,
-            selectedKey: null,
-          }))
+        ? regenerated.map((question) => {
+            const stored = question.uid ? storedAnswers.get(question.uid) : undefined
+            return {
+              question,
+              verdict: stored?.correct,
+              selectedKey: stored?.selectedKey ?? null,
+            }
+          })
         : []
 
   const molecules: QuizMolecule[] = testQuestionPool(test, allMolecules)?.molecules ?? []
@@ -198,7 +218,7 @@ export function BiomoleculesTestResultPage() {
           </p>
         ) : (
           <>
-            {review === null && (
+            {review === null && storedAnswers.size === 0 && (
               <p className="text-sm text-muted-foreground">{testyStrings.reviewWithoutChoices}</p>
             )}
             <ol className="space-y-4">
@@ -233,7 +253,11 @@ export function BiomoleculesTestResultPage() {
                           <li key={option.key} className="flex items-center justify-center">
                             <div
                               className={`rounded-[4px] border p-2 ${
-                                option.correct ? "border-accent" : "border-border opacity-60"
+                                option.correct
+                                  ? "border-accent"
+                                  : picked
+                                    ? "border-destructive"
+                                    : "border-border opacity-60"
                               }`}
                             >
                               <StructureView
@@ -261,9 +285,14 @@ export function BiomoleculesTestResultPage() {
                           }`}
                         >
                           <RichText text={optionLabel(molecules, option)} />
-                          {option.correct && (
+                          {(option.correct || picked) && (
                             <span className="ml-auto text-xs font-medium">
-                              {testyStrings.correctOption}
+                              {[
+                                picked ? cs.peptidovka.practice.yourAnswer : null,
+                                option.correct ? testyStrings.correctOption : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
                             </span>
                           )}
                         </li>

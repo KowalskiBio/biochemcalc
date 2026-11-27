@@ -1,48 +1,19 @@
-import {
-  ArrowLeft,
-  CheckCircle2,
-  Crown,
-  Play,
-  RotateCcw,
-  Swords,
-  Timer,
-  Trophy,
-} from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { ArrowLeft, RotateCcw, Timer, Trophy } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Link } from "react-router-dom"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import { useCountdown } from "@/hooks/use-countdown"
-import { useToast } from "@/hooks/use-toast"
+import { type PeptideDraw, usePeptidovkaPool } from "@/hooks/use-peptidovka-pool"
 import { cs } from "@/i18n/cs"
-import {
-  biomoleculesApi,
-  type PeptidovkaMode,
-  type PeptidovkaSettings,
-  type PeptidovkaTestStudentView,
-} from "@/lib/biomolecules-api"
-import { extractErrorMessage } from "@/lib/http"
-import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
-import { ensureRdkit } from "@/lib/molecules/render/rdkit-engine"
-import {
-  expectedChainLetters,
-  generatePeptide,
-  isChainCorrect,
-  nLeftOrientationDeg,
-  peptideParts,
-} from "@/lib/peptides"
+import { biomoleculesApi, type PeptidovkaMode } from "@/lib/biomolecules-api"
+import { isChainCorrect } from "@/lib/peptides"
 import { cn } from "@/lib/utils"
-import {
-  useBiomoleculeDataLoaded,
-  useBiomoleculeDataStore,
-  useMoleculeCategories,
-} from "@/stores/biomolecule-data-store"
 
 const peptidovkaStrings = cs.peptidovka
 
@@ -60,19 +31,6 @@ function aminoAcidCountLabel(count: number): string {
   const forms = peptidovkaStrings.aminoAcidCount
   const form = count === 1 ? forms.one : count >= 2 && count <= 4 ? forms.few : forms.many
   return form.replace("{count}", String(count))
-}
-
-/**
- * Učeň's canonical reading direction — structure laid N-terminus left. Any
- * geometry hiccup (unparseable SMILES, RDKit still initializing) degrades
- * to the unrotated draw rather than killing the round.
- */
-function nLeftDeg(smiles: string, nIndex: number): number {
-  try {
-    return nLeftOrientationDeg(smiles, nIndex) ?? 0
-  } catch {
-    return 0
-  }
 }
 
 function BackLink({ href, label }: { href: string; label: string }) {
@@ -99,15 +57,8 @@ function MicroLabel({ children }: { children: string }) {
   )
 }
 
-/** One served peptide, with everything the round needs precomputed. */
-interface Round {
-  slugs: string[]
-  smiles: string
-  orientationDeg: number
-  /** The N→C one-letter answer, already uppercased. */
-  expected: string
-  length: number
-  timeLimitSeconds: number
+/** One served peptide plus the moment its round clock runs out. */
+interface Round extends PeptideDraw {
   deadlineMs: number
 }
 
@@ -181,249 +132,6 @@ function ChainAnswerForm({ answered, verdict, onSubmit }: ChainAnswerFormProps) 
   )
 }
 
-const MODES = [
-  {
-    mode: "ucen",
-    to: "/biomolekuly/peptidovka/ucen",
-    icon: Swords,
-    title: cs.test.modeUcenTitle,
-    description: peptidovkaStrings.modeUcenDescription,
-  },
-  {
-    mode: "mistr",
-    to: "/biomolekuly/peptidovka/mistr",
-    icon: Crown,
-    title: cs.test.modeMistrTitle,
-    description: peptidovkaStrings.modeMistrDescription,
-  },
-] as const
-
-const testyStrings = cs.peptidovka.testy
-
-/** Czech 1/2–4/5+ plural of "{n} peptid*" for the test cards. */
-function peptideCountText(count: number): string {
-  const forms = testyStrings.peptideCount
-  const form = count === 1 ? forms.one : count >= 2 && count <= 4 ? forms.few : forms.many
-  return form.replace("{count}", String(count))
-}
-
-function formatWindowDate(value: string): string {
-  return new Date(value).toLocaleString("cs-CZ", {
-    day: "numeric",
-    month: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
-
-/**
- * Teacher-assigned, once-only peptidovka tests: the same list the Biomolekuly
- * test hub carries, scoped to this game's attempts.
- */
-function AssignedTests() {
-  const navigate = useNavigate()
-  const { toast } = useToast()
-  const [tests, setTests] = useState<PeptidovkaTestStudentView[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [openingId, setOpeningId] = useState<string | null>(null)
-
-  const loadTests = useCallback(async () => {
-    setLoadError(null)
-    try {
-      setTests(await biomoleculesApi.availablePeptidovkaTests())
-    } catch (error) {
-      setLoadError(extractErrorMessage(error, testyStrings.loadError))
-      setTests((current) => current ?? [])
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadTests()
-  }, [loadTests])
-
-  const openTest = async (view: PeptidovkaTestStudentView) => {
-    const { test, attempt } = view
-    if (attempt?.submittedAt) {
-      navigate(`/biomolekuly/peptidovka/test/zadane/${test.id}/vysledek`, {
-        state: { view },
-      })
-      return
-    }
-
-    setOpeningId(test.id)
-    try {
-      const started = await biomoleculesApi.startPeptidovkaTestAttempt(test.id)
-      const nextView: PeptidovkaTestStudentView = {
-        ...view,
-        attempt: {
-          ...started,
-          detailJson: attempt?.detailJson ?? null,
-        },
-      }
-      const destination = started.submittedAt ? "vysledek" : "pisat"
-      navigate(`/biomolekuly/peptidovka/test/zadane/${test.id}/${destination}`, {
-        state: { view: nextView },
-      })
-    } catch (error) {
-      toast({
-        title: testyStrings.startError,
-        description: extractErrorMessage(error, testyStrings.startError),
-        variant: "destructive",
-      })
-      // The card can outlive its window by a few seconds. Re-read the server's
-      // view so a just-closed or already-submitted test resolves to fresh state.
-      await loadTests()
-    } finally {
-      setOpeningId(null)
-    }
-  }
-
-  return (
-    <section className="space-y-4 border-t border-border pt-6" aria-labelledby="assigned-tests">
-      <div>
-        <h2 id="assigned-tests" className="text-xl font-semibold tracking-tight text-foreground">
-          {testyStrings.hubTitle}
-        </h2>
-        <p className="text-sm text-muted-foreground">{testyStrings.hubDescription}</p>
-      </div>
-
-      {loadError && (
-        <Card>
-          <CardContent className="flex flex-col items-start gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-destructive">{loadError}</p>
-            <Button variant="outline" size="sm" onClick={() => void loadTests()}>
-              {testyStrings.retry}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {tests === null ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {[0, 1].map((item) => (
-            <Card key={item}>
-              <CardHeader>
-                <Skeleton className="h-5 w-48" />
-                <Skeleton className="h-4 w-full" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-36" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : tests.length === 0 && !loadError ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="font-medium">{testyStrings.emptyTitle}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{testyStrings.emptyDescription}</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
-          {tests.map((view) => {
-            const { test, attempt } = view
-            const submitted = attempt?.submittedAt != null
-            const expired = !submitted && new Date(test.availableTo).getTime() <= Date.now()
-            const status = submitted
-              ? testyStrings.statusSubmitted
-              : expired
-                ? testyStrings.statusClosed
-                : attempt
-                  ? testyStrings.statusInProgress
-                  : testyStrings.statusNotStarted
-            const action = submitted
-              ? testyStrings.showResult
-              : attempt
-                ? testyStrings.resume
-                : testyStrings.start
-            const ActionIcon = submitted ? CheckCircle2 : attempt ? RotateCcw : Play
-            const isOpening = openingId === test.id
-
-            return (
-              <Card key={test.id} className="overflow-hidden">
-                <CardHeader className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <CardTitle className="text-lg leading-snug">{test.title}</CardTitle>
-                    <Badge
-                      variant="outline"
-                      className={submitted ? "border-accent/40 text-accent" : undefined}
-                    >
-                      {status}
-                    </Badge>
-                  </div>
-                  <CardDescription className="space-y-1">
-                    <span className="block">
-                      {testyStrings.windowLabel}: {formatWindowDate(test.availableFrom)} –{" "}
-                      {formatWindowDate(test.availableTo)}
-                    </span>
-                    <span className="block">{peptideCountText(test.peptideCount)}</span>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-h-5 text-sm">
-                    {submitted ? (
-                      <span className="font-mono tabular font-semibold text-accent">
-                        {testyStrings.score
-                          .replace("{correct}", String(attempt.correctCount ?? 0))
-                          .replace("{total}", String(attempt.totalCount ?? test.peptideCount))}
-                      </span>
-                    ) : attempt ? (
-                      <span className="text-muted-foreground">{testyStrings.statusInProgress}</span>
-                    ) : null}
-                  </div>
-                  <Button
-                    onClick={() => void openTest(view)}
-                    disabled={openingId !== null || (expired && attempt == null)}
-                    variant={submitted ? "outline" : "default"}
-                  >
-                    <ActionIcon className="size-4" />
-                    {isOpening ? testyStrings.opening : action}
-                  </Button>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      )}
-    </section>
-  )
-}
-
-/**
- * Peptidovka's entry point — the same two-card mode pick as the Biomolekuly
- * test hub (shared `cs.test` mode titles, Peptidovka-specific descriptions).
- */
-export function PeptidovkaPage() {
-  return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {peptidovkaStrings.title}
-        </h1>
-        <p className="text-muted-foreground text-sm">{peptidovkaStrings.modePickDescription}</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        {MODES.map(({ mode, to, icon: Icon, title, description }) => (
-          <Link key={mode} to={to} className="block h-full">
-            <Card className="h-full cursor-pointer transition-colors hover:border-primary hover:bg-primary/5">
-              <CardHeader>
-                <Icon className="size-6 text-primary" strokeWidth={1.75} />
-                <CardTitle className="text-lg">{title}</CardTitle>
-                <CardDescription>{description}</CardDescription>
-              </CardHeader>
-            </Card>
-          </Link>
-        ))}
-      </div>
-
-      <AssignedTests />
-    </div>
-  )
-}
-
 /**
  * The Peptidovka run: one generated peptide structure per round, answered as
  * one-letter codes N→C. Like the biomolecules streak, the whole run lives in
@@ -434,82 +142,7 @@ export function PeptidovkaPage() {
  */
 export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   const master = mode === "mistr"
-  const loaded = useBiomoleculeDataLoaded()
-  const categories = useMoleculeCategories()
-  const allMolecules = useBiomoleculeDataStore((s) => s.molecules)
-
-  const [settingsAll, setSettingsAll] = useState<PeptidovkaSettings[] | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  // Settings come once per page mount — a teacher's mid-run edits are a
-  // non-case, exactly like the streak's pool built from the loaded dataset.
-  useEffect(() => {
-    let cancelled = false
-    biomoleculesApi
-      .peptidovkaSettings()
-      .then((rows) => {
-        if (!cancelled) setSettingsAll(rows)
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // RDKit has to be up before Učeň's N-left orientation can be measured; the
-  // wasm usually wins the race against the dataset, and fail-open degrades
-  // to the unrotated draw (nLeftDeg) instead of never starting.
-  const [rdkitReady, setRdkitReady] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    ensureRdkit()
-      .catch(() => {})
-      .then(() => {
-        if (!cancelled) setRdkitReady(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const modeSettings = useMemo(
-    () => settingsAll?.find((row) => row.mode === mode) ?? null,
-    [settingsAll, mode],
-  )
-
-  // The playable pool: the amino-acid category's molecules that carry a
-  // one-letter code (the answer alphabet) — the same playability rule the
-  // teacher settings grid uses.
-  const playableBySlug = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const molecule of allMolecules) {
-      if (!PEPTIDE_FAMILY_SLUGS.includes(molecule.categorySlug)) continue
-      const oneLetter = traitOf(molecule, TRAIT.oneLetter)
-      if (oneLetter !== undefined) map.set(molecule.slug, oneLetter)
-    }
-    return map
-  }, [allMolecules])
-
-  // The effective pool: every playable molecule not explicitly switched off.
-  // A missing saved weight means the default 1; explicit zero disables the
-  // molecule. Valid positive weights pass straight through to the generator's
-  // weighted sampling (0.5 = half as likely as 1). Iterating playable molecules
-  // also drops stale slugs, stripped one-letter codes, and deleted molecules.
-  const { pool, poolWeights } = useMemo(() => {
-    const slugs: string[] = []
-    const weights: Record<string, number> = {}
-    if (modeSettings !== null) {
-      for (const slug of playableBySlug.keys()) {
-        const weight = modeSettings.weights[slug] ?? 1
-        if (!Number.isFinite(weight) || weight <= 0 || weight > 1) continue
-        slugs.push(slug)
-        weights[slug] = weight
-      }
-    }
-    return { pool: slugs, poolWeights: weights }
-  }, [modeSettings, playableBySlug])
+  const { status, draw } = usePeptidovkaPool(mode)
 
   const [run, setRun] = useState<Run | null>(null)
   const [round, setRound] = useState<Round | null>(null)
@@ -525,40 +158,15 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   // one React batch would both end the run.
   const endingRef = useRef(false)
 
-  // Serve the next peptide. Unknown slugs in the pool (no residue template —
-  // a teacher-added acid the synthesizer doesn't know) get exactly one
-  // redraw with a fresh seed, then the round is declared impossible;
-  // length falls back to a sane span should the server's bounds ever slip.
+  // Serve the next peptide with its round deadline; null when the pool
+  // holds a slug the synthesizer can't build (see usePeptidovkaPool.draw).
   const nextRound = useCallback(
     (startedAtMs: number): Round | null => {
-      if (modeSettings === null || pool.length === 0) return null
-      const maxLen = Math.max(modeSettings.minLen, modeSettings.maxLen)
-      const minLen = Math.max(1, Math.min(modeSettings.minLen, maxLen))
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const random = crypto.getRandomValues(new Uint32Array(3))
-        const length = minLen + (random[0] % (maxLen - minLen + 1))
-        const slugs = generatePeptide(poolWeights, length, random[1])
-        const parts = peptideParts(slugs)
-        if (parts === null) continue
-        const letters = slugs.map((slug) => playableBySlug.get(slug))
-        if (letters.some((letter) => letter === undefined)) continue
-        // Mistr rotates the chain to a pseudo-random angle per round; Učeň
-        // keeps the canonical N-terminus-left reading direction.
-        const orientationDeg = master ? random[2] % 360 : nLeftDeg(parts.smiles, parts.nIndex)
-        const timeLimitSeconds = modeSettings.secondsPerAa * length
-        return {
-          slugs,
-          smiles: parts.smiles,
-          orientationDeg,
-          expected: expectedChainLetters(letters as string[]),
-          length,
-          timeLimitSeconds,
-          deadlineMs: startedAtMs + timeLimitSeconds * 1000,
-        }
-      }
-      return null
+      const peptide = draw()
+      if (peptide === null) return null
+      return { ...peptide, deadlineMs: startedAtMs + peptide.timeLimitSeconds * 1000 }
     },
-    [modeSettings, pool.length, poolWeights, playableBySlug, master],
+    [draw],
   )
 
   const startRun = useCallback(() => {
@@ -584,10 +192,8 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   // after it `run` is set, so this fires exactly once per page entry
   // (restart is startRun called from the UI).
   useEffect(() => {
-    if (loaded && settingsAll !== null && pool.length >= 2 && rdkitReady && run === null) {
-      startRun()
-    }
-  }, [loaded, settingsAll, pool.length, rdkitReady, run, startRun])
+    if (status === "ready" && run === null) startRun()
+  }, [status, run, startRun])
 
   const endRun = useCallback(
     (by: "wrong" | "timeout", remaining: number | null) => {
@@ -681,7 +287,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
     setRound(next)
   }
 
-  if (!loaded || (settingsAll === null && !loadFailed)) {
+  if (status === "loading") {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-6">
         <Skeleton className="h-8 w-48 rounded-[4px]" />
@@ -691,10 +297,10 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
     )
   }
 
-  if (loadFailed) {
+  if (status === "error") {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-6">
-        <BackLink href="/biomolekuly/peptidovka" label={peptidovkaStrings.backToModes} />
+        <BackLink href="/biomolekuly/test" label={peptidovkaStrings.backToModes} />
         <Card>
           <CardContent className="space-y-2 py-10 text-center">
             <p className="font-medium">{peptidovkaStrings.emptyTitle}</p>
@@ -708,15 +314,10 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
   // The dataset is missing the amino-acid category, no one-letter-coded
   // molecules, or the mode's pool is below two acids — a friendly state
   // instead of a run that can never serve a round.
-  if (
-    roundImpossible ||
-    !categories.some((category) => PEPTIDE_FAMILY_SLUGS.includes(category.slug)) ||
-    playableBySlug.size === 0 ||
-    pool.length < 2
-  ) {
+  if (roundImpossible || status === "empty") {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-6">
-        <BackLink href="/biomolekuly/peptidovka" label={peptidovkaStrings.backToModes} />
+        <BackLink href="/biomolekuly/test" label={peptidovkaStrings.backToModes} />
         <Card>
           <CardContent className="space-y-2 py-10 text-center">
             <p className="font-medium">{peptidovkaStrings.emptyTitle}</p>
@@ -747,7 +348,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
-      <BackLink href="/biomolekuly/peptidovka" label={peptidovkaStrings.backToModes} />
+      <BackLink href="/biomolekuly/test" label={peptidovkaStrings.backToModes} />
 
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -875,7 +476,7 @@ export function PeptidovkaRunPage({ mode }: { mode: PeptidovkaMode }) {
                 {peptidovkaStrings.playAgain}
               </Button>
               <Button variant="outline" asChild>
-                <Link to="/biomolekuly/peptidovka">{peptidovkaStrings.backToModes}</Link>
+                <Link to="/biomolekuly/test">{peptidovkaStrings.backToModes}</Link>
               </Button>
             </div>
           </CardContent>

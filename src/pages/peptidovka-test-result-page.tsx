@@ -7,7 +7,11 @@ import { cs } from "@/i18n/cs"
 import type { PeptidovkaTestStudentView } from "@/lib/biomolecules-api"
 import { nLeftOrientationDeg } from "@/lib/peptides"
 import { normalizeChainInput } from "@/lib/peptides/answer"
-import { generatePeptidovkaTestRun, type PeptidovkaTestRun } from "@/lib/peptides/test"
+import {
+  generatePeptidovkaTestRun,
+  isPeptideAnswerCorrect,
+  type PeptidovkaTestRun,
+} from "@/lib/peptides/test"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
 const testyStrings = cs.peptidovka.testy
@@ -19,6 +23,21 @@ interface RunReview {
   structures: { smiles: string; nIndex: number }[]
   typed: (string | null)[]
   verdicts: boolean[]
+}
+
+/**
+ * The typed chains the run page stored with the submission (`detailJson`
+ * `typed`), or null when the detail is missing or malformed.
+ */
+function storedTypedAnswers(detailJson: string | null): (string | null)[] | null {
+  if (detailJson === null) return null
+  try {
+    const parsed = JSON.parse(detailJson) as { typed?: unknown } | null
+    if (!Array.isArray(parsed?.typed)) return null
+    return parsed.typed.map((value) => (typeof value === "string" ? value : null))
+  } catch {
+    return null
+  }
 }
 
 function nLeftDeg(smiles: string, nIndex: number): number {
@@ -44,20 +63,22 @@ export function PeptidovkaTestResultPage() {
   const test = view?.test ?? null
   const attempt = view?.attempt ?? null
 
-  // Post-hub review: regenerate the peptides from the attempt seed. The
-  // student's typed answers were never stored server-side, so that review
-  // shows the correct chains only.
+  // Post-hub review: regenerate the peptides from the attempt seed and pair
+  // them with the typed chains the submission stored on the server, so the
+  // student sees what they wrote next to the correct answer either way.
   let regenerated: PeptidovkaTestRun | null = null
   if (loaded && test !== null && review === null && attempt !== null) {
     regenerated = generatePeptidovkaTestRun(test, attempt.seed, allMolecules)
   }
+  const storedTyped = regenerated !== null ? storedTypedAnswers(attempt?.detailJson ?? null) : null
+  const hasStoredTyped = storedTyped !== null && storedTyped.length === regenerated?.chains.length
 
   if (!loaded || view === null || test === null || attempt === null) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4">
         <p className="text-sm text-destructive">{testyStrings.loadError}</p>
         <Button variant="outline" asChild>
-          <Link to="/biomolekuly/peptidovka">{testyStrings.backToHub}</Link>
+          <Link to="/biomolekuly/test">{testyStrings.backToHub}</Link>
         </Button>
       </div>
     )
@@ -89,8 +110,11 @@ export function PeptidovkaTestResultPage() {
             id: `${attempt.attemptId}-${index}`,
             chain,
             structure: regenerated.structures[index] ?? { smiles: "", nIndex: 0 },
-            typed: null,
-            verdict: undefined,
+            typed: hasStoredTyped ? normalizeTyped(storedTyped[index]) : null,
+            verdict: hasStoredTyped
+              ? storedTyped[index] != null &&
+                isPeptideAnswerCorrect(chain, storedTyped[index] as string)
+              : undefined,
           }))
         : []
 
@@ -98,7 +122,7 @@ export function PeptidovkaTestResultPage() {
     <div className="mx-auto w-full max-w-2xl space-y-6">
       <div>
         <Link
-          to="/biomolekuly/peptidovka"
+          to="/biomolekuly/test"
           className="inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
         >
           <ArrowLeft className="size-4" strokeWidth={1.75} />
@@ -128,7 +152,7 @@ export function PeptidovkaTestResultPage() {
           </p>
         ) : (
           <>
-            {review === null && (
+            {review === null && !hasStoredTyped && (
               <p className="text-sm text-muted-foreground">{testyStrings.typedReviewMissing}</p>
             )}
             <ol className="space-y-4">
@@ -163,30 +187,44 @@ export function PeptidovkaTestResultPage() {
                       className="max-w-full"
                     />
                   </div>
-                  <div className="mt-3 rounded-[4px] border bg-muted/50 px-4 py-2 text-center">
-                    <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                      {peptidovkaStrings.correctAnswerLabel}
-                    </p>
-                    <p className="break-all font-mono text-xl font-semibold tracking-[0.3em]">
-                      {row.chain}
-                    </p>
-                  </div>
-                  {row.typed !== null && (
-                    <p className="mt-2 text-center text-sm">
-                      <span className="text-muted-foreground">
-                        {peptidovkaStrings.answerLabel}:{" "}
-                      </span>
-                      <span
+                  {/* What the student wrote next to the correct chain — the
+                      answer box is coloured by its verdict. */}
+                  <div
+                    className={
+                      row.verdict === undefined ? "mt-3" : "mt-3 grid gap-3 sm:grid-cols-2"
+                    }
+                  >
+                    {row.verdict !== undefined && (
+                      <div
                         className={
                           row.verdict
-                            ? "break-all font-mono font-semibold tracking-[0.2em] text-accent"
-                            : "break-all font-mono font-semibold tracking-[0.2em] text-destructive"
+                            ? "rounded-[4px] border border-accent/50 bg-accent/5 px-4 py-2 text-center"
+                            : "rounded-[4px] border border-destructive/50 bg-destructive/5 px-4 py-2 text-center"
                         }
                       >
-                        {row.typed}
-                      </span>
-                    </p>
-                  )}
+                        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                          {cs.peptidovka.practice.yourAnswer}
+                        </p>
+                        <p
+                          className={
+                            row.verdict
+                              ? "break-all font-mono text-xl font-semibold tracking-[0.3em] text-accent"
+                              : "break-all font-mono text-xl font-semibold tracking-[0.3em] text-destructive"
+                          }
+                        >
+                          {row.typed ?? cs.test.reviewNoAnswer}
+                        </p>
+                      </div>
+                    )}
+                    <div className="rounded-[4px] border bg-muted/50 px-4 py-2 text-center">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                        {peptidovkaStrings.correctAnswerLabel}
+                      </p>
+                      <p className="break-all font-mono text-xl font-semibold tracking-[0.3em]">
+                        {row.chain}
+                      </p>
+                    </div>
+                  </div>
                 </li>
               ))}
             </ol>

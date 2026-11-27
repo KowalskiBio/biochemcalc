@@ -14,16 +14,19 @@ import { useUiStore } from "@/stores/ui-store"
  * who has never chosen gets the one-time picker (`needsChoice`).
  */
 
+/** The student home page — the first nav item of every section, and where a student lands. */
+export const STUDENT_HOME_PATH = "/domu"
+
 /** Pages every section shows in its sidebar — they don't imply a section. */
-const SHARED_PATHS = ["/leaderboard", "/settings", "/help"]
+const SHARED_PATHS = [STUDENT_HOME_PATH, "/leaderboard", "/settings", "/help"]
 
 export function allowedSections(access: SectionAccess): Section[] {
   return access === "both" ? ["calculations", "biomolecules"] : [access]
 }
 
 export function sectionHome(section: Section, role: Role): string {
-  if (section === "biomolecules") return "/biomolekuly"
-  return role === "teacher" ? "/topics" : "/"
+  if (role !== "teacher") return STUDENT_HOME_PATH
+  return section === "biomolecules" ? "/biomolekuly" : "/topics"
 }
 
 /** The section a path belongs to, or null for a page shared by all sections. */
