@@ -120,7 +120,7 @@ function BackLink({ href, label }: { href: string; label: string }) {
     <Link
       to={href}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground",
+        "-my-2 inline-flex min-h-[44px] items-center gap-1.5 rounded-[4px] py-2 text-sm text-muted-foreground",
         "transition-colors duration-150 hover:text-foreground",
         FOCUS_RING_CLASS,
       )}
@@ -228,7 +228,7 @@ function OptionButton({
           : undefined
       }
       className={cn(
-        "flex min-h-[44px] items-center justify-center rounded-[4px] border bg-card p-3",
+        "flex min-h-[44px] min-w-0 items-center justify-center rounded-[4px] border bg-card p-2 sm:p-3",
         "transition-colors duration-150",
         FOCUS_RING_CLASS,
         stateClass,
@@ -606,7 +606,16 @@ function QuestionScreen({
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div
+          className={cn(
+            "grid gap-3 sm:grid-cols-2",
+            // Structures sit two per row even on a phone: four stacked drawings
+            // would mean scrolling past every option.
+            question.options.some((option) => option.display === "structure")
+              ? "grid-cols-2"
+              : "grid-cols-1",
+          )}
+        >
           {question.options.map((option, i) => (
             <OptionButton
               key={option.key}

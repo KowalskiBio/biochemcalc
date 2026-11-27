@@ -19,7 +19,7 @@ import {
   generatePeptidovkaTestRun,
   isPeptideAnswerCorrect,
 } from "@/lib/peptides/test"
-import { autoSubmitMarginMs, remainingTimeMs } from "@/lib/test-clock"
+import { autoSubmitMarginMs, formatCountdown, remainingTimeMs } from "@/lib/test-clock"
 import { cn } from "@/lib/utils"
 import { useBiomoleculeDataLoaded, useBiomoleculeDataStore } from "@/stores/biomolecule-data-store"
 
@@ -85,13 +85,6 @@ function clearStoredProgress(attemptId: string): void {
   } catch {
     // Nothing to clean up.
   }
-}
-
-function formatRemaining(ms: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${String(seconds).padStart(2, "0")}`
 }
 
 function formatDeadline(value: string): string {
@@ -415,34 +408,44 @@ export function PeptidovkaTestRunPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <Link
-          to="/biomolekuly/test"
-          className="inline-flex items-center gap-1.5 rounded-[4px] py-1 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" strokeWidth={1.75} />
-          {testyStrings.backToHub}
-        </Link>
-        <div className="flex items-center gap-3">
+      <Link
+        to="/biomolekuly/test"
+        className="-my-2 inline-flex min-h-[44px] items-center gap-1.5 rounded-[4px] py-2 text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" strokeWidth={1.75} />
+        {testyStrings.backToHub}
+      </Link>
+
+      {/* Pinned while the student works down the test – under the phone's
+          top bar (62px), at the very top on wider screens – so the clock,
+          progress and submit button never scroll away. */}
+      <div className="sticky top-[62px] z-20 flex items-center gap-3 rounded-[4px] border bg-background/95 px-3 py-2 backdrop-blur md:top-2">
+        <div className="min-w-0 flex-1">
           {remainingMs !== null && remainingMs > 0 && !submittedRef.current && (
-            <span
+            <p
               className={cn(
                 "font-mono tabular text-sm",
-                remainingMs < 60_000 ? "font-semibold text-destructive" : "text-muted-foreground",
+                remainingMs < 60_000 ? "font-semibold text-destructive" : "text-foreground",
               )}
             >
-              {testyStrings.timeRemaining}: {formatRemaining(remainingMs)}
-            </span>
+              <span className="font-sans text-xs text-muted-foreground">
+                {testyStrings.timeRemaining}{" "}
+              </span>
+              {formatCountdown(remainingMs)}
+            </p>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void submitRef.current(false)}
-            disabled={submitting || total === 0}
-          >
-            {submitting ? testyStrings.submitting : testyStrings.submit}
-          </Button>
+          <p className="font-mono tabular text-xs text-muted-foreground">
+            {Math.min(index + 1, total)} / {total}
+          </p>
         </div>
+        <Button
+          variant="outline"
+          className="min-h-[44px] shrink-0"
+          onClick={() => void submitRef.current(false)}
+          disabled={submitting || total === 0}
+        >
+          {submitting ? testyStrings.submitting : testyStrings.submit}
+        </Button>
       </div>
 
       <div className="rounded-[4px] border bg-card p-3">
@@ -453,9 +456,6 @@ export function PeptidovkaTestRunPage() {
               {testyStrings.availableUntil.replace("{time}", formatDeadline(test.availableTo))}
             </p>
           </div>
-          <p className="whitespace-nowrap font-mono tabular text-sm text-muted-foreground">
-            {Math.min(index + 1, total)} / {total}
-          </p>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{testyStrings.autoSubmitNotice}</p>
       </div>

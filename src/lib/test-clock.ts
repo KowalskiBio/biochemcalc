@@ -38,3 +38,17 @@ export function remainingTimeMs(availableTo: string, offsetMs: number, deviceNow
 export function autoSubmitMarginMs(leftAtOpen: number): number {
   return leftAtOpen <= LATE_START_MS ? 0 : AUTO_SUBMIT_MARGIN_MS
 }
+
+/**
+ * A countdown for display: "m:ss" under an hour, "h:mm:ss" from an hour up
+ * (a test open for a day reads "23:59:58", not "1439:58"). Rounds up, so the
+ * clock shows 0:00 only once the time is really gone.
+ */
+export function formatCountdown(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const ss = String(seconds).padStart(2, "0")
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${ss}` : `${minutes}:${ss}`
+}

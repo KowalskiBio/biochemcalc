@@ -314,9 +314,9 @@ export function StudentShell({ children }: { children: ReactNode }) {
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
 
-      <main className="flex flex-1 flex-col md:ml-[var(--sidebar-width)]">
+      <main className="flex min-w-0 flex-1 flex-col md:ml-[var(--sidebar-width)]">
         <StudentViewBanner />
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-black/20 bg-[hsl(var(--sidebar))] px-4 py-3 md:hidden">
+        <div className="sticky top-0 z-30 flex h-[62px] items-center justify-between border-b border-black/20 bg-[hsl(var(--sidebar))] px-4 md:hidden">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-[4px] bg-[hsl(var(--accent))] flex items-center justify-center flex-shrink-0">
               <FlaskConical className="size-4 text-[hsl(var(--card))]" strokeWidth={1.75} />

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   autoSubmitMarginMs,
   clockOffsetMs,
+  formatCountdown,
   remainingTimeMs,
   withClockOffset,
 } from "@/lib/test-clock"
@@ -30,5 +31,22 @@ describe("test clock", () => {
   it("does not submit a late start immediately", () => {
     expect(autoSubmitMarginMs(600_000)).toBe(30_000)
     expect(autoSubmitMarginMs(20_000)).toBe(0)
+  })
+})
+
+describe("formatCountdown", () => {
+  it("shows m:ss under an hour", () => {
+    expect(formatCountdown(65_000)).toBe("1:05")
+    expect(formatCountdown(59 * 60_000 + 59_000)).toBe("59:59")
+  })
+
+  it("shows h:mm:ss from an hour up", () => {
+    expect(formatCountdown(3_600_000)).toBe("1:00:00")
+    expect(formatCountdown(23 * 3_600_000 + 58 * 60_000 + 58_000)).toBe("23:58:58")
+  })
+
+  it("rounds up and never goes negative", () => {
+    expect(formatCountdown(1)).toBe("0:01")
+    expect(formatCountdown(-5_000)).toBe("0:00")
   })
 })
