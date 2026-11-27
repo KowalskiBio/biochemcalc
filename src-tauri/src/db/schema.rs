@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 /// Schema version — bumped for every migration to keep them idempotent.
 #[allow(dead_code)]
-const CURRENT_USER_VERSION: u32 = 66;
+const CURRENT_USER_VERSION: u32 = 67;
 
 /// Run all migrations. Idempotent — safe to call on every startup.
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
@@ -337,6 +337,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     if user_version < 66 {
         apply_migration_v66(conn)?;
         conn.pragma_update(None, "user_version", "66")?;
+    }
+
+    if user_version < 67 {
+        apply_migration_v67(conn)?;
+        conn.pragma_update(None, "user_version", "67")?;
     }
 
     Ok(())
@@ -2638,6 +2643,51 @@ fn apply_migration_v66(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+/// The notice a student sees once after v67 opened Biomolekuly to them.
+pub const NOTICE_BIOMOLECULES_LAUNCH: &str = "biomolecules-launch";
+
+/// Biomolekuly opens to every student who has Laboratorní výpočty.
+///
+/// - `user_notices` holds one-time messages a user still has to see: a row
+///   per (user, notice), deleted when the user dismisses it.
+/// - Each calculations-only student gets `both`, keeps landing in výpočty
+///   (`preferred_section` filled where empty, so the one-time "which
+///   section?" picker never appears for them) and gets the launch notice.
+/// - Biomolecules-only students, teachers and invite codes are untouched
+///   (codes keep the scope they were minted with).
+fn apply_migration_v67(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS user_notices (
+            user_id BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            notice TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, notice)
+        );
+        ",
+    )?;
+    // Hand-built partial databases (migration tests) may lack the columns.
+    if table_exists(conn, "users")?
+        && table_has_column(conn, "users", "sections")?
+        && table_has_column(conn, "users", "preferred_section")?
+    {
+        conn.execute(
+            "INSERT OR IGNORE INTO user_notices (user_id, notice, created_at)
+             SELECT id, ?1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+             FROM users WHERE role = 'student' AND sections = 'calculations'",
+            [NOTICE_BIOMOLECULES_LAUNCH],
+        )?;
+        conn.execute(
+            "UPDATE users
+             SET sections = 'both',
+                 preferred_section = COALESCE(preferred_section, 'calculations')
+             WHERE role = 'student' AND sections = 'calculations'",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 /// Teacher-action log for the biomolecules module, mirroring the
 /// calculations history pattern: every mutation records who did what, so
 /// the "Historie" page can show a reviewable trail. `kind` scopes the entry
@@ -4322,8 +4372,11 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("old student readable");
-        assert_eq!(sections, "calculations");
-        assert_eq!(preferred, None);
+        // v43 scoped the student to calculations; replaying to the current
+        // version, v67 then opens Biomolekuly too and keeps výpočty as the
+        // landing section.
+        assert_eq!(sections, "both");
+        assert_eq!(preferred.as_deref(), Some("calculations"));
 
         let code_sections: String = conn
             .query_row(
@@ -4890,11 +4943,53 @@ mod tests {
             .expect("user exists")
         };
         assert_eq!(sections_of("old-teacher"), "both");
-        assert_eq!(
-            sections_of("old-student"),
-            "calculations",
-            "students keep their scope"
-        );
+        // v54 left students alone; v67 (replayed here too) later opens
+        // Biomolekuly to calculations students.
+        assert_eq!(sections_of("old-student"), "both");
+    }
+
+    #[test]
+    fn v67_opens_biomolecules_to_calculations_students() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        run_migrations(&conn).expect("migrations");
+        conn.pragma_update(None, "user_version", "66")
+            .expect("set version");
+
+        conn.execute_batch(
+            "
+            INSERT INTO users (id, username, password_hash, role, created_at, sections, preferred_section)
+            VALUES
+                (randomblob(16), 'calc', 'h', 'student', '2026-01-01T00:00:00Z', 'calculations', NULL),
+                (randomblob(16), 'calc-chose', 'h', 'student', '2026-01-01T00:00:00Z', 'calculations', 'calculations'),
+                (randomblob(16), 'bio', 'h', 'student', '2026-01-01T00:00:00Z', 'biomolecules', NULL),
+                (randomblob(16), 'both', 'h', 'student', '2026-01-01T00:00:00Z', 'both', 'biomolecules'),
+                (randomblob(16), 'teacher', 'h', 'teacher', '2026-01-01T00:00:00Z', 'calculations', NULL);
+            ",
+        )
+        .expect("pre-v67 users");
+
+        run_migrations(&conn).expect("migrations");
+        assert_eq!(user_version(&conn), CURRENT_USER_VERSION);
+
+        let row = |username: &str| -> (String, Option<String>, i64) {
+            conn.query_row(
+                "SELECT u.sections, u.preferred_section,
+                        (SELECT COUNT(*) FROM user_notices n WHERE n.user_id = u.id AND n.notice = ?2)
+                 FROM users u WHERE u.username = ?1",
+                rusqlite::params![username, NOTICE_BIOMOLECULES_LAUNCH],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("user exists")
+        };
+        assert_eq!(row("calc"), ("both".into(), Some("calculations".into()), 1));
+        assert_eq!(row("calc-chose"), ("both".into(), Some("calculations".into()), 1));
+        assert_eq!(row("bio"), ("biomolecules".into(), None, 0), "bio-only untouched");
+        assert_eq!(row("both"), ("both".into(), Some("biomolecules".into()), 0));
+        assert_eq!(row("teacher"), ("calculations".into(), None, 0), "teachers untouched");
+
+        // Re-running is harmless: no duplicate notices, nothing else moves.
+        apply_migration_v67(&conn).expect("v67 replay");
+        assert_eq!(row("calc").2, 1);
     }
 
     /// The v59-era TEXT/BLOB id mistake poisoned live databases with rows

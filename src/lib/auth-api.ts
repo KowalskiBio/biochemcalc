@@ -56,6 +56,13 @@ export const authApi = {
   setPreferredSection: (section: Section): Promise<User> =>
     httpRequest<User>("/api/auth/preferred-section", { section }),
 
+  /** Either role: one-time notices still waiting for this user (e.g. "biomolecules-launch"). */
+  notices: (): Promise<string[]> => httpRequest<string[]>("/api/auth/notices"),
+
+  /** Either role: mark a notice as seen so it never shows again. */
+  dismissNotice: (notice: string): Promise<void> =>
+    httpRequest<void>("/api/auth/notices/dismiss", { notice }),
+
   /**
    * Teacher-only: mint a student invite code for the given sections,
    * superseding whatever code that same scope had before.
