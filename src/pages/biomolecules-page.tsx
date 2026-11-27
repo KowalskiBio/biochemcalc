@@ -29,6 +29,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { StructureView } from "@/components/ui/structure-view"
 import { Textarea } from "@/components/ui/textarea"
+import { useTeacherView } from "@/hooks/use-teacher-view"
 import { useToast } from "@/hooks/use-toast"
 import { cs } from "@/i18n/cs"
 import { ApiError } from "@/lib/api"
@@ -48,7 +49,6 @@ import {
 import { type ProjectionSpec, parseProjection } from "@/lib/molecules/render/projection"
 import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
-import { useAuthStore } from "@/stores/auth-store"
 import {
   builtInCategoryText,
   builtInTopicText,
@@ -147,7 +147,7 @@ export function BiomoleculesPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { toast } = useToast()
-  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const isTeacher = useTeacherView()
   const categories = useMoleculeCategories()
   const topics = useMoleculeTopics()
   const loaded = useBiomoleculeDataLoaded()
@@ -485,7 +485,7 @@ function CategoryList({
   onDeleteTopic,
   onAddCategory,
 }: CategoryListProps) {
-  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const isTeacher = useTeacherView()
   const nameOf = useCategoryNames()
   const { nameOf: topicNameOf, descriptionOf: topicDescriptionOf } = useTopicText()
 
@@ -583,7 +583,7 @@ function CategoryList({
 
 /** Narrow screens: the same list as a grouped picker above the content. */
 function CategoryPicker({ sections, activeSlug, onPick, onAddCategory }: CategoryListProps) {
-  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const isTeacher = useTeacherView()
   const nameOf = useCategoryNames()
   const { nameOf: topicNameOf } = useTopicText()
   const withCategories = sections.filter((section) => section.categories.length > 0)
@@ -1167,7 +1167,7 @@ function MoleculeBrowser({
   bits: CategoryBits
 }) {
   const { toast } = useToast()
-  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const isTeacher = useTeacherView()
   const deleteMolecule = useBiomoleculeDataStore((s) => s.deleteMolecule)
   const [selected, setSelected] = useState<Biomolecule | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
@@ -1919,7 +1919,7 @@ function InlineCategoryText({
   value: string
 }) {
   const { toast } = useToast()
-  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const isTeacher = useTeacherView()
   const update = useBiomoleculeDataStore((s) => s.updateCategoryMeta)
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState("")
@@ -1998,7 +1998,7 @@ function InlineCategoryText({
 function CategoryPanel({ categoryId }: { categoryId: string }) {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const isTeacher = useAuthStore((s) => s.user?.role === "teacher")
+  const isTeacher = useTeacherView()
   const category = useMoleculeCategory(categoryId)
   const molecules = useCategoryMolecules(categoryId)
   const nameOf = useCategoryNames()
