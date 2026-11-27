@@ -1976,6 +1976,15 @@ export const cs = {
 
   // Theme and UI
   // Teacher previewing the app as a student sees it (issue #14)
+  // One-time notices the server queues for a user (shown once, then dismissed).
+  notices: {
+    biomoleculesLaunch: {
+      title: "Máme uvařeno.",
+      body: "Mrkněte si, co vás čeká v biochemii, setkáte se s tím už ve druhém ročníku. Ať se daří!",
+      open: "Mrknout na Biomolekuly",
+      close: "Zavřít",
+    },
+  },
   studentView: {
     enter: "Zobrazit jako student",
     banner: "Náhled studenta",

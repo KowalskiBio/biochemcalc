@@ -338,6 +338,39 @@ pub fn do_set_preferred_section(
     Ok(UserRepo::get_by_id(conn, user_id)?.into_public())
 }
 
+/// Either role: the one-time notices this user still has to see (e.g.
+/// `biomolecules-launch`), oldest first.
+pub fn do_list_notices(conn: &Connection, user_id: &Uuid) -> Result<Vec<String>, DbError> {
+    let mut stmt = conn.prepare(
+        "SELECT notice FROM user_notices WHERE user_id = ?1 ORDER BY created_at, notice",
+    )?;
+    let notices = stmt
+        .query_map([user_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(notices)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DismissNoticePayload {
+    pub notice: String,
+}
+
+/// Either role: the user has seen a notice – it never shows again.
+/// Dismissing one that isn't pending is a no-op, so a double click or a
+/// second tab is harmless.
+pub fn do_dismiss_notice(
+    conn: &Connection,
+    user_id: &Uuid,
+    payload: DismissNoticePayload,
+) -> Result<(), DbError> {
+    conn.execute(
+        "DELETE FROM user_notices WHERE user_id = ?1 AND notice = ?2",
+        rusqlite::params![user_id, payload.notice],
+    )?;
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangePasswordPayload {
@@ -1029,6 +1062,54 @@ mod tests {
             },
         );
         assert!(matches!(result, Err(DbError::Validation(_))));
+    }
+
+    #[test]
+    fn notices_list_and_dismiss_per_user() {
+        let conn = setup_conn();
+        let make = |name: &str| {
+            do_admin_create_user(
+                &conn,
+                AdminCreateUserPayload {
+                    username: name.into(),
+                    password: "pupilpassword1".into(),
+                    email: None,
+                    role: Role::Student,
+                    sections: SectionAccess::Both,
+                },
+            )
+            .expect("create student")
+        };
+        let anna = make("anna");
+        let ben = make("ben");
+        for user in [&anna, &ben] {
+            conn.execute(
+                "INSERT INTO user_notices (user_id, notice, created_at)
+                 VALUES (?1, 'biomolecules-launch', '2026-11-27T00:00:00Z')",
+                [user.id],
+            )
+            .expect("queue notice");
+        }
+
+        assert_eq!(
+            do_list_notices(&conn, &anna.id).expect("list"),
+            vec!["biomolecules-launch".to_string()]
+        );
+        let dismiss = || DismissNoticePayload {
+            notice: "biomolecules-launch".into(),
+        };
+        do_dismiss_notice(&conn, &anna.id, dismiss()).expect("dismiss");
+        assert!(do_list_notices(&conn, &anna.id).expect("list").is_empty());
+        // A second dismissal is a no-op, and other users keep theirs.
+        do_dismiss_notice(&conn, &anna.id, dismiss()).expect("dismiss again");
+        assert_eq!(do_list_notices(&conn, &ben.id).expect("list").len(), 1);
+
+        // Deleting an account drops its pending notices.
+        UserRepo::delete(&conn, &ben.id).expect("delete");
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM user_notices", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(left, 0);
     }
 
     #[test]

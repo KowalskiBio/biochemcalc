@@ -365,6 +365,19 @@ entirely (frontend, `commands/victor.rs`, routes, `reqwest`, the dead `settings_
 - Test results (classic + Peptidovka) rebuild the student's own answers from the attempt's
   `detailJson`, so the review shows them after reopening, not only right after submitting.
 
+
+### One-time notices + Biomolekuly for all calculations students (v67, 2026-11-27)
+
+- `user_notices (user_id, notice, created_at)`, PK (user_id, notice), cascades on user
+  delete. `POST /api/auth/notices` lists the caller's pending notices,
+  `POST /api/auth/notices/dismiss {notice}` deletes one (idempotent).
+- Migration v67: every `student` with `sections = 'calculations'` → `both`,
+  `preferred_section` filled with `calculations` where NULL (so the one-time
+  `SectionPicker` never appears for them), and a `biomolecules-launch` notice queued.
+  Bio-only students, teachers and invite codes untouched.
+- `components/layout/launch-notice.tsx` (in `StudentShell`) shows the notice once and
+  dismisses it server-side however the dialog closes; strings `cs.notices.*`.
+
 ## 9. Feature-addition checklist
 
 1. Data-model change? → update Rust models + `src/lib/types.ts` + new migration

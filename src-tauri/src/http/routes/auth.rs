@@ -1,7 +1,8 @@
 use crate::commands::auth::{
     do_admin_create_user, do_admin_update_user, do_change_password, do_create_invite_code,
     do_delete_user, do_forgot_password, do_list_invite_codes, do_list_users, do_login, do_logout,
-    do_register, do_reset_password, do_revoke_invite_code, do_set_preferred_section,
+    do_dismiss_notice, do_list_notices, do_register, do_reset_password, do_revoke_invite_code,
+    do_set_preferred_section, DismissNoticePayload,
     AdminCreateUserPayload, AdminUpdateUserPayload, AuthSession, ChangePasswordPayload,
     CreateInviteCodePayload, ForgotPasswordPayload, LoginPayload, RegisterPayload,
     ResetPasswordPayload, SetPreferredSectionPayload,
@@ -138,6 +139,24 @@ async fn set_preferred_section(
     Ok(Json(do_set_preferred_section(&conn, &user.id, payload)?))
 }
 
+async fn list_notices(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+) -> Result<Json<Vec<String>>, HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    Ok(Json(do_list_notices(&conn, &user.id)?))
+}
+
+async fn dismiss_notice(
+    State(state): State<Arc<AppState>>,
+    Extension(CurrentUser(user)): Extension<CurrentUser>,
+    Json(payload): Json<DismissNoticePayload>,
+) -> Result<(), HttpError> {
+    let conn = crate::util::lock_db(&state.db);
+    do_dismiss_notice(&conn, &user.id, payload)?;
+    Ok(())
+}
+
 async fn create_invite_code(
     State(state): State<Arc<AppState>>,
     Extension(CurrentUser(user)): Extension<CurrentUser>,
@@ -215,6 +234,8 @@ pub fn authenticated_router() -> Router<Arc<AppState>> {
         .route("/me", post(me))
         .route("/change-password", post(change_password))
         .route("/preferred-section", post(set_preferred_section))
+        .route("/notices", post(list_notices))
+        .route("/notices/dismiss", post(dismiss_notice))
 }
 
 /// Teacher only — issuing (student) invite codes is how students get

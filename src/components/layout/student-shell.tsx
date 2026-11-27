@@ -18,6 +18,7 @@ import {
 import type React from "react"
 import { type ReactNode, useEffect, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
+import { LaunchNotice } from "@/components/layout/launch-notice"
 import { SectionPicker } from "@/components/layout/section-picker"
 import { SectionSwitcher } from "@/components/layout/section-switcher"
 import { StudentFooter } from "@/components/layout/student-footer"
@@ -339,6 +340,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
           <StudentFooter />
         </div>
       </main>
+      <LaunchNotice />
       <Toaster />
     </div>
   )
