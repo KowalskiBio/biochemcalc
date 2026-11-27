@@ -7,6 +7,7 @@ import {
   generatePeptide,
   isChainCorrect,
   nLeftOrientationDeg,
+  normalizeChainInput,
   peptideParts,
   peptideSmiles,
   RESIDUES,
@@ -226,6 +227,11 @@ describe("answer semantics", () => {
     expect(isChainCorrect("mky", "MKY")).toBe(true)
     expect(isChainCorrect("M K Y", "MKY")).toBe(true)
     expect(isChainCorrect("  MKY  ", "MKY")).toBe(true)
+  })
+
+  it("normalizes a typed chain to the form the review shows", () => {
+    expect(normalizeChainInput("pDWE")).toBe("PDWE")
+    expect(normalizeChainInput(" g l d d g ")).toBe("GLDDG")
   })
 
   it("rejects wrong order, wrong length and empty input", () => {

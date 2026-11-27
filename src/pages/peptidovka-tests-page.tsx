@@ -21,6 +21,7 @@ import {
 import { extractErrorMessage } from "@/lib/http"
 import { PEPTIDE_FAMILY_SLUGS, TRAIT, traitOf } from "@/lib/molecules"
 import { nLeftOrientationDeg } from "@/lib/peptides"
+import { normalizeChainInput } from "@/lib/peptides/answer"
 import { regradePeptidovkaAttempt } from "@/lib/peptides/test"
 import { stripRichMarkup } from "@/lib/rich-text"
 import { cn } from "@/lib/utils"
@@ -636,7 +637,10 @@ function PeptidovkaAttemptDetail({
       <ol className="space-y-3">
         {run.chains.map((chain, index) => {
           const structure = run.structures[index] ?? { smiles: "", nIndex: 0 }
-          const typed = rows[index]?.typed ?? null
+          const rawTyped = rows[index]?.typed ?? null
+          // Older attempts stored the raw keystrokes ("pDWE"); show every
+          // answer in the same uppercase form as the correct chain.
+          const typed = rawTyped === null ? null : normalizeChainInput(rawTyped)
           const verdict = rows[index]?.correct ?? false
           return (
             <li
@@ -679,7 +683,7 @@ function PeptidovkaAttemptDetail({
                 <span className="text-muted-foreground">{peptidovkaStrings.answerLabel}: </span>
                 <span
                   className={cn(
-                    "font-mono font-semibold",
+                    "break-all font-mono font-semibold tracking-[0.2em]",
                     verdict ? "text-accent" : "text-destructive",
                   )}
                 >

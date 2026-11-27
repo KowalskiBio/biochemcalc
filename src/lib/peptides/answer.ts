@@ -10,7 +10,15 @@ export function expectedChainLetters(oneLetters: string[]): string {
   return oneLetters.join("").toUpperCase()
 }
 
+/**
+ * The canonical form of a typed chain: whitespace stripped, uppercased. Used
+ * for grading and for showing an answer back, so "m k y" reads as "MKY".
+ */
+export function normalizeChainInput(input: string): string {
+  return input.replace(/\s+/g, "").toUpperCase()
+}
+
 /** Case- and whitespace-insensitive exact comparison of the typed chain. */
 export function isChainCorrect(input: string, expected: string): boolean {
-  return input.replace(/\s+/g, "").toUpperCase() === expected
+  return normalizeChainInput(input) === expected
 }
