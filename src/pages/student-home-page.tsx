@@ -126,17 +126,50 @@ function PracticeTestRow({ offer }: { offer: PracticeTestOffer }) {
   )
 }
 
-function OpenTests({ allowed }: { allowed: Section[] }) {
+/**
+ * Open tests, grouped by section: the section the student is in comes first
+ * (its assigned tests are what they most likely came for), any other
+ * section they can reach follows under its own name. When the current
+ * section has nothing open, a line says so before the other section's tests.
+ */
+function OpenTests({ allowed, section }: { allowed: Section[]; section: Section }) {
   const hasBiomolecules = allowed.includes("biomolecules")
   const hasCalculations = allowed.includes("calculations")
   const { tests, loadError, reload } = useAssignedTests(hasBiomolecules)
   const { open, openingId } = useOpenAssignedTest(reload)
   const { offers, failed } = usePracticeTestOffers(hasCalculations)
 
-  // Assigned tests first (they have deadlines), then the always-on practice tests.
   const assignedOpen = (tests ?? []).filter(isAssignedTestOpen)
   const loading = tests === null || offers === null
-  const empty = !loading && assignedOpen.length === 0 && (offers ?? []).length === 0
+
+  const groups: { section: Section; count: number; items: ReactNode }[] = []
+  if (hasBiomolecules) {
+    groups.push({
+      section: "biomolecules",
+      count: assignedOpen.length,
+      items: assignedOpen.map((item) => (
+        <AssignedTestCard
+          key={`${item.kind}-${item.view.test.id}`}
+          item={item}
+          openingId={openingId}
+          onOpen={(next) => void open(next)}
+        />
+      )),
+    })
+  }
+  if (hasCalculations) {
+    groups.push({
+      section: "calculations",
+      count: (offers ?? []).length,
+      items: (offers ?? []).map((offer) => (
+        <PracticeTestRow key={`${offer.kind}-${offer.topic.id}`} offer={offer} />
+      )),
+    })
+  }
+  groups.sort((a, b) => Number(b.section === section) - Number(a.section === section))
+  const current = groups.find((group) => group.section === section)
+  const others = groups.filter((group) => group.section !== section && group.count > 0)
+  const empty = !loading && groups.every((group) => group.count === 0)
 
   return (
     <section className="space-y-4" aria-labelledby="home-open-tests">
@@ -162,17 +195,25 @@ function OpenTests({ allowed }: { allowed: Section[] }) {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {assignedOpen.map((item) => (
-            <AssignedTestCard
-              key={`${item.kind}-${item.view.test.id}`}
-              item={item}
-              openingId={openingId}
-              onOpen={(next) => void open(next)}
-            />
-          ))}
-          {(offers ?? []).map((offer) => (
-            <PracticeTestRow key={`${offer.kind}-${offer.topic.id}`} offer={offer} />
+        <div className="space-y-6">
+          {current && (
+            <div className="space-y-3">
+              {current.count > 0 ? (
+                current.items
+              ) : (
+                <p className="rounded-[4px] border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                  {homeStrings.openTestsSectionEmpty.replace("{section}", cs.sections[section])}
+                </p>
+              )}
+            </div>
+          )}
+          {others.map((group) => (
+            <div key={group.section} className="space-y-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                {homeStrings.openTestsOtherSection.replace("{section}", cs.sections[group.section])}
+              </p>
+              {group.items}
+            </div>
           ))}
         </div>
       )}
@@ -489,7 +530,7 @@ export function StudentHomePage() {
 
       <div className="grid items-start gap-6 lg:grid-cols-3">
         <div className="space-y-8 lg:col-span-2">
-          <OpenTests allowed={allowed} />
+          <OpenTests allowed={allowed} section={section} />
           <Standings section={section} />
         </div>
         <MoleculeOfDay canBrowse={allowed.includes("biomolecules")} />
