@@ -235,11 +235,17 @@ categories are editable seed data like everything else.
   Never CSS-rotate/mirror the finished SVG (rotates/flips text too).
 - `src/lib/molecules/orientation.ts` — pure transform math (`transformPoints`,
   `pointsBoundingCenter`); unit tested in `__tests__/orientation.test.ts` (10 tests).
-- `src/pages/biomolecules-page.tsx` — hub (`/biomolekuly`, category cards + teacher's
-  new-category dialog) + category view (`/biomolekuly/:categoryId`, grid + detail dialog
-  with trait rows + teacher management: inline rename, molecule add/edit via
-  `MoleculeFormDialog` with live SMILES preview/`onValidityChange`, delete with confirm).
-  Both routes in TeacherRoutes and StudentRoutes; nav points at the hub. Per-kind browse
+- `src/pages/biomolecules-page.tsx` — the library as ONE two-pane page (2026-11-27):
+  `BiomoleculesPage` serves both `/biomolekuly` and `/biomolekuly/:categoryId`.
+  Left `CategoryList` (sticky, own scroll; topics → categories with counts; teacher
+  edit/delete icons on topic headings + "Nová kategorie"); below `lg` it's the grouped
+  `CategoryPicker` select. Right `CategoryPanel` (grid + detail dialog with trait rows +
+  teacher management: inline rename, molecule add/edit via `MoleculeFormDialog` with live
+  SMILES preview/`onValidityChange`, delete with confirm). `/biomolekuly` and unknown
+  slugs redirect (after data load) to the last-viewed category (sessionStorage
+  `biomolecules:lastCategory`) or the first in list order. `?hledat=` searches name,
+  aliases, abbreviation, one-letter code (case/diacritics-insensitive) across all
+  categories → `SearchResults`, one `MoleculeBrowser` per matching category. Per-kind browse
   via local `CategoryBits` descriptors (cardCodeLine, cardBadges?, dialogDescription,
   detailRows) for amino-acids/nitrogen-bases/custom categories, fed by molecules from the
   store. Strings: `cs.biomolekuly.*` (+ `manage.*` block).
