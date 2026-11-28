@@ -74,6 +74,101 @@ describe("recognizeOpenChainSugar", () => {
   })
 })
 
+describe("reduced sugars (alditols)", () => {
+  // Reduction (CHO/CH2OH swap) preserves the drawn Fischer pattern of the
+  // parent aldose, so every expected pattern below is the parent's – the
+  // patterns the aldose tests above already pin down. The CIP codes do shift
+  // (the arm priorities flip at C2/C3), which is exactly what the recognizer
+  // must absorb.
+  const SORBITOL = "C([C@H]([C@H]([C@@H]([C@H](CO)O)O)O)O)O" // reduced OPEN_GLUCOSE
+  const D_MANNOSE = "C([C@H]([C@H]([C@@H]([C@@H](C=O)O)O)O)O)O" // C2-epimer of glucose
+  const MANNITOL = "C([C@H]([C@H]([C@@H]([C@@H](CO)O)O)O)O)O"
+  const RIBITOL = "OC[C@H](O)[C@H](O)[C@H](O)CO" // reduced OPEN_RIBOSE
+  const XYLITOL = "OC[C@H](O)[C@@H](O)[C@H](O)CO"
+  const ERYTHRITOL = "OC[C@H](O)[C@H](O)CO" // the meso form
+  const GLYCEROL = "OCC(O)CO"
+  const GLYCOL = "OCCO"
+  const ETHER_POLYOL = "COC[C@@H](O)[C@H](O)CO"
+
+  it("keeps the parent aldose pattern: sorbitol reads right, left, right, right", () => {
+    const result = recognize(SORBITOL)
+    expect(result).not.toBeNull()
+    expect(result?.ketone).toBe(false)
+    expect(result?.topLabel).toBe("CH2OH")
+    expect(result?.bottomLabel).toBe("CH2OH")
+    expect(result?.centers.map((center) => center.ohSide)).toEqual([
+      "right",
+      "left",
+      "right",
+      "right",
+    ])
+  })
+
+  it("reads mannitol left, left, right, right like its D-mannose parent", () => {
+    // The C2-epimer construction is verified through the sugar path first.
+    expect(recognize(D_MANNOSE)?.centers.map((center) => center.ohSide)).toEqual([
+      "left",
+      "left",
+      "right",
+      "right",
+    ])
+    expect(recognize(MANNITOL)?.centers.map((center) => center.ohSide)).toEqual([
+      "left",
+      "left",
+      "right",
+      "right",
+    ])
+  })
+
+  it("draws xylitol right, left, right via the rule-5 pseudoasymmetric middle", () => {
+    const result = recognize(XYLITOL)
+    expect(result).not.toBeNull()
+    expect(result?.centers.map((center) => center.ohSide)).toEqual(["right", "left", "right"])
+    // Spine: CH2OH label, three crossings, CH2OH label.
+    expect(result?.slots).toHaveLength(5)
+    expect(result?.slots[0]).toEqual({ kind: "label", text: "CH2OH" })
+    expect(result?.slots[4]).toEqual({ kind: "label", text: "CH2OH" })
+  })
+
+  it("draws ribitol and meso-erythritol with the parent's palindromic pattern", () => {
+    expect(recognize(RIBITOL)?.centers.map((center) => center.ohSide)).toEqual([
+      "right",
+      "right",
+      "right",
+    ])
+    expect(recognize(ERYTHRITOL)?.centers.map((center) => center.ohSide)).toEqual([
+      "right",
+      "right",
+    ])
+  })
+
+  it("rejects achiral or non-terminal polyols (glycerol, glycol, ethers)", () => {
+    expect(recognize(GLYCEROL)).toBeNull()
+    expect(recognize(GLYCOL)).toBeNull()
+    expect(recognize(ETHER_POLYOL)).toBeNull()
+  })
+
+  it("renders both terminal CH2OH labels with true subscripts", () => {
+    const recognition = recognize(XYLITOL)
+    if (recognition === null) {
+      throw new Error("xylitol not recognized")
+    }
+    const drawing = drawFischer(recognition)
+    const texts = drawing.elements
+      .filter((element) => element.kind === "text")
+      .map((element) => (element as { text: string }).text)
+    expect(texts.some((text) => text.includes("="))).toBe(false)
+    expect(
+      drawing.elements.filter(
+        (element) =>
+          element.kind === "text" &&
+          (element as { text: string; fontSize?: number }).text === "2" &&
+          (element as { fontSize?: number }).fontSize !== undefined,
+      ),
+    ).toHaveLength(2)
+  })
+})
+
 describe("drawFischer", () => {
   // Aliases to the shared app palette (atom-palette.ts) – never re-hardcode
   // the hexes here, the projection must track the palette by reference.

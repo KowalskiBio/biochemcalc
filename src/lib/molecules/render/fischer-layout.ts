@@ -1,4 +1,5 @@
-// Fischer projection for open-chain sugars (aldoses and ketoses).
+// Fischer projection for open-chain sugars (aldoses and ketoses) and their
+// reduced forms (alditols: xylitol, sorbitol, mannitol, …).
 //
 // Recognition runs on the recognizer's GraphSnapshot (the same chemistry
 // input the Haworth pass sees) plus RDKit's CIP R/S codes. With the main
@@ -6,7 +7,10 @@
 // stereocenter's OH goes RIGHT iff (R configuration) == (the drawn-up chain
 // neighbour outranks the drawn-down one in the CIP sphere sense). That one
 // parity rule reproduces the textbook patterns: D-glucose R/L/R/R,
-// D-fructose L/R/R, (R)-glyceraldehyde right.
+// D-fructose L/R/R, (R)-glyceraldehyde right. Alditols have a CH2OH at both
+// ends, so the drawn direction is picked by the D-alditol convention
+// (bottommost center R) and their symmetric middle carbons are settled by
+// CIP rule 5 – see recognizeAlditol.
 //
 // The drawing deliberately mirrors the declarative projection style:
 // vertical spine, terminal labels ("CHO" / "CH2OH", "C=O" for ketoses),
@@ -195,18 +199,16 @@ function findCarbonyl(snapshot: GraphSnapshot, ringMembers: Set<number>): Carbon
 }
 
 /**
- * Recognize an open-chain aldose/ketose. Returns null for anything else:
- * cyclic forms, branched chains, chains carrying anything but C/O/H.
+ * Recognize an open-chain aldose/ketose – or, when no carbonyl is present, a
+ * reduced sugar (alditol: a linear HOCH2–(CHOH)n–CH2OH polyol). Returns null
+ * for anything else: cyclic forms, branched chains, chains carrying anything
+ * but C/O/H.
  */
 export function recognizeOpenChainSugar(
   snapshot: GraphSnapshot,
   chirality: Map<number, string>,
 ): FischerRecognition | null {
   const ringMembers = ringMemberIds(snapshot)
-  const carbonyl = findCarbonyl(snapshot, ringMembers)
-  if (carbonyl === null) {
-    return null
-  }
 
   // Every heavy atom is C or O – rules out amino acids / nucleotides.
   let heavyTotal = 0
@@ -220,6 +222,21 @@ export function recognizeOpenChainSugar(
     heavyTotal += 1
   }
 
+  const carbonyl = findCarbonyl(snapshot, ringMembers)
+  if (carbonyl !== null) {
+    return recognizeCarbonylSugar(snapshot, chirality, carbonyl, ringMembers, heavyTotal)
+  }
+  return recognizeAlditol(snapshot, chirality, ringMembers, heavyTotal)
+}
+
+/** The aldose/ketose body, unchanged: one carbonyl anchoring the chain walk. */
+function recognizeCarbonylSugar(
+  snapshot: GraphSnapshot,
+  chirality: Map<number, string>,
+  carbonyl: CarbonylHit,
+  ringMembers: Set<number>,
+  heavyTotal: number,
+): FischerRecognition | null {
   const ketone = carbonyl.kind === "ketone"
   let chainOrder: number[]
   let topLabel: "CHO" | "CH2OH"
@@ -330,6 +347,150 @@ export function recognizeOpenChainSugar(
   slots.push({ kind: "label", text: "CH2OH" })
 
   return { ketone, topLabel, bottomLabel: "CH2OH", centers, slots }
+}
+
+/** The side rule also accepts the lowercase pseudoasymmetric CIP labels. */
+function isRLike(code: string | undefined): boolean {
+  return code === "R" || code === "r"
+}
+
+function isSLike(code: string | undefined): boolean {
+  return code === "S" || code === "s"
+}
+
+/** +1 for an R-configured ligand, −1 for S, 0 when unlabelled. */
+function chiralityRank(code: string | undefined): number {
+  if (isRLike(code)) {
+    return 1
+  }
+  return isSLike(code) ? -1 : 0
+}
+
+/** A terminal CH2OH carbon: one carbon neighbour, one -OH, two hydrogens. */
+function isAlditolTerminus(
+  snapshot: GraphSnapshot,
+  id: number,
+  ringMembers: Set<number>,
+): boolean {
+  if (!isChainCarbon(snapshot, id, ringMembers)) {
+    return false
+  }
+  const carbons = neighboursOf(snapshot, id).filter((neighbour) => elementOf(snapshot, neighbour) === "C")
+  const hydroxyls = neighboursOf(snapshot, id).filter((neighbour) => isOxygenOH(snapshot, neighbour))
+  return carbons.length === 1 && hydroxyls.length === 1 && hydrogenCount(snapshot, id) === 2
+}
+
+/**
+ * Reduced sugar (alditol): a linear HOCH2–(CHOH)n–CH2OH polyol with no
+ * carbonyl. Walk, coverage and length rules are the carbonyl path's; the
+ * differences are the two CH2OH termini, the drawn orientation and the tie
+ * handling for the molecule's symmetric middle:
+ *
+ * – Orientation. Both ends are CH2OH, so either drawn direction depicts the
+ *   same molecule (a 180° paper rotation is free for Fischer projections).
+ *   The convention that reproduces textbook alditols keeps the parent
+ *   aldose's top-down reading, which is the orientation whose bottommost
+ *   center carries R (the D-determining carbon); meso chains read as
+ *   palindromes, where the choice changes nothing.
+ * – Enantiomorphic arms (xylitol's middle carbon): the constitution-only
+ *   sphere comparison ties; CIP rule 5 breaks it – the R-configured arm
+ *   outranks the S one. RDKit labels these pseudoasymmetric centers (the
+ *   same R/S geometric rule applies to them).
+ * – A tie that survives rule 5 means two identical arms (the center is
+ *   achiral and carries no CIP label at all): either hydroxyl side depicts
+ *   the same molecule, and the right-hand textbook idiom is drawn.
+ */
+function recognizeAlditol(
+  snapshot: GraphSnapshot,
+  chirality: Map<number, string>,
+  ringMembers: Set<number>,
+  heavyTotal: number,
+): FischerRecognition | null {
+  const termini: { id: number; oh: number }[] = []
+  for (const atom of snapshot.atoms.values()) {
+    if (atom.element !== "C" || !isAlditolTerminus(snapshot, atom.vertexId, ringMembers)) {
+      continue
+    }
+    const oh = neighboursOf(snapshot, atom.vertexId).find((neighbour) =>
+      isOxygenOH(snapshot, neighbour),
+    )
+    if (oh !== undefined) {
+      termini.push({ id: atom.vertexId, oh })
+    }
+  }
+
+  for (const terminus of termini) {
+    const carbonNeighbour = neighboursOf(snapshot, terminus.id).find(
+      (neighbour) => elementOf(snapshot, neighbour) === "C",
+    )
+    if (carbonNeighbour === undefined) {
+      continue
+    }
+    const leg = walkChainLeg(snapshot, carbonNeighbour, terminus.id, ringMembers)
+    if (leg === null) {
+      continue
+    }
+    const chainOrder = [terminus.id, ...leg.centers, leg.terminus]
+    if (chainOrder.length < 3 || chainOrder.length > MAX_CHAIN_CARBONS + 2) {
+      continue
+    }
+    // Coverage: the walked chain plus its oxygens must be the whole molecule.
+    const hydroxyls = [terminus.oh, ...leg.hydroxyls]
+    const covered = new Set([...chainOrder, ...hydroxyls])
+    if (covered.size !== heavyTotal) {
+      continue
+    }
+
+    // Drawn direction: keep the orientation whose bottommost center is R.
+    const firstCenter = chainOrder[1]
+    const lastCenter = chainOrder[chainOrder.length - 2]
+    if (chirality.get(lastCenter) === "S" && chirality.get(firstCenter) === "R") {
+      chainOrder.reverse()
+    }
+
+    const centers: FischerChainCenter[] = []
+    let rejected = false
+    for (let index = 1; index < chainOrder.length - 1; index += 1) {
+      const center = chainOrder[index]
+      const drawnUp = chainOrder[index - 1]
+      const drawnDown = chainOrder[index + 1]
+      let comparison = comparePriorities(snapshot, center, drawnUp, drawnDown)
+      if (comparison === 0) {
+        // CIP rule 5: an R-configured arm outranks its S enantiomer.
+        const upRank = chiralityRank(chirality.get(drawnUp))
+        const downRank = chiralityRank(chirality.get(drawnDown))
+        if (upRank !== 0 && downRank !== 0 && upRank !== downRank) {
+          comparison = upRank > downRank ? 1 : -1
+        }
+      }
+      if (comparison === 0) {
+        // Identical arms: an achiral center (no CIP label). Either side
+        // depicts the same molecule; draw the textbook right-hand idiom.
+        centers.push({ atomIdx: center, ohSide: "right" })
+        continue
+      }
+      const code = chirality.get(center)
+      if (!isRLike(code) && !isSLike(code)) {
+        rejected = true
+        break
+      }
+      const ohSide: "left" | "right" = isRLike(code) === (comparison === 1) ? "right" : "left"
+      centers.push({ atomIdx: center, ohSide })
+    }
+    // A real reduced sugar carries at least two stereocenters (erythritol
+    // and up); glycerol-class single-center polyols stay skeletal.
+    if (rejected || centers.length < 2) {
+      continue
+    }
+
+    const slots: FischerSpineSlot[] = [{ kind: "label", text: "CH2OH" }]
+    for (const center of centers) {
+      slots.push({ kind: "center", center })
+    }
+    slots.push({ kind: "label", text: "CH2OH" })
+    return { ketone: false, topLabel: "CH2OH", bottomLabel: "CH2OH", centers, slots }
+  }
+  return null
 }
 
 const STROKE_WIDTH = 1.5

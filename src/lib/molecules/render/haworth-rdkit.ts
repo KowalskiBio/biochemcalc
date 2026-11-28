@@ -188,7 +188,10 @@ function readMolMetadata(mol: Mol): MolMetadata {
   )
   const chirality = new Map<number, string>()
   for (const [atomIdx, code] of representation?.cipCodes ?? []) {
-    if (code === "R" || code === "S") {
+    // Lowercase r/s are pseudoasymmetric centers (CIP rule 5 – the symmetric
+    // middle of meso alditols); the Fischer alditol path reads them, while
+    // the Haworth pass keeps its strict R/S contract.
+    if (code === "R" || code === "S" || code === "r" || code === "s") {
       chirality.set(atomIdx, code)
     }
   }
@@ -502,6 +505,10 @@ function restoreStereochemistry(molblock: string, desired: Map<number, string>):
   const updates = new Map<number, number>()
   const bonds = readMolblockBonds(molblock)
   for (const [atomIdx, code] of desired) {
+    if (code !== "R" && code !== "S") {
+      // Pseudoasymmetric labels never take part in the wedge repair.
+      continue
+    }
     if (actual.get(atomIdx) === code) {
       continue
     }
